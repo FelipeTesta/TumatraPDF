@@ -1,0 +1,54 @@
+# Visual Studio
+vs2022/.vs/
+vs2022/Debug/
+vs2022/Release/
+vs2022/x64/
+vs2022/x86/
+*.sdf
+*.opensdf
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.VC.db
+*.VC.opendb
+*.tlog/
+*.lastbuildstate
+*.idb
+*.pdb
+*.ilk
+*.obj
+*.log
+*.recipe
+*.cache
+*.binlog
+
+# Premake5 generated
+Makefile
+*.make
+
+# Build outputs
+obj/
+bin/
+out/
+build/
+*.exe
+*.dll
+*.lib
+*.exp
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# SumatraPDF specific
+sumatrapdf-src/vs2022/Debug/
+sumatrapdf-src/vs2022/Release/
