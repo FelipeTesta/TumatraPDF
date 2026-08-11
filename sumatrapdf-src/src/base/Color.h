@@ -1,0 +1,61 @@
+/* Copyright 2022 the SumatraPDF project authors (see AUTHORS file).
+   License: Simplified BSD (see COPYING.BSD) */
+
+// note: include Base.h instead of including directly
+
+// a "unset" state for COLORREF value. technically all colors are valid
+// this one is hopefully not used in practice
+constexpr COLORREF kColorUnset = ((COLORREF)(0xfeffffff));
+// kColorNoChange indicates that we shouldn't change the color
+constexpr COLORREF kColorNoChange((COLORREF)(0xfdffffff));
+
+// PdfColor is aarrggbb, where 0xff alpha is opaque and 0x0 alpha is transparent
+// this is different than COLORREF, which ggrrbb and no alpha
+using PdfColor = uint64_t;
+
+struct ParsedColor {
+    bool wasParsed = false;
+    bool parsedOk = false;
+    COLORREF col = 0;
+    PdfColor pdfCol = 0;
+};
+
+COLORREF MkGray(u8 x);
+COLORREF MkColor(u8 r, u8 g, u8 b, u8 a = 0);
+void UnpackColor(COLORREF, u8& r, u8& g, u8& b);
+void UnpackColor(COLORREF, u8& r, u8& g, u8& b, u8& a);
+
+bool IsSpecialColor(COLORREF col);
+
+void ParseColor(ParsedColor& parsed, Str txt);
+bool ParseColor(COLORREF* destColor, Str s);
+COLORREF ParseColor(Str s, COLORREF defCol = 0);
+TempStr SerializeColorTemp(COLORREF);
+
+PdfColor MkPdfColor(u8 r, u8 g, u8 b, u8 a = 0xff); // 0xff is opaque
+void UnpackPdfColor(PdfColor, u8& r, u8& g, u8& b, u8& a);
+void SerializePdfColor(PdfColor c, str::Builder& out);
+
+COLORREF AdjustLightness(COLORREF c, float factor);
+COLORREF AdjustLightness2(COLORREF c, float units);
+float GetLightness(COLORREF c);
+bool IsLightColor(COLORREF c);
+COLORREF AccentColor(COLORREF col, int light, int dark = 0);
+bool IsNearBlack(COLORREF c);
+DWORD PremultiplyPixel(COLORREF c, u8 alpha);
+
+// GDI+ only exists on Windows; portable code works with COLORREF
+#if OS_WIN
+Gdiplus::Color Unblend(COLORREF c, u8 alpha);
+Gdiplus::Color GdiRgbFromCOLORREF(COLORREF c);
+Gdiplus::Color GdiRgbaFromCOLORREF(COLORREF c);
+#endif
+
+constexpr COLORREF RgbToCOLORREF(COLORREF rgb) {
+    return ((rgb & 0x0000FF) << 16) | (rgb & 0x00FF00) | ((rgb & 0xFF0000) >> 16);
+}
+
+u8 GetRed(COLORREF rgb);
+u8 GetGreen(COLORREF rgb);
+u8 GetBlue(COLORREF rgb);
+u8 GetAlpha(COLORREF rgb);
