@@ -246,6 +246,75 @@ void DisplayModel::RepaintDisplay() {
     cb->Repaint();
 }
 
+// viewport crop: zoom to column, shift viewport for columns using margin values
+void DisplayModel::ApplyViewportCrop() {
+    if (!viewportCropEnabled) {
+        return;
+    }
+    if (GetKeyState(VK_SHIFT) & 0x8000) {
+        return;
+    }
+    if (viewportCropSaved.IsEmpty()) {
+        viewportCropSaved = viewPort;
+        viewportCropSavedZoom = GetZoomVirtual(true);
+    }
+
+    // Zoom 2x so each half-page fills the window width
+    float newZoom = viewportCropSavedZoom * 2.0f;
+    SetZoomVirtual(newZoom, nullptr);
+
+    int windowWidth = viewportCropSaved.dx;
+    viewPort.dx = windowWidth;
+
+    if (viewportCropColumn == 0) {
+        viewPort.x = viewportCropSaved.x;
+    } else {
+        viewPort.x = viewportCropSaved.x + windowWidth;
+    }
+}
+
+// margin trim: zoom to fit content width (minus left/right margins)
+void DisplayModel::ApplyMarginTrim() {
+    if (!marginTrimEnabled) {
+        return;
+    }
+    if (marginTrimSaved.IsEmpty()) {
+        marginTrimSaved = viewPort;
+        marginTrimSavedZoom = GetZoomVirtual(true);
+    }
+    viewPort.x = marginTrimSaved.x;
+    viewPort.dx = marginTrimSaved.dx;
+
+    float pageWidth = (float)marginTrimSaved.dx;
+    float leftM = (float)gGlobalPrefs->viewportCrop.left;
+    float rightM = (float)gGlobalPrefs->viewportCrop.right;
+    float contentWidth = pageWidth - leftM - rightM;
+    float zoomFactor = (contentWidth > 0) ? (pageWidth / contentWidth) : 1.0f;
+    if (zoomFactor > 4.0f) {
+        zoomFactor = 4.0f;
+    }
+    if (zoomFactor < 0.5f) {
+        zoomFactor = 0.5f;
+    }
+
+    float newZoom = marginTrimSavedZoom * zoomFactor;
+    SetZoomVirtual(newZoom, nullptr);
+
+    viewPort.x += (int)leftM;
+    viewPort.dx = (int)contentWidth;
+}
+
+void DisplayModel::QuickToggleViewportCrop() {
+    if (!viewportCropEnabled) return;
+    viewportCropQuickToggled = !viewportCropQuickToggled;
+    if (viewportCropQuickToggled) {
+        viewPort = viewportCropSaved;
+        SetZoomVirtual(viewportCropSavedZoom, nullptr);
+    } else {
+        ApplyViewportCrop();
+    }
+}
+
 static bool IsDisplayModelValid(DisplayModel* dm) {
     for (MainWindow* win : gWindows) {
         for (WindowTab* tab : win->Tabs()) {
@@ -640,7 +709,7 @@ static DocumentLayoutMargin ToDocumentLayoutMargin(WindowMargin margin) {
 }
 
 static void CopyDocumentLayoutToPageInfo(const DisplayModel* dm, const DocumentLayout& layout) {
-    for (int pageNo = 1; pageNo <= dm->PageCount(); pageNo++) {
+    for (int pageNo = 1; pageNo <= layout.pages.len; pageNo++) {
         PageInfo* pageInfo = dm->GetPageInfo(pageNo);
         const DocumentLayoutPage* page = layout.GetPage(pageNo);
         if (!pageInfo || !page) {
@@ -1218,8 +1287,8 @@ void DisplayModel::Relayout(float newZoomVirtual, int newRotation) {
         }
         viewPort.x = newViewPortOffsetX;
 
-        layout.Reset(PageCount());
-        for (int pageNo = 1; pageNo <= PageCount(); pageNo++) {
+        layout.Reset(engine->PageCount());
+        for (int pageNo = 1; pageNo <= engine->PageCount(); pageNo++) {
             PageInfo* pi = GetPageInfo(pageNo);
             pi->usedEstimatedMediaBox = false;
             DocumentLayoutPage* layoutPage = layout.GetPage(pageNo);
@@ -1267,6 +1336,8 @@ void DisplayModel::Relayout(float newZoomVirtual, int newRotation) {
     canvasSize = layout.canvasSize;
     zoomReal = layout.zoomReal;
     CopyDocumentLayoutToPageInfo(this, layout);
+
+    ApplyViewportCrop();
 }
 
 // Re-do the layout after page sizes changed, keeping the user looking at the
@@ -1406,10 +1477,11 @@ void DisplayModel::RecalcVisibleParts() const {
         return;
     }
 
+    int nPages = PageCount();
     DocumentLayout layout;
-    layout.Reset(PageCount());
+    layout.Reset(nPages);
     layout.viewPort = viewPort;
-    for (int pageNo = 1; pageNo <= PageCount(); ++pageNo) {
+    for (int pageNo = 1; pageNo <= nPages; ++pageNo) {
         DocumentLayoutPage* layoutPage = layout.GetPage(pageNo);
         PageInfo* pageInfo = GetPageInfo(pageNo);
         if (!layoutPage || !pageInfo) {
@@ -1715,6 +1787,8 @@ void DisplayModel::SetViewPortSize(Size newViewPortSize) {
         RenderVisibleParts();
         cb->UpdateScrollbars(canvasSize);
     }
+
+    ApplyViewportCrop();
 }
 
 RectF DisplayModel::GetContentBox(int pageNo) const {
@@ -2096,6 +2170,52 @@ void DisplayModel::ScrollYBy(int dy, bool changePage) {
             if (viewPort.y + viewPort.dy >= canvasSize.dy) {
                 GoToNextPage();
                 return;
+            }
+        }
+    }
+
+    // Viewport crop column advance / retreat
+    if (viewportCropEnabled && !viewportCropQuickToggled && IsContinuous(GetDisplayMode())) {
+        currPageNo = CurrentPageNo();
+        pageInfo = GetPageInfo(currPageNo);
+        if (pageInfo) {
+            int colTop = (int)pageInfo->pos.y;
+            int colBottom = (int)(pageInfo->pos.y + pageInfo->pos.dy);
+            if (dy > 0 && currYOff + dy >= colBottom - viewPort.dy) {
+                // Reached bottom of current column
+                if (viewportCropColumn == 0) {
+                    viewportCropColumn = 1; // go to right column
+                    viewPort.y = colTop; // top of same page
+                    ApplyViewportCrop();
+                    RecalcVisibleParts();
+                    RepaintDisplay();
+                    return;
+                } else {
+                    // At right column bottom — advance to next page
+                    viewportCropColumn = 0;
+                    GoToNextPage();
+                    ApplyViewportCrop();
+                    return;
+                }
+            } else if (dy < 0 && currYOff <= colTop) {
+                // Reached top of current column
+                if (viewportCropColumn == 1) {
+                    viewportCropColumn = 0; // go back to left column
+                    viewPort.y = colBottom - viewPort.dy;
+                    ApplyViewportCrop();
+                    RecalcVisibleParts();
+                    RepaintDisplay();
+                    return;
+                } else if (currPageNo > 1) {
+                    viewportCropColumn = 1; // go to previous page right column
+                    GoToPrevPage();
+                    auto prevPageInfo = GetPageInfo(CurrentPageNo());
+                    if (prevPageInfo) {
+                        viewPort.y = (int)(prevPageInfo->pos.y + prevPageInfo->pos.dy - viewPort.dy);
+                    }
+                    ApplyViewportCrop();
+                    return;
+                }
             }
         }
     }

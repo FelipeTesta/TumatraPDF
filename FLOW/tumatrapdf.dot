@@ -7,19 +7,16 @@ digraph TumatraPDF {
     fase0 [label="Fase 0: Setup\nClonar SumatraPDF\nInit Git\nDocumentar", fillcolor="#c8e6c9", style=filled];
     fase1 [label="Fase 1: Build Base\nVS2022 + Premake5\nCompilar sem mods", fillcolor="#fff9c4", style=filled];
     fase2 [label="Fase 2: Análise\nPipeline render\nHooks de integração\nUpdate checker", fillcolor="#fff9c4", style=filled];
-    fase3 [label="Fase 3: Feature 1\nAutoScroll com Timer\n(port do AHK)", fillcolor="#bbdefb", style=filled];
-    fase4 [label="Fase 4: Feature 2\nRecorte Viewport\nDuas Colunas", fillcolor="#bbdefb", style=filled];
-    fase5 [label="Fase 5: Feature 3\nFiltro de Contraste", fillcolor="#bbdefb", style=filled];
+    fase3 [label="Fase 3: Features 1+2 ✓\nAutoScroll + Contraste\n✓ Temas Light/Dark\n✓ Menu New Tools\n✓ Toolbar Icons\n✓ Command Registration\n✓ AutoScroll + Contraste + Themes + Menu + Invert", fillcolor="#c8e6c9", style=filled];
+    fase4 [label="Fase 4: Feature 3 ✓\nViewport Crop + Margin Trim\n(Zoom bug fixed)", fillcolor="#c8e6c9", style=filled];
     fase6 [label="Fase 6: Integração\nTestes\nBuild Final\nMerge upstream", fillcolor="#f8bbd0", style=filled];
 
     fase0 -> fase1;
     fase1 -> fase2;
     fase2 -> fase3;
     fase2 -> fase4;
-    fase2 -> fase5;
     fase3 -> fase6;
     fase4 -> fase6;
-    fase5 -> fase6;
 
     // Update loop
     update [label="Verificação de\nAtualizações Upstream\n(check-updates.ps1)", shape=hexagon, fillcolor="#e1bee7", style=filled];
