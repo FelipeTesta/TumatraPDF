@@ -588,7 +588,9 @@ void CreateThemeCommands() {
     gThemes = new Vec<Theme*>();
     gParsedThemes = ParseThemes(themesTxt);
     for (Theme* theme : *gParsedThemes->themes) {
-        gThemes->Append(theme);
+        if (str::Eq(theme->name, StrL("Light")) || str::Eq(theme->name, StrL("Dark"))) {
+            gThemes->Append(theme);
+        }
     }
 
     for (Theme* theme : *gGlobalPrefs->themes) {
@@ -824,9 +826,9 @@ void SetTheme(Str name) {
     name = ResolveThemeAlias(name);
     int idx = GetThemeByName(name);
     if (idx < 0) {
-        // invalid name, reset to light theme
-        str::ReplaceWithCopy(&gGlobalPrefs->theme, gThemeLight->name);
-        idx = 0;
+        // invalid name, reset to dark theme
+        str::ReplaceWithCopy(&gGlobalPrefs->theme, StrL("Dark"));
+        idx = GetThemeByName(StrL("Dark"));
     }
     SetThemeByIndex(idx);
 }

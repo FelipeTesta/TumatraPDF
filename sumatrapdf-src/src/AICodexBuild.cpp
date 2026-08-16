@@ -118,7 +118,7 @@ static bool QueryCodexModels(Str exePath, StrVec& models) {
     closeHandle(hStdoutWrite);
 
     Str request = StrL(
-        "{\"method\":\"initialize\",\"id\":1,\"params\":{\"clientInfo\":{\"name\":\"SumatraPDF\",\"version\":\"3.7\"}}}"
+        "{\"method\":\"initialize\",\"id\":1,\"params\":{\"clientInfo\":{\"name\":\"TumatraPDF\",\"version\":\"3.7\"}}}"
         "\n"
         "{\"method\":\"model/list\",\"id\":2,\"params\":{\"limit\":100,\"includeHidden\":false}}\n");
     DWORD nWritten = 0;

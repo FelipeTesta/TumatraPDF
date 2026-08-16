@@ -317,6 +317,17 @@ struct MainWindow {
     float xScrollAccum = 0;
     float yScrollAccum = 0;
 
+    // --- begin auto-scroll feature ---
+    bool autoScrollActive = false;
+    float autoScrollSpeed = 2.0f;      // pixels per tick
+    float autoScrollSpeedMultiplier = 1.0f;
+    float autoScrollAccum = 0.0f;
+    int autoScrollTickCount = 0;
+    HWND hwndEtaLabel = nullptr;
+    DWORD autoScrollTimerMinutes = 0;    // 0 = no timer
+    DWORD autoScrollStartTick = 0;
+    // --- end auto-scroll feature ---
+
     // true while selecting and when CurrentTab()->selectionOnPage != nullptr
     bool showSelection = false;
     // true while a text selection started by double-clicking a word is being
@@ -383,6 +394,12 @@ struct MainWindow {
     bool isFullScreen = false;
     PresentationMode presentation = PM_DISABLED;
     int windowStateBeforePresentation = 0;
+
+    // --- contrast overlay ---
+    HWND hwndContrastOverlay = nullptr;
+    bool contrastEnabled = false;
+    int contrastOpacity = 50; // 0-100, percentage
+    // --- end contrast overlay ---
     bool suppressFrameRedraw = false;
     // whether BeginFrameRedrawSuppression sent WM_SETREDRAW FALSE (it doesn't
     // for a hidden frame: WM_SETREDRAW TRUE would show the window)
@@ -530,6 +547,7 @@ struct MainWindow {
     LARGE_INTEGER scrollAnimLastTime{};
     bool scrollAnimActive = false;
     bool scrollAnimHiResTimer = false; // timeBeginPeriod(1) while animating
+    int scrollAnimLastAppliedY = 0; // track last applied integer Y position
 
     // suppress Read Aloud user-scroll detection during programmatic follow scrolling
     mutable bool readAloudScrollFromCode = false;

@@ -130,8 +130,8 @@ using Gdiplus::SolidBrush;
 
 constexpr const char* kRestrictionsFileName = "sumatrapdfrestrict.ini";
 
-constexpr const char* kSumatraWindowTitle = "SumatraPDF";
-constexpr const WCHAR* kSumatraWindowTitleW = L"SumatraPDF";
+constexpr const char* kSumatraWindowTitle = "TumatraPDF";
+constexpr const WCHAR* kSumatraWindowTitleW = L"TumatraPDF";
 
 // Text-to-speech/read-aloud helpers are implemented together near the end of this file.
 static void ReadAloudClearSourceTab();
@@ -824,6 +824,8 @@ void UpdateTabFileDisplayStateForTab(WindowTab* tab) {
     tab->ctrl->GetDisplayState(fs);
     UpdateDisplayStateWindowRect(win, fs, false);
     UpdateSidebarDisplayState(tab, fs);
+    // Persist autoscroll speed multiplier
+    fs->autoScrollSpeedMultiplier = win->autoScrollSpeedMultiplier;
 }
 
 static bool gForceRtl = false;
@@ -2026,6 +2028,10 @@ static void ReplaceDocumentInCurrentTab(LoadArgs* args, DocController* ctrl, Fil
     }
     if (fs && fs->useDefaultState) {
         fs = nullptr;
+    }
+    // Restore per-document autoscroll speed multiplier
+    if (fs) {
+        win->autoScrollSpeedMultiplier = fs->autoScrollSpeedMultiplier < 0.1f ? 0.1f : fs->autoScrollSpeedMultiplier;
     }
 
     DisplayMode displayMode = gGlobalPrefs->defaultDisplayModeEnum;
@@ -9964,6 +9970,7 @@ static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, L
             break;
 
         case CmdToggleToolbarShowReadAloud: {
+            if (gGlobalPrefs->disableReadAloud) break;
             bool show = !gGlobalPrefs->toolbarShowReadAloud;
             if (GetCommandArg(cmd, kCmdArgState)) {
                 show = GetCommandBoolArg(cmd, kCmdArgState, true);
@@ -10110,6 +10117,41 @@ static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, L
             // start middle-click-style auto-scroll without needing a middle button
             StartAutoScrollAtCursor(win);
             break;
+
+        case CmdAutoScrollToggle:
+            if (ShouldToggle(cmd, win->autoScrollActive)) {
+                win->autoScrollActive = !win->autoScrollActive;
+                if (win->autoScrollActive) {
+                    win->autoScrollAccum = 0;
+                    win->autoScrollStartTick = GetTickCount();
+                    win->autoScrollTickCount = 0;
+                    UpdateToolbarEtaText(win, -1); // reset ETA label
+                    SetTimer(win->hwndCanvas, kContinuousAutoScrollTimerID, USER_TIMER_MINIMUM, nullptr);
+                } else {
+                    KillTimer(win->hwndCanvas, kContinuousAutoScrollTimerID);
+                    UpdateToolbarEtaText(win, -1);
+                }
+                SetToolbarButtonCheckedState(win, CmdAutoScrollToggle, win->autoScrollActive);
+            }
+            break;
+        case CmdAutoScrollSpeedUp: {
+            win->autoScrollSpeedMultiplier = std::min(win->autoScrollSpeedMultiplier * 1.2f, 10.0f);
+            // Persist the new multiplier
+            FileState* fs = gFileHistory.FindByPath(tab->filePath);
+            if (fs) {
+                fs->autoScrollSpeedMultiplier = win->autoScrollSpeedMultiplier;
+            }
+            break;
+        }
+        case CmdAutoScrollSpeedDown: {
+            win->autoScrollSpeedMultiplier = std::max(win->autoScrollSpeedMultiplier * 0.8f, 0.1f);
+            // Persist the new multiplier
+            FileState* fs = gFileHistory.FindByPath(tab->filePath);
+            if (fs) {
+                fs->autoScrollSpeedMultiplier = win->autoScrollSpeedMultiplier;
+            }
+            break;
+        }
 
         case CmdScrollUpHalfPage: {
             if (win->IsCurrentTabAbout()) {
@@ -10855,6 +10897,76 @@ static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, L
         case CmdToggleLaserPointer:
             // the cursor itself is the feedback, so no notification
             ToggleLaserPointer(win);
+            break;
+
+        case CmdContrastToggle:
+            if (ShouldToggle(cmd, win->contrastEnabled)) {
+                win->contrastEnabled = !win->contrastEnabled;
+                if (win->contrastEnabled) {
+                    CreateContrastOverlay(win);
+                } else {
+                    DestroyContrastOverlay(win);
+                }
+                SetToolbarButtonCheckedState(win, CmdContrastToggle, win->contrastEnabled);
+            }
+            break;
+
+        case CmdViewportCropToggle:
+            if (ShouldToggle(cmd, gGlobalPrefs->viewportCrop.enabled)) {
+                gGlobalPrefs->viewportCrop.enabled = !gGlobalPrefs->viewportCrop.enabled;
+                auto cropDm = win->AsFixed();
+                if (cropDm) {
+                    cropDm->viewportCropEnabled = gGlobalPrefs->viewportCrop.enabled;
+                    cropDm->viewportCropColumn = 0;
+                    cropDm->viewportCropQuickToggled = false;
+                    if (cropDm->viewportCropEnabled) {
+                        cropDm->viewportCropSaved = cropDm->GetViewPort();
+                        cropDm->viewportCropSavedZoom = cropDm->GetZoomVirtual(true);
+                        cropDm->ApplyViewportCrop();
+                    } else {
+                        // Restore full viewport + original zoom
+                        if (!cropDm->viewportCropSaved.IsEmpty()) {
+                            cropDm->viewPort = cropDm->viewportCropSaved;
+                            cropDm->SetZoomVirtual(cropDm->viewportCropSavedZoom, nullptr);
+                            cropDm->viewportCropSaved = Rect();
+                        }
+                    }
+                    cropDm->RecalcVisibleParts();
+                    HwndRepaintNow(win->hwndCanvas);
+                }
+                SetToolbarButtonCheckedState(win, CmdViewportCropToggle, gGlobalPrefs->viewportCrop.enabled);
+            }
+            break;
+
+        case CmdMarginTrimToggle:
+            if (ShouldToggle(cmd, win->AsFixed() ? win->AsFixed()->marginTrimEnabled : false)) {
+                auto trimDm = win->AsFixed();
+                if (trimDm) {
+                    trimDm->marginTrimEnabled = !trimDm->marginTrimEnabled;
+                    if (trimDm->marginTrimEnabled) {
+                        trimDm->marginTrimSaved = Rect();
+                        trimDm->ApplyMarginTrim();
+                    } else {
+                        if (!trimDm->marginTrimSaved.IsEmpty()) {
+                            trimDm->viewPort = trimDm->marginTrimSaved;
+                            trimDm->SetZoomVirtual(trimDm->marginTrimSavedZoom, nullptr);
+                            trimDm->marginTrimSaved = Rect();
+                        }
+                    }
+                    trimDm->RecalcVisibleParts();
+                    HwndRepaintNow(win->hwndCanvas);
+                }
+                SetToolbarButtonCheckedState(win, CmdMarginTrimToggle, trimDm ? trimDm->marginTrimEnabled : false);
+            }
+            break;
+
+        case CmdContrastIncrease:
+            win->contrastOpacity = std::min(win->contrastOpacity + 10, 100);
+            UpdateContrastOverlayOpacity(win);
+            break;
+        case CmdContrastDecrease:
+            win->contrastOpacity = std::max(win->contrastOpacity - 10, 0);
+            UpdateContrastOverlayOpacity(win);
             break;
 
         case CmdSelectTextViaKeyboard:

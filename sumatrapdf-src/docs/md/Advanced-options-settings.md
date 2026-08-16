@@ -207,6 +207,14 @@ ReadAloudVoiceId =
 ; in version 3.7)
 ReadAloudSpeed = 1
 
+; if true, disables Read Aloud (text-to-speech) feature completely: hides menu
+; entries, toolbar button, and commands (introduced in version 3.7)
+DisableReadAloud = false
+
+; if true, disables AI Chat sidebar feature completely: hides menu entries,
+; toolbar buttons, and commands for all AI providers (introduced in version 3.7)
+DisableAIChat = false
+
 ; if true, mouse wheel scrolling is faster when mouse is over a scrollbar
 ; (introduced in version 3.6)
 FastScrollOverScrollbar = false
@@ -222,7 +230,7 @@ TabWidth = 300
 ; Light, Solarized Dark, Dracula, Nebula, Greeny, Choco, Purpy, One Dark,
 ; Monokai, Nord, GitHub Dark, Catppuccin Mocha, Tokyo Night, Gruvbox, Night Owl,
 ; Ayu, Palenight, System (introduced in version 3.5)
-Theme = 
+Theme = Dark
 
 ; the light theme the light/dark toggle and the System theme switch to
 ; (introduced in version 3.7)
@@ -310,6 +318,9 @@ ZoomLevels =
 ; the current zoom level. If 0 or negative, zooming steps through ZoomLevels
 ; instead
 ZoomIncrement = 0
+
+; viewport crop settings for two-column reading (introduced in version 3.7)
+ViewportCrop = 0 0 0 0 0 false false
 
 ; customization options for PDF, XPS, DjVu and PostScript UI
 FixedPageUI [
@@ -934,6 +945,9 @@ FileStates [
     ; data required to determine which parts of the table of contents have been
     ; expanded
     TocState =
+
+    ; Autoscroll speed multiplier for this document
+    AutoScrollSpeedMultiplier = 1
   ]
 ]
 

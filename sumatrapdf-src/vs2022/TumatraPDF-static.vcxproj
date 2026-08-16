@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|Win32">
@@ -102,7 +102,7 @@
     <ProjectGuid>{31E17D57-9DF7-7BED-E66E-070F52C44C75}</ProjectGuid>
     <IgnoreWarnCompileDuplicatedFilename>true</IgnoreWarnCompileDuplicatedFilename>
     <Keyword>Win32Proj</Keyword>
-    <RootNamespace>SumatraPDF-static</RootNamespace>
+    <RootNamespace>TumatraPDF-static</RootNamespace>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
@@ -270,128 +270,128 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <LinkIncremental>true</LinkIncremental>
     <OutDir>$(ProjectDir)..\out\dbg32\</OutDir>
-    <IntDir>$(ProjectDir)..\out\dbg32\obj-s\SumatraPDF-static\</IntDir>
-    <TargetName>SumatraPDF-static</TargetName>
+    <IntDir>$(ProjectDir)..\out\dbg32\obj-s\TumatraPDF-static\</IntDir>
+    <TargetName>TumatraPDF-static</TargetName>
     <TargetExt>.exe</TargetExt>
     <GenerateManifest>false</GenerateManifest>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <LinkIncremental>true</LinkIncremental>
     <OutDir>$(ProjectDir)..\out\dbg64\</OutDir>
-    <IntDir>$(ProjectDir)..\out\dbg64\obj-s\SumatraPDF-static\</IntDir>
-    <TargetName>SumatraPDF-static</TargetName>
+    <IntDir>$(ProjectDir)..\out\dbg64\obj-s\TumatraPDF-static\</IntDir>
+    <TargetName>TumatraPDF-static</TargetName>
     <TargetExt>.exe</TargetExt>
     <GenerateManifest>false</GenerateManifest>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">
     <LinkIncremental>true</LinkIncremental>
     <OutDir>$(ProjectDir)..\out\dbgarm64\</OutDir>
-    <IntDir>$(ProjectDir)..\out\dbgarm64\obj-s\SumatraPDF-static\</IntDir>
-    <TargetName>SumatraPDF-static</TargetName>
+    <IntDir>$(ProjectDir)..\out\dbgarm64\obj-s\TumatraPDF-static\</IntDir>
+    <TargetName>TumatraPDF-static</TargetName>
     <TargetExt>.exe</TargetExt>
     <GenerateManifest>false</GenerateManifest>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug x64_asan|x64'">
     <LinkIncremental>false</LinkIncremental>
     <OutDir>$(ProjectDir)..\out\dbg64_asan\</OutDir>
-    <IntDir>$(ProjectDir)..\out\dbg64_asan\obj-s\SumatraPDF-static\</IntDir>
-    <TargetName>SumatraPDF-static</TargetName>
+    <IntDir>$(ProjectDir)..\out\dbg64_asan\obj-s\TumatraPDF-static\</IntDir>
+    <TargetName>TumatraPDF-static</TargetName>
     <TargetExt>.exe</TargetExt>
     <GenerateManifest>false</GenerateManifest>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='DebugFull|Win32'">
     <LinkIncremental>true</LinkIncremental>
     <OutDir>$(ProjectDir)..\out\dbgfull32\</OutDir>
-    <IntDir>$(ProjectDir)..\out\dbgfull32\obj-s\SumatraPDF-static\</IntDir>
-    <TargetName>SumatraPDF-static</TargetName>
+    <IntDir>$(ProjectDir)..\out\dbgfull32\obj-s\TumatraPDF-static\</IntDir>
+    <TargetName>TumatraPDF-static</TargetName>
     <TargetExt>.exe</TargetExt>
     <GenerateManifest>false</GenerateManifest>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='DebugFull|x64'">
     <LinkIncremental>true</LinkIncremental>
     <OutDir>$(ProjectDir)..\out\dbgfull64\</OutDir>
-    <IntDir>$(ProjectDir)..\out\dbgfull64\obj-s\SumatraPDF-static\</IntDir>
-    <TargetName>SumatraPDF-static</TargetName>
+    <IntDir>$(ProjectDir)..\out\dbgfull64\obj-s\TumatraPDF-static\</IntDir>
+    <TargetName>TumatraPDF-static</TargetName>
     <TargetExt>.exe</TargetExt>
     <GenerateManifest>false</GenerateManifest>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='DebugFull|ARM64'">
     <LinkIncremental>true</LinkIncremental>
     <OutDir>$(ProjectDir)..\out\dbgfullarm64\</OutDir>
-    <IntDir>$(ProjectDir)..\out\dbgfullarm64\obj-s\SumatraPDF-static\</IntDir>
-    <TargetName>SumatraPDF-static</TargetName>
+    <IntDir>$(ProjectDir)..\out\dbgfullarm64\obj-s\TumatraPDF-static\</IntDir>
+    <TargetName>TumatraPDF-static</TargetName>
     <TargetExt>.exe</TargetExt>
     <GenerateManifest>false</GenerateManifest>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='DebugFull x64_asan|x64'">
     <LinkIncremental>false</LinkIncremental>
     <OutDir>$(ProjectDir)..\out\dbgfull64_asan\</OutDir>
-    <IntDir>$(ProjectDir)..\out\dbgfull64_asan\obj-s\SumatraPDF-static\</IntDir>
-    <TargetName>SumatraPDF-static</TargetName>
+    <IntDir>$(ProjectDir)..\out\dbgfull64_asan\obj-s\TumatraPDF-static\</IntDir>
+    <TargetName>TumatraPDF-static</TargetName>
     <TargetExt>.exe</TargetExt>
     <GenerateManifest>false</GenerateManifest>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <LinkIncremental>false</LinkIncremental>
     <OutDir>$(ProjectDir)..\out\rel32\</OutDir>
-    <IntDir>$(ProjectDir)..\out\rel32\obj-s\SumatraPDF-static\</IntDir>
-    <TargetName>SumatraPDF-static</TargetName>
+    <IntDir>$(ProjectDir)..\out\rel32\obj-s\TumatraPDF-static\</IntDir>
+    <TargetName>TumatraPDF-static</TargetName>
     <TargetExt>.exe</TargetExt>
     <GenerateManifest>false</GenerateManifest>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <LinkIncremental>false</LinkIncremental>
     <OutDir>$(ProjectDir)..\out\rel64\</OutDir>
-    <IntDir>$(ProjectDir)..\out\rel64\obj-s\SumatraPDF-static\</IntDir>
-    <TargetName>SumatraPDF-static</TargetName>
+    <IntDir>$(ProjectDir)..\out\rel64\obj-s\TumatraPDF-static\</IntDir>
+    <TargetName>TumatraPDF-static</TargetName>
     <TargetExt>.exe</TargetExt>
     <GenerateManifest>false</GenerateManifest>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">
     <LinkIncremental>false</LinkIncremental>
     <OutDir>$(ProjectDir)..\out\arm64\</OutDir>
-    <IntDir>$(ProjectDir)..\out\arm64\obj-s\SumatraPDF-static\</IntDir>
-    <TargetName>SumatraPDF-static</TargetName>
+    <IntDir>$(ProjectDir)..\out\arm64\obj-s\TumatraPDF-static\</IntDir>
+    <TargetName>TumatraPDF-static</TargetName>
     <TargetExt>.exe</TargetExt>
     <GenerateManifest>false</GenerateManifest>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release x64_asan|x64'">
     <LinkIncremental>false</LinkIncremental>
     <OutDir>$(ProjectDir)..\out\rel64_asan\</OutDir>
-    <IntDir>$(ProjectDir)..\out\rel64_asan\obj-s\SumatraPDF-static\</IntDir>
-    <TargetName>SumatraPDF-static</TargetName>
+    <IntDir>$(ProjectDir)..\out\rel64_asan\obj-s\TumatraPDF-static\</IntDir>
+    <TargetName>TumatraPDF-static</TargetName>
     <TargetExt>.exe</TargetExt>
     <GenerateManifest>false</GenerateManifest>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseAnalyze|Win32'">
     <LinkIncremental>false</LinkIncremental>
     <OutDir>$(ProjectDir)..\out\rel32_prefast\</OutDir>
-    <IntDir>$(ProjectDir)..\out\rel32_prefast\obj-s\SumatraPDF-static\</IntDir>
-    <TargetName>SumatraPDF-static</TargetName>
+    <IntDir>$(ProjectDir)..\out\rel32_prefast\obj-s\TumatraPDF-static\</IntDir>
+    <TargetName>TumatraPDF-static</TargetName>
     <TargetExt>.exe</TargetExt>
     <GenerateManifest>false</GenerateManifest>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseAnalyze|x64'">
     <LinkIncremental>false</LinkIncremental>
     <OutDir>$(ProjectDir)..\out\rel64_prefast\</OutDir>
-    <IntDir>$(ProjectDir)..\out\rel64_prefast\obj-s\SumatraPDF-static\</IntDir>
-    <TargetName>SumatraPDF-static</TargetName>
+    <IntDir>$(ProjectDir)..\out\rel64_prefast\obj-s\TumatraPDF-static\</IntDir>
+    <TargetName>TumatraPDF-static</TargetName>
     <TargetExt>.exe</TargetExt>
     <GenerateManifest>false</GenerateManifest>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseAnalyze|ARM64'">
     <LinkIncremental>false</LinkIncremental>
     <OutDir>$(ProjectDir)..\out\arm64_prefast\</OutDir>
-    <IntDir>$(ProjectDir)..\out\arm64_prefast\obj-s\SumatraPDF-static\</IntDir>
-    <TargetName>SumatraPDF-static</TargetName>
+    <IntDir>$(ProjectDir)..\out\arm64_prefast\obj-s\TumatraPDF-static\</IntDir>
+    <TargetName>TumatraPDF-static</TargetName>
     <TargetExt>.exe</TargetExt>
     <GenerateManifest>false</GenerateManifest>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseAnalyze x64_asan|x64'">
     <LinkIncremental>false</LinkIncremental>
     <OutDir>$(ProjectDir)..\out\rel64_prefast_asan\</OutDir>
-    <IntDir>$(ProjectDir)..\out\rel64_prefast_asan\obj-s\SumatraPDF-static\</IntDir>
-    <TargetName>SumatraPDF-static</TargetName>
+    <IntDir>$(ProjectDir)..\out\rel64_prefast_asan\obj-s\TumatraPDF-static\</IntDir>
+    <TargetName>TumatraPDF-static</TargetName>
     <TargetExt>.exe</TargetExt>
     <GenerateManifest>false</GenerateManifest>
   </PropertyGroup>
@@ -1361,7 +1361,6 @@
     <ClCompile Include="..\src\CommandPaletteDraw.cpp" />
     <ClCompile Include="..\src\CommandPaletteFilter.cpp" />
     <ClCompile Include="..\src\Commands.cpp" />
-    <ClCompile Include="..\src\ContrastOverlay.cpp" />
     <ClCompile Include="..\src\CrashHandler.cpp" />
     <ClCompile Include="..\src\DisplayMode.cpp" />
     <ClCompile Include="..\src\DisplayModel.cpp" />

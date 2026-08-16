@@ -15,7 +15,7 @@ export function clearDirPreserveSettings(dir: string, verbose = false): void {
   for (const entry of entries) {
     const name = entry.name;
     const fullPath = join(dir, name);
-    const excluded = name === "sumatrapdfcache" || name === "SumatraPDF-settings.txt" || name.includes("asan");
+    const excluded = name === "sumatrapdfcache" || name === "TumatraPDF-settings.txt" || name.includes("asan");
     if (excluded) {
       nSkipped++;
       if (verbose) {

@@ -47,6 +47,7 @@
 #include "MainWindow.h"
 #include "Canvas.h"
 #include "Menu.h"
+#include "Commands.h"
 #include "uia/Provider.h"
 #include "SearchAndDDE.h"
 #include "Selection.h"
@@ -1036,7 +1037,7 @@ static void StartOrUpdateSmoothScrollY(MainWindow* win, int targetY) {
             timeBeginPeriod(1);
             win->scrollAnimHiResTimer = true;
         }
-        SetTimer(win->hwndCanvas, kSmoothScrollTimerID, 1, nullptr);
+        SetTimer(win->hwndCanvas, kSmoothScrollTimerID, USER_TIMER_MINIMUM, nullptr);
     }
     // If already active: only target changes; scrollAnimY keeps going.
 }
@@ -4450,6 +4451,72 @@ static void OnTimer(MainWindow* win, HWND hwnd, WPARAM timerId) {
             }
             break;
 
+        case kContinuousAutoScrollTimerID:
+            // Ctrl held = pause auto-scroll temporarily
+            if (GetKeyState(VK_CONTROL) & 0x8000) {
+                return;
+            }
+            if (!win->autoScrollActive) {
+                KillTimer(hwnd, kContinuousAutoScrollTimerID);
+                return;
+            }
+            {
+                auto dm = win->AsFixed();
+                if (!dm) {
+                    return;
+                }
+                // Check end of document
+                if (dm->IsAtDocumentEnd()) {
+                    win->autoScrollActive = false;
+                    KillTimer(hwnd, kContinuousAutoScrollTimerID);
+                    UpdateToolbarEtaText(win, -1);
+                    SetToolbarButtonCheckedState(win, CmdAutoScrollToggle, false);
+                    win->autoScrollTickCount = 0;
+                    return;
+                }
+                // Timer check
+                if (win->autoScrollTimerMinutes > 0 && win->autoScrollStartTick > 0) {
+                    DWORD elapsedMs = GetTickCount() - win->autoScrollStartTick;
+                    if (elapsedMs >= (DWORD)win->autoScrollTimerMinutes * 60 * 1000) {
+                        win->autoScrollActive = false;
+                        KillTimer(hwnd, kContinuousAutoScrollTimerID);
+                        UpdateToolbarEtaText(win, -1);
+                        SetToolbarButtonCheckedState(win, CmdAutoScrollToggle, false);
+                        win->autoScrollTickCount = 0;
+                        return;
+                    }
+                }
+                // Scroll
+                win->autoScrollTickCount++;
+                float speed = win->autoScrollSpeed * win->autoScrollSpeedMultiplier;
+                win->autoScrollAccum += speed;
+                int dy = (int)win->autoScrollAccum;
+                if (dy != 0) {
+                    win->autoScrollAccum -= dy;
+                    win->MoveDocBy(0, dy);
+                }
+                // Update ETA label every 100 ticks (~1 second at 10ms timer)
+                if (win->autoScrollTickCount >= 100) {
+                    win->autoScrollTickCount = 0;
+                    // Calculate ETA: remaining pages * page height / speed
+                    int remainingPages = dm->PageCount() - dm->CurrentPageNo();
+                    if (remainingPages > 0 && speed > 0) {
+                        // page height in pixels: get via GetPageInfo
+                        auto pageInfo = dm->GetPageInfo(dm->CurrentPageNo());
+                        if (pageInfo) {
+                            int pageHeightPx = (int)pageInfo->pos.dy;
+                            // speed px/sec: speed * 100 (10ms tick -> 100 ticks/sec)
+                            float speedPxPerSec = speed * 100.0f;
+                            float etaSec = (remainingPages * pageHeightPx) / speedPxPerSec;
+                            int minutes = (int)(etaSec / 60.0f);
+                            if (minutes < 0) minutes = 0;
+                            UpdateToolbarEtaText(win, minutes);
+                        }
+                    }
+                }
+            }
+            break;
+
         case kHideCursorTimerID:
             // logf("got kHideCursorTimerID\n");
             KillTimer(hwnd, kHideCursorTimerID);
@@ -4571,6 +4638,13 @@ static void OnTimer(MainWindow* win, HWND hwnd, WPARAM timerId) {
             win->scrollAnimY += remaining * a;
 
             int y = (int)lround(win->scrollAnimY);
+            if (y == win->scrollAnimLastAppliedY) {
+                // Integer position didn't change since last tick - skip expensive ScrollYTo+repaint
+                // but keep accumulating scrollAnimY for smooth eventual arrival
+                break;
+            }
+            win->scrollAnimLastAppliedY = y;
+
             if (y != viewY) {
                 dm->ScrollYTo(y);
                 // If ScrollYTo clamped (document edge), stop chasing an
@@ -5052,6 +5126,9 @@ LRESULT CALLBACK WndProcCanvas(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 // fully invalidate since layout depends on size
                 // (replaces CS_HREDRAW | CS_VREDRAW which caused transparent flash)
                 HwndInvalidate(hwnd);
+                if (win && win->hwndContrastOverlay) {
+                    UpdateContrastOverlay(win);
+                }
             }
             return 0;
 

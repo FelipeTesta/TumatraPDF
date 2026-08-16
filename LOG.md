@@ -364,3 +364,38 @@ when viewportCrop.enabled in continuous mode.
   - Removed `viewportCropSaved = Rect()` reset during navigation so `viewportCropSavedZoom` remains anchored to the stable base uncropped zoom.
   - Added upward column/page retreat logic in `ScrollYBy` (`dy < 0`) alongside forward advance (`dy > 0`) for fully fluid manual reading in both directions.
 - **Build**: MSBuild Debug x64 succeeded with 0 errors; output binary `Compiled/TumatraPDF.exe`.
+
+## 2026-08-15 — ETA Label Overlap Fix (Right-Align + Hidden by Default)
+
+### Bug
+"ETA" label appeared on top of the toolbar buttons (Contrast/Invert/Crop/Trim), including at startup.
+
+### Root Cause (Toolbar.cpp)
+- `CreateEtaLabel` anchored label x to `TbGetRect(hwndToolbar, CmdAutoScrollSpeedDown)` right edge + 8px — but SpeedDown (idx 23) is mid-row, NOT the last button. Contrast/Invert/Crop/Trim (idx 25-28) sit right after → overlap whenever visible.
+- Label created with `WS_VISIBLE` style → visible at startup ("ETA: --" over buttons) until the first `UpdateToolbarEtaText` call (which only happens on autoscroll toggle / timer tick).
+
+### Fix (2 edits, Toolbar.cpp only)
+1. `CreateEtaLabel`: removed `WS_VISIBLE` from CreateWindowExW style → hidden by default.
+2. `UpdateToolbarEtaText`: right-aligned the label against the toolbar client right edge — replaced the SpeedDown-anchored x (`tbarRect.x + tbarRect.dx + DpiScale(8)`) with `rc.dx - size.dx - DpiScale(8)` using the existing `HwndClientRect(win->hwndToolbar)`. ETA now sits right of the last button (Trim), repositions on every show, never overlaps.
+
+### Result
+- ETA hidden by default; shown only when autoscroll=on (`win->autoScrollActive` guard unchanged); positioned at right side of toolbar.
+- Build: MSBuild Debug x64 → 0 errors. Output: Compiled\TumatraPDF.exe (21,863,424 bytes).
+
+## 2026-08-15 — Autoscroll Dead Fix: Persisted Multiplier 0 Clamp on Load
+
+### Bug
+Autoscroll stopped working (button toggles, no movement). ETA fix (same day) ruled out — autoscroll code intact end-to-end (toggle, timer, F9 accelerator, availability).
+
+### Root Cause
+`Compiled\TumatraPDF-settings.txt:213` had `AutoScrollSpeedMultiplier = 0` for the current doc (Resumen Psiquiatria.pdf). Load path (SumatraPDF.cpp:2034) had NO clamp → `win->autoScrollSpeedMultiplier = 0` → Canvas.cpp:4491 `speed = 2.0 * 0 = 0` → dy always 0 → `if (dy != 0)` false → MoveDocBy never called. UI cannot produce 0 (F7 clamps min 0.1, SumatraPDF.cpp:10147) → value from hand-edit/older build/corruption. Other docs (Varela = 1) scrolled fine — per-document symptom.
+
+### Fix (1 edit, SumatraPDF.cpp:2034)
+```cpp
+win->autoScrollSpeedMultiplier = fs->autoScrollSpeedMultiplier < 0.1f ? 0.1f : fs->autoScrollSpeedMultiplier;
+```
+Ternary (not std::max) to avoid include dependency. Any load path for persisted float settings that the UI clamps must clamp too.
+
+### Result
+- Build: MSBuild Debug x64 → 0 errors. Output: Compiled\TumatraPDF.exe (21,863,424 bytes).
+- Immediate workaround (before fix): one F7 press recovers (max(0×0.8, 0.1) = 0.1).

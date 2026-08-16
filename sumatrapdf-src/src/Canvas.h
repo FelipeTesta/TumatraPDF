@@ -40,3 +40,10 @@ constexpr uint kSelectionToolbarShowDelayInMs = 500;
 // either as a gesture stream or as synthesized mouse messages, so the hold is
 // detected both ways; this timer is the mouse-message half.
 constexpr UINT_PTR kTouchLongPressTimerID = 14;
+// Timer for continuous auto-scroll (CmdAutoScrollToggle)
+constexpr UINT_PTR kContinuousAutoScrollTimerID = 15;
+
+void CreateContrastOverlay(MainWindow* win);
+void DestroyContrastOverlay(MainWindow* win);
+void UpdateContrastOverlay(MainWindow* win);
+void UpdateContrastOverlayOpacity(MainWindow* win);

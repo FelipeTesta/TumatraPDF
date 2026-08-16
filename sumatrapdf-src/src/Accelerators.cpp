@@ -112,9 +112,9 @@ static ACCEL gBuiltInAccelerators[] = {
     {FSHIFT | FCONTROL | FVIRTKEY, VK_F3, CmdFindPrevSel},
     {FCONTROL | FVIRTKEY, VK_F4, CmdClose},
     {FVIRTKEY, VK_F6, CmdMoveFrameFocus},
-    {FVIRTKEY, VK_F7, CmdSelectTextViaKeyboard},
-    {FVIRTKEY, VK_F8, CmdToggleToolbar},
-    {FVIRTKEY, VK_F9, CmdToggleMenuBar},
+    {FVIRTKEY, VK_F7, CmdAutoScrollSpeedDown},
+    {FVIRTKEY, VK_F8, CmdAutoScrollSpeedUp},
+    {FVIRTKEY, VK_F9, CmdAutoScrollToggle},
     {FCONTROL | FVIRTKEY, 'L', CmdTogglePresentationMode},
     {FVIRTKEY, VK_F5, CmdTogglePresentationMode},
     {FSHIFT | FVIRTKEY, VK_F11, CmdTogglePresentationMode},
@@ -163,6 +163,7 @@ static ACCEL gBuiltInAccelerators[] = {
     // TODO: don't know what VK_ is this
     {0, '.', CmdPresentationBlackBackground},
     {FVIRTKEY, 'C', CmdToggleContinuousView},
+    {FVIRTKEY | FCONTROL | FSHIFT, 'C', CmdContrastToggle},
 };
 
 static ACCEL* gAccels = nullptr;

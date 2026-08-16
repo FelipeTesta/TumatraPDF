@@ -339,10 +339,10 @@ function dll_shared_lib_dirs()
   end)
 end
 
-workspace "SumatraPDF"
+workspace "TumatraPDF"
   configurations { "Debug", "DebugFull", "Release", "ReleaseAnalyze", }
   platforms { "x86", "x64", "arm64", "x64_asan" }
-  startproject "SumatraPDF"
+  startproject "TumatraPDF"
 
   filter "platforms:x86"
     architecture "x86"
@@ -1383,7 +1383,7 @@ workspace "SumatraPDF"
     }
 
   -- a dll version where most functionality is in libsumatrapdf.dll
-  project "SumatraPDF"
+  project "TumatraPDF"
     dll_app_objdir()
     dll_linker_intermediates()
     kind "WindowedApp"

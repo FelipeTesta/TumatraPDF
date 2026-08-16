@@ -86,6 +86,16 @@ static ToolbarButtonInfo gToolbarButtons[] = {
     {TbIcon::ZoomIn, CmdZoomIn, _TRN("Zoom In")},
     {TbIcon::None, 0, nullptr}, // separator
     {TbIcon::Search, CmdFindFirst, _TRN("Find")},
+    {TbIcon::None, 0, nullptr}, // separator
+    {TbIcon::None, 0, nullptr}, // separator before autoscroll group
+    {TbIcon::Text, CmdAutoScrollToggle, _TRN("Autoscroll")},
+    {TbIcon::Text, CmdAutoScrollSpeedUp, _TRN("+")},
+    {TbIcon::Text, CmdAutoScrollSpeedDown, _TRN("-")},
+    {TbIcon::None, 0, nullptr}, // separator after autoscroll group
+    {TbIcon::Text, CmdContrastToggle, _TRN("Contrast")},
+    {TbIcon::Text, CmdInvertColors, _TRN("Invert")},
+    {TbIcon::Text, CmdViewportCropToggle, _TRN("Crop")},
+    {TbIcon::Text, CmdMarginTrimToggle, _TRN("Trim")},
 };
 // unicode chars: https://www.compart.com/en/unicode/U+25BC
 
@@ -319,7 +329,9 @@ static TBBUTTON TbButtonFromButtonInfo(const ToolbarButtonInfo& bi, bool noTrans
         b.fsStyle |= BTNS_DROPDOWN;
     }
 
-    if (bi.cmdId == CmdFindToggleMatchCase || bi.cmdId == CmdFindToggleMatchWholeWord) {
+    if (bi.cmdId == CmdFindToggleMatchCase || bi.cmdId == CmdFindToggleMatchWholeWord ||
+        bi.cmdId == CmdContrastToggle || bi.cmdId == CmdAutoScrollToggle ||
+        bi.cmdId == CmdViewportCropToggle || bi.cmdId == CmdMarginTrimToggle) {
         b.fsStyle = BTNS_CHECK;
     }
     if (bi.bmpIndex == TbIcon::Text) {
@@ -1088,6 +1100,46 @@ void UpdateToolbarPageText(MainWindow* win, int pageCount, bool updateOnly) {
     HwndInvalidate(win->hwndToolbar, true);
 }
 
+// Creates the ETA label for autoscroll, placed after the autoscroll button
+// group: [sep] [Autoscroll] [+] [−] [sep] -> ETA label
+static void CreateEtaLabel(MainWindow* win) {
+    if (win->hwndEtaLabel != nullptr) {
+        return; // already created
+    }
+    Rect r = TbGetRect(win->hwndToolbar, CmdAutoScrollSpeedDown);
+    int x = r.x + r.dx + DpiScale(win->hwndFrame, 8);
+    int y = r.y;
+    int dx = DpiScale(win->hwndFrame, 50); // width for ETA text
+    int dy = r.dy;
+
+    HWND h = CreateWindowExW(0, WC_STATICW, L"ETA: --", SS_CENTER | WS_CHILD, x, y, dx, dy,
+                             win->hwndToolbar, (HMENU) nullptr, GetModuleHandle(nullptr), nullptr);
+    win->hwndEtaLabel = h;
+}
+
+void UpdateToolbarEtaText(MainWindow* win, int minutes) {
+    if (win->hwndEtaLabel == nullptr) {
+        return;
+    }
+    if (!win->autoScrollActive || minutes < 0) {
+        ShowWindow(win->hwndEtaLabel, SW_HIDE);
+        return;
+    }
+    ShowWindow(win->hwndEtaLabel, SW_SHOW);
+    if (minutes < 0) {
+        HwndSetText(win->hwndEtaLabel, fmt("ETA: --"));
+    } else {
+        HwndSetText(win->hwndEtaLabel, fmt("ETA: %dmin", minutes));
+    }
+    // Reposition and measure (right-align against toolbar client right edge)
+    TempStr txt = HwndGetTextTemp(win->hwndEtaLabel);
+    Size size = HwndMeasureText(win->hwndEtaLabel, txt);
+    Rect rc = HwndClientRect(win->hwndToolbar);
+    int y = (rc.dy - size.dy) / 2;
+    MoveWindow(win->hwndEtaLabel, rc.dx - size.dx - DpiScale(win->hwndFrame, 8), y, size.dx, size.dy, TRUE);
+    HwndInvalidate(win->hwndToolbar, true);
+}
+
 static void CreatePageBox(MainWindow* win, HFONT font, int iconDy) {
     bool isRtl = IsUIRtl();
 
@@ -1137,6 +1189,9 @@ static void CreatePageBox(MainWindow* win, HFONT font, int iconDy) {
     win->hwndPageEdit = page;
     win->hwndPageBg = pageBg;
     win->hwndPageTotal = total;
+
+    // Create ETA label for autoscroll
+    CreateEtaLabel(win);
 }
 
 __unused static void LogBitmapInfo(HBITMAP hbmp) {
@@ -1646,6 +1701,7 @@ void ReCreateToolbar(MainWindow* win) {
         HwndDestroyWindowSafe(&win->hwndPageEdit);
         HwndDestroyWindowSafe(&win->hwndPageBg);
         HwndDestroyWindowSafe(&win->hwndPageTotal);
+        HwndDestroyWindowSafe(&win->hwndEtaLabel);
         HwndDestroyWindowSafe(&win->hwndToolbar);
         HwndDestroyWindowSafe(&win->hwndReBar);
     }

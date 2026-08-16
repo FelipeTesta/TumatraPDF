@@ -789,6 +789,7 @@ const fileSettings: Field[] = [
   field("Index", Int, 0, "temporary value needed for FileHistory::cmpOpenCount").notSaved(),
   field("Himl", { name: "", ctype: "HIMAGELIST" }, "NULL", "image list holding the file's shell icon").notSaved(),
   field("IconIdx", Int, -1, "index of the file's shell icon in Himl, -1 if not loaded yet").notSaved(),
+  field("AutoScrollSpeedMultiplier", Float, 1.0, "Autoscroll speed multiplier for this document"),
 ];
 
 const tabState: Field[] = [
@@ -821,6 +822,16 @@ const sessionData: Field[] = [
   field("WindowState", Int, 0, "state of the window. 1 is normal, 2 is maximized, 3 is fullscreen, 4 is minimized"),
   compactStruct("WindowPos", windowPos, "position of the window (can be on any monitor)").structName("Rect"),
   field("SidebarDx", Int, 0, "width of the favorites / bookmarks sidebar in screen pixels (0 if it wasn't shown)"),
+];
+
+const viewportCrop: Field[] = [
+  field("Left", Int, 0, "left crop margin in pixels at 100% display scaling"),
+  field("Right", Int, 0, "right crop margin in pixels at 100% display scaling"),
+  field("Top", Int, 0, "top crop margin in pixels at 100% display scaling"),
+  field("Bottom", Int, 0, "bottom crop margin in pixels at 100% display scaling"),
+  field("ColGap", Int, 0, "gap between columns in pixels at 100% display scaling"),
+  field("Enabled", Bool, false, "if true, viewport crop is enabled"),
+  field("QuickToggle", Bool, false, "if true, double-click toggles between cropped and full view"),
 ];
 
 const globalPrefs: Field[] = [
@@ -1046,6 +1057,18 @@ const globalPrefs: Field[] = [
     "playback speed multiplier for Read Aloud text-to-speech (0.5 .. 3.0), 1 is normal speed; can also be changed from the Read Aloud playback bar",
   ).ver("3.7"),
   field(
+    "DisableReadAloud",
+    Bool,
+    false,
+    "if true, disables Read Aloud (text-to-speech) feature completely: hides menu entries, toolbar button, and commands",
+  ).ver("3.7"),
+  field(
+    "DisableAIChat",
+    Bool,
+    false,
+    "if true, disables AI Chat sidebar feature completely: hides menu entries, toolbar buttons, and commands for all AI providers",
+  ).ver("3.7"),
+  field(
     "FastScrollOverScrollbar",
     Bool,
     false,
@@ -1062,7 +1085,7 @@ const globalPrefs: Field[] = [
   field(
     "Theme",
     Str,
-    "",
+    "Dark",
     "the name of the theme to use. System follows the Windows light/dark app mode " +
       "and switches between LastLightTheme and LastDarkTheme. Built-in themes: " +
       "Light, Dark, Light Warm, Dark from 3.5, Charcoal, Solarized Light, " +
@@ -1200,6 +1223,10 @@ const globalPrefs: Field[] = [
     "how much a single zoom in / zoom out step changes the zoom, as a percentage of the " +
       "current zoom level. If 0 or negative, zooming steps through ZoomLevels instead",
   ),
+
+  emptyLine(),
+
+  compactStruct("ViewportCrop", viewportCrop, "viewport crop settings for two-column reading").ver("3.7"),
 
   emptyLine(),
 

@@ -227,6 +227,9 @@ static UINT_PTR removeIfChm[] = {
     CmdFacingView,
     CmdBookView,
     CmdToggleContinuousView,
+    CmdContrastToggle,
+    CmdViewportCropToggle,
+    CmdMarginTrimToggle,
     CmdRotateLeft,
     CmdRotateRight,
     CmdTogglePresentationMode,
@@ -244,6 +247,9 @@ static UINT_PTR removeIfChm[] = {
     CmdZoom12_5,
     CmdZoom8_33,
     CmdInvokeInverseSearch,
+    CmdAutoScrollToggle,
+    CmdAutoScrollSpeedUp,
+    CmdAutoScrollSpeedDown,
     0,
 };
 
@@ -456,6 +462,9 @@ CommandVisibility GetCommandVisibility(int cmdId, const AppCommandCtx& ctx, Comm
 
     if (cmdId == CmdAIChatWithClaudeCode || cmdId == CmdAIChatWithGrokBuild || cmdId == CmdAIChatWithOpenAICodex ||
         cmdId == CmdAIChatWithAntiGravity) {
+        if (gGlobalPrefs->disableAIChat) {
+            return CommandVisibility::Hide;
+        }
         if (!IsAIChatAvailable()) {
             return CommandVisibility::Hide;
         }
@@ -711,7 +720,11 @@ CommandVisibility GetCommandVisibility(int cmdId, const AppCommandCtx& ctx, Comm
 
     // No extractable text on comics, image folders, or single images.
     if (cmdId == CmdReadAloud || cmdId == CmdReadAloudFromTopPage || cmdId == CmdReadAloudSelection ||
-        cmdId == CmdPauseReadAloud || cmdId == CmdContinueReadAloud || cmdId == CmdStopReadAloud) {
+        cmdId == CmdPauseReadAloud || cmdId == CmdContinueReadAloud || cmdId == CmdStopReadAloud ||
+        cmdId == CmdToggleToolbarShowReadAloud) {
+        if (gGlobalPrefs->disableReadAloud) {
+            return CommandVisibility::Hide;
+        }
         Kind k = ctx.engineKind;
         bool isImage =
             k == kindEngineImage || k == kindEngineImageDir || k == kindEngineComicBooks || ctx.isImageCollection;

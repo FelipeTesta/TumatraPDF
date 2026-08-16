@@ -52,3 +52,6 @@ Desktop.ini
 # SumatraPDF specific
 sumatrapdf-src/vs2022/Debug/
 sumatrapdf-src/vs2022/Release/
+
+# TumatraPDF build output
+Compiled/

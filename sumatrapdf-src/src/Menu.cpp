@@ -78,7 +78,7 @@ static MenuDef menuDefFile[] = {
         CmdOpenFile,
     },
     {
-        _TRN("Use SumatraPDF File Picker"),
+        _TRN("Use TumatraPDF File Picker"),
         CmdToggleFilePicker,
     },
     {
@@ -517,7 +517,7 @@ static MenuDef menuDefSettings[] = {
     { kMenuSeparator,                             0                  },
 #endif
     {
-        _TRN("Use SumatraPDF File Picker"),
+        _TRN("Use TumatraPDF File Picker"),
         CmdToggleFilePicker,
     },
     {
@@ -587,6 +587,55 @@ static MenuDef menuDefFavorites[] = {
 };
 //] ACCESSKEY_GROUP Favorites Menu
 
+
+//[ ACCESSKEY_GROUP New Tools Menu
+static MenuDef menuDefNewTools[] = {
+    {
+        _TRN("Auto-Scroll &Toggle"),
+        CmdAutoScrollToggle,
+    },
+    {
+        _TRN("Auto-Scroll Speed &Up"),
+        CmdAutoScrollSpeedUp,
+    },
+    {
+        _TRN("Auto-Scroll Speed &Down"),
+        CmdAutoScrollSpeedDown,
+    },
+    {
+        kMenuSeparator,
+        0,
+    },
+    {
+        _TRN("Contrast &Toggle"),
+        CmdContrastToggle,
+    },
+    {
+        _TRN("Contrast &Up (+10%)"),
+        CmdContrastIncrease,
+    },
+    {
+        _TRN("Contrast &Down (-10%)"),
+        CmdContrastDecrease,
+    },
+    {
+        kMenuSeparator,
+        0,
+    },
+    {
+        _TRN("Viewport &Crop"),
+        CmdViewportCropToggle,
+    },
+    {
+        _TRN("Margin &Trim"),
+        CmdMarginTrimToggle,
+    },
+    {
+        nullptr,
+        0,
+    },
+};
+//] ACCESSKEY_GROUP New Tools Menu
 
 //[ ACCESSKEY_GROUP Help Menu
 static MenuDef menuDefHelp[] = {
@@ -838,6 +887,10 @@ static MenuDef menuDefMenubar[] = {
     {
         _TRN("&Settings"),
         (UINT_PTR)menuDefSettings,
+    },
+    {
+        _TRN("New &Tools"),
+        (UINT_PTR)menuDefNewTools,
     },
     {
         _TRN("&Help"),

@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { detectVisualStudio2026, runLogged } from "./util";
+import { detectVisualStudio, runLogged } from "./util";
 import { clearDirPreserveSettings } from "./clean";
 
 let clean = false;
@@ -7,7 +7,7 @@ let config = "Debug";
 let platform = "x64";
 let outDir = join("out", "dbg64");
 
-let t = `/t:SumatraPDF`;
+let t = `/t:TumatraPDF`;
 
 for (const arg of process.argv.slice(2)) {
   if (arg === "-clean") {
@@ -32,8 +32,8 @@ async function main() {
     }
   }
 
-  const { msbuildPath } = detectVisualStudio2026();
-  const sln = String.raw`vs2022\SumatraPDF.sln`;
+  const { msbuildPath } = detectVisualStudio();
+  const sln = String.raw`vs2022\TumatraPDF.sln`;
   // const t = `/t:SumatraPDF;test_util`;
   const p = `/p:Configuration=${config};Platform=${platform}`;
   await runLogged(msbuildPath, [sln, t, p, `/m`]);

@@ -83,7 +83,7 @@ static bool SaveBitmapAsPdf(Bitmap* bmp, Str destPath) {
         TempStr now = FormatPdfDateTemp();
         c->SetProperty(DocProp::CreationDate, now);
         c->SetProperty(DocProp::ModificationDate, now);
-        c->SetProperty(DocProp::CreatorApp, StrL("SumatraPDF"));
+        c->SetProperty(DocProp::CreatorApp, StrL("TumatraPDF"));
         ok = c->SaveToFile(destPath);
     }
     delete c;

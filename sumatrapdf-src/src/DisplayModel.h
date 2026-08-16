@@ -212,6 +212,11 @@ struct DisplayModel : DocController {
     bool ShouldCacheRendering(int pageNo) const;
     void RepaintDisplay();
 
+    // viewport crop
+    void ApplyViewportCrop();
+    void QuickToggleViewportCrop();
+    void ApplyMarginTrim();
+
     bool InPresentation() const;
 
     void BuildPagesInfo();
@@ -300,6 +305,18 @@ struct DisplayModel : DocController {
     /* whether to display pages Left-to-Right or Right-to-Left.
        this value is extracted from the PDF document */
     bool displayR2L = false;
+
+    // viewport crop (no page duplication — viewport manipulation only)
+    bool viewportCropEnabled = false;
+    int viewportCropColumn = 0; // 0=left, 1=right
+    Rect viewportCropSaved;
+    float viewportCropSavedZoom = 1.0f;
+    bool viewportCropQuickToggled = false; // currently showing full page
+
+    // margin trim (independent of viewport crop)
+    bool marginTrimEnabled = false;
+    Rect marginTrimSaved;
+    float marginTrimSavedZoom = 1.0f;
 
     /* when we're in presentation mode, _pres* contains the pre-presentation values */
     bool inPresentation = false;

@@ -286,6 +286,14 @@ export const commands = [
     "CmdExtendSelectionWordRight", "Extend Selection One Word Right",
     "CmdToggleLaserPointer", "Toggle Laser Pointer",
     "CmdZoomToSelection", "Zoom: To Selection",
+    "CmdAutoScrollToggle", "Start/stop auto-scrolling",
+    "CmdAutoScrollSpeedUp", "Increase auto-scroll speed",
+    "CmdAutoScrollSpeedDown", "Decrease auto-scroll speed",
+    "CmdContrastToggle", "Toggle Contrast Filter",
+    "CmdContrastIncrease", "Increase contrast overlay opacity",
+    "CmdContrastDecrease", "Decrease contrast overlay opacity",
+    "CmdViewportCropToggle", "Toggle Viewport Crop",
+    "CmdMarginTrimToggle", "Toggle margin trimming",
     "CmdNone", "Do nothing",
 ];
 

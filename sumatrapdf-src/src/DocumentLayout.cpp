@@ -4,6 +4,7 @@
 #include "base/Base.h"
 
 #include "Settings.h"
+#include "GlobalPrefs.h"
 #include "DisplayMode.h"
 #include "DocumentLayout.h"
 
@@ -195,6 +196,7 @@ void DocumentLayout::Relayout(const DocumentLayoutParams& newParams) {
         columnMaxWidth[pageInARow] = std::max(columnMaxWidth[pageInARow], pos.dx);
 
         page->pos = pos;
+
         pageInARow++;
         ReportIf(pageInARow > columns);
         if (pageInARow == columns) {

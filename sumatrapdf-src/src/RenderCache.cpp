@@ -1138,9 +1138,12 @@ int RenderCache::Paint(HDC hdc, Rect bounds, DisplayModel* dm, int pageNo, PageI
 
         RectF area = ToRectF(bounds);
         area.Offset((float)-pi->pageOnScreen.x, (float)-pi->pageOnScreen.y);
-        area = dm->GetEngine()->Transform(area, pageNo, zoom, rotation, true);
 
-        RenderPageArgs args(pageNo, zoom, rotation, &area);
+        int renderPageNo = pageNo;
+
+        area = dm->GetEngine()->Transform(area, renderPageNo, zoom, rotation, true);
+
+        RenderPageArgs args(renderPageNo, zoom, rotation, &area);
         Pixmap* bmp = dm->GetEngine()->RenderPage(args);
         bool success = bmp && BlitPixmap(bmp, hdc, bounds);
         FreePixmap(bmp);

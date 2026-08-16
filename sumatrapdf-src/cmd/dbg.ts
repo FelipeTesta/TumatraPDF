@@ -13,7 +13,7 @@ import { runLogged } from "./util";
 // Pass -for-testing when opening a document to poke at: it starts a fresh
 // instance and won't overwrite the settings you actually use.
 
-const exePath = join("out", "dbg64_asan", "SumatraPDF-static.exe");
+const exePath = join("out", "dbg64_asan", "TumatraPDF-static.exe");
 
 function firstExisting(paths: string[]): string | null {
   return paths.find((p) => existsSync(p)) ?? null;

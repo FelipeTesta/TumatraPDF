@@ -293,6 +293,14 @@ static SeqStrings gCommandNames =
     "CmdExtendSelectionWordRight\0"
     "CmdToggleLaserPointer\0"
     "CmdZoomToSelection\0"
+    "CmdAutoScrollToggle\0"
+    "CmdAutoScrollSpeedUp\0"
+    "CmdAutoScrollSpeedDown\0"
+    "CmdContrastToggle\0"
+    "CmdContrastIncrease\0"
+    "CmdContrastDecrease\0"
+    "CmdViewportCropToggle\0"
+    "CmdMarginTrimToggle\0"
     "CmdNone\0"
     "\0";
 
@@ -574,6 +582,14 @@ static i32 gCommandIds[] = {
     CmdExtendSelectionWordRight,
     CmdToggleLaserPointer,
     CmdZoomToSelection,
+    CmdAutoScrollToggle,
+    CmdAutoScrollSpeedUp,
+    CmdAutoScrollSpeedDown,
+    CmdContrastToggle,
+    CmdContrastIncrease,
+    CmdContrastDecrease,
+    CmdViewportCropToggle,
+    CmdMarginTrimToggle,
     CmdNone,
 };
 
@@ -855,6 +871,14 @@ SeqStrings gCommandDescriptions =
     "Extend Selection One Word Right\0"
     "Toggle Laser Pointer\0"
     "Zoom: To Selection\0"
+    "Start/stop auto-scrolling\0"
+    "Increase auto-scroll speed\0"
+    "Decrease auto-scroll speed\0"
+    "Toggle Contrast Filter\0"
+    "Increase contrast overlay opacity\0"
+    "Decrease contrast overlay opacity\0"
+    "Toggle Viewport Crop\0"
+    "Toggle margin trimming\0"
     "Do nothing\0"
     "\0";
 // clang-format on

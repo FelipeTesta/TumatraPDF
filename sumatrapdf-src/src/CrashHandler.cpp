@@ -401,7 +401,7 @@ bool CrashHandlerDownloadSymbols() {
 }
 
 bool AreSymbolsDownloaded(Str symDir) {
-    TempStr path = path::JoinTemp(symDir, StrL("SumatraPDF.pdb"));
+    TempStr path = path::JoinTemp(symDir, StrL("TumatraPDF.pdb"));
     if (file::Exists(path)) {
         logf("AreSymbolsDownloaded(): exist in '%s', symDir: '%s'\n", path, symDir);
         return true;
@@ -919,11 +919,11 @@ int __cdecl _purecall() {
 static Str BuildSymbolsUrl() {
     Str urlBase = StrL("https://www.sumatrapdfreader.org/dl/");
     if (gIsPreReleaseBuild) {
-        urlBase = str::JoinTemp(urlBase, StrL("prerel/"), preReleaseVersion, StrL("/SumatraPDF-prerel"));
+        urlBase = str::JoinTemp(urlBase, StrL("prerel/"), preReleaseVersion, StrL("/TumatraPDF-prerel"));
     } else {
         // assuming this is release version
         Str ver = StrL(QM(CURR_VERSION));
-        urlBase = str::JoinTemp(urlBase, StrL("rel/"), ver, StrL("/SumatraPDF-"), ver);
+        urlBase = str::JoinTemp(urlBase, StrL("rel/"), ver, StrL("/TumatraPDF-"), ver);
     }
     // TODO: ugly it's different between release and pre-release
     Str suff = StrL(".pdb.lzsa");

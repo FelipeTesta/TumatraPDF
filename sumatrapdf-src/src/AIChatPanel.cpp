@@ -1132,7 +1132,7 @@ static void EnsureWebViewReady(MainWindow* win) {
     TempStr localAppData = GetSpecialFolderTemp(CSIDL_LOCAL_APPDATA);
     // use unique data dir per process to avoid locking conflicts
     webView->dataDir =
-        str::Dup(fmt("%s\\SumatraPDF\\%s_%d", localAppData, p->webViewDataDirPrefix, (int)GetCurrentProcessId()));
+        str::Dup(fmt("%s\\TumatraPDF\\%s_%d", localAppData, p->webViewDataDirPrefix, (int)GetCurrentProcessId()));
     int markedLen = 0;
     u8* markedData = GetEmbeddedFileData(StrL("marked.min.js"), &markedLen);
     if (!markedData || markedLen <= 0) {
