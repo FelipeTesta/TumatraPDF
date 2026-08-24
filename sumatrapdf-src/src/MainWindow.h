@@ -319,14 +319,26 @@ struct MainWindow {
 
     // --- begin auto-scroll feature ---
     bool autoScrollActive = false;
-    float autoScrollSpeed = 2.0f;      // pixels per tick
+    float autoScrollSpeed = 2.0f; // pixels per tick
     float autoScrollSpeedMultiplier = 1.0f;
     float autoScrollAccum = 0.0f;
-    int autoScrollTickCount = 0;
+    int autoScrollEtaMinutes = 0;      // ETA in minutes, computed on demand
+    DWORD autoScrollEtaStartTick = 0;  // countdown base (reset on each recalc)
+    int autoScrollEtaLastShown = -1;   // last minute value displayed (avoid redundant updates)
+    int autoScrollEtaPageNo = 0;       // page ETA was computed for
+    int autoScrollEtaToolbarWidth = 0; // cached toolbar width (reposition only on resize)
     HWND hwndEtaLabel = nullptr;
-    DWORD autoScrollTimerMinutes = 0;    // 0 = no timer
+    DWORD autoScrollTimerMinutes = 0; // 0 = no timer
     DWORD autoScrollStartTick = 0;
     // --- end auto-scroll feature ---
+
+    // --- trim config dialog state ---
+    int trimConfigMode = 0;     // 0 = dialog closed (no lines), 1 = dialog open (both lines)
+    int trimConfigDragLine = 0; // 0 = none, 1 = top line, 2 = bottom line
+    int trimConfigTop = 0;      // pending top distance (page units)
+    int trimConfigBottom = 0;   // pending bottom distance (page units)
+    bool trimDragging = false;  // true while dragging a red line
+    // --- end trim config dialog state ---
 
     // true while selecting and when CurrentTab()->selectionOnPage != nullptr
     bool showSelection = false;
@@ -547,7 +559,7 @@ struct MainWindow {
     LARGE_INTEGER scrollAnimLastTime{};
     bool scrollAnimActive = false;
     bool scrollAnimHiResTimer = false; // timeBeginPeriod(1) while animating
-    int scrollAnimLastAppliedY = 0; // track last applied integer Y position
+    int scrollAnimLastAppliedY = 0;    // track last applied integer Y position
 
     // suppress Read Aloud user-scroll detection during programmatic follow scrolling
     mutable bool readAloudScrollFromCode = false;

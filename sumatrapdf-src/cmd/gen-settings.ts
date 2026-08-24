@@ -789,7 +789,10 @@ const fileSettings: Field[] = [
   field("Index", Int, 0, "temporary value needed for FileHistory::cmpOpenCount").notSaved(),
   field("Himl", { name: "", ctype: "HIMAGELIST" }, "NULL", "image list holding the file's shell icon").notSaved(),
   field("IconIdx", Int, -1, "index of the file's shell icon in Himl, -1 if not loaded yet").notSaved(),
-  field("AutoScrollSpeedMultiplier", Float, 1.0, "Autoscroll speed multiplier for this document"),
+  field("AutoScrollSpeedMultiplier", Float, 0.1, "Autoscroll speed multiplier for this document"),
+  field("InvertColors", Bool, false, "invert page colors for this document"),
+  field("ContrastEnabled", Bool, false, "contrast overlay enabled for this document"),
+  field("ContrastOpacity", Int, 50, "contrast overlay opacity for this document (0-100)"),
 ];
 
 const tabState: Field[] = [
@@ -832,6 +835,12 @@ const viewportCrop: Field[] = [
   field("ColGap", Int, 0, "gap between columns in pixels at 100% display scaling"),
   field("Enabled", Bool, false, "if true, viewport crop is enabled"),
   field("QuickToggle", Bool, false, "if true, double-click toggles between cropped and full view"),
+];
+
+const trim: Field[] = [
+  field("Top", Int, 0, "top trim margin in pixels at 100% display scaling"),
+  field("Bottom", Int, 0, "bottom trim margin in pixels at 100% display scaling"),
+  field("Enabled", Bool, false, "if true, margin trim is enabled"),
 ];
 
 const globalPrefs: Field[] = [
@@ -992,6 +1001,7 @@ const globalPrefs: Field[] = [
   ).ver("3.7"),
   field("ShowToc", Bool, true, "if true, show the table of contents (Bookmarks) sidebar when the document has one"),
   field("ShowLinks", Bool, false, "if true, draw a blue border around links in the document").ver("3.6"),
+  field("AutoScrollShowEta", Bool, true, "Show ETA label during auto-scroll"),
   field(
     "ShowDocumentFocusIndicator",
     Bool,
@@ -1227,6 +1237,7 @@ const globalPrefs: Field[] = [
   emptyLine(),
 
   compactStruct("ViewportCrop", viewportCrop, "viewport crop settings for two-column reading").ver("3.7"),
+  compactStruct("Trim", trim, "margin trim settings (top/bottom elimination)").ver("3.7"),
 
   emptyLine(),
 

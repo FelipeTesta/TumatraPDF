@@ -34,6 +34,7 @@ The features below were developed on top of SumatraPDF and **do not exist in the
 - A high-precision timer (`SetTimer`) fires `MoveDocBy(0, dy)` on each tick, moving the document vertically
 - Sub-pixel accumulator ensures smooth scrolling even at low speeds
 - ETA calculation uses: `remaining pages × page height / current scroll speed`
+- ETA is computed once on start / speed change / page change and then counts down by wall clock — no per-second recalculation, and only the label (not the whole toolbar) is repainted, so the timer stays smooth
 - Scrolling pauses automatically when clicking on the page (for text selection)
 - Stops at the end of the document (`IsAtDocumentEnd()`)
 
@@ -51,6 +52,8 @@ The features below were developed on top of SumatraPDF and **do not exist in the
 - Label showing ETA (e.g.: "⏱ 12min remaining")
 
 **Persistence:** Speed and timer saved in `TumatraPDF-settings.txt` (`AutoScrollSpeed`, `AutoScrollTimerMinutes`).
+
+**Advanced Options:** `AutoScrollShowEta` (default `true`) — set to `false` to hide the ETA label in the toolbar entirely.
 
 ---
 
@@ -79,7 +82,7 @@ The features below were developed on top of SumatraPDF and **do not exist in the
 
 ### 3. 📖 Viewport Crop with Margin Trimming
 
-**Status:** 🟡 In Development — Zoom correction needed
+**Status:** 🟢 Complete
 
 **What it does:** Automatically trims margins and displays two-column pages one column at a time, maximizing screen space and optimizing auto-scroll reading flow.
 
@@ -107,6 +110,26 @@ The features below were developed on top of SumatraPDF and **do not exist in the
 | Toolbar button | Toggle on/off |
 | Config button (gear icon) | Open margin settings dialog |
 | Quick toggle | Temporarily show full page |
+
+---
+
+### 3.5 ✂️ Trim (Top/Bottom Margin Elimination)
+
+**Status:** 🟢 Complete (2026-08-15)
+
+**What it does:** Eliminates top/bottom margins from the rendered pages in continuous reader mode, optimizing screen usage.
+
+**How it works:**
+- Clip-based render elimination (`RenderPageArgs.pageRect`) — NOT a zoom hack
+- Trim Config dialog with "margin-top" / "margin-bottom" buttons
+- Draggable red 2px horizontal line to set the trim distance
+- ✅ button saves the distances
+
+**Controls:**
+| Access | Action |
+|---|---|
+| Toolbar button | Trim on/off |
+| Trim Config button | Open config dialog |
 
 ---
 
@@ -195,6 +218,24 @@ TumatraPDF/
 - Script `scripts/check-updates.ps1` for manual checking
 - Merge process documented in `MERGE.md`
 
+## Debug Tooling
+
+Inventory of debug tooling in `sumatrapdf-src/` (research 2026-08-16):
+
+- **Build/run:** `cmd/build.ts` (vs2022\TumatraPDF.sln /t:TumatraPDF → `out/dbg64/TumatraPDF.exe`), `cmd/run.ts` (build + launch)
+- **Unit tests:** `cmd/run-unit-tests.ts` `-dbg|-rel|-asan` → `test_util.exe -for-ai` (callstacks captured)
+- **Runtime control:** `-dbg-control <pipe>` + `cmd/control.ts` — 44 Test* commands (Ping/Quit/List/TestSearch/TestToc/TestToolbarButtons/TestAIChat)
+- **UI automation:** `tests/winapi.ts`, `tests/win-automation.ts` — FFI win32, postMessage cross-process, `captureWindowToPng` (works on occluded windows)
+- **Flags:** `-for-testing -console -log -stress-test -bench -render -extract-text -set-color-range`
+- **Static analysis:** `cmd/clang-tidy.ts`, `cmd/cppcheck.ts`
+- **Codegen:** `cmd/gen-{commands,settings,flags}.ts`; log viewer `src/tools/logview`; 112 `tests/issue-*.ts`
+
+**Known issues (fix next session):**
+- `cmd/build-asan.ts` references `SumatraPDF.sln`/`SumatraPDF-static` — renamed to `TumatraPDF.sln` → ASan + windbg pipeline broken
+- `.vscode/launch.json`/`tasks.json` target `SumatraPDF-dll.exe`/`SumatraPDF.sln` → no F5 debug in VS Code
+- `-dbg-control` lacks commands for custom feature state (crop rect, trim, autoscroll ETA, contrast/invert)
+- Scroll delay 3.7.20958 vs 3.6.17065: root cause = upstream smooth-scroll (default TRUE since 2026-07-29); `smoothScroll=false` → instant scroll. Residual delay: `uitask::Post` deferral + async render thread. trim=on intensifies it (fix separate)
+
 ## Architecture
 
 Based on SumatraPDF:
@@ -208,3 +249,14 @@ Based on SumatraPDF:
 ## Status
 
 🟢 Complete — All core features implemented (AutoScroll, Contrast Filter, Viewport Crop & Margin Trim, Dark Theme default, New Tools menu). Binary: `TumatraPDF.exe`.
+
+## 2026-08-17 - Trim Cache + ETA Option Visibility
+
+- **BUG1 fix:** AutoScrollShowEta now visible in Advanced Options dialog. Field was placed after the internalRest marker (comment "You're not expected to change those manually") in cmd/gen-settings.ts -> generated FieldInfo had 4th arg true (internal = hidden). Moved before marker (next to ShowLinks). Regenerated via bun cmd/gen-settings.ts: entry now 3-arg, fieldNames contains AutoScrollShowEta, fieldCount 139.
+- **BUG2 fix:** trim=on no longer forces non-cached render path. DisplayModel::ShouldCacheRendering returns true always; RenderCache GetTileRectDevice/GetTileRectUser/GetTileOnScreen take trimEnabled param (shrink mediabox by trim strips, shift user rect back by trim.top); cache invalidated via gRenderCache->FreeForDisplayModel on trim toggle (CmdMarginTrimToggle) and trim save (TrimConfigDialog OnSave). Autoscroll with trim now uses cached tiles -> no per-frame re-render lag.
+
+## 2026-08-17 - Trim Black-Space Fix + Tab Freeze + Per-Doc Invert/Contrast
+
+- **Trim fix:** black band at top of each page in trim mode = double top-shift. Removed `mediabox.y += t;` from `RenderCache::GetTileRectDevice` (~line 320); `GetTileRectUser`'s `rect.y += gGlobalPrefs->trim.top;` (line 336) kept as the single correct shift. Build OK, exe in `Compiled\TumatraPDF.exe`.
+- **Tab freeze:** `TabsCtrl::LayoutTabs` condition now `tabWidthFrozen && frozenTabDx > 0 && nTabs > 1`, else resets freeze; `CloseTab` adds `TrackMouseLeave(hwnd)`. ⚠️ Tab still small with 1 doc open — UNRESOLVED, deprioritized (settings corruption excluded: `TabWidth=300` OK).
+- **Per-doc invert/contrast persistence:** FileState gains `InvertColors` (false), `ContrastEnabled` (false), `ContrastOpacity` (50) via `cmd/gen-settings.ts` (fieldCount 22→25). Save in `UpdateTabFileDisplayStateForTab` (~L830-833); load in `LoadDocument` (~L2040-2043) + `CreateContrastOverlay` after `win->ctrl = tab->ctrl` (~L2093-2095). Reopen restores invert + contrast state.

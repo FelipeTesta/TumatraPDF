@@ -29,10 +29,6 @@ MainWindow* FindMainWindowByHwnd(HWND hwnd);
 static Kind kindTabs = "tabs";
 static Kind kindTabWnd = "tabWnd";
 
-// non-selected tabs narrower than this hide their close button so that
-// clicks drag/select instead of accidentally closing the tab
-constexpr int kMinTabWidthForClose = 64;
-
 using Gdiplus::Bitmap;
 using Gdiplus::Color;
 using Gdiplus::CompositingQualityHighQuality;
@@ -202,10 +198,8 @@ void TabWnd::SetBounds(Rect r) {
 }
 
 bool TabWnd::CloseVisible() {
-    if (!ti->canClose) {
-        return false;
-    }
-    return IsSelected() || (IsUnderMouse() && bounds.dx >= kMinTabWidthForClose);
+    // ✕ close icon removed from tabs; Alt+LeftClick or middle-click closes
+    return false;
 }
 
 void TabWnd::Paint(VirtWndPaintCtx& ctx) {
@@ -225,6 +219,14 @@ void TabWnd::Paint(VirtWndPaintCtx& ctx) {
     SolidBrush br(GdipCol(tabBgCol));
     gfx.FillRectangle(&br, ToGdipRect(r));
 
+    // active tab indicator: white strip along the bottom edge of the selected tab
+    if (IsSelected()) {
+        int underlineDy = DpiScale(hwnd, 3);
+        Rect rUl = {r.x, r.y + r.dy - underlineDy, r.dx, underlineDy};
+        SolidBrush ulBr(GdipCol(RGB(255, 255, 255)));
+        gfx.FillRectangle(&ulBr, ToGdipRect(rUl));
+    }
+
     bool isRtl = IsTabsRtl(hwnd);
     StringFormat sf(StringFormat::GenericDefault());
     sf.SetFormatFlags(Gdiplus::StringFormatFlagsNoWrap);
@@ -234,21 +236,13 @@ void TabWnd::Paint(VirtWndPaintCtx& ctx) {
         sf.SetAlignment(Gdiplus::StringAlignmentFar);
     }
 
-    // draw text — inset from the close glyph (size varies with tab height)
+    // draw text — padded from the tab edges; the ✕ close glyph is gone, so no
+    // close-gutter space is reserved and text spans the full padded width
     gfx.SetCompositingMode(Gdiplus::CompositingModeSourceOver);
     Gdiplus::RectF rTxt = ToGdipRectF(r);
     int textPad = DpiScale(hwnd, 8);
-    int textGap = DpiScale(hwnd, 4);
-    if (isRtl) {
-        // RTL: close on the left — text after the close circle
-        int textLeft = rClose.x + rClose.dx + textGap;
-        rTxt.X = (Gdiplus::REAL)textLeft;
-        rTxt.Width = (Gdiplus::REAL)std::max(0, (r.x + r.dx - textPad) - textLeft);
-    } else {
-        // LTR: close on the right — text before the close circle
-        rTxt.X = (Gdiplus::REAL)(r.x + textPad);
-        rTxt.Width = (Gdiplus::REAL)std::max(0, rClose.x - textGap - (int)rTxt.X);
-    }
+    rTxt.X = (Gdiplus::REAL)(r.x + textPad);
+    rTxt.Width = (Gdiplus::REAL)std::max(0, (r.x + r.dx - textPad) - (int)rTxt.X);
     Font f(hdc, tabsCtrl->GetFont());
     br.SetColor(GdipCol(textColor));
     WCHAR* ws = CWStrTemp(ti->text);
@@ -358,13 +352,8 @@ void TabsCtrl::LayoutTabs() {
         // (issue #5861). The parent hides the control when there are no tabs.
         return;
     }
-    int dx;
-    if (tabWidthFrozen && frozenTabDx > 0) {
-        dx = frozenTabDx;
-    } else {
-        auto maxDx = (rect.dx - 5) / nTabs;
-        dx = std::min(tabDefaultDx, maxDx);
-    }
+    auto maxDx = (rect.dx - 5) / nTabs;
+    int dx = std::min(tabDefaultDx, maxDx);
     tabSize = {dx, dy};
     if (IsRunningOnWine()) {
         logf("TabsCtrl::LayoutTabs: hwnd=%p client=(%d,%d) tabSize=(%d,%d) nTabs=%d\n", hwnd, rect.dx, rect.dy,
@@ -622,10 +611,6 @@ void TabsCtrl::CloseTab(int idx) {
     if (!IsValidIdx(idx)) {
         return;
     }
-    // freeze tab widths so next close button stays under cursor;
-    // unfreezes when mouse leaves the tab control
-    frozenTabDx = tabSize.dx;
-    tabWidthFrozen = true;
     TriggerTabClosed(this, idx);
     // TriggerTabClosed() might have destroyed the window and this TabsCtrl
     if (!FindMainWindowByHwnd(hwnd)) {
@@ -698,10 +683,6 @@ LRESULT TabsCtrl::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             break;
 
         case WM_MOUSELEAVE: {
-            if (tabWidthFrozen) {
-                tabWidthFrozen = false;
-                LayoutTabs();
-            }
             LRESULT res = 0;
             if (vroot) {
                 vroot->OnMessage(msg, wp, lp, res);
@@ -769,6 +750,13 @@ LRESULT TabsCtrl::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         }
 
         case WM_LBUTTONDOWN: {
+            // Alt+LeftClick closes the tab under the cursor
+            if (IsKeyPressed(VK_MENU)) {
+                if (tabUnderMouse >= 0 && canClose) {
+                    CloseTab(tabUnderMouse);
+                }
+                return 0;
+            }
             if (overClose) {
                 tabBeingClosed = tabUnderMouse;
             }

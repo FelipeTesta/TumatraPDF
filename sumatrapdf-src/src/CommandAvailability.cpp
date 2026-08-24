@@ -230,6 +230,7 @@ static UINT_PTR removeIfChm[] = {
     CmdContrastToggle,
     CmdViewportCropToggle,
     CmdMarginTrimToggle,
+    CmdTrimConfig,
     CmdRotateLeft,
     CmdRotateRight,
     CmdTogglePresentationMode,

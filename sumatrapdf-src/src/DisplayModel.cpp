@@ -255,14 +255,14 @@ void DisplayModel::ApplyViewportCrop() {
         return;
     }
     if (viewportCropSaved.IsEmpty()) {
+        // first application: save the base (uncropped) state and apply the 2x zoom
         viewportCropSaved = viewPort;
         viewportCropSavedZoom = GetZoomVirtual(true);
+        float newZoom = viewportCropSavedZoom * 2.0f;
+        SetZoomVirtual(newZoom, nullptr);
     }
-
-    // Zoom 2x so each half-page fills the window width
-    float newZoom = viewportCropSavedZoom * 2.0f;
-    SetZoomVirtual(newZoom, nullptr);
-
+    // subsequent calls (relayout, page change, column switch): only fix the
+    // viewport width + column position — never override the user's zoom
     int windowWidth = viewportCropSaved.dx;
     viewPort.dx = windowWidth;
 
@@ -273,36 +273,8 @@ void DisplayModel::ApplyViewportCrop() {
     }
 }
 
-// margin trim: zoom to fit content width (minus left/right margins)
-void DisplayModel::ApplyMarginTrim() {
-    if (!marginTrimEnabled) {
-        return;
-    }
-    if (marginTrimSaved.IsEmpty()) {
-        marginTrimSaved = viewPort;
-        marginTrimSavedZoom = GetZoomVirtual(true);
-    }
-    viewPort.x = marginTrimSaved.x;
-    viewPort.dx = marginTrimSaved.dx;
-
-    float pageWidth = (float)marginTrimSaved.dx;
-    float leftM = (float)gGlobalPrefs->viewportCrop.left;
-    float rightM = (float)gGlobalPrefs->viewportCrop.right;
-    float contentWidth = pageWidth - leftM - rightM;
-    float zoomFactor = (contentWidth > 0) ? (pageWidth / contentWidth) : 1.0f;
-    if (zoomFactor > 4.0f) {
-        zoomFactor = 4.0f;
-    }
-    if (zoomFactor < 0.5f) {
-        zoomFactor = 0.5f;
-    }
-
-    float newZoom = marginTrimSavedZoom * zoomFactor;
-    SetZoomVirtual(newZoom, nullptr);
-
-    viewPort.x += (int)leftM;
-    viewPort.dx = (int)contentWidth;
-}
+// margin trim is clip-based now (RenderCache::Paint clips the render area via
+// RenderPageArgs.pageRect); the old zoom-hack ApplyMarginTrim was removed.
 
 void DisplayModel::QuickToggleViewportCrop() {
     if (!viewportCropEnabled) return;
@@ -522,6 +494,8 @@ DisplayModel::DisplayModel(EngineBase* engine, DocControllerCallback* cb) : DocC
     this->engine = engine;
     ReportIf(!engine || engine->PageCount() <= 0);
     engineType = engine->kind;
+
+    marginTrimEnabled = gGlobalPrefs->trim.enabled;
 
     SetUiDpi(96);
 
@@ -1315,6 +1289,9 @@ void DisplayModel::Relayout(float newZoomVirtual, int newRotation) {
         params.windowMargin = ToDocumentLayoutMargin(windowMargin);
         params.pageSpacing = pageSpacing;
         params.paddingAfterLastPage = gGlobalPrefs->paddingAfterLastPage;
+        params.trimTop = gGlobalPrefs->trim.top;
+        params.trimBottom = gGlobalPrefs->trim.bottom;
+        params.trimEnabled = marginTrimEnabled;
         layout.Relayout(params);
 
         if (!hideScrollbars && !useOverlayScrollbar && !needVScroll && layout.canvasSize.dy > layout.viewPort.dy) {
@@ -2185,7 +2162,7 @@ void DisplayModel::ScrollYBy(int dy, bool changePage) {
                 // Reached bottom of current column
                 if (viewportCropColumn == 0) {
                     viewportCropColumn = 1; // go to right column
-                    viewPort.y = colTop; // top of same page
+                    viewPort.y = colTop;    // top of same page
                     ApplyViewportCrop();
                     RecalcVisibleParts();
                     RepaintDisplay();
@@ -2715,7 +2692,9 @@ void DisplayModel::CopyNavHistory(DisplayModel& orig) {
 }
 
 bool DisplayModel::ShouldCacheRendering(int /*pageNo*/) const {
-    // recommend caching for all documents
+    // always cache: the render cache is trim-aware (GetTileRectDevice/User
+    // shrink the tile rect by the trim strips), so cached tiles stay valid
+    // even with margin trim enabled
     return true;
 }
 

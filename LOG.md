@@ -1,5 +1,170 @@
 # TumatraPDF — Development Log
 
+- 2026-08-24 — toggle underline deterministic WM_PAINT overlay — NM_CUSTOMDRAW fallback proven visible via runtime diag (tests/tmp/tb-diag.ts).
+
+## 2026-08-24 — Deterministic Toggle Underline (WM_PAINT overlay) + Runtime Proof
+
+### What
+Checked-toggle underline was invisible to user despite NM_CUSTOMDRAW code looking correct. Replaced the earlier `WndProcToolbar` WM_PAINT fallback (BeginPaint + passing hdc as wParam to `CallWindowProc` — toolbar proc ignores it, update-region clipping risk) with a deterministic overlay: `CallWindowProc(DefWndProcToolbar, ...)` first (NOT `DefSubclassProc` — subclass is `SetWindowLongPtr`-based, empty comctl32 chain would skip toolbar proc → blank toolbar), then `GetDC` + loop all buttons via `TB_GETBUTTONINFO` (`TBIF_BYINDEX|TBIF_STATE`), fill `{left+2, bottom-3, right-2, bottom}` with `ThemeWindowTextColor()` brush for every `TBSTATE_CHECKED` button, `ReleaseDC`. Not clipped to update region → survives BeginPaint validation inside toolbar proc.
+
+### Runtime verification (tests/tmp/tb-diag.ts, bun FFI)
+- `TB_ISBUTTONCHECKED`/`TB_GETSTATE`/`TB_COMMANDTOINDEX` are pointer-free → safe cross-process; `TB_GETBUTTONINFO` (pointer lParam) is NOT reliable cross-process (zeroed struct / may disturb target).
+- Contrast toggle: state 0x4 → 0x5 CHECKED, sticks; screenshot `tests/tmp/tb-contrast-on.png` shows white underline under "Contrast" — **visible, confirmed**.
+- AutoScroll toggle: CHECKED at t=0, self-off <100ms — Canvas.cpp ~L4553 cancels auto-scroll on 1-page doc (no scroll possible); state machinery fine, not an indicator bug.
+- ViewportCrop/MarginTrim toggles didn't stick in this test (state stayed 0x4) — separate issue, uninvestigated.
+
+### Build
+`bun cmd/build.ts` — 0 errors / 0 warnings (50s). Deployed `Compiled\TumatraPDF.exe` 21,895,168 bytes @ 2026-08-24 18:30:31.
+
+## 2026-08-24 — Toolbar Toggle Underline + ETA Label Responsive Positioning
+
+### What
+White 3px underline under checked toggle buttons (Trim/Crop/Autoscroll/Contrast) drawn via a new `CDDS_ITEMPOSTPAINT` stage in `ReBarWndProc` custom draw (item pre-paint now returns `CDRF_NEWFONT | CDRF_NOTIFYPOSTPAINT` only when checked). ETA label repositioned instantly on toolbar resize: new `RepositionEtaLabel()` anchors it after the last visible button (TB_BUTTONCOUNT/TB_GETSTATE/TB_GETITEMRECT loop) instead of the right edge, auto-hides when there is no room; `WM_SIZE` hook in `WndProcToolbar` calls it when visible (fixes up-to-1s stale position, overlap and clipping on narrow windows).
+
+### Changes
+- `src/Toolbar.cpp` — `ReBarWndProc`: `CDDS_ITEMPREPAINT` returns `CDRF_NEWFONT | CDRF_NOTIFYPOSTPAINT` for checked toggles; new `CDDS_ITEMPOSTPAINT` fills bottom strip `{x+2, y+dy-3, x+dx-2, y+dy}` white via `CreateSolidBrush`+`FillRect`
+- `src/Toolbar.cpp` — new `RepositionEtaLabel(MainWindow*)`: anchored after last visible button, `DpiScale(8)` gap, hides when `x + width > client dx - DpiScale(4)`
+- `src/Toolbar.cpp` — `UpdateToolbarEtaText`: width-changed branch now calls `RepositionEtaLabel` (old right-align math removed)
+- `src/Toolbar.cpp` — `WndProcToolbar`: new `WM_SIZE` case calls `RepositionEtaLabel` when label exists and is visible
+- `src/Toolbar.h` — declared `RepositionEtaLabel`
+
+### Build
+`bun cmd/build.ts` — OK, 0 errors / 0 warnings (61.5s). Fresh exe copied to `Compiled\TumatraPDF.exe`.
+
+## 2026-08-24 — Tab Freeze Removal + X Icon Removal + Alt+Click Close + Toolbar Cleanup
+
+### What
+"Tab stays small" bug finally fixed by removing the freeze mechanism entirely. Root cause: Home tab is always inserted at index 0 when tabs are enabled, so 1 open doc = 2 tabs. The Chrome-like freeze (added 2026-08-17) kept the small frozen width while the cursor stayed over the tab bar; the WM_MOUSELEAVE heal only fired when the mouse left the bar, so the small width appeared stuck. Also: removed the ✕ close icon from tabs (replaced by Alt+LeftClick close) and removed Back/Forward toolbar buttons.
+
+### Changes
+- `src/wingui/TabsCtrl.cpp` — `LayoutTabs`: always `dx = min(tabDefaultDx, (clientW - 5) / nTabs)`; deleted freeze branch + else-reset block
+- `src/wingui/TabsCtrl.cpp` — `CloseTab`: deleted freeze-set lines and `TrackMouseLeave(hwnd)`
+- `src/wingui/TabsCtrl.cpp` — `WM_MOUSELEAVE` case: deleted frozen-width reset block
+- `src/wingui/WinGui.h` — removed fields `tabWidthFrozen` / `frozenTabDx`
+- `src/wingui/TabsCtrl.cpp` — `TabWnd::CloseVisible()`: returns false unconditionally (✕ never visible/painted; hit-test code left in place, now dead)
+- `src/wingui/TabsCtrl.cpp` — removed unused `kMinTabWidthForClose`
+- `src/wingui/TabsCtrl.cpp` — `WM_LBUTTONDOWN`: if `IsKeyPressed(VK_MENU)` and a closable tab is under cursor, call `CloseTab(idx)` and swallow message; empty-bar clicks ignored
+- `src/Toolbar.cpp` — `gToolbarButtons[]`: removed NavigateBack/NavigateForward entries (+ one separator). Commands kept — keyboard shortcuts (Alt+Left, Alt+Right, Ctrl+Backspace) still work
+
+### Build
+`bun cmd/build.ts` — OK, 0 errors / 0 warnings. Fresh exe copied to `Compiled\TumatraPDF.exe`.
+
+## 2026-08-17 — Trim Black-Space Fix (RenderCache.cpp)
+
+### What
+Trim mode left black band at top of each page. Root cause: DOUBLE top-shift — `GetTileRectDevice` had `mediabox.y += t;` (~line 320) while `GetTileRectUser` also does `rect.y += gGlobalPrefs->trim.top;` (line 336). Same shift applied twice → clipped band.
+
+### Fix
+- `sumatrapdf-src/src/RenderCache.cpp` — removed `mediabox.y += t;` from `GetTileRectDevice` (~line 320). Kept `rect.y += gGlobalPrefs->trim.top;` in `GetTileRectUser` (line 336) as the single correct shift.
+
+### Build
+`bun cmd/build.ts` — OK. Fresh exe copied to `Compiled\TumatraPDF.exe`.
+
+## 2026-08-17 — Tab Freeze Fix (TabsCtrl.cpp) — UNRESOLVED
+
+### What
+User-set tab width freeze broke: tab renders small with 1 doc open.
+
+### Changes applied
+- `src/wingui/TabsCtrl.cpp` — `LayoutTabs`: freeze condition now `if (tabWidthFrozen && frozenTabDx > 0 && nTabs > 1)`; else-branch resets `tabWidthFrozen=false` / `frozenTabDx=0`
+- `src/wingui/TabsCtrl.cpp` — `CloseTab`: added `TrackMouseLeave(hwnd);` after the freeze lines
+
+### Status
+⚠️ Applied but STILL broken — tab remains small with 1 doc open. Deprioritized by user, leave as-is. Settings file corruption excluded (`TabWidth=300` reads correctly).
+
+## 2026-08-17 — Invert + Contrast Per-Document Persistence
+
+### What
+Reopening a document now restores invert + contrast state (was session-only).
+
+### Files changed
+- `cmd/gen-settings.ts` — new FileState fields in `fileSettings` array (after `AutoScrollSpeedMultiplier`): `InvertColors` (Bool, false), `ContrastEnabled` (Bool, false), `ContrastOpacity` (Int, 50)
+- `src/Settings.h` — regenerated (fieldCount 22 → 25)
+- `src/SumatraPDF.cpp` — save in `UpdateTabFileDisplayStateForTab` (~L830-833); load in `LoadDocument` (~L2040-2043) + `CreateContrastOverlay` after `win->ctrl = tab->ctrl` (~L2093-2095)
+
+### Build
+`bun cmd/build.ts` — OK. Fresh exe copied to `Compiled\TumatraPDF.exe`.
+
+## 2026-08-17 — Scroll Delay Investigation: 3.7.20958 vs 3.6.17065
+
+### What
+Investigated scroll delay regression in 3.7.20958 vs 3.6.17065 (instant scroll). Root cause: upstream smooth-scroll system (redesign ed7dbb13d 2026-07-28, default TRUE since 15a48380c 2026-07-29). 3.6.17065 had smoothScroll default FALSE → instant scroll.
+
+### Findings
+- `smoothScroll=false` confirmed INSTANT: direct `ScrollYTo` (Canvas.cpp:1242-1250), gate `smoothWheel = gGlobalPrefs->smoothScroll && gInMouseWheelScroll` (Canvas.cpp:1167). No timer/animation when off.
+- Smooth scroll mechanics (when ON): exponential chase `a=1-e^(-15·dt)`, 1ms timer + `timeBeginPeriod(1)`, ~200ms convergence, per-tick full repaint chain.
+- Remaining delay sources with smoothScroll=false: (a) `uitask::Post` deferral in `ScheduleRepaint` (Canvas.cpp:4448-4459) — InvalidateRect deferred ≥1 message-loop turn; (b) async render thread — `RequestRendering` (DisplayModel.cpp:1697-1734), `RenderFinishedAsync` → `uitask::Post` → `RepaintDisplay` (DisplayModel.cpp:310-328); (c) `uitask::Post` + async render appears NEW in 3.7 vs 3.6.17065.
+- Smart thin scrollbar (upstream 9ecd69005 2026-08-01): NOT default (mode "windows", SumatraPDF.cpp:1326). Only active if user enables smart/overlay mode.
+- Double buffer NOT stale: `DrawDocument` re-renders at current scroll pos each WM_PAINT (Canvas.cpp:3162); buffer is flicker-prevention only.
+- USER FINDING: trim=on (crop/trim feature) INTENSIFIES the scroll bug — complicates render path. Being fixed separately.
+
+### Optimization candidates (future)
+- Smooth timer 1ms → 10-16ms; skip repaint when delta <1px; reduce `uitask::Post` double-hop; trim render path optimization.
+
+### Artifacts
+- `.tmp_compare/` (upstream clone + comparison files) at project root — keep for future upstream diffs.
+
+## 2026-08-17 — Autoscroll ETA Optimization + AutoScrollShowEta Option
+
+### What
+Reworked autoscroll ETA: no more per-second recalculation + full-toolbar repaint every 100 ticks (10ms timer → WM_PAINT delays → stutter). ETA now computed on demand (start / speed change / page change), countdown by wall clock, label updated only when the minute value changes, only the label invalidated. New Advanced Options setting `AutoScrollShowEta` (default true) hides the ETA label entirely.
+
+### Files changed
+- `src/MainWindow.h` — replaced `autoScrollTickCount` with 5 ETA state fields (minutes, start tick, last shown, page no, cached toolbar width)
+- `src/Toolbar.h` — declared `RecalcAutoScrollEta(MainWindow*)`
+- `src/Toolbar.cpp` — added `RecalcAutoScrollEta`; rewrote `UpdateToolbarEtaText` (hide when `AutoScrollShowEta` false, reposition only on toolbar resize, invalidate label only)
+- `src/Canvas.cpp` — removed tick-count logic from `kContinuousAutoScrollTimerID` handler; ETA gate replaced with page-change recalc + wall-clock countdown
+- `src/SumatraPDF.cpp` — start path calls `RecalcAutoScrollEta` + shows computed ETA; speed up/down recalc ETA when active
+- `src/Settings.h` — added `bool autoScrollShowEta` (default true) + metadata entry (visible in Advanced Options)
+
+### Build
+`bun cmd/build.ts` — success, 0 warnings 0 errors. First attempt failed with LNK1201 (libsumatrapdf.pdb locked — stale handle, likely VS Code/OneDrive); renamed the PDB and rebuilt clean. Fresh exe copied to `Compiled\TumatraPDF.exe`.
+
+## 2026-08-16 — Debug Tooling Analysis (Research Only)
+
+### What
+Inventory of existing debug tooling in sumatrapdf-src. No code changed.
+
+### Working
+- `cmd/build.ts` — vs2022\TumatraPDF.sln /t:TumatraPDF → out/dbg64/TumatraPDF.exe
+- `cmd/run.ts` — build + launch detached
+- `cmd/run-unit-tests.ts` -dbg|-rel|-asan — test_util.exe + -for-ai, callstacks captured
+- `cmd/control.ts` + `-dbg-control <pipe>` — 44 Test* commands (Ping/Quit/List/TestSearch/TestToc/TestToolbarButtons/TestAIChat)
+- `tests/winapi.ts` + `tests/win-automation.ts` — FFI win32, postMessage cross-process, captureWindowToPng works on occluded windows; SendInput DROPPED on this machine
+- Flags: -for-testing/-console/-log/-stress-test/-bench/-render/-extract-text/-set-color-range
+- `cmd/clang-tidy.ts`, `cmd/cppcheck.ts`, `cmd/gen-{commands,settings,flags}.ts` codegen
+- `src/tools/logview`, 112 tests/issue-*.ts
+
+### Broken (fix next session)
+- `cmd/build-asan.ts:62-63` → vs2022\SumatraPDF.sln + /t:SumatraPDF-static — file renamed to TumatraPDF.sln. `cmd/dbg.ts` expects out/dbg64_asan/TumatraPDF-static.exe but build produces SumatraPDF-static.exe. ASan + windbg pipeline unusable.
+
+### Stale
+- `.vscode/launch.json` → out/dbg64/SumatraPDF-dll.exe; `.vscode/tasks.json` → SumatraPDF.sln /t:SumatraPDF-dll → no F5 debug in VS Code.
+
+### Gaps
+- `-dbg-control` no commands for custom feature state (viewport crop rect, trim values, autoscroll timer/ETA, contrast/invert)
+- test_util no unit tests for custom feature logic (crop zoom math, trim clip)
+
+### Plan (5 steps, next session)
+1. Fix ASan tooling: rename sln + target in build-asan.ts/dbg.ts (SumatraPDF.sln → TumatraPDF.sln, SumatraPDF-static → TumatraPDF-static)
+2. Update .vscode launch.json/tasks.json → TumatraPDF.sln + TumatraPDF.exe
+3. Extend -dbg-control: TestViewportCrop / TestTrimState / TestAutoScrollState / TestContrastState
+4. Add unit regression for custom features in test_util (crop math, trim clip)
+5. Document debug loop in AGENTS.md (build → flags → dbg-control → screenshots)
+
+## 2026-08-16 — Inversion Fix: Recolor in Non-Cached Path (trim=on)
+
+### What
+Color inversion (and document-color-follow-theme) was lost when trim was enabled. Trim forces the non-cached render path (`ShouldCacheRendering` → `!marginTrimEnabled`), and that path never called `RecolorPixmap` — only the cached path did.
+
+### Files
+- `sumatrapdf-src/src/RenderCache.cpp` — non-cached path in `RenderCache::Paint` (~line 1165): added `RecolorPixmap(bmp, this->textColor, this->backgroundColor, this->linkColor, nullptr)` guarded by `ShouldUpdateBitmapColorsLegacy(dm->GetEngine(), this)` before `BlitPixmap`, matching the cached path (~line 1017).
+
+### Result
+- Build: MSBuild Debug x64 0 errors.
+- Binary: `Compiled\TumatraPDF.exe` = 21,875,200 bytes.
+- Note: used `this` (member function) instead of `gRenderCache` global — the `extern RenderCache* gRenderCache;` declaration sits at line 1259, after the non-cached path, so the global wasn't visible there.
+
 ## 2026-08-11 — Project Start
 
 ### SumatraPDF Architecture Research
@@ -399,3 +564,161 @@ Ternary (not std::max) to avoid include dependency. Any load path for persisted 
 ### Result
 - Build: MSBuild Debug x64 → 0 errors. Output: Compiled\TumatraPDF.exe (21,863,424 bytes).
 - Immediate workaround (before fix): one F7 press recovers (max(0×0.8, 0.1) = 0.1).
+## 2026-08-15 � TRIM Rework: Clip-Based Top/Bottom Elimination + Trim Config Dialog
+
+### What
+- Trim now ELIMINATES top/bottom strips from RENDER (RenderPageArgs.pageRect clip in RenderCache::Paint non-cached path) � old zoom hack (ApplyMarginTrim) deleted.
+- New Trim Config dialog (modeless, ChangeThemeWnd pattern): buttons margin-top/margin-bottom show a draggable red 2px line on the page; drag auto-calculates distance; ? saves to gGlobalPrefs->trim.top/bottom.
+- New CmdTrimConfig command + "Trim Config" toolbar button + menu item.
+- Trim settings persisted: Trim struct (Top/Bottom/Enabled) in gen-settings.ts.
+- ShouldCacheRendering returns false when trim on (no stale cache tiles).
+- Scope: top/bottom only � left/right/column-gap NOT implemented (per user).
+
+### Files
+- gen-settings.ts, gen-commands.ts (regenerated Settings.h/.cpp, Commands.h/.cpp)
+- CommandAvailability.cpp, Toolbar.cpp, Menu.cpp, MainWindow.h
+- NEW TrimConfigDialog.cpp/h
+- DisplayModel.cpp/h, RenderCache.cpp, Canvas.cpp, SumatraPDF.cpp
+- premake5.files.lua / vs2022 vcxproj (build integration)
+
+### Result
+- Build: MSBuild Debug x64 ? 0 errors. Output: Compiled\TumatraPDF.exe (21,875,200 bytes).
+
+## 2026-08-15 � TRIM Fixes: Dialog Persistence + Continuous Layout + Stretch Fix
+
+### What
+3 bugs fixed after clip-based trim implementation:
+1. Trim Config dialog disappeared when clicking/dragging red line on canvas � dialog was an unowned popup (args.parent = nullptr); canvas mouse capture dropped it behind the frame. Fix: own dialog to main window (args.parent = win->hwndFrame).
+2. Black gap in continuous mode � DocumentLayout computed page height from full mediaBox, ignoring trim. Fix: DocumentLayoutParams gained trimTop/trimBottom/trimEnabled; DisplayModel::Relayout populates them from gGlobalPrefs->trim + marginTrimEnabled; DocumentLayout::Relayout reduces pageSize.dy by top+bottom (pos.dy/canvasDy/canvasSize derive from it). CmdMarginTrimToggle + TrimConfigDialog OnSave/OnCancel now call RelayoutKeepingView() (keeps view, recalc visible parts, repaint). Trim line bottom Y (OnBottom + Canvas OnMouseMove clamp) uses reduced height so line starts at visible trimmed page bottom.
+3. Text stretch distortion when scrolling over trimmed region � RenderCache::Paint non-cached path clipped area AND shrank bounds (pixmap smaller than bounds ? BlitPixmap stretched). With layout now using reduced page height, pageOnScreen is already the trimmed rect: replaced clip+bounds-shrink with simple page-coord shift (area.y += t), no bounds adjustment ? 1:1 blit.
+
+### Files
+- TrimConfigDialog.cpp (parent, OnSave/OnCancel relayout, OnBottom reduced height)
+- DocumentLayout.h (params fields), DocumentLayout.cpp (reduced pageSize.dy)
+- DisplayModel.cpp (params population)
+- SumatraPDF.cpp (CmdMarginTrimToggle ? RelayoutKeepingView)
+- Canvas.cpp (OnMouseMove clamp reduced height)
+- RenderCache.cpp (shift-only trim render)
+
+### Result
+- Build: MSBuild Debug x64 0 errors. Output: Compiled\TumatraPDF.exe (21,875,200 bytes).
+
+## 2026-08-15 - Trim Config Dialog Redesign: Dual Lines + Numeric Inputs + Reset
+
+### What
+Trim Config dialog redesigned:
+1. Both red lines appear immediately on dialog open (top line at top trim boundary, bottom line at bottom trim boundary), both draggable right away.
+2. Dialog shows "margin top:" and "margin bottom:" numeric edits - typing a number moves the red line live; dragging a red line updates the number live (two-way sync via TrimConfigDialogSyncEdits called from Canvas OnMouseMove).
+3. "Reset" button added (sets both distances to 0, moves both lines).
+4. margin-top/margin-bottom buttons REMOVED (redundant - only labels remain).
+5. Save (?) + Cancel kept.
+
+### Math
+Line positions use tRef = marginTrimEnabled ? gGlobalPrefs->trim.top : 0 (layout reference). topLineY = tl.y + (trimConfigTop - tRef)*zoom; bottomLineY = tl.y + (mb.dy - trimConfigBottom - tRef)*zoom. Drag clamps per line (top: [tl.y - tRef*zoom, bottomLineY]; bottom: [topLineY, tl.y + (mb.dy - tRef)*zoom]). Edit clamps: top <= mb.dy - trimConfigBottom, bottom <= mb.dy - trimConfigTop.
+
+### Files
+- MainWindow.h: trimConfigLineY removed, trimConfigDragLine added (0=none, 1=top, 2=bottom); trimConfigMode semantics: 0=closed, 1=open (both lines).
+- TrimConfigDialog.h: TrimConfigDialogSyncEdits() declared.
+- TrimConfigDialog.cpp: rewritten - Edit* editTop/editBottom, btnReset, suppressEditUpdate flag, OnEditTopChanged/OnEditBottomChanged/OnReset/SyncEditsFromLine; Create sets trimConfigMode=1 + both lines visible + repaint canvas; OnTop/OnBottom/UpdateInfoLabel/lblInfo deleted.
+- Canvas.cpp: OnPaintDocument draws BOTH red lines; OnMouseLeftButtonDown hit-tests both lines (nearest wins); OnMouseMove drags per trimConfigDragLine + calls TrimConfigDialogSyncEdits; OnMouseLeftButtonUp resets trimConfigDragLine. Added #include "TrimConfigDialog.h".
+
+### Result
+- Build: MSBuild Debug x64 0 errors. Output: Compiled\TumatraPDF.exe (21,875,200 bytes).
+- clang-format applied to Canvas.cpp, TrimConfigDialog.cpp/h, MainWindow.h.
+
+## 2026-08-16 — Crop Zoom Fix + Toolbar Checked Bold/White
+
+### What
+- FIX1: Viewport Crop zoom snap-back bug. ApplyViewportCrop (DisplayModel.cpp) forced zoom = savedZoom*2 on EVERY call (Relayout/GoToPage/ScrollYBy) → user zoom changes while cropped instantly overridden; disable restored stale zoom. Now 2x zoom applied ONLY on first application (viewportCropSaved.IsEmpty()); subsequent calls only fix viewPort.x/dx (column position). CmdViewportCropToggle ON branch (SumatraPDF.cpp) no longer pre-saves — sets viewportCropSaved = Rect() then ApplyViewportCrop captures base state. Disable branch unchanged.
+- FIX2: Toolbar checked toggle buttons (Trim/Crop/Autoscroll/Contrast) now bold white text. ReBarWndProc CDDS_ITEMPREPAINT (Toolbar.cpp): cmdId from dwItemSpec, guard cmdId > 0, TB_ISBUTTONCHECKED via SendMessageW → col = RGB(255,255,255) + SelectObject(GetAppTreeFontEx(hwndToolbar, true, false)) bold font + CDRF_NEWFONT.
+
+### Files
+- src/DisplayModel.cpp (ApplyViewportCrop)
+- src/SumatraPDF.cpp (CmdViewportCropToggle)
+- src/Toolbar.cpp (ReBarWndProc CDDS_ITEMPREPAINT)
+
+### Result
+- Build: MSBuild Debug x64 0 errors
+- Binary: Compiled\TumatraPDF.exe = 21,875,200 bytes
+
+## 2026-08-16 - End of Session
+
+### What
+- 3 fixes this session, all built (0 errors) + copied to Compiled\TumatraPDF.exe = 21,875,200 bytes:
+  1. Crop zoom snap-back fix (ApplyViewportCrop 2x only on first apply; subsequent calls fix column only; CmdViewportCropToggle ON no longer pre-saves).
+  2. Toolbar checked toggle buttons bold white (ReBarWndProc CDDS_ITEMPREPAINT + GetAppTreeFontEx(hwnd,true,false) + TB_ISBUTTONCHECKED).
+  3. Inversion lost when trim=on (trim forces non-cached render path which skipped RecolorPixmap) - fixed by adding RecolorPixmap guarded by ShouldUpdateBitmapColorsLegacy in non-cached path.
+- All 3 runtime-tested, pending user confirmation.
+
+## 2026-08-17 - Trim Cache Fix + AutoScrollShowEta Visibility
+
+### What
+- BUG1: AutoScrollShowEta hidden from Advanced Options. field() was added to cmd/gen-settings.ts globalPrefs AFTER CheckForUpdates, i.e. inside internalRest section (after comment("You're not expected to change those manually")) -> generated FieldInfo 4th arg true = internal. Moved to before marker (next to ShowLinks). Regenerated: src/Settings.h autoScrollShowEta = {offsetof(GlobalPrefs, autoScrollShowEta), SettingType::Bool, true} (3-arg, visible), fieldNames packed string contains AutoScrollShowEta, fieldCount 139.
+- BUG2: trim=on slowness (autoscroll lag). Root cause: DisplayModel::ShouldCacheRendering returned !marginTrimEnabled -> trim disabled render cache -> every paint re-rendered page from engine. Fix:
+  - ShouldCacheRendering -> return true (cache is now trim-aware).
+  - RenderCache.cpp GetTileRectDevice(+bool trimEnabled): when trim, shrink mediabox by trim.top/bottom (page coords), return empty Rect if t+b >= mb.dy, then Transform as before.
+  - GetTileRectUser(+bool trimEnabled): after inverse Transform, rect.y += trim.top (shift into trimmed page coords).
+  - GetTileOnScreen(+bool trimEnabled) propagates; IsTileVisible passes dm->marginTrimEnabled; Paint (~1212) + render request (~746) pass dm->marginTrimEnabled.
+  - Cache invalidation: CmdMarginTrimToggle (SumatraPDF.cpp) + TrimConfigDialog OnSave call gRenderCache->FreeForDisplayModel(trimDm) after RelayoutKeepingView.
+  - TrimConfigDialog.cpp needed #include "RenderCache.h" (SumatraPDF.h only forward-declares RenderCache -> C2027).
+- Non-cached path in RenderCache::Paint kept as fallback (dead code).
+
+### Files
+- cmd/gen-settings.ts (moved AutoScrollShowEta)
+- src/Settings.h (regenerated)
+- src/DisplayModel.cpp (ShouldCacheRendering)
+- src/RenderCache.cpp (GetTileRectDevice/User/OnScreen trimEnabled)
+- src/SumatraPDF.cpp (CmdMarginTrimToggle FreeForDisplayModel)
+- src/TrimConfigDialog.cpp (OnSave FreeForDisplayModel + include)
+
+### Result
+- Build: MSBuild Debug x64 0 errors (1st attempt C2027 RenderCache undefined -> fixed with include)
+- Binary: Compiled\TumatraPDF.exe = 21,875,200 bytes (hash matches out\dbg64; stale running instance killed to unlock)
+
+## 2026-08-24 - Small-Tab Root Cause Found + Active Tab Underline
+
+### What
+- ROOT CAUSE of "tiny tab" bug FOUND: Compiled\TumatraPDF-settings.txt had TabWidth = 60 (settings floor is 60, AppSettings.cpp). 60px tab - 8px textPad - ~28px close-gutter reservation = ~20px text = only 2-3 letters visible. Not a code bug at all.
+- Fixed by resetting settings line to TabWidth = 300 (default).
+- New: active tab underline - white 3px (DpiScale) horizontal strip along bottom edge of selected tab, painted right after per-tab bg fill in TabWnd::Paint using same SolidBrush/FillRectangle primitive.
+- Reclaimed close-gutter text space: rTxt width no longer pulled to rClose.x - textGap; now spans full padded tab width (r.x+textPad .. r.x+r.dx-textPad), LTR and RTL unified (RTL alignment still via StringFormat). rClose computation left untouched (dead but harmless since CloseVisible()=false).
+
+### Files
+- sumatrapdf-src/src/wingui/TabsCtrl.cpp (TabWnd::Paint underline + rTxt)
+- Compiled/TumatraPDF-settings.txt (TabWidth 60 -> 300)
+
+### Result
+- Build: bun cmd/build.ts, 0 errors / 0 warnings, 66.8s
+- Deploy: running instance killed (PID 9064); Compiled\TumatraPDF.exe = 21,895,168 bytes
+- Settings verified: line 47 "TabWidth = 300"
+2026-08-24 — autoscroll toolbar buttons reordered: - before +
+
+## 2026-08-24 — Dev Tooling: Guide tumatrapdf-v1-distilled + debugview Skill
+
+### What
+- Created lemma guide `tumatrapdf-v1-dev` (dev-tool): consolidated manual from ~123 project memories. Sections: build/deploy protocol, toolbar NM_CUSTOMDRAW gotchas, tabs VirtWnds refs, diagnostics decision rules.
+- Anchors distilled into guide: mde3b8faaa846 (custom-draw DC space), m22b30c2898df (small-tab settings root cause), ma48b4e41db49 (tab freeze removal).
+- Build entrypoint CONFIRMED: `cmd/` lives inside sumatrapdf-src/ (not repo root). Workdir sumatrapdf-src → `bun cmd/build.ts` → vs2022\TumatraPDF.sln /t:TumatraPDF → out\dbg64\TumatraPDF.exe. Fallback msbuild direct; new files → `bun cmd/premake.ts` first.
+- Installed skill `debugview` (microsoft/skills, official) → ~\.agents\skills\debugview. Captures OutputDebugString/DebugView output for native Win32 debugging.
+- Skills search verdict: ecosystem weak for native C++/Win32 profiling (no WPA/xperf/VS Profiler skills worth installing). Profiling protocol folded into guide instead.
+
+### Result
+- Guide live (usage count 4 after distills); skill installed globally (OpenCode included)
+- No code changes in this session
+
+## 2026-08-24 — Full Audit: FLOW/tumatrapdf.dot Rewritten From Real Code
+
+### What
+- Audited entire fork surface (explore agent + grep): toolbar gToolbarButtons Toolbar.cpp:69-97, menus menuDefNewTools Menu.cpp:592-641, accelerators Accelerators.cpp, settings cmd/gen-settings.ts.
+- Fork reality: ~810 insertions / 34 files, direct patches in sumatrapdf-src/src/ + TrimConfigDialog.{h,cpp}. src/features/ + src/hooks/ DO NOT EXIST — old .dot cluster was aspirational; README "Modularity Strategy" still describes it (known falsidade).
+- FLOW/tumatrapdf.dot REWRITTEN: phases updated (fase5 partial: ASan sln rename ✗, .vscode F5 ✗), real toolbar order (25 buttons), New Tools menu tree, Tumatra shortcuts (F7/F8/F9/Ctrl+Shift+C/Alt+Click), settings global+per-doc, features w/ file:line refs, dead-code cluster, deps+legend kept.
+- Bottlenecks → lemma memory m03bbbdedaab9 for next agent (8 itens): F10-vs-F9 doc mismatch, missing shortcuts crop/trim/contrast±10%, QuickToggleViewportCrop dead, TabsCtrl ✕ dead paths, build-asan.ts broken sln ref, .vscode F5 broken, no Test* dbg-control cmds for fork features, commented accels.
+
+### Result
+- Files: FLOW/tumatrapdf.dot (rewrite); LOG.md (this)
+- Memory: m03bbbdedaab9 (warning) + .dot fidelity note
+- No C++ changes
+
+### 2026-08-24
+- Invert restore fixed: UpdateDocumentColors() called unconditionally after LoadDocument per-doc state apply (was loading invert/contrast state without repaint).
+- Autoscroll default speed for unadjusted docs = minimum 0.1 (FileState AutoScrollSpeedMultiplier default 1.0 -> 0.1 in gen-settings.ts; Settings.h/cpp regenerated); per-doc last-used restore already existed.

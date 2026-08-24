@@ -123,6 +123,9 @@
     <ClInclude Include="..\src\ChangeThemeDialog.h">
       <Filter>src</Filter>
     </ClInclude>
+    <ClInclude Include="..\src\TrimConfigDialog.h">
+      <Filter>src</Filter>
+    </ClInclude>
     <ClInclude Include="..\src\ChmDump.h">
       <Filter>src</Filter>
     </ClInclude>
@@ -594,6 +597,9 @@
       <Filter>src</Filter>
     </ClCompile>
     <ClCompile Include="..\src\ChangeThemeDialog.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\TrimConfigDialog.cpp">
       <Filter>src</Filter>
     </ClCompile>
     <ClCompile Include="..\src\ChmDump.cpp">

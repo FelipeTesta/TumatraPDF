@@ -606,6 +606,7 @@ function sumatrapdf_files()
     "Canvas.*",
     "CanvasAboutUI.*",
     "ContrastOverlay.*",
+    "TrimConfigDialog.*",
     "CaptionGlyphs.*",
     "ChmDump.*",
     "ChmModel.*",

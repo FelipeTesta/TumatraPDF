@@ -33,6 +33,11 @@ struct DocumentLayoutParams {
     bool paddingAfterLastPage = false;
     DocumentLayoutMargin windowMargin{};
     Size pageSpacing;
+    // margin trim: page height is reduced by top+bottom so pages flow as if
+    // the strip was cut out (values in page units at zoom 100%)
+    int trimTop = 0;
+    int trimBottom = 0;
+    bool trimEnabled = false;
 };
 
 struct DocumentLayout {

@@ -46,6 +46,7 @@
 #include "Notifications.h"
 #include "MainWindow.h"
 #include "Canvas.h"
+#include "TrimConfigDialog.h"
 #include "Menu.h"
 #include "Commands.h"
 #include "uia/Provider.h"
@@ -1613,6 +1614,38 @@ static bool OnTouchLongPress(MainWindow* win, int x, int y) {
 }
 
 static void OnMouseMove(MainWindow* win, int x, int y, WPARAM /*key*/) {
+    if (win->trimDragging) {
+        auto* dm = win->AsFixed();
+        if (dm) {
+            int pageNo = dm->CurrentPageNo();
+            RectF mb = dm->GetEngine()->PageMediabox(pageNo);
+            float zoom = dm->GetZoomReal(pageNo);
+            Point tl = dm->CvtToScreen(pageNo, PointF(0, 0));
+            int tRef = dm->marginTrimEnabled ? gGlobalPrefs->trim.top : 0;
+            int topLineY = tl.y + (int)((win->trimConfigTop - tRef) * zoom);
+            int bottomLineY = tl.y + (int)((mb.dy - win->trimConfigBottom - tRef) * zoom);
+            if (win->trimConfigDragLine == 1) {
+                int minY = tl.y - (int)(tRef * zoom);
+                int maxY = bottomLineY;
+                int lineY = y < minY ? minY : (y > maxY ? maxY : y);
+                win->trimConfigTop = (int)((lineY - tl.y) / zoom + tRef);
+                if (win->trimConfigTop < 0) {
+                    win->trimConfigTop = 0;
+                }
+            } else if (win->trimConfigDragLine == 2) {
+                int minY = topLineY;
+                int maxY = tl.y + (int)((mb.dy - tRef) * zoom);
+                int lineY = y < minY ? minY : (y > maxY ? maxY : y);
+                win->trimConfigBottom = (int)((mb.dy - tRef) - (lineY - tl.y) / zoom);
+                if (win->trimConfigBottom < 0) {
+                    win->trimConfigBottom = 0;
+                }
+            }
+            TrimConfigDialogSyncEdits();
+            ScheduleRepaint(win, 0);
+        }
+        return;
+    }
     DisplayModel* dm = win->AsFixed();
     // ReportIf(!dm); // can happen if reload fails, we delete DisplayModel
     if (!dm) return;
@@ -1976,6 +2009,27 @@ static bool IsFullPageImage(DisplayModel* dm, IPageElement* el, int pageNo) {
 
 static void OnMouseLeftButtonDown(MainWindow* win, int x, int y, WPARAM key) {
     // lf("Left button clicked on %d %d", x, y);
+    if (win->trimConfigMode != 0) {
+        auto* dm = win->AsFixed();
+        if (dm) {
+            int pageNo = dm->CurrentPageNo();
+            RectF mb = dm->GetEngine()->PageMediabox(pageNo);
+            float zoom = dm->GetZoomReal(pageNo);
+            Point tl = dm->CvtToScreen(pageNo, PointF(0, 0));
+            int tRef = dm->marginTrimEnabled ? gGlobalPrefs->trim.top : 0;
+            int topLineY = tl.y + (int)((win->trimConfigTop - tRef) * zoom);
+            int bottomLineY = tl.y + (int)((mb.dy - win->trimConfigBottom - tRef) * zoom);
+            int tol = DpiScale(win->hwndFrame, 8);
+            if (abs(y - topLineY) <= tol || abs(y - bottomLineY) <= tol) {
+                win->trimConfigDragLine = abs(y - topLineY) <= abs(y - bottomLineY) ? 1 : 2;
+                SetCapture(win->hwndCanvas);
+                win->mouseAction = MouseAction::Dragging;
+                win->trimDragging = true;
+                win->dragPrevPos = Point(x, y);
+                return;
+            }
+        }
+    }
     if (IsRightDragging(win)) {
         return;
     }
@@ -2170,6 +2224,13 @@ static void OnMouseLeftButtonDown(MainWindow* win, int x, int y, WPARAM key) {
 }
 
 static void OnMouseLeftButtonUp(MainWindow* win, int x, int y, WPARAM key) {
+    if (win->trimDragging) {
+        if (GetCapture() == win->hwndCanvas) ReleaseCapture();
+        win->trimDragging = false;
+        win->trimConfigDragLine = 0;
+        win->mouseAction = MouseAction::None;
+        return;
+    }
     DisplayModel* dm = win->AsFixed();
     ReportIf(!dm);
 
@@ -3104,6 +3165,25 @@ static void OnPaintDocument(MainWindow* win) {
         bool showFocus = CanvasShouldShowKeyboardFocus(win);
         if (!gNoFlickerRender || shouldPaint || showFocus) {
             win->buffer->Flush(hdc);
+        }
+    }
+
+    // trim config: draw both draggable red lines on top of the page
+    if (win->trimConfigMode != 0) {
+        auto* dm = win->AsFixed();
+        if (dm) {
+            int pageNo = dm->CurrentPageNo();
+            RectF mb = dm->GetEngine()->PageMediabox(pageNo);
+            float zoom = dm->GetZoomReal(pageNo);
+            Point tl = dm->CvtToScreen(pageNo, PointF(0, 0));
+            int tRef = dm->marginTrimEnabled ? gGlobalPrefs->trim.top : 0;
+            int topLineY = tl.y + (int)((win->trimConfigTop - tRef) * zoom);
+            int bottomLineY = tl.y + (int)((mb.dy - win->trimConfigBottom - tRef) * zoom);
+            int pageW = (int)(mb.dx * zoom);
+            Gdiplus::Graphics gs(hdc);
+            Gdiplus::Pen pen(Gdiplus::Color(255, 255, 0, 0), 2); // red 2px
+            gs.DrawLine(&pen, tl.x, topLineY, tl.x + pageW, topLineY);
+            gs.DrawLine(&pen, tl.x, bottomLineY, tl.x + pageW, bottomLineY);
         }
     }
     DrawCanvasKeyboardFocusIfNeeded(win, hdc);
@@ -4471,7 +4551,6 @@ static void OnTimer(MainWindow* win, HWND hwnd, WPARAM timerId) {
                     KillTimer(hwnd, kContinuousAutoScrollTimerID);
                     UpdateToolbarEtaText(win, -1);
                     SetToolbarButtonCheckedState(win, CmdAutoScrollToggle, false);
-                    win->autoScrollTickCount = 0;
                     return;
                 }
                 // Timer check
@@ -4482,12 +4561,10 @@ static void OnTimer(MainWindow* win, HWND hwnd, WPARAM timerId) {
                         KillTimer(hwnd, kContinuousAutoScrollTimerID);
                         UpdateToolbarEtaText(win, -1);
                         SetToolbarButtonCheckedState(win, CmdAutoScrollToggle, false);
-                        win->autoScrollTickCount = 0;
                         return;
                     }
                 }
                 // Scroll
-                win->autoScrollTickCount++;
                 float speed = win->autoScrollSpeed * win->autoScrollSpeedMultiplier;
                 win->autoScrollAccum += speed;
                 int dy = (int)win->autoScrollAccum;
@@ -4495,24 +4572,17 @@ static void OnTimer(MainWindow* win, HWND hwnd, WPARAM timerId) {
                     win->autoScrollAccum -= dy;
                     win->MoveDocBy(0, dy);
                 }
-                // Update ETA label every 100 ticks (~1 second at 10ms timer)
-                if (win->autoScrollTickCount >= 100) {
-                    win->autoScrollTickCount = 0;
-                    // Calculate ETA: remaining pages * page height / speed
-                    int remainingPages = dm->PageCount() - dm->CurrentPageNo();
-                    if (remainingPages > 0 && speed > 0) {
-                        // page height in pixels: get via GetPageInfo
-                        auto pageInfo = dm->GetPageInfo(dm->CurrentPageNo());
-                        if (pageInfo) {
-                            int pageHeightPx = (int)pageInfo->pos.dy;
-                            // speed px/sec: speed * 100 (10ms tick -> 100 ticks/sec)
-                            float speedPxPerSec = speed * 100.0f;
-                            float etaSec = (remainingPages * pageHeightPx) / speedPxPerSec;
-                            int minutes = (int)(etaSec / 60.0f);
-                            if (minutes < 0) minutes = 0;
-                            UpdateToolbarEtaText(win, minutes);
-                        }
-                    }
+                // ETA: recalc on page change, countdown by wall clock between
+                if (dm->CurrentPageNo() != win->autoScrollEtaPageNo) {
+                    RecalcAutoScrollEta(win);
+                }
+                int remaining = win->autoScrollEtaMinutes - (int)((GetTickCount() - win->autoScrollEtaStartTick) / 60000);
+                if (remaining < 0) {
+                    remaining = 0;
+                }
+                if (remaining != win->autoScrollEtaLastShown) {
+                    win->autoScrollEtaLastShown = remaining;
+                    UpdateToolbarEtaText(win, remaining);
                 }
             }
             break;

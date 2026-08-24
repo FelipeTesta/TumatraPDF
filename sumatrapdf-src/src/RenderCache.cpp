@@ -15,6 +15,7 @@
 #include "wingui/WinGui.h"
 
 #include "Settings.h"
+#include "GlobalPrefs.h"
 #include "Theme.h"
 #include "DarkModeSubclass.h"
 #include "SumatraConfig.h"
@@ -305,8 +306,19 @@ static RectF GetTileRect(RectF pagerect, TilePosition tile) {
 }
 
 // get the coordinates of a specific tile
-static Rect GetTileRectDevice(EngineBase* engine, int pageNo, int rotation, float zoom, TilePosition tile) {
+static Rect GetTileRectDevice(EngineBase* engine, int pageNo, int rotation, float zoom, TilePosition tile,
+                              bool trimEnabled) {
     RectF mediabox = engine->PageMediabox(pageNo);
+    if (trimEnabled) {
+        // margin trim: shrink the tile rect to the visible strip (trim units
+        // are page coords/points)
+        float t = (float)gGlobalPrefs->trim.top;
+        float b = (float)gGlobalPrefs->trim.bottom;
+        if (t + b >= mediabox.dy) {
+            return Rect(); // fully trimmed, nothing to render
+        }
+        mediabox.dy -= t + b;
+    }
     if (tile.res > 0 && tile.res != INVALID_TILE_RES) {
         mediabox = GetTileRect(mediabox, tile);
     }
@@ -314,14 +326,21 @@ static Rect GetTileRectDevice(EngineBase* engine, int pageNo, int rotation, floa
     return pixelbox.Round();
 }
 
-static RectF GetTileRectUser(EngineBase* engine, int pageNo, int rotation, float zoom, TilePosition tile) {
-    Rect pixelbox = GetTileRectDevice(engine, pageNo, rotation, zoom, tile);
-    return engine->Transform(ToRectF(pixelbox), pageNo, zoom, rotation, true);
+static RectF GetTileRectUser(EngineBase* engine, int pageNo, int rotation, float zoom, TilePosition tile,
+                             bool trimEnabled) {
+    Rect pixelbox = GetTileRectDevice(engine, pageNo, rotation, zoom, tile, trimEnabled);
+    RectF rect = engine->Transform(ToRectF(pixelbox), pageNo, zoom, rotation, true);
+    if (trimEnabled) {
+        // shift back into trimmed page coords (the layout uses the reduced
+        // page height, so the render area starts at the top trim strip)
+        rect.y += (float)gGlobalPrefs->trim.top;
+    }
+    return rect;
 }
 
 static Rect GetTileOnScreen(EngineBase* engine, int pageNo, int rotation, float zoom, TilePosition tile,
-                            Rect pageOnScreen) {
-    Rect bbox = GetTileRectDevice(engine, pageNo, rotation, zoom, tile);
+                            Rect pageOnScreen, bool trimEnabled) {
+    Rect bbox = GetTileRectDevice(engine, pageNo, rotation, zoom, tile, trimEnabled);
     bbox.Offset(pageOnScreen.x, pageOnScreen.y);
     return bbox;
 }
@@ -338,7 +357,7 @@ static bool IsTileVisible(DisplayModel* dm, int pageNo, TilePosition tile, float
     int rotation = dm->GetRotation();
     float zoom = dm->GetZoomReal(pageNo);
     Rect r = pageInfo->pageOnScreen;
-    Rect tileOnScreen = GetTileOnScreen(engine, pageNo, rotation, zoom, tile, r);
+    Rect tileOnScreen = GetTileOnScreen(engine, pageNo, rotation, zoom, tile, r, dm->marginTrimEnabled);
     // consider nearby tiles visible depending on the fuzz factor
     tileOnScreen.x -= (int)((float)tileOnScreen.dx * fuzz * 0.5);
     tileOnScreen.dx = (int)((float)tileOnScreen.dx * (fuzz + 1));
@@ -723,7 +742,7 @@ bool RenderCache::Render(DisplayModel* dm, int pageNo, int rotation, float zoom,
     newRequest->rotation = rotation;
     newRequest->zoom = zoom;
     if (tile) {
-        newRequest->pageRect = GetTileRectUser(dm->GetEngine(), pageNo, rotation, zoom, *tile);
+        newRequest->pageRect = GetTileRectUser(dm->GetEngine(), pageNo, rotation, zoom, *tile, dm->marginTrimEnabled);
         newRequest->tile = *tile;
     } else if (pageRect) {
         newRequest->pageRect = *pageRect;
@@ -1143,8 +1162,33 @@ int RenderCache::Paint(HDC hdc, Rect bounds, DisplayModel* dm, int pageNo, PageI
 
         area = dm->GetEngine()->Transform(area, renderPageNo, zoom, rotation, true);
 
+        // margin trim: the layout already uses the reduced page height, so
+        // pageOnScreen is the trimmed rect and bounds is 1:1 with it. Just
+        // shift the render area (page coords) down by the top strip and render
+        // the middle strip t..mb.dy-b; no bounds adjustment, or BlitPixmap
+        // would stretch the pixmap over the full-height rect.
+        if (dm->marginTrimEnabled) {
+            RectF mb = dm->GetEngine()->PageMediabox(renderPageNo);
+            float t = (float)gGlobalPrefs->trim.top;
+            float b = (float)gGlobalPrefs->trim.bottom;
+            if (t + b >= mb.dy) {
+                return 0; // fully trimmed, nothing to render
+            }
+            area.y += t;
+            if (area.dy <= 0.0f) {
+                return 0; // visible part fully trimmed away
+            }
+        }
+
         RenderPageArgs args(renderPageNo, zoom, rotation, &area);
         Pixmap* bmp = dm->GetEngine()->RenderPage(args);
+        if (bmp) {
+            // match the cached path: apply document-color-follow-theme / inversion
+            // (trim forces the non-cached path, so without this the recolor is skipped)
+            if (ShouldUpdateBitmapColorsLegacy(dm->GetEngine(), this)) {
+                RecolorPixmap(bmp, this->textColor, this->backgroundColor, this->linkColor, nullptr);
+            }
+        }
         bool success = bmp && BlitPixmap(bmp, hdc, bounds);
         FreePixmap(bmp);
 
@@ -1164,7 +1208,8 @@ int RenderCache::Paint(HDC hdc, Rect bounds, DisplayModel* dm, int pageNo, PageI
 
     while (len(queue) > 0) {
         TilePosition tile = queue.PopAt(0);
-        Rect tileOnScreen = GetTileOnScreen(dm->GetEngine(), pageNo, rotation, zoom, tile, pi->pageOnScreen);
+        Rect tileOnScreen =
+            GetTileOnScreen(dm->GetEngine(), pageNo, rotation, zoom, tile, pi->pageOnScreen, dm->marginTrimEnabled);
         if (tileOnScreen.IsEmpty()) {
             // display an error message when only empty tiles should be drawn (i.e. on page loading errors)
             renderDelayMin = std::min(RENDER_DELAY_FAILED, renderDelayMin);

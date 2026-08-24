@@ -215,7 +215,6 @@ struct DisplayModel : DocController {
     // viewport crop
     void ApplyViewportCrop();
     void QuickToggleViewportCrop();
-    void ApplyMarginTrim();
 
     bool InPresentation() const;
 
@@ -315,8 +314,6 @@ struct DisplayModel : DocController {
 
     // margin trim (independent of viewport crop)
     bool marginTrimEnabled = false;
-    Rect marginTrimSaved;
-    float marginTrimSavedZoom = 1.0f;
 
     /* when we're in presentation mode, _pres* contains the pre-presentation values */
     bool inPresentation = false;

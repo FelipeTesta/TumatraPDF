@@ -294,7 +294,8 @@ enum {
     CmdContrastDecrease = 483,
     CmdViewportCropToggle = 484,
     CmdMarginTrimToggle = 485,
-    CmdNone = 486,
+    CmdTrimConfig = 486,
+    CmdNone = 487,
 
     /* range for file history */
     CmdFileHistoryFirst,

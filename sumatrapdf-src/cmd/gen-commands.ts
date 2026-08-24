@@ -294,6 +294,7 @@ export const commands = [
     "CmdContrastDecrease", "Decrease contrast overlay opacity",
     "CmdViewportCropToggle", "Toggle Viewport Crop",
     "CmdMarginTrimToggle", "Toggle margin trimming",
+    "CmdTrimConfig", "Configure margin trimming",
     "CmdNone", "Do nothing",
 ];
 

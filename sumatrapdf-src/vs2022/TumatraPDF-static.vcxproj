@@ -1158,6 +1158,7 @@
     <ClInclude Include="..\src\Canvas.h" />
     <ClInclude Include="..\src\CaptionGlyphs.h" />
     <ClInclude Include="..\src\ChangeThemeDialog.h" />
+    <ClInclude Include="..\src\TrimConfigDialog.h" />
     <ClInclude Include="..\src\ChmDump.h" />
     <ClInclude Include="..\src\ChmFile.h" />
     <ClInclude Include="..\src\ChmModel.h" />
@@ -1352,6 +1353,7 @@
     <ClCompile Include="..\src\CanvasAboutUI.cpp" />
     <ClCompile Include="..\src\CaptionGlyphs.cpp" />
     <ClCompile Include="..\src\ChangeThemeDialog.cpp" />
+    <ClCompile Include="..\src\TrimConfigDialog.cpp" />
     <ClCompile Include="..\src\ChmDump.cpp" />
     <ClCompile Include="..\src\ChmFile.cpp" />
     <ClCompile Include="..\src\ChmModel.cpp" />

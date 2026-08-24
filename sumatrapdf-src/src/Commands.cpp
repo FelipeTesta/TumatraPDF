@@ -301,6 +301,7 @@ static SeqStrings gCommandNames =
     "CmdContrastDecrease\0"
     "CmdViewportCropToggle\0"
     "CmdMarginTrimToggle\0"
+    "CmdTrimConfig\0"
     "CmdNone\0"
     "\0";
 
@@ -590,6 +591,7 @@ static i32 gCommandIds[] = {
     CmdContrastDecrease,
     CmdViewportCropToggle,
     CmdMarginTrimToggle,
+    CmdTrimConfig,
     CmdNone,
 };
 
@@ -879,6 +881,7 @@ SeqStrings gCommandDescriptions =
     "Decrease contrast overlay opacity\0"
     "Toggle Viewport Crop\0"
     "Toggle margin trimming\0"
+    "Configure margin trimming\0"
     "Do nothing\0"
     "\0";
 // clang-format on

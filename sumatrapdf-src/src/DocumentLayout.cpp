@@ -182,6 +182,12 @@ void DocumentLayout::Relayout(const DocumentLayoutParams& newParams) {
         }
 
         SizeF pageSize = PageSizeAfterRotation(page, params.rotation);
+        // margin trim: lay out the reduced height so pages flow as if the
+        // top/bottom strip was cut out (pos.dy, canvasDy and canvasSize all
+        // derive from this)
+        if (params.trimEnabled) {
+            pageSize.dy = std::max(0.0f, pageSize.dy - (float)params.trimTop - (float)params.trimBottom);
+        }
         Rect pos;
         float zoom = page->zoomReal;
         pos.dx = (int)((pageSize.dx * zoom) + 0.499f);

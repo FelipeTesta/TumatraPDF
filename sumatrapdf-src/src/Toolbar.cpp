@@ -73,9 +73,6 @@ static ToolbarButtonInfo gToolbarButtons[] = {
     {TbIcon::PagePrev, CmdGoToPrevPage, _TRN("Previous Page")},
     {TbIcon::PageNext, CmdGoToNextPage, _TRN("Next Page")},
     {TbIcon::None, 0, nullptr}, // separator
-    {TbIcon::NavigateBack, CmdNavigateBack, _TRN("Back")},
-    {TbIcon::NavigateForward, CmdNavigateForward, _TRN("Forward")},
-    {TbIcon::None, 0, nullptr}, // separator
     {TbIcon::Speak, CmdReadAloud, _TRN("Read Aloud")},
     {TbIcon::None, 0, nullptr}, // separator
     {TbIcon::LayoutContinuous, CmdZoomFitWidthAndContinuous, _TRN("Fit Width and Show Pages Continuously")},
@@ -89,13 +86,14 @@ static ToolbarButtonInfo gToolbarButtons[] = {
     {TbIcon::None, 0, nullptr}, // separator
     {TbIcon::None, 0, nullptr}, // separator before autoscroll group
     {TbIcon::Text, CmdAutoScrollToggle, _TRN("Autoscroll")},
-    {TbIcon::Text, CmdAutoScrollSpeedUp, _TRN("+")},
     {TbIcon::Text, CmdAutoScrollSpeedDown, _TRN("-")},
+    {TbIcon::Text, CmdAutoScrollSpeedUp, _TRN("+")},
     {TbIcon::None, 0, nullptr}, // separator after autoscroll group
     {TbIcon::Text, CmdContrastToggle, _TRN("Contrast")},
     {TbIcon::Text, CmdInvertColors, _TRN("Invert")},
     {TbIcon::Text, CmdViewportCropToggle, _TRN("Crop")},
     {TbIcon::Text, CmdMarginTrimToggle, _TRN("Trim")},
+    {TbIcon::Text, CmdTrimConfig, _TRN("Trim Config")},
 };
 // unicode chars: https://www.compart.com/en/unicode/U+25BC
 
@@ -330,8 +328,8 @@ static TBBUTTON TbButtonFromButtonInfo(const ToolbarButtonInfo& bi, bool noTrans
     }
 
     if (bi.cmdId == CmdFindToggleMatchCase || bi.cmdId == CmdFindToggleMatchWholeWord ||
-        bi.cmdId == CmdContrastToggle || bi.cmdId == CmdAutoScrollToggle ||
-        bi.cmdId == CmdViewportCropToggle || bi.cmdId == CmdMarginTrimToggle) {
+        bi.cmdId == CmdContrastToggle || bi.cmdId == CmdAutoScrollToggle || bi.cmdId == CmdViewportCropToggle ||
+        bi.cmdId == CmdMarginTrimToggle) {
         b.fsStyle = BTNS_CHECK;
     }
     if (bi.bmpIndex == TbIcon::Text) {
@@ -786,12 +784,35 @@ static LRESULT CALLBACK ReBarWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM
                         if (itemState & (CDIS_DISABLED | CDIS_GRAYED)) {
                             col = ThemeWindowTextDisabledColor();
                         }
-                        // Toolbar honors text color from the DC (and clrText) when
-                        // CDRF_NEWFONT is returned; setting only clrText is ignored
-                        // under some common-control versions / themes.
+                        // checked toggle buttons (Trim/Crop/Autoscroll/Contrast) get bold white text
+                        HWND hwndToolbar = custDraw->nmcd.hdr.hwndFrom;
+                        int cmdId = (int)custDraw->nmcd.dwItemSpec;
+                        bool isCheckedToggle = false;
+                        if (cmdId > 0 && SendMessageW(hwndToolbar, TB_ISBUTTONCHECKED, cmdId, 0)) {
+                            col = ThemeWindowTextColor();
+                            SelectObject(custDraw->nmcd.hdc, GetAppTreeFontEx(hwndToolbar, true, false));
+                            isCheckedToggle = true;
+                        }
                         custDraw->clrText = col;
                         SetTextColor(custDraw->nmcd.hdc, col);
-                        return CDRF_NEWFONT;
+                        // request a postpaint stage so we can draw the underline below
+                        return isCheckedToggle ? (CDRF_NEWFONT | CDRF_NOTIFYPOSTPAINT) : CDRF_NEWFONT;
+                    }
+
+                    case CDDS_ITEMPOSTPAINT: {
+                        // white underline under checked toggle buttons (Trim/Crop/Autoscroll/
+                        // Contrast): fill a 3px strip along the bottom edge of the item rect.
+                        // The DC is clipped to the item, so the line stays strictly inside.
+                        HWND hwndToolbar = custDraw->nmcd.hdr.hwndFrom;
+                        int cmdId = (int)custDraw->nmcd.dwItemSpec;
+                        if (cmdId > 0 && SendMessageW(hwndToolbar, TB_ISBUTTONCHECKED, cmdId, 0)) {
+                            RECT rcItem = custDraw->nmcd.rc;
+                            RECT rcLine = {rcItem.left + 2, rcItem.bottom - 3, rcItem.right - 2, rcItem.bottom};
+                            HBRUSH brUnderline = CreateSolidBrush(ThemeWindowTextColor());
+                            FillRect(custDraw->nmcd.hdc, &rcLine, brUnderline);
+                            DeleteObject(brUnderline);
+                        }
+                        return CDRF_DODEFAULT;
                     }
                 }
             }
@@ -896,6 +917,45 @@ static LRESULT CALLBACK WndProcToolbar(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp
                     return 0;
                 }
             }
+        }
+    }
+
+    // deterministic ON indicator independent of NM_CUSTOMDRAW routing: let the
+    // toolbar finish its own paint first, then overlay a bottom line on every
+    // TBSTATE_CHECKED button via a plain GetDC draw (not clipped to the update
+    // region, so it survives BeginPaint validation inside the toolbar proc)
+    if (WM_PAINT == msg) {
+        LRESULT res = CallWindowProc(DefWndProcToolbar, hwnd, msg, wp, lp);
+        HDC hdc = GetDC(hwnd);
+        if (hdc) {
+            int count = (int)SendMessageW(hwnd, TB_BUTTONCOUNT, 0, 0);
+            for (int i = 0; i < count; i++) {
+                TBBUTTONINFOW bi{};
+                bi.cbSize = sizeof(bi);
+                bi.dwMask = TBIF_BYINDEX | TBIF_STATE;
+                if (SendMessageW(hwnd, TB_GETBUTTONINFO, i, (LPARAM)&bi)) {
+                    if (bi.fsState & TBSTATE_CHECKED) {
+                        RECT rc{};
+                        if (SendMessageW(hwnd, TB_GETITEMRECT, i, (LPARAM)&rc)) {
+                            RECT rcLine = {rc.left + 2, rc.bottom - 3, rc.right - 2, rc.bottom};
+                            HBRUSH br = CreateSolidBrush(ThemeWindowTextColor());
+                            FillRect(hdc, &rcLine, br);
+                            DeleteObject(br);
+                        }
+                    }
+                }
+            }
+            ReleaseDC(hwnd, hdc);
+        }
+        return res;
+    }
+
+    // reposition the ETA label instantly on resize; without this it stays stale
+    // for up to a second and overlaps buttons or gets clipped on narrow windows
+    if (WM_SIZE == msg) {
+        MainWindow* win = FindMainWindowByHwnd(hwnd);
+        if (win && win->hwndEtaLabel && IsWindowVisible(win->hwndEtaLabel)) {
+            RepositionEtaLabel(win);
         }
     }
 
@@ -1101,24 +1161,104 @@ void UpdateToolbarPageText(MainWindow* win, int pageCount, bool updateOnly) {
 }
 
 // Creates the ETA label for autoscroll, placed after the autoscroll button
-// group: [sep] [Autoscroll] [+] [−] [sep] -> ETA label
+// group: [sep] [Autoscroll] [−] [+] [sep] -> ETA label
 static void CreateEtaLabel(MainWindow* win) {
     if (win->hwndEtaLabel != nullptr) {
         return; // already created
     }
-    Rect r = TbGetRect(win->hwndToolbar, CmdAutoScrollSpeedDown);
+    Rect r = TbGetRect(win->hwndToolbar, CmdAutoScrollSpeedUp); // last button of autoscroll group after -/+ swap
     int x = r.x + r.dx + DpiScale(win->hwndFrame, 8);
     int y = r.y;
     int dx = DpiScale(win->hwndFrame, 50); // width for ETA text
     int dy = r.dy;
 
-    HWND h = CreateWindowExW(0, WC_STATICW, L"ETA: --", SS_CENTER | WS_CHILD, x, y, dx, dy,
-                             win->hwndToolbar, (HMENU) nullptr, GetModuleHandle(nullptr), nullptr);
+    HWND h = CreateWindowExW(0, WC_STATICW, L"ETA: --", SS_CENTER | WS_CHILD, x, y, dx, dy, win->hwndToolbar,
+                             (HMENU) nullptr, GetModuleHandle(nullptr), nullptr);
     win->hwndEtaLabel = h;
+}
+
+// Positions the ETA label anchored after the last visible toolbar button
+// (instead of the right edge of the toolbar) and hides it when there is no
+// room left, so it can't overlap buttons or get clipped on narrow windows.
+void RepositionEtaLabel(MainWindow* win) {
+    HWND hwndLabel = win->hwndEtaLabel;
+    HWND hwndToolbar = win->hwndToolbar;
+    if (!hwndLabel || !hwndToolbar) {
+        return;
+    }
+    Rect rc = HwndClientRect(hwndToolbar);
+    int lastRight = 0;
+    int n = (int)SendMessageW(hwndToolbar, TB_BUTTONCOUNT, 0, 0);
+    for (int i = 0; i < n; i++) {
+        DWORD state = (DWORD)SendMessageW(hwndToolbar, TB_GETSTATE, i, 0);
+        if (!(state & TBSTATE_HIDDEN)) {
+            RECT rb = {0};
+            if (SendMessageW(hwndToolbar, TB_GETITEMRECT, i, (LPARAM)&rb)) {
+                if (rb.right > lastRight) {
+                    lastRight = (int)rb.right;
+                }
+            }
+        }
+    }
+    TempStr txt = HwndGetTextTemp(hwndLabel);
+    Size size = HwndMeasureText(hwndLabel, txt);
+    int x = lastRight + DpiScale(win->hwndFrame, 8);
+    int y = (rc.dy - size.dy) / 2;
+    if (x + size.dx > rc.dx - DpiScale(win->hwndFrame, 4)) {
+        // no room: hide instead of overlapping buttons / getting clipped
+        if (IsWindowVisible(hwndLabel)) {
+            ShowWindow(hwndLabel, SW_HIDE);
+            HwndInvalidate(hwndToolbar, true);
+        }
+        return;
+    }
+    MoveWindow(hwndLabel, x, y, size.dx, size.dy, TRUE);
+}
+
+// Recomputes the autoscroll ETA (in minutes) from the remaining pages and the
+// current scroll speed. Called on autoscroll start and on speed / page change;
+// between those the timer just counts down by wall clock, so no per-second
+// recalculation is needed (and the toolbar is not invalidated repeatedly).
+void RecalcAutoScrollEta(MainWindow* win) {
+    if (!win->autoScrollActive) {
+        return;
+    }
+    auto dm = win->AsFixed();
+    if (!dm) {
+        return;
+    }
+    int remainingPages = dm->PageCount() - dm->CurrentPageNo();
+    float speed = win->autoScrollSpeed * win->autoScrollSpeedMultiplier;
+    if (remainingPages <= 0 || speed <= 0) {
+        win->autoScrollEtaMinutes = 0;
+    } else {
+        auto pageInfo = dm->GetPageInfo(dm->CurrentPageNo());
+        if (!pageInfo) {
+            win->autoScrollEtaMinutes = 0;
+        } else {
+            int pageHeightPx = (int)pageInfo->pos.dy;
+            float speedPxPerSec = speed * 100.0f;
+            float etaSec = (remainingPages * pageHeightPx) / speedPxPerSec;
+            win->autoScrollEtaMinutes = (int)(etaSec / 60.0f);
+            if (win->autoScrollEtaMinutes < 0) {
+                win->autoScrollEtaMinutes = 0;
+            }
+        }
+    }
+    win->autoScrollEtaStartTick = GetTickCount();
+    win->autoScrollEtaLastShown = -1;
+    win->autoScrollEtaPageNo = dm->CurrentPageNo();
 }
 
 void UpdateToolbarEtaText(MainWindow* win, int minutes) {
     if (win->hwndEtaLabel == nullptr) {
+        return;
+    }
+    if (!gGlobalPrefs->autoScrollShowEta) {
+        if (IsWindowVisible(win->hwndEtaLabel)) {
+            ShowWindow(win->hwndEtaLabel, SW_HIDE);
+            HwndInvalidate(win->hwndToolbar, true);
+        }
         return;
     }
     if (!win->autoScrollActive || minutes < 0) {
@@ -1126,18 +1266,15 @@ void UpdateToolbarEtaText(MainWindow* win, int minutes) {
         return;
     }
     ShowWindow(win->hwndEtaLabel, SW_SHOW);
-    if (minutes < 0) {
-        HwndSetText(win->hwndEtaLabel, fmt("ETA: --"));
-    } else {
-        HwndSetText(win->hwndEtaLabel, fmt("ETA: %dmin", minutes));
-    }
-    // Reposition and measure (right-align against toolbar client right edge)
-    TempStr txt = HwndGetTextTemp(win->hwndEtaLabel);
-    Size size = HwndMeasureText(win->hwndEtaLabel, txt);
+    HwndSetText(win->hwndEtaLabel, fmt("ETA: %dmin", minutes));
+    // reposition only when toolbar width changed (anchored after last button)
     Rect rc = HwndClientRect(win->hwndToolbar);
-    int y = (rc.dy - size.dy) / 2;
-    MoveWindow(win->hwndEtaLabel, rc.dx - size.dx - DpiScale(win->hwndFrame, 8), y, size.dx, size.dy, TRUE);
-    HwndInvalidate(win->hwndToolbar, true);
+    if (rc.dx != win->autoScrollEtaToolbarWidth) {
+        win->autoScrollEtaToolbarWidth = rc.dx;
+        RepositionEtaLabel(win);
+    }
+    // invalidate only the label, not the whole toolbar
+    HwndInvalidateRect(win->hwndEtaLabel, HwndClientRect(win->hwndEtaLabel), false);
 }
 
 static void CreatePageBox(MainWindow* win, HFONT font, int iconDy) {
@@ -1597,12 +1734,8 @@ void CreateToolbar(MainWindow* win) {
     win->hwndToolbar = hwndToolbar;
     TbSetButtonStructSize(hwndToolbar, sizeofi(TBBUTTON));
 
-    if (!UseDarkModeLib() || !DarkMode::isEnabled()) {
-        if (!IsCurrentThemeDefault()) {
-            // without this custom draw code doesn't work
-            SetWindowTheme(hwndToolbar, L"", L"");
-        }
-    }
+    // Unconditionally strip comctl32 v6 themes so NM_CUSTOMDRAW clrText/font are honored under any Windows theme
+    SetWindowTheme(hwndToolbar, L"", L"");
 
     if (UseDarkModeLib()) {
         DarkMode::setWindowNotifyCustomDrawSubclass(win->hwndReBar);

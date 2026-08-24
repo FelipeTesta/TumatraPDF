@@ -112,6 +112,7 @@
 #include "CommandPalette.h"
 #include "AdvancedSettingsDialog.h"
 #include "ChangeThemeDialog.h"
+#include "TrimConfigDialog.h"
 #include "NavFilesInFolder.h"
 #include "Installer.h"
 #include "RegistryPreview.h"
@@ -826,6 +827,10 @@ void UpdateTabFileDisplayStateForTab(WindowTab* tab) {
     UpdateSidebarDisplayState(tab, fs);
     // Persist autoscroll speed multiplier
     fs->autoScrollSpeedMultiplier = win->autoScrollSpeedMultiplier;
+    // Persist invert colors and contrast overlay state
+    fs->invertColors = GetInvertPageColors();
+    fs->contrastEnabled = win->contrastEnabled;
+    fs->contrastOpacity = win->contrastOpacity;
 }
 
 static bool gForceRtl = false;
@@ -2032,7 +2037,13 @@ static void ReplaceDocumentInCurrentTab(LoadArgs* args, DocController* ctrl, Fil
     // Restore per-document autoscroll speed multiplier
     if (fs) {
         win->autoScrollSpeedMultiplier = fs->autoScrollSpeedMultiplier < 0.1f ? 0.1f : fs->autoScrollSpeedMultiplier;
+        // Restore per-document invert colors and contrast overlay state
+        SetInvertPageColors(fs->invertColors);
+        win->contrastEnabled = fs->contrastEnabled;
+        win->contrastOpacity = fs->contrastOpacity;
     }
+    // apply loaded per-doc color state immediately (was loading state without repaint)
+    UpdateDocumentColors();
 
     DisplayMode displayMode = gGlobalPrefs->defaultDisplayModeEnum;
     float zoomVirtual = gGlobalPrefs->defaultZoomFloat;
@@ -2081,6 +2092,10 @@ static void ReplaceDocumentInCurrentTab(LoadArgs* args, DocController* ctrl, Fil
     DocController* prevCtrl = win->ctrl;
     tab->ctrl = ctrl;
     win->ctrl = tab->ctrl;
+    // Restore contrast overlay (must run after win->ctrl points at the new document)
+    if (win->contrastEnabled) {
+        CreateContrastOverlay(win);
+    }
 
     // Reload/replace swaps the document; clear any tip for the previous page.
     win->DeleteToolTip();
@@ -10124,8 +10139,8 @@ static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, L
                 if (win->autoScrollActive) {
                     win->autoScrollAccum = 0;
                     win->autoScrollStartTick = GetTickCount();
-                    win->autoScrollTickCount = 0;
-                    UpdateToolbarEtaText(win, -1); // reset ETA label
+                    RecalcAutoScrollEta(win);
+                    UpdateToolbarEtaText(win, win->autoScrollEtaMinutes);
                     SetTimer(win->hwndCanvas, kContinuousAutoScrollTimerID, USER_TIMER_MINIMUM, nullptr);
                 } else {
                     KillTimer(win->hwndCanvas, kContinuousAutoScrollTimerID);
@@ -10141,6 +10156,9 @@ static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, L
             if (fs) {
                 fs->autoScrollSpeedMultiplier = win->autoScrollSpeedMultiplier;
             }
+            if (win->autoScrollActive) {
+                RecalcAutoScrollEta(win);
+            }
             break;
         }
         case CmdAutoScrollSpeedDown: {
@@ -10149,6 +10167,9 @@ static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, L
             FileState* fs = gFileHistory.FindByPath(tab->filePath);
             if (fs) {
                 fs->autoScrollSpeedMultiplier = win->autoScrollSpeedMultiplier;
+            }
+            if (win->autoScrollActive) {
+                RecalcAutoScrollEta(win);
             }
             break;
         }
@@ -10920,8 +10941,7 @@ static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, L
                     cropDm->viewportCropColumn = 0;
                     cropDm->viewportCropQuickToggled = false;
                     if (cropDm->viewportCropEnabled) {
-                        cropDm->viewportCropSaved = cropDm->GetViewPort();
-                        cropDm->viewportCropSavedZoom = cropDm->GetZoomVirtual(true);
+                        cropDm->viewportCropSaved = Rect(); // fresh base capture inside ApplyViewportCrop
                         cropDm->ApplyViewportCrop();
                     } else {
                         // Restore full viewport + original zoom
@@ -10943,21 +10963,19 @@ static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, L
                 auto trimDm = win->AsFixed();
                 if (trimDm) {
                     trimDm->marginTrimEnabled = !trimDm->marginTrimEnabled;
-                    if (trimDm->marginTrimEnabled) {
-                        trimDm->marginTrimSaved = Rect();
-                        trimDm->ApplyMarginTrim();
-                    } else {
-                        if (!trimDm->marginTrimSaved.IsEmpty()) {
-                            trimDm->viewPort = trimDm->marginTrimSaved;
-                            trimDm->SetZoomVirtual(trimDm->marginTrimSavedZoom, nullptr);
-                            trimDm->marginTrimSaved = Rect();
-                        }
-                    }
-                    trimDm->RecalcVisibleParts();
-                    HwndRepaintNow(win->hwndCanvas);
+                    gGlobalPrefs->trim.enabled = trimDm->marginTrimEnabled;
+                    // page heights depend on trim, so re-layout (keeps the view,
+                    // recalculates visible parts and repaints)
+                    trimDm->RelayoutKeepingView();
+                    // cached tiles were rendered with the old trim state
+                    gRenderCache->FreeForDisplayModel(trimDm);
                 }
                 SetToolbarButtonCheckedState(win, CmdMarginTrimToggle, trimDm ? trimDm->marginTrimEnabled : false);
             }
+            break;
+
+        case CmdTrimConfig:
+            ShowTrimConfigDialog(win);
             break;
 
         case CmdContrastIncrease:

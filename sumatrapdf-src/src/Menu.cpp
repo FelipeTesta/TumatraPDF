@@ -631,6 +631,10 @@ static MenuDef menuDefNewTools[] = {
         CmdMarginTrimToggle,
     },
     {
+        _TRN("Trim &Config"),
+        CmdTrimConfig,
+    },
+    {
         nullptr,
         0,
     },

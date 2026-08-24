@@ -154,6 +154,9 @@ ShowToc = true
 ; version 3.6)
 ShowLinks = false
 
+; Show ETA label during auto-scroll
+AutoScrollShowEta = true
+
 ; if true, draw a focus ring around the document when it has keyboard focus (Tab
 ; to the page area) (introduced in version 3.7)
 ShowDocumentFocusIndicator = false
@@ -321,6 +324,9 @@ ZoomIncrement = 0
 
 ; viewport crop settings for two-column reading (introduced in version 3.7)
 ViewportCrop = 0 0 0 0 0 false false
+
+; margin trim settings (top/bottom elimination) (introduced in version 3.7)
+Trim = 0 0 false
 
 ; customization options for PDF, XPS, DjVu and PostScript UI
 FixedPageUI [
@@ -947,7 +953,16 @@ FileStates [
     TocState =
 
     ; Autoscroll speed multiplier for this document
-    AutoScrollSpeedMultiplier = 1
+    AutoScrollSpeedMultiplier = 0.1
+
+    ; invert page colors for this document
+    InvertColors = false
+
+    ; contrast overlay enabled for this document
+    ContrastEnabled = false
+
+    ; contrast overlay opacity for this document (0-100)
+    ContrastOpacity = 50
   ]
 ]
 

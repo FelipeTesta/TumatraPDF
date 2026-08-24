@@ -5,6 +5,7 @@ cropview off:
 | ← largura total da tela ou zoom usuário → |
 |           página 1 (original)             |
 |    coluna esquerda | | colunadireita      |
+
 |                 página 2                  |
 |    coluna esquerda | |  colunadireita     |
 
@@ -12,10 +13,13 @@ cropview on:
 | ← largura total da tela → |
 |        página 1           |
 |      coluna esquerda      |
+
 |         página 1          |
 |       colunadireita       |
+
 |        página 2           |
 |       coluna esquerda     |
+
 |        página 2           |
 |       colunadireita       |
 
@@ -35,3 +39,9 @@ vamos ter dois botões: [Trim](on/off) e
 abre uma janela com botões "margin-top" "margin-bottom"→clicar em qualquer um→exibe uma linha vermelha horizontal 2px com distancia 0px do topo/bottom; essa linha permite clicar e arrastar para baixo/cima→arrastar calcula automaticamente a distancia do topo até a nova posição da linha→clicar em ✅ salva as distancia.
 [Trim]=on:
 o leitor contínuo ELIMINA do render esse pedaço das páginas;
+
+Status: ✅ IMPLEMENTADO (2026-08-15) — clip-based top/bottom elimination + Trim Config dialog (margin-top/margin-bottom buttons, draggable red 2px line, ✅ save). Left/right/column-gap NOT implemented (per user decision).
+
+## AUTOSCROLL TIMER
+Incluir na barra de ferramentas um Checkbox, logo após o autoscroll: "🔳 Timer |Input Numerico|";
+A ideia é: quando timer:check, o autoscroll desliga sozinho apos N minutos (input numerico - padrão 30min);
