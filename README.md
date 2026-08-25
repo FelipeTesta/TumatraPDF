@@ -22,7 +22,7 @@ We thank Krzysztof and all contributors for the excellent work on SumatraPDF.
 
 The features below were developed on top of SumatraPDF and **do not exist in the original version**. They follow the same project philosophy — native C/C++ code, Win32 interface, no external dependencies.
 
-> **Note for Krzysztof Kowalczyk** (creator of SumatraPDF): these features were implemented as hooks in the original code, without modifying the SumatraPDF core. The `sumatrapdf-src/` directory contains the preserved upstream code. All extensions are in `src/features/`. Feel free to incorporate any of them into the official SumatraPDF.
+> **Note for Krzysztof Kowalczyk** (creator of SumatraPDF): these features were implemented as **direct patches in `sumatrapdf-src/src/`** — the upstream code is preserved in `sumatrapdf-src/`. The `src/features/` and `src/hooks/` directories **do not exist** (README diagram was aspirational). Feel free to incorporate any of them into the official SumatraPDF.
 
 ---
 
@@ -41,7 +41,7 @@ The features below were developed on top of SumatraPDF and **do not exist in the
 **Controls:**
 | Shortcut | Action |
 |---|---|
-| `F10` | Start/Stop AutoScroll |
+| `F9` | Start/Stop AutoScroll |
 | `F7` | Increase speed (+20%) |
 | `F8` | Decrease speed (-20%) |
 
@@ -162,9 +162,9 @@ The script compares the version in `sumatrapdf-src/src/Version.h` with the pre-r
 
 | Feature | Main files | Hook point |
 |---|---|---|
-| AutoScroll | `src/features/autoscroll/`, `src/Canvas.cpp` | `OnTimer()`, `FrameOnCommand()` |
-| Contrast Filter | `src/features/contrast/`, `src/Canvas.cpp` | `WM_CREATE` (overlay window) |
-| Viewport Crop | `src/features/viewport/`, `src/DisplayModel.cpp` | `GetViewPort()`, `ScrollYBy()` |
+| AutoScroll | `src/AutoScroll.cpp`, `src/AutoScroll.h`, `src/Canvas.cpp` | `OnTimer()`, `FrameOnCommand()` |
+| Contrast Filter | `src/ContrastOverlay.cpp`, `src/Canvas.cpp` | `WM_CREATE` (overlay window) |
+| Viewport Crop | `src/DisplayModel.cpp`, `src/SumatraPDF.cpp` | `GetViewPort()`, `ScrollYBy()` |
 | Update | `scripts/check-updates.ps1`, `MERGE.md` | N/A (external tool) |
 
 **How to build:** See "Build" section below.
@@ -186,17 +186,16 @@ The script compares the version in `sumatrapdf-src/src/Version.h` with the pre-r
 
 ## Modularity Strategy
 
-To allow SumatraPDF upstream updates without breaking our features:
+**Reality (audit 2026-08-24):** The fork uses **direct patches in `sumatrapdf-src/src/`** — not a separate `src/features/` or `src/hooks/` tree. Those directories do not exist.
 
 ```
 TumatraPDF/
-├── sumatrapdf-src/        # Original SumatraPDF code (untouched)
-├── src/                   # Our extensions and hooks
-│   ├── features/          # Modular features
-│   │   ├── autoscroll/    # Automatic scrolling
-│   │   ├── viewport/      # Viewport cropping
-│   │   └── contrast/      # Contrast filter
-│   └── hooks/             # Upstream integration points
+├── sumatrapdf-src/        # Original SumatraPDF code (preserved)
+│   └── src/               # ~810 insertions across 34 files + new modules
+│       ├── AutoScroll.{h,cpp}        # NEW module
+│       ├── ContrastOverlay.cpp       # NEW module
+│       ├── TrimConfigDialog.{h,cpp}  # NEW module
+│       └── ... (direct patches to existing files)
 ├── docs/                  # Documentation
 ├── FLOW/                  # Planning diagrams
 ├── README.md
@@ -205,10 +204,9 @@ TumatraPDF/
 ```
 
 **Principles:**
-- Upstream code in `sumatrapdf-src/` is NEVER modified directly
-- Features implemented in `src/features/` as isolated modules
-- Integration via hooks/patching in the build system (Premake5)
-- `MERGE.md` documents the upstream update process
+- Upstream code in `sumatrapdf-src/` is the baseline; patches applied directly
+- New features added as standalone modules in `sumatrapdf-src/src/` (AutoScroll, ContrastOverlay, TrimConfigDialog)
+- `MERGE.md` documents the upstream update process (fork point ~912ecf2, Aug 2026)
 
 ## Update Check System
 
@@ -258,5 +256,5 @@ Based on SumatraPDF:
 ## 2026-08-17 - Trim Black-Space Fix + Tab Freeze + Per-Doc Invert/Contrast
 
 - **Trim fix:** black band at top of each page in trim mode = double top-shift. Removed `mediabox.y += t;` from `RenderCache::GetTileRectDevice` (~line 320); `GetTileRectUser`'s `rect.y += gGlobalPrefs->trim.top;` (line 336) kept as the single correct shift. Build OK, exe in `Compiled\TumatraPDF.exe`.
-- **Tab freeze:** `TabsCtrl::LayoutTabs` condition now `tabWidthFrozen && frozenTabDx > 0 && nTabs > 1`, else resets freeze; `CloseTab` adds `TrackMouseLeave(hwnd)`. ⚠️ Tab still small with 1 doc open — UNRESOLVED, deprioritized (settings corruption excluded: `TabWidth=300` OK).
+- **Tab freeze:** `TabsCtrl::LayoutTabs` condition now `tabWidthFrozen && frozenTabDx > 0 && nTabs > 1`, else resets freeze; `CloseTab` adds `TrackMouseLeave(hwnd)`. ⚠️ Tab still small with 1 doc open — **RESOLVED 2026-08-24**: root cause was `TabWidth=60` in settings file + upstream freeze mechanism; freeze code deleted; Alt+Click close added, X icon removed.
 - **Per-doc invert/contrast persistence:** FileState gains `InvertColors` (false), `ContrastEnabled` (false), `ContrastOpacity` (50) via `cmd/gen-settings.ts` (fieldCount 22→25). Save in `UpdateTabFileDisplayStateForTab` (~L830-833); load in `LoadDocument` (~L2040-2043) + `CreateContrastOverlay` after `win->ctrl = tab->ctrl` (~L2093-2095). Reopen restores invert + contrast state.

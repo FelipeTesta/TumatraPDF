@@ -3,80 +3,167 @@ digraph TumatraPDF {
     node [shape=box, style=rounded];
     compound=true;
 
-    // Fases do projeto
-    fase0 [label="Fase 0: Setup\nClonar SumatraPDF\nInit Git\nDocumentar", fillcolor="#c8e6c9", style=filled];
-    fase1 [label="Fase 1: Build Base\nVS2022 + Premake5\nCompilar sem mods", fillcolor="#fff9c4", style=filled];
-    fase2 [label="Fase 2: Análise\nPipeline render\nHooks de integração\nUpdate checker", fillcolor="#fff9c4", style=filled];
-    fase3 [label="Fase 3: Features 1+2 ✓\nAutoScroll + Contraste\n✓ Temas Light/Dark\n✓ Menu New Tools\n✓ Toolbar Icons\n✓ Command Registration\n✓ AutoScroll + Contraste + Themes + Menu + Invert", fillcolor="#c8e6c9", style=filled];
-    fase4 [label="Fase 4: Feature 3 ✓\nViewport Crop + Margin Trim\n(Zoom bug fixed)", fillcolor="#c8e6c9", style=filled];
-    fase6 [label="Fase 6: Integração\nTestes\nBuild Final\nMerge upstream", fillcolor="#f8bbd0", style=filled];
+    // ===================== PROJECT PHASES =====================
+    fase0 [label="Phase 0: Setup ✓\nClone SumatraPDF\nInit Git\nDocument", fillcolor="#c8e6c9", style=filled];
+    fase1 [label="Phase 1: Build Base ✓\nVS2022 + Premake5\nCompile without mods", fillcolor="#c8e6c9", style=filled];
+    fase2 [label="Phase 2: Analysis ✓\nRender pipeline\nIntegration hooks\nUpdate checker", fillcolor="#c8e6c9", style=filled];
+    fase3 [label="Phase 3: Features ✓\nAutoScroll + Contrast + Themes\nMenu New Tools + Toolbar Icons\nCommand Registration + Invert", fillcolor="#c8e6c9", style=filled];
+    fase4 [label="Phase 4: Feature 3 ✓\nViewport Crop + Margin Trim\n(zoom bug fixed; trim cache;\nper-doc invert/contrast)", fillcolor="#c8e6c9", style=filled];
+    fase5 [label="Phase 5: Debug Tooling (PARTIAL)\n1. ✗ Fix ASan: build-asan.ts still\n   references SumatraPDF.sln\n2. ✗ Fix .vscode F5\n   (launch/tasks → SumatraPDF-dll)\n3. ○ -dbg-control: Test* for custom\n   features (crop/trim/autoscroll/contrast)\n4. ○ test_util: crop/trim regression\n5. ○ AGENTS.md: debug loop", shape=box, style="rounded,filled", fillcolor="#fff9c4"];
+    fase6 [label="Phase 6: Integration\nAutomated tests\nFinal Build\nMerge upstream", shape=box, style="rounded,filled", fillcolor="#f8bbd0"];
 
     fase0 -> fase1;
     fase1 -> fase2;
     fase2 -> fase3;
     fase2 -> fase4;
     fase3 -> fase6;
+    fase4 -> fase5;
     fase4 -> fase6;
+    fase5 -> fase6;
 
-    // Update loop
-    update [label="Verificação de\nAtualizações Upstream\n(check-updates.ps1)", shape=hexagon, fillcolor="#e1bee7", style=filled];
+    // Upstream update loop
+    update [label="Upstream Update\nCheck (check-updates.ps1 + MERGE.md)", shape=hexagon, fillcolor="#e1bee7", style=filled];
     fase6 -> update [label="release"];
-    update -> fase6 [label="nova versão\ndisponível", style=dashed];
+    update -> fase6 [label="new version\navailable", style=dashed];
 
-    // Modularidade
+    // ===================== REAL ARCHITECTURE (audit 2026-08-24) =====================
     subgraph cluster_modular {
-        label="Estratégia Modular";
+        label="Code Reality (≠ aspirational README)";
         style=dashed;
         color="#666";
-        
-        upstream [label="sumatrapdf-src/\n(CÓDIGO INTOCADO)", shape=folder, fillcolor="#ffcdd2", style=filled];
-        features [label="src/features/\n(NOSSAS EXTENSÕES)", shape=folder, fillcolor="#c8e6c9", style=filled];
-        hooks [label="src/hooks/\n(PONTOS DE INTEGRAÇÃO)", shape=folder, fillcolor="#fff9c4", style=filled];
-        premake [label="Premake5\n(merge scripts)", shape=component];
-        
-        upstream -> hooks [label="hook points"];
-        features -> hooks [label="registra"];
-        hooks -> premake [label="build config"];
+
+        upstream [label="sumatrapdf-src/\n(upstream 3.7.20958 preserved)", shape=folder, fillcolor="#ffcdd2", style=filled];
+        patches [label="DIRECT PATCHES in sumatrapdf-src/src/\n~810 insertions in 34 files\n+ TrimConfigDialog.{h,cpp} (new)\n+ AutoScroll.{h,cpp} (new)\nDOES NOT EXIST src/features/ nor src/hooks/", shape=folder, fillcolor="#ffecb3", style=filled];
+
+        upstream -> patches [label="modified by\ndirect patch"];
     }
 
-    // Arquitetura SumatraPDF
+    // ===================== TOOLBAR — REAL ORDER =====================
+    subgraph cluster_toolbar {
+        label="Toolbar — gToolbarButtons[] (Toolbar.cpp:69-97)";
+        style=dashed;
+        color="#666";
+
+        tbA [label="Open · Print · PageInfo (text box,\npseudo-id PageInfoId L66)\nPagePrev · PageNext"];
+        tbB [label="ReadAloud ▾ (BTNS_DROPDOWN L326)"];
+        tbC [label="FitWidth+Continuous · FitSinglePage\nRotateL · RotateR · ZoomOut · ZoomIn"];
+        tbD [label="Find"];
+        tbE [label="Autoscroll · Vel− · Vel+   [TUMATRA]\n(autoscroll group, own separator)"];
+        tbF [label="Contrast · Invert · Crop · Trim · TrimConfig\n[TUMATRA — all with icon-text BTNS_SHOWTEXT]"];
+
+        tbA -> tbB -> tbC -> tbD -> tbE -> tbF [style=invis];
+
+        tb_toggles [label="BTNS_CHECK toggles (L330-334):\nContrast · AutoscrollToggle · ViewportCropToggle · MarginTrimToggle\n(+ find case/whole-word upstream)", shape=note, fillcolor="#e3f2fd", style=filled];
+        tbE -> tb_toggles [style=dotted];
+    }
+
+    // ===================== MENUS =====================
+    subgraph cluster_menus {
+        label="Menus (Menu.cpp)";
+        style=dashed;
+        color="#666";
+
+        menubar [label="Bar: File · View · Go To · Zoom · Selection · Read Aloud\nFavorites (+Tab Groups submenu L558) · Settings\nNew &Tools [TUMATRA] · Help · Debug   (menuDefMenubar L862-911)"];
+        newtools [label="New &Tools [TUMATRA] — menuDefNewTools L592-641:\nAuto-Scroll: Toggle · Speed Up · Speed Down\nContrast: Toggle · Up (+10%) · Down (−10%)\nViewport Crop · Margin Trim · Trim Config", shape=box, style="rounded,filled", fillcolor="#c8e6c9"];
+        filepicker [label="File: \"Use TumatraPDF File Picker\" [TUMATRA]\n(CmdToggleFilePicker; dup in Settings; handler SumatraPDF.cpp:9654)", shape=note, fillcolor="#e3f2fd", style=filled];
+
+        menubar -> newtools;
+        menubar -> filepicker [style=dotted];
+    }
+
+    // ===================== SHORTCUTS =====================
+    subgraph cluster_keys {
+        label="Shortcuts (Accelerators.cpp)";
+        style=dashed;
+        color="#666";
+
+        keysU [label="[UPSTREAM] default sets intact:\nnav (BkSp/Alt+arrows) · file (Ctrl+O/W/N/S/P/Q)\nedit/annotation · find (Ctrl+F/F3) · zoom/layout (Ctrl+0-4/+/-)\npresentation (F5/F11/F12/L) · tabs (Ctrl+Tab, Ctrl+Shift+T)"];
+        keysT [label="[TUMATRA]\nF7 = AutoScroll SpeedDown (L115)\nF8 = AutoScroll SpeedUp (L116)\nF9 = AutoScroll Toggle (L117)\nCtrl+Shift+C = Contrast Toggle (L166)\nAlt+Click = close tab (TabsCtrl WM_LBUTTONDOWN)\nMiddle-click = close tab / autoscroll anchor (upstream)", shape=box, style="rounded,filled", fillcolor="#c8e6c9"];
+        keygap [label="⚠ NO shortcut: Crop, Trim, TrimConfig,\nContrast ±10% (menu/toolbar only)\n⚠ fixed 2026-08-24: README now says F9 (matches code)", shape=note, fillcolor="#ffcdd2", style=filled];
+
+        keysT -> keygap [style=dotted];
+    }
+
+    // ===================== SETTINGS =====================
+    subgraph cluster_settings {
+        label="Settings (cmd/gen-settings.ts → Settings.h generated)";
+        style=dashed;
+        color="#666";
+
+        setG [label="Globals [TUMATRA]:\nViewportCrop ver3.7 {Left Right Top Bottom=0,\nColGap=0, Enabled=f, QuickToggle=f (orphan)}\nTrim ver3.7 {Top=0, Bottom=0, Enabled=f}\nAutoScrollShowEta=t (gate ETA toolbar)\nfilePicker=\"\" (os|sumatrapdf)"];
+        setD [label="Per-document (FileState) [TUMATRA]:\nAutoScrollSpeedMultiplier=0.1 (clamp 0.1–10)\nInvertColors=f · ContrastEnabled=f · ContrastOpacity=50\nsave SumatraPDF.cpp:829-833 / restore :2039-2045\nspeed save in AutoScroll.cpp (AutoScrollSpeedAdjust)\nUpdateDocumentColors() :2045 (invert restore fix)"];
+        setwarn [label="⚠ NEVER edit @gen-start/@gen-end by hand —\nchange cmd/gen-settings.ts and regenerate\n(bun cmd/gen-settings.ts)", shape=note, fillcolor="#fff3e0", style=filled];
+
+        setG -> setwarn [style=dotted];
+    }
+
+    // ===================== FEATURES =====================
+    subgraph cluster_features {
+        label="TUMATRA Features (file:line)";
+        style=dashed;
+        color="#1565c0";
+
+        feat_scroll [label="AutoScroll\n· middle-click anchor: Canvas.cpp thin timer call (ID 7)\n· continuous F9: Canvas.cpp thin timer call (ID 15)\n  tick handlers: AutoScrollContinuousTick / AutoScrollMiddleClickTick\n  in AutoScroll.cpp (decl AutoScroll.h:25)\n  scroll = speed × multiplier\n· ETA: RecalcAutoScrollEta AutoScroll.cpp:82\n  label UI only in Toolbar.cpp:\n  CreateEtaLabel / RepositionEtaLabel / UpdateToolbarEtaText\n  gate AutoScrollShowEta + width cache"];
+        feat_contrast [label="Contrast (overlay)\n· layered child window over canvas:\n  ContrastOverlay.cpp:34-104\n  alpha via AlphaFromOpacity static helper :10\n  call sites L77 + L107\n· handlers SumatraPDF.cpp:10923-10987 (steps ±10)\n· per-document persistence"];
+        feat_crop [label="ViewportCrop (column ×2)\n· DisplayModel::ApplyViewportCrop DisplayModel.cpp:250\n  zoom ×2 on 1st application; Shift bypasses L254\n· column switch/relayout SumatraPDF.cpp:2166-2193\n· toggle saves/restores viewport+zoom :10936-10958"];
+        feat_trim [label="MarginTrim (clip top/bottom)\n· tile clip via pageRect:\n  RenderCache.cpp:360/745/1170\n· toggle relayout + frees cache\n  SumatraPDF.cpp:10961-10974\n· draggable red guide lines:\n  Canvas.cpp:1624/2019/3179"];
+        feat_trimdlg [label="TrimConfigDialog (new)\n· singleton gTrimConfigWnd, Show L335\n· edits synced on drag:\n  TrimConfigDialogSyncEdits L189"];
+        feat_tabs [label="Tabs (VirtWnds — TabsCtrl.cpp)\n· active tab underline 3px: Paint L224-225\n· Alt+Click closes tab: L719-723\n· Middle-click closes: L775-779\n· freeze mechanism REMOVED (2026-08-24)\n· Home tab always idx 0 pinned (Tabs.cpp:712-726)\n  ⇒ nTabs ≥ 2 with 1 doc\n· LayoutTabs dx=min(DpiScale(TabWidth),(clientW−5)/nTabs)"];
+        feat_persist [label="Per-doc persistence\ninvert+contrast restored on reopen\nLoadDocument :2039-2045 →\nUpdateDocumentColors() :2045\nCreateContrastOverlay after ctrl=:2096"];
+        feat_picker [label="Own File Picker\npref os↔sumatrapdf\nSumatraPDF.cpp:5852-5860"];
+
+        feat_scroll -> feat_contrast -> feat_crop -> feat_trim [style=invis];
+        feat_trimdlg -> feat_tabs -> feat_persist -> feat_picker [style=invis];
+    }
+
+    // Feature hooks in upstream architecture
     subgraph cluster_arch {
-        label="Arquitetura SumatraPDF (upstream)";
+        label="SumatraPDF Architecture (upstream)";
         node [shape=record];
-        ui [label="Win32 UI\n(Janela, Menus, Toolbar)"];
-        render [label="Pipeline Render\nMuPDF → Bitmap → Display"];
-        input [label="Input Handler\n(Teclado, Mouse, Scroll)"];
-        doc [label="Document Model\n(PDF, EPUB, etc.)"];
-        updatecheck [label="UpdateCheck.cpp\n(auto-update nativo)"];
+        ui [label="Win32 UI\n(Window, Menus, Toolbar)"];
+        render [label="Render Pipeline\nMuPDF → Bitmap → Display\n(RenderCache tiles)"];
+        input [label="Input Handler\n(Keyboard, Mouse, Scroll)"];
+        docm [label="Document Model\n(PDF, EPUB, etc.)"];
+    }
+    feat_scroll -> input [style=dotted];
+    feat_contrast -> ui [style=dotted, label="overlay"];
+    feat_crop -> render [style=dotted, label="viewport"];
+    feat_trim -> render [style=dotted, label="clip tile"];
+    feat_tabs -> ui [style=dotted];
+    patches -> cluster_arch [lhead=cluster_arch, style=dashed, label="integration"];
+
+    // ===================== DEAD CODE / PENDING =====================
+    subgraph cluster_dead {
+        label="Dead / Half-done (future cleanup)";
+        style=dashed;
+        color="#b71c1c";
+
+        dead1 [label="QuickToggleViewportCrop()\nDisplayModel.cpp:279 — ZERO callers\nviewportCrop.quickToggle setting orphaned\ndouble-click not wired", fillcolor="#ffebee", style=filled];
+        dead3 [label="Commented accels: CmdCommandPaletteOnlyTabs\n(Accelerators.cpp:82), CmdCreateShortcutToFile (:70);\nBTNS_DROPDOWN for text commented Toolbar.cpp:336", fillcolor="#ffebee", style=filled];
     }
 
-    // Feature hooks
-    features -> input [label="autoscroll:\nhook input", style=dotted, lhead=cluster_arch];
-    features -> render [label="viewport:\nhook render crop\ncontrast:\nhook post-process", style=dotted, lhead=cluster_arch];
-
-    // Dependências
+    // ===================== DEPENDENCIES =====================
     subgraph cluster_deps {
-        label="Dependências";
+        label="Dependencies";
         mupdf [label="MuPDF\n(PDF Engine)"];
         vs2022 [label="Visual Studio 2022"];
         premake5 [label="Premake5\n(Build System)"];
+        buntool [label="bun\n(cmd/*.ts build/codegen/tests)"];
     }
-
     mupdf -> render;
-    premake5 -> fase1;
-    vs2022 -> fase1;
 
-    // Referência AHK
-    ahk [label="sumatra-autoscroll-v3.ahk\n(Referência: AutoScroll\n+ Navegação 2 Colunas)", shape=note, fillcolor="#fff9c4", style=filled];
-    ahk -> fase3 [label="portar lógica", style=dashed];
+    // ===================== NOTES / FINDINGS =====================
+    notes [label="Scroll delay 3.7 vs 3.6.17065:\nroot cause = upstream smooth-scroll\ndefault TRUE. smoothScroll=false = instant.\nResidual: uitask::Post deferral\n(Canvas.cpp:4448-4459) + async render thread.\ntrim=on intensifies — separate fix.", shape=note, fillcolor="#fff9c4", style=filled];
+    audit [label="AUDIT 2026-08-24:\ndiagram rewritten from real code\n(gToolbarButtons, menuDefNewTools, Accelerators,\ngen-settings.ts, explore agent).\nBottlenecks logged in lemma memory.\n\nBATCHES 1-3 (2026-08-24):\n· dead close-icon code removed (TabsCtrl)\n· AutoScroll module extracted (src/AutoScroll.{h,cpp})\n· perf guards: gAnyToggleChecked early-out,\n  width-gated ETA reposition, StringFormat statics\n  in TabWnd::Paint\n· lint: RenderCache unused param, static\n  SafeDeleteTrimConfigDialog, comment moved .h→.cpp\n· MERGE.md corrected (factual, fork point ~912ecf2)"];
 
-    // Legenda
+    // ===================== LEGEND =====================
     subgraph cluster_legend {
-        label="Legenda";
+        label="Legend";
         color="#ccc";
-        done [label="Concluído", fillcolor="#c8e6c9", style=filled];
-        progress [label="Em progresso", fillcolor="#fff9c4", style=filled];
-        feature [label="Features", fillcolor="#bbdefb", style=filled];
-        critical [label="Crítico", fillcolor="#f8bbd0", style=filled];
+        done [label="Done", fillcolor="#c8e6c9", style=filled];
+        progress [label="Partial/plan", fillcolor="#fff9c4", style=filled];
+        critical [label="Critical/pending", fillcolor="#f8bbd0", style=filled];
+        tumatraN [label="[TUMATRA] fork-exclusive", fillcolor="#c8e6c9", style="rounded,filled"];
+        deadN [label="Dead code", fillcolor="#ffebee", style=filled];
     }
 }

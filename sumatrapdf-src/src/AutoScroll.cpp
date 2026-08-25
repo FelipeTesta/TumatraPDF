@@ -136,9 +136,10 @@ void AutoScrollSpeedAdjust(MainWindow* win, int direction) {
     if (direction > 0) {
         win->autoScrollSpeedMultiplier = std::min(win->autoScrollSpeedMultiplier * kSpeedUpFactor, kMaxSpeedMultiplier);
     } else {
-        win->autoScrollSpeedMultiplier = std::max(win->autoScrollSpeedMultiplier * kSpeedDownFactor, kMinSpeedMultiplier);
+        win->autoScrollSpeedMultiplier =
+            std::max(win->autoScrollSpeedMultiplier * kSpeedDownFactor, kMinSpeedMultiplier);
     }
-    // Persist the new multiplier
+    // persist to in-memory FileState; written to disk on next settings save (app exit)
     WindowTab* tab = win->CurrentTab();
     if (tab && tab->filePath) {
         FileState* fs = gFileHistory.FindByPath(tab->filePath);

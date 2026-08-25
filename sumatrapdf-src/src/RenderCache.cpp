@@ -44,8 +44,7 @@ int gMaxRenderThreads = 8;
 // Whether to run the bitmap recolor pass when no dark profile applies.
 // Only MuPDF-rendered documents (PDF, XPS, EPUB, MOBI, FB2, HTML, etc.) and
 // DjVu are recolored; image/comic/native-ebook engines keep original pixels.
-static bool ShouldUpdateBitmapColorsLegacy(EngineBase* engine, RenderCache* cache) {
-    (void)cache;
+static bool ShouldUpdateBitmapColorsLegacy(EngineBase* engine) {
     return EngineUsesDocumentColorsFollowTheme(engine);
 }
 
@@ -1014,7 +1013,7 @@ static DWORD WINAPI RenderCacheThread(LPVOID data) {
                 // object-level smart dark renders themed output directly
                 recolor = DarkModeProfileUsesLegacyPostProcess(profile);
             } else {
-                recolor = ShouldUpdateBitmapColorsLegacy(engine, cache);
+                recolor = ShouldUpdateBitmapColorsLegacy(engine);
             }
             if (recolor) {
                 bool preserve = profile && profile->mode == PageColorMode::PreserveImages && profile->preservePdfImages;
@@ -1185,7 +1184,7 @@ int RenderCache::Paint(HDC hdc, Rect bounds, DisplayModel* dm, int pageNo, PageI
         if (bmp) {
             // match the cached path: apply document-color-follow-theme / inversion
             // (trim forces the non-cached path, so without this the recolor is skipped)
-            if (ShouldUpdateBitmapColorsLegacy(dm->GetEngine(), this)) {
+            if (ShouldUpdateBitmapColorsLegacy(dm->GetEngine())) {
                 RecolorPixmap(bmp, this->textColor, this->backgroundColor, this->linkColor, nullptr);
             }
         }
