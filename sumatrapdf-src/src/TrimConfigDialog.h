@@ -4,4 +4,8 @@
 struct MainWindow;
 
 void ShowTrimConfigDialog(MainWindow* win);
-void TrimConfigDialogSyncEdits(); // sync edit boxes from current trim values (called from Canvas during drag)
+void TrimConfigDialogSyncEdits();
+
+// SafeDeleteTrimConfigDialog: posts a deferred deletion task for the trim config
+// dialog window. Called from the dialog's OnClose/OnDestroy handlers and from
+// OnSave/OnCancel to clean up after the dialog closes.

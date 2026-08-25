@@ -21,10 +21,10 @@ MainWindow* FindMainWindowByHwnd(HWND hwnd);
 
 //--- Tabs
 //
-// Each tab is a TabWnd in a VirtWndBox that lays them out along the bar, with
-// the tab's ✕ as a child of the tab. The control keeps the HWND (it owns the
-// drag loop, which needs capture and screen coordinates) and the tab list;
-// everything on screen belongs to the tree.
+// Each tab is a TabWnd in a VirtWndBox that lays them out along the bar.
+// The control keeps the HWND (it owns the drag loop, which needs capture
+// and screen coordinates) and the tab list; everything on screen belongs
+// to the tree.
 
 static Kind kindTabs = "tabs";
 static Kind kindTabWnd = "tabWnd";
@@ -70,10 +70,7 @@ static COLORREF TabTextColorForBackground(COLORREF tabBg) {
 struct TabWnd : VirtWnd {
     TabsCtrl* tabsCtrl = nullptr;
     TabInfo* ti = nullptr;
-    VirtWndCloseButton* closeBtn = nullptr;
     Size idealSize;
-    // the ✕ glyph itself, inside the close button's larger hit area
-    Rect rClose;
 
     TabWnd();
     ~TabWnd() override = default;
@@ -81,7 +78,6 @@ struct TabWnd : VirtWnd {
     int Idx();
     bool IsSelected();
     bool IsUnderMouse();
-    bool CloseVisible();
     COLORREF BgColor();
 
     Size GetIdealSize() override;
@@ -92,14 +88,8 @@ struct TabWnd : VirtWnd {
     TempStr GetTooltipTemp(Point) override;
 };
 
-static void TabCloseClicked(TabWnd*, VirtWndMouseEvent*);
-
 TabWnd::TabWnd() {
     kind = kindTabWnd;
-    closeBtn = new VirtWndCloseButton();
-    closeBtn->onClick = MkFunc1(TabCloseClicked, this);
-    closeBtn->visibility = Visibility::Collapse;
-    AddChild(closeBtn);
 }
 
 int TabWnd::Idx() {
@@ -143,63 +133,8 @@ Size TabWnd::GetIdealSize() {
     return idealSize;
 }
 
-// the ✕ is inset from the tab's edge, but its hit area is the whole gutter
-// (~40 DIP, full height) so it stays easy to hit
 void TabWnd::SetBounds(Rect r) {
     VirtWnd::SetBounds(r);
-    HWND hwnd = GetHwnd();
-    int dx = r.dx;
-    int dy = r.dy;
-
-    // Close glyph grows with tab height (taller UI fonts / tab bar) so it
-    // stays usable on touch; floor 16 DIP, cap 28 DIP (issue #5220).
-    int closeMin = DpiScale(hwnd, 16);
-    int closeMax = DpiScale(hwnd, 28);
-    int closeDy = dy - DpiScale(hwnd, 6);
-    closeDy = limitValue(closeDy, closeMin, closeMax);
-    if (closeDy > dy) {
-        closeDy = dy;
-    }
-    int closeDx = closeDy;
-
-    // Padding between circle and tab edge; grow with the button.
-    int closePad = std::max(DpiScale(hwnd, 6), closeDx / 2);
-    // Keep the glyph inside the tab when tabs are very narrow.
-    if (closeDx + closePad > dx && dx > 0) {
-        closeDx = std::min(closeDx, std::max(DpiScale(hwnd, 12), dx - 2));
-        closeDy = closeDx;
-        closePad = std::max(1, (dx - closeDx) / 2);
-    }
-    int closeY = (dy - closeDy) / 2;
-
-    // Hit target: at least ~40 DIP wide (touch-friendly), full tab height.
-    // Cap at half the tab so title still has a drag/select zone.
-    int minHitDx = DpiScale(hwnd, 40);
-    int hitDx = std::max(closeDx + (2 * closePad), minHitDx);
-    hitDx = std::min(hitDx, std::max(closeDx + closePad, dx / 2));
-    hitDx = std::min(hitDx, dx);
-
-    bool isRtl = IsTabsRtl(hwnd);
-    Rect hit;
-    if (isRtl) {
-        hit = {r.x, r.y, hitDx, dy};
-        rClose = {r.x + closePad, r.y + closeY, closeDx, closeDy};
-    } else {
-        hit = {r.x + dx - hitDx, r.y, hitDx, dy};
-        rClose = {r.x + dx - closeDx - closePad, r.y + closeY, closeDx, closeDy};
-    }
-    // the glyph is painted in the button's content rect, so the padding is what
-    // makes the hit area bigger than the ✕ itself
-    closeBtn->padding.left = rClose.x - hit.x;
-    closeBtn->padding.top = rClose.y - hit.y;
-    closeBtn->padding.right = hit.Right() - rClose.Right();
-    closeBtn->padding.bottom = hit.Bottom() - rClose.Bottom();
-    closeBtn->SetBounds(hit);
-}
-
-bool TabWnd::CloseVisible() {
-    // ✕ close icon removed from tabs; Alt+LeftClick or middle-click closes
-    return false;
 }
 
 void TabWnd::Paint(VirtWndPaintCtx& ctx) {
@@ -227,14 +162,23 @@ void TabWnd::Paint(VirtWndPaintCtx& ctx) {
         gfx.FillRectangle(&ulBr, ToGdipRect(rUl));
     }
 
+    // StringFormat hoisted to function-local static (UI thread only, thread-safe)
     bool isRtl = IsTabsRtl(hwnd);
-    StringFormat sf(StringFormat::GenericDefault());
-    sf.SetFormatFlags(Gdiplus::StringFormatFlagsNoWrap);
-    sf.SetLineAlignment(StringAlignmentCenter);
-    sf.SetTrimming(Gdiplus::StringTrimmingEllipsisCharacter);
-    if (isRtl) {
-        sf.SetAlignment(Gdiplus::StringAlignmentFar);
+    static StringFormat sfLtr(StringFormat::GenericDefault());
+    static StringFormat sfRtl(StringFormat::GenericDefault());
+    static bool sfInit = false;
+    if (!sfInit) {
+        sfLtr.SetFormatFlags(Gdiplus::StringFormatFlagsNoWrap);
+        sfLtr.SetLineAlignment(StringAlignmentCenter);
+        sfLtr.SetTrimming(Gdiplus::StringTrimmingEllipsisCharacter);
+        sfLtr.SetAlignment(Gdiplus::StringAlignmentNear);
+        sfRtl.SetFormatFlags(Gdiplus::StringFormatFlagsNoWrap);
+        sfRtl.SetLineAlignment(StringAlignmentCenter);
+        sfRtl.SetTrimming(Gdiplus::StringTrimmingEllipsisCharacter);
+        sfRtl.SetAlignment(Gdiplus::StringAlignmentFar);
+        sfInit = true;
     }
+    StringFormat& sf = isRtl ? sfRtl : sfLtr;
 
     // draw text — padded from the tab edges; the ✕ close glyph is gone, so no
     // close-gutter space is reserved and text spans the full padded width
@@ -265,9 +209,7 @@ void TabWnd::Paint(VirtWndPaintCtx& ctx) {
         gfx.SetSmoothingMode(Gdiplus::SmoothingModeNone);
     }
 
-    // the ✕ blends into the tab, so it takes the tab's background
-    closeBtn->circleColor = tabBgCol;
-}
+    }
 
 bool TabWnd::OnMouseDown(VirtWndMouseEvent& ev) {
     tabsCtrl->OnTabMouseDown(this, ev);
@@ -282,10 +224,6 @@ bool TabWnd::OnMouseUp(VirtWndMouseEvent&) {
 
 TempStr TabWnd::GetTooltipTemp(Point) {
     return str::DupTemp(ti->tooltip);
-}
-
-static void TabCloseClicked(TabWnd* tab, VirtWndMouseEvent*) {
-    tab->tabsCtrl->CloseTab(tab->Idx());
 }
 
 //--- TabsCtrl
@@ -388,8 +326,6 @@ TabsCtrl::MouseState TabsCtrl::TabStateFromMousePosition(const Point& p) {
     }
     Point ptLocal{0, 0};
     VirtWnd* hit = vroot->WndFromPoint(p, &ptLocal);
-    // the only child of a tab is its ✕, so anything below a tab is the ✕
-    bool overClose = hit && hit->parent && IsVirtWndOfKind(hit->parent, kindTabWnd);
     TabWnd* tab = nullptr;
     for (VirtWnd* w = hit; w; w = w->parent) {
         if (IsVirtWndOfKind(w, kindTabWnd)) {
@@ -402,7 +338,6 @@ TabsCtrl::MouseState TabsCtrl::TabStateFromMousePosition(const Point& p) {
     }
     res.tabIdx = tab->Idx();
     res.tabInfo = tab->ti;
-    res.overClose = overClose && tab->CloseVisible();
     Rect r = tab->bounds;
     Rect rightHalf = r;
     int halfDx = r.dx / 2;
@@ -416,15 +351,6 @@ TabsCtrl::MouseState TabsCtrl::TabStateFromMousePosition(const Point& p) {
 void TabsCtrl::UpdateHover(int tabUnderMouse) {
     bool changed = (tabHighlighted != tabUnderMouse);
     tabHighlighted = tabUnderMouse;
-    int n = TabCount();
-    for (int i = 0; i < n; i++) {
-        TabWnd* w = tabWnds[i];
-        auto vis = w->CloseVisible() ? Visibility::Visible : Visibility::Collapse;
-        if (w->closeBtn->visibility != vis) {
-            w->closeBtn->visibility = vis;
-            changed = true;
-        }
-    }
     if (changed) {
         HwndScheduleRepaint(hwnd);
     }
@@ -493,11 +419,9 @@ static void TabsCtrlUpdateAfterChangingTabsCount(TabsCtrl* tabs) {
     tabs->tabBeingClosed = -1;
     Point mousePos = HwndGetCursorPos(hwnd);
     auto tabState = tabs->TabStateFromMousePosition(mousePos);
-    bool canClose = tabState.tabInfo && tabState.tabInfo->canClose;
-    bool overClose = tabState.overClose && canClose;
     int tabUnderMouse = tabState.tabIdx;
     tabs->UpdateHover(tabUnderMouse);
-    tabs->tabHighlightedClose = overClose ? tabUnderMouse : -1;
+    tabs->tabHighlightedClose = -1;
     if (tabs->draggingTab) {
         tabs->draggingTab = false;
         ImageList_EndDrag();
@@ -633,7 +557,6 @@ LRESULT TabsCtrl::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 
     TabsCtrl::MouseState tabState;
 
-    bool overClose = false;
     bool canClose = true;
     int tabUnderMouse = -1;
 
@@ -641,7 +564,6 @@ LRESULT TabsCtrl::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         tabState = TabStateFromMousePosition(mousePos);
         tabUnderMouse = tabState.tabIdx;
         canClose = tabState.tabInfo && tabState.tabInfo->canClose;
-        overClose = tabState.overClose && canClose;
         lastMousePos = mousePos;
     }
 
@@ -738,14 +660,6 @@ LRESULT TabsCtrl::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 UpdateHover(tabUnderMouse);
                 return 0;
             }
-            int xHl = -1;
-            if (overClose && !isDragging) {
-                xHl = hl;
-            }
-            if (tabHighlightedClose != xHl) {
-                tabHighlightedClose = xHl;
-                HwndScheduleRepaint(hwnd);
-            }
             return 0;
         }
 
@@ -756,9 +670,6 @@ LRESULT TabsCtrl::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                     CloseTab(tabUnderMouse);
                 }
                 return 0;
-            }
-            if (overClose) {
-                tabBeingClosed = tabUnderMouse;
             }
             LRESULT res = 0;
             if (vroot) {
@@ -771,14 +682,6 @@ LRESULT TabsCtrl::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             bool isDragging = (GetCapture() == hwnd);
             if (isDragging) {
                 ReleaseCapture();
-            }
-            if (tabBeingClosed != -1 && tabUnderMouse == tabBeingClosed && overClose) {
-                // the ✕ is a control of its own: it runs CloseTab() from here
-                LRESULT res = 0;
-                if (vroot) {
-                    vroot->OnMessage(msg, wp, lp, res);
-                }
-                return 0;
             }
             // we don't always get WM_MOUSEMOVE before WM_LBUTTONUP so
             // update the hover state

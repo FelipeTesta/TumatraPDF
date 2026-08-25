@@ -1,5 +1,7 @@
 # TumatraPDF — Development Log
 
+- 2026-08-24 — refactor batch — AutoScroll logic extracted to src/AutoScroll.{h,cpp} (ETA math out of Toolbar, tick out of Canvas, commands thin), toolbar overlay brush hoisted + early-out, WM_SIZE ETA reposition width-gated, TabWnd::Paint StringFormat hoisted, ContrastOverlay alpha dedup.
+- 2026-08-24 — cleanup batch — dead close-icon code removed (TabsCtrl), dead custom-draw underline removed (Toolbar), orphan TumatraPDF-static.vcxproj deleted, MERGE.md corrected, misc lint fixes.
 - 2026-08-24 — toggle underline deterministic WM_PAINT overlay — NM_CUSTOMDRAW fallback proven visible via runtime diag (tests/tmp/tb-diag.ts).
 
 ## 2026-08-24 — Deterministic Toggle Underline (WM_PAINT overlay) + Runtime Proof

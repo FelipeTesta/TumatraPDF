@@ -99,6 +99,7 @@
 #include "TableOfContents.h"
 #include "Tabs.h"
 #include "Toolbar.h"
+#include "AutoScroll.h"
 #include "FindBar.h"
 #include "FindWindow.h"
 #include "Translations.h"
@@ -10129,50 +10130,18 @@ static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, L
             break;
 
         case CmdStartAutoScroll:
-            // start middle-click-style auto-scroll without needing a middle button
             StartAutoScrollAtCursor(win);
             break;
 
         case CmdAutoScrollToggle:
-            if (ShouldToggle(cmd, win->autoScrollActive)) {
-                win->autoScrollActive = !win->autoScrollActive;
-                if (win->autoScrollActive) {
-                    win->autoScrollAccum = 0;
-                    win->autoScrollStartTick = GetTickCount();
-                    RecalcAutoScrollEta(win);
-                    UpdateToolbarEtaText(win, win->autoScrollEtaMinutes);
-                    SetTimer(win->hwndCanvas, kContinuousAutoScrollTimerID, USER_TIMER_MINIMUM, nullptr);
-                } else {
-                    KillTimer(win->hwndCanvas, kContinuousAutoScrollTimerID);
-                    UpdateToolbarEtaText(win, -1);
-                }
-                SetToolbarButtonCheckedState(win, CmdAutoScrollToggle, win->autoScrollActive);
-            }
+            AutoScrollToggle(win);
             break;
-        case CmdAutoScrollSpeedUp: {
-            win->autoScrollSpeedMultiplier = std::min(win->autoScrollSpeedMultiplier * 1.2f, 10.0f);
-            // Persist the new multiplier
-            FileState* fs = gFileHistory.FindByPath(tab->filePath);
-            if (fs) {
-                fs->autoScrollSpeedMultiplier = win->autoScrollSpeedMultiplier;
-            }
-            if (win->autoScrollActive) {
-                RecalcAutoScrollEta(win);
-            }
+        case CmdAutoScrollSpeedUp:
+            AutoScrollSpeedAdjust(win, +1);
             break;
-        }
-        case CmdAutoScrollSpeedDown: {
-            win->autoScrollSpeedMultiplier = std::max(win->autoScrollSpeedMultiplier * 0.8f, 0.1f);
-            // Persist the new multiplier
-            FileState* fs = gFileHistory.FindByPath(tab->filePath);
-            if (fs) {
-                fs->autoScrollSpeedMultiplier = win->autoScrollSpeedMultiplier;
-            }
-            if (win->autoScrollActive) {
-                RecalcAutoScrollEta(win);
-            }
+        case CmdAutoScrollSpeedDown:
+            AutoScrollSpeedAdjust(win, -1);
             break;
-        }
 
         case CmdScrollUpHalfPage: {
             if (win->IsCurrentTabAbout()) {

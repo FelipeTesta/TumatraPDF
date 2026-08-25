@@ -46,7 +46,7 @@ struct TrimConfigWnd : Wnd {
 
 static TrimConfigWnd* gTrimConfigWnd = nullptr;
 
-void SafeDeleteTrimConfigDialog() {
+static void SafeDeleteTrimConfigDialog() {
     if (!gTrimConfigWnd) {
         return;
     }

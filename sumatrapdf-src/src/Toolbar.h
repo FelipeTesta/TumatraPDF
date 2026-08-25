@@ -11,7 +11,6 @@ void UpdateToolbarFindText(MainWindow*);
 void UpdateToolbarPageText(MainWindow*, int pageCount, bool updateOnly = false);
 void UpdateToolbarEtaText(MainWindow* win, int minutes);
 void RepositionEtaLabel(MainWindow* win);
-void RecalcAutoScrollEta(MainWindow* win);
 void UpdateFindbox(MainWindow*);
 void SetToolbarButtonEnableState(MainWindow*, int cmdId, bool isEnabled);
 void SetToolbarButtonCheckedState(MainWindow*, int cmdId, bool isChecked);

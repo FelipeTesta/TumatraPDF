@@ -7,7 +7,6 @@ LRESULT CALLBACK WndProcCanvas(HWND, UINT, WPARAM, LPARAM);
 LRESULT WndProcCanvasAbout(MainWindow*, HWND, UINT, WPARAM, LPARAM);
 bool IsDragDistance(int x1, int x2, int y1, int y2);
 void CancelDrag(MainWindow*);
-void StartAutoScrollAtCursor(MainWindow*);
 bool ShowImageOutlines();
 void ToggleShowImageOutlines();
 bool ShowFitContentArea();
@@ -47,3 +46,5 @@ void CreateContrastOverlay(MainWindow* win);
 void DestroyContrastOverlay(MainWindow* win);
 void UpdateContrastOverlay(MainWindow* win);
 void UpdateContrastOverlayOpacity(MainWindow* win);
+
+void SetCanvasCursor(MainWindow* win, LPWSTR cursorId);

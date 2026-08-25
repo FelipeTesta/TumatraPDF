@@ -35,6 +35,7 @@ extern "C" {
 #include "Menu.h"
 #include "SearchAndDDE.h"
 #include "Toolbar.h"
+#include "AutoScroll.h"
 #include "Tabs.h"
 #include "FindBar.h"
 #include "Translations.h"
@@ -48,6 +49,10 @@ extern "C" {
 // https://docs.microsoft.com/en-us/windows/win32/controls/toolbar-control-reference
 
 static int kButtonSpacingX = 4;
+
+// true if any toolbar toggle button (BTNS_CHECK) is currently checked;
+// used by WndProcToolbar WM_PAINT overlay to early-out when no highlight needed
+static bool gAnyToggleChecked = false;
 
 // distance between label and edit field
 constexpr int kTextPaddingRight = 6;
@@ -163,6 +168,20 @@ void SetToolbarButtonCheckedState(MainWindow* win, int cmdId, bool isChecked) {
     for (int i = 0; i < n; i++) {
         int idx = buttons[i];
         UpdateToolbarButtonStateByIdx(win->hwndToolbar, idx, isChecked, TBSTATE_CHECKED);
+    }
+    // update gAnyToggleChecked: scan all toggle buttons (BTNS_CHECK)
+    gAnyToggleChecked = false;
+    int count = (int)SendMessageW(win->hwndToolbar, TB_BUTTONCOUNT, 0, 0);
+    for (int i = 0; i < count; i++) {
+        TBBUTTONINFOW bi{};
+        bi.cbSize = sizeof(bi);
+        bi.dwMask = TBIF_BYINDEX | TBIF_STATE | TBIF_STYLE;
+        if (SendMessageW(win->hwndToolbar, TB_GETBUTTONINFO, i, (LPARAM)&bi)) {
+            if ((bi.fsStyle & BTNS_CHECK) && (bi.fsState & TBSTATE_CHECKED)) {
+                gAnyToggleChecked = true;
+                break;
+            }
+        }
     }
 }
 
@@ -795,24 +814,7 @@ static LRESULT CALLBACK ReBarWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM
                         }
                         custDraw->clrText = col;
                         SetTextColor(custDraw->nmcd.hdc, col);
-                        // request a postpaint stage so we can draw the underline below
-                        return isCheckedToggle ? (CDRF_NEWFONT | CDRF_NOTIFYPOSTPAINT) : CDRF_NEWFONT;
-                    }
-
-                    case CDDS_ITEMPOSTPAINT: {
-                        // white underline under checked toggle buttons (Trim/Crop/Autoscroll/
-                        // Contrast): fill a 3px strip along the bottom edge of the item rect.
-                        // The DC is clipped to the item, so the line stays strictly inside.
-                        HWND hwndToolbar = custDraw->nmcd.hdr.hwndFrom;
-                        int cmdId = (int)custDraw->nmcd.dwItemSpec;
-                        if (cmdId > 0 && SendMessageW(hwndToolbar, TB_ISBUTTONCHECKED, cmdId, 0)) {
-                            RECT rcItem = custDraw->nmcd.rc;
-                            RECT rcLine = {rcItem.left + 2, rcItem.bottom - 3, rcItem.right - 2, rcItem.bottom};
-                            HBRUSH brUnderline = CreateSolidBrush(ThemeWindowTextColor());
-                            FillRect(custDraw->nmcd.hdc, &rcLine, brUnderline);
-                            DeleteObject(brUnderline);
-                        }
-                        return CDRF_DODEFAULT;
+                        return CDRF_NEWFONT;
                     }
                 }
             }
@@ -926,26 +928,29 @@ static LRESULT CALLBACK WndProcToolbar(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp
     // region, so it survives BeginPaint validation inside the toolbar proc)
     if (WM_PAINT == msg) {
         LRESULT res = CallWindowProc(DefWndProcToolbar, hwnd, msg, wp, lp);
-        HDC hdc = GetDC(hwnd);
-        if (hdc) {
-            int count = (int)SendMessageW(hwnd, TB_BUTTONCOUNT, 0, 0);
-            for (int i = 0; i < count; i++) {
-                TBBUTTONINFOW bi{};
-                bi.cbSize = sizeof(bi);
-                bi.dwMask = TBIF_BYINDEX | TBIF_STATE;
-                if (SendMessageW(hwnd, TB_GETBUTTONINFO, i, (LPARAM)&bi)) {
-                    if (bi.fsState & TBSTATE_CHECKED) {
-                        RECT rc{};
-                        if (SendMessageW(hwnd, TB_GETITEMRECT, i, (LPARAM)&rc)) {
-                            RECT rcLine = {rc.left + 2, rc.bottom - 3, rc.right - 2, rc.bottom};
-                            HBRUSH br = CreateSolidBrush(ThemeWindowTextColor());
-                            FillRect(hdc, &rcLine, br);
-                            DeleteObject(br);
+        // early-out: no toggle buttons checked, no underline needed
+        if (gAnyToggleChecked) {
+            HDC hdc = GetDC(hwnd);
+            if (hdc) {
+                HBRUSH br = CreateSolidBrush(ThemeWindowTextColor());
+                int count = (int)SendMessageW(hwnd, TB_BUTTONCOUNT, 0, 0);
+                for (int i = 0; i < count; i++) {
+                    TBBUTTONINFOW bi{};
+                    bi.cbSize = sizeof(bi);
+                    bi.dwMask = TBIF_BYINDEX | TBIF_STATE;
+                    if (SendMessageW(hwnd, TB_GETBUTTONINFO, i, (LPARAM)&bi)) {
+                        if (bi.fsState & TBSTATE_CHECKED) {
+                            RECT rc{};
+                            if (SendMessageW(hwnd, TB_GETITEMRECT, i, (LPARAM)&rc)) {
+                                RECT rcLine = {rc.left + 2, rc.bottom - 3, rc.right - 2, rc.bottom};
+                                FillRect(hdc, &rcLine, br);
+                            }
                         }
                     }
                 }
+                DeleteObject(br);
+                ReleaseDC(hwnd, hdc);
             }
-            ReleaseDC(hwnd, hdc);
         }
         return res;
     }
@@ -955,7 +960,14 @@ static LRESULT CALLBACK WndProcToolbar(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp
     if (WM_SIZE == msg) {
         MainWindow* win = FindMainWindowByHwnd(hwnd);
         if (win && win->hwndEtaLabel && IsWindowVisible(win->hwndEtaLabel)) {
-            RepositionEtaLabel(win);
+            // skip if toolbar client width unchanged
+            RECT rcToolbar;
+            GetClientRect(hwnd, &rcToolbar);
+            static int lastToolbarWidth = 0;
+            if (rcToolbar.right != lastToolbarWidth) {
+                lastToolbarWidth = rcToolbar.right;
+                RepositionEtaLabel(win);
+            }
         }
     }
 
@@ -1213,41 +1225,6 @@ void RepositionEtaLabel(MainWindow* win) {
         return;
     }
     MoveWindow(hwndLabel, x, y, size.dx, size.dy, TRUE);
-}
-
-// Recomputes the autoscroll ETA (in minutes) from the remaining pages and the
-// current scroll speed. Called on autoscroll start and on speed / page change;
-// between those the timer just counts down by wall clock, so no per-second
-// recalculation is needed (and the toolbar is not invalidated repeatedly).
-void RecalcAutoScrollEta(MainWindow* win) {
-    if (!win->autoScrollActive) {
-        return;
-    }
-    auto dm = win->AsFixed();
-    if (!dm) {
-        return;
-    }
-    int remainingPages = dm->PageCount() - dm->CurrentPageNo();
-    float speed = win->autoScrollSpeed * win->autoScrollSpeedMultiplier;
-    if (remainingPages <= 0 || speed <= 0) {
-        win->autoScrollEtaMinutes = 0;
-    } else {
-        auto pageInfo = dm->GetPageInfo(dm->CurrentPageNo());
-        if (!pageInfo) {
-            win->autoScrollEtaMinutes = 0;
-        } else {
-            int pageHeightPx = (int)pageInfo->pos.dy;
-            float speedPxPerSec = speed * 100.0f;
-            float etaSec = (remainingPages * pageHeightPx) / speedPxPerSec;
-            win->autoScrollEtaMinutes = (int)(etaSec / 60.0f);
-            if (win->autoScrollEtaMinutes < 0) {
-                win->autoScrollEtaMinutes = 0;
-            }
-        }
-    }
-    win->autoScrollEtaStartTick = GetTickCount();
-    win->autoScrollEtaLastShown = -1;
-    win->autoScrollEtaPageNo = dm->CurrentPageNo();
 }
 
 void UpdateToolbarEtaText(MainWindow* win, int minutes) {

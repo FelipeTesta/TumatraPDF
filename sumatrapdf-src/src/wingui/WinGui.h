@@ -786,7 +786,6 @@ struct TabsCtrl : Wnd {
 
     struct MouseState {
         int tabIdx = -1;
-        bool overClose = false;
         // if true, mouse is over right half of the tab rectangle
         // used to make drag&drop determine a better position for drop
         bool inRightHalf = false;

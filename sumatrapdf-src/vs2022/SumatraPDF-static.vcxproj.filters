@@ -108,6 +108,9 @@
     <ClInclude Include="..\src\AppTools.h">
       <Filter>src</Filter>
     </ClInclude>
+    <ClInclude Include="..\src\AutoScroll.h">
+      <Filter>src</Filter>
+    </ClInclude>
     <ClInclude Include="..\src\AvifReader.h">
       <Filter>src</Filter>
     </ClInclude>
@@ -121,9 +124,6 @@
       <Filter>src</Filter>
     </ClInclude>
     <ClInclude Include="..\src\ChangeThemeDialog.h">
-      <Filter>src</Filter>
-    </ClInclude>
-    <ClInclude Include="..\src\TrimConfigDialog.h">
       <Filter>src</Filter>
     </ClInclude>
     <ClInclude Include="..\src\ChmDump.h">
@@ -429,6 +429,9 @@
     <ClInclude Include="..\src\TreeModel.h">
       <Filter>src</Filter>
     </ClInclude>
+    <ClInclude Include="..\src\TrimConfigDialog.h">
+      <Filter>src</Filter>
+    </ClInclude>
     <ClInclude Include="..\src\UpdateCheck.h">
       <Filter>src</Filter>
     </ClInclude>
@@ -581,6 +584,9 @@
     <ClCompile Include="..\src\AppUnitTests.cpp">
       <Filter>src</Filter>
     </ClCompile>
+    <ClCompile Include="..\src\AutoScroll.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
     <ClCompile Include="..\src\AvifReader.cpp">
       <Filter>src</Filter>
     </ClCompile>
@@ -597,9 +603,6 @@
       <Filter>src</Filter>
     </ClCompile>
     <ClCompile Include="..\src\ChangeThemeDialog.cpp">
-      <Filter>src</Filter>
-    </ClCompile>
-    <ClCompile Include="..\src\TrimConfigDialog.cpp">
       <Filter>src</Filter>
     </ClCompile>
     <ClCompile Include="..\src\ChmDump.cpp">
@@ -999,6 +1002,9 @@
       <Filter>src</Filter>
     </ClCompile>
     <ClCompile Include="..\src\TreeModel.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\TrimConfigDialog.cpp">
       <Filter>src</Filter>
     </ClCompile>
     <ClCompile Include="..\src\Uninstaller.cpp">

@@ -55,3 +55,6 @@ sumatrapdf-src/vs2022/Release/
 
 # TumatraPDF build output
 Compiled/
+
+# Upstream baseline comparison
+.tmp_compare/

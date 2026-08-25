@@ -60,6 +60,7 @@
 #include "TextToSpeech.h"
 #include "HomePage.h"
 #include "Toolbar.h"
+#include "AutoScroll.h"
 #include "Translations.h"
 
 #include "RefHover.h"
@@ -215,7 +216,7 @@ static bool SetLaserPointerCursor(MainWindow* win) {
 
 // canvas code sets its cursor through this instead of SetCursorCached() so
 // that the laser pointer can take over
-static void SetCanvasCursor(MainWindow* win, LPWSTR cursorId) {
+void SetCanvasCursor(MainWindow* win, LPWSTR cursorId) {
     if (SetLaserPointerCursor(win)) {
         return;
     }
@@ -2504,17 +2505,6 @@ static void ToggleAutoScroll(MainWindow* win, int x, int y) {
     OnMouseMiddleButtonDown(win, x, y, 0);
 }
 
-// CmdStartAutoScroll entry point: start/stop auto-scroll anchored at the current
-// cursor position, exactly as a middle-click there would. Move the cursor away
-// from that point to scroll; invoke again (or middle-click, or change focus) to stop.
-void StartAutoScrollAtCursor(MainWindow* win) {
-    if (!win || !win->AsFixed()) {
-        return;
-    }
-    Point pt = HwndGetCursorPos(win->hwndCanvas);
-    ToggleAutoScroll(win, pt.x, pt.y);
-}
-
 static void OnMouseMiddleButtonUp(MainWindow* win, WPARAM /*key*/) {
     // a middle-click that started auto-scrolling and then moved is a drag, and
     // releasing it ends the scroll; releasing without moving leaves auto-scroll
@@ -4506,85 +4496,11 @@ static void OnTimer(MainWindow* win, HWND hwnd, WPARAM timerId) {
             break;
 
         case kAutoScrollTimerID:
-            if (MouseAction::Scrolling == win->mouseAction) {
-                // xScrollSpeed/yScrollSpeed are in pixels per 20ms; this timer
-                // fires far more often, so move only the matching fraction each
-                // tick and carry the leftover sub-pixel amount, which keeps
-                // middle-click auto-scroll smooth instead of stepping (issue #2693)
-                constexpr float kBaseIntervalMs = 20.0f;
-                float scale = (float)USER_TIMER_MINIMUM / kBaseIntervalMs;
-                win->xScrollAccum += win->xScrollSpeed * scale;
-                win->yScrollAccum += win->yScrollSpeed * scale;
-                int dx = (int)win->xScrollAccum;
-                int dy = (int)win->yScrollAccum;
-                win->xScrollAccum -= (float)dx;
-                win->yScrollAccum -= (float)dy;
-                if (dx != 0 || dy != 0) {
-                    win->MoveDocBy(dx, dy);
-                }
-            } else {
-                KillTimer(hwnd, kAutoScrollTimerID);
-                win->xScrollSpeed = 0;
-                win->yScrollSpeed = 0;
-                win->xScrollAccum = 0;
-                win->yScrollAccum = 0;
-            }
+            AutoScrollMiddleClickTick(win, hwnd);
             break;
 
         case kContinuousAutoScrollTimerID:
-            // Ctrl held = pause auto-scroll temporarily
-            if (GetKeyState(VK_CONTROL) & 0x8000) {
-                return;
-            }
-            if (!win->autoScrollActive) {
-                KillTimer(hwnd, kContinuousAutoScrollTimerID);
-                return;
-            }
-            {
-                auto dm = win->AsFixed();
-                if (!dm) {
-                    return;
-                }
-                // Check end of document
-                if (dm->IsAtDocumentEnd()) {
-                    win->autoScrollActive = false;
-                    KillTimer(hwnd, kContinuousAutoScrollTimerID);
-                    UpdateToolbarEtaText(win, -1);
-                    SetToolbarButtonCheckedState(win, CmdAutoScrollToggle, false);
-                    return;
-                }
-                // Timer check
-                if (win->autoScrollTimerMinutes > 0 && win->autoScrollStartTick > 0) {
-                    DWORD elapsedMs = GetTickCount() - win->autoScrollStartTick;
-                    if (elapsedMs >= (DWORD)win->autoScrollTimerMinutes * 60 * 1000) {
-                        win->autoScrollActive = false;
-                        KillTimer(hwnd, kContinuousAutoScrollTimerID);
-                        UpdateToolbarEtaText(win, -1);
-                        SetToolbarButtonCheckedState(win, CmdAutoScrollToggle, false);
-                        return;
-                    }
-                }
-                // Scroll
-                float speed = win->autoScrollSpeed * win->autoScrollSpeedMultiplier;
-                win->autoScrollAccum += speed;
-                int dy = (int)win->autoScrollAccum;
-                if (dy != 0) {
-                    win->autoScrollAccum -= dy;
-                    win->MoveDocBy(0, dy);
-                }
-                // ETA: recalc on page change, countdown by wall clock between
-                if (dm->CurrentPageNo() != win->autoScrollEtaPageNo) {
-                    RecalcAutoScrollEta(win);
-                }
-                int remaining = win->autoScrollEtaMinutes - (int)((GetTickCount() - win->autoScrollEtaStartTick) / 60000);
-                if (remaining < 0) {
-                    remaining = 0;
-                }
-                if (remaining != win->autoScrollEtaLastShown) {
-                    win->autoScrollEtaLastShown = remaining;
-                    UpdateToolbarEtaText(win, remaining);
-                }
-            }
+            AutoScrollContinuousTick(win, hwnd);
             break;
 
         case kHideCursorTimerID:

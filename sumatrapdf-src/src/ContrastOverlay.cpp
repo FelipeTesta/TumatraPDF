@@ -6,6 +6,11 @@ License: GPLv3 */
 #include "MainWindow.h"
 #include "Canvas.h"
 
+// Convert opacity percentage (0-100) to BYTE alpha (0-255)
+static BYTE AlphaFromOpacity(int opacity) {
+    return (BYTE)((opacity * 255) / 100);
+}
+
 static LRESULT CALLBACK WndProcContrastOverlay(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     MainWindow* win = (MainWindow*)GetWindowLongPtrW(hwnd, GWLP_USERDATA);
     if (!win) {
@@ -69,7 +74,7 @@ void CreateContrastOverlay(MainWindow* win) {
     win->hwndContrastOverlay = hwndOverlay;
 
     // Set initial transparency
-    BYTE alpha = (BYTE)((win->contrastOpacity * 255) / 100);
+    BYTE alpha = AlphaFromOpacity(win->contrastOpacity);
     SetLayeredWindowAttributes(hwndOverlay, 0, alpha, LWA_ALPHA);
 
     // Place above canvas in z-order
@@ -99,7 +104,7 @@ void UpdateContrastOverlayOpacity(MainWindow* win) {
     if (!win->hwndContrastOverlay) {
         return;
     }
-    BYTE alpha = (BYTE)((win->contrastOpacity * 255) / 100);
+    BYTE alpha = AlphaFromOpacity(win->contrastOpacity);
     SetLayeredWindowAttributes(win->hwndContrastOverlay, 0, alpha, LWA_ALPHA);
     InvalidateRect(win->hwndContrastOverlay, nullptr, TRUE);
 }
