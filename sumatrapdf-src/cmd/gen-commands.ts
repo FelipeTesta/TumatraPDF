@@ -295,6 +295,14 @@ export const commands = [
     "CmdViewportCropToggle", "Toggle Viewport Crop",
     "CmdMarginTrimToggle", "Toggle margin trimming",
     "CmdTrimConfig", "Configure margin trimming",
+    "CmdArchScale", "Toggle Arch Scale Tool",
+    "CmdArchMeasure", "Toggle Arch Measure Tool",
+    "CmdArchScaleApply", "Apply Arch Scale",
+    "CmdArchClear", "Clear Arch Measurements",
+    "CmdArchToolsToggle", "Toggle Arch Tools Toolbar",
+    "CmdArchResetScale", "Reset Arch Scale",
+    "CmdAutoScrollTimerToggle", "Toggle Auto-Scroll Timer",
+    "CmdAutoScrollTimerEdit", "Edit Auto-Scroll Timer Duration",
     "CmdNone", "Do nothing",
 ];
 

@@ -42,6 +42,7 @@
 #include "WindowTab.h"
 #include "TableOfContents.h"
 #include "StressTesting.h"
+#include "Toolbar.h"
 #include "uia/Provider.h"
 
 static void SafeDeleteTabsCtrl(TabsCtrl* tabsCtrl) {
@@ -197,6 +198,7 @@ MainWindow::~MainWindow() {
     delete favLayout;
 
     DestroyAIChatPanel(this);
+    DestroyToolbar2(this);
 
     delete sidebarSplitter;
     delete favSplitter;

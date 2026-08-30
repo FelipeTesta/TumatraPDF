@@ -635,6 +635,18 @@ static MenuDef menuDefNewTools[] = {
         CmdTrimConfig,
     },
     {
+        kMenuSeparator,
+        0,
+    },
+    {
+        _TRN("Arch &Scale"),
+        CmdArchScale,
+    },
+    {
+        _TRN("Arch &Measure"),
+        CmdArchMeasure,
+    },
+    {
         nullptr,
         0,
     },

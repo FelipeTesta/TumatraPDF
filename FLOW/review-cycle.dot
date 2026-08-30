@@ -1,0 +1,16 @@
+digraph ReviewCycle {
+    rankdir=TB;
+    node [shape=box, style=rounded];
+    start [label="Session start", fillcolor="#c8e6c9", style=filled];
+    check [label="Read FLOW/review-cycle.dot\nLAST REVIEW date", fillcolor="#bbdefb", style=filled];
+    recent [label="< 30 days\nproceed with task", fillcolor="#c8e6c9", style=filled];
+    old [label=">= 30 days\nALERT user: run review", fillcolor="#fff9c4", style=filled];
+    audit [label="Review: lemma memory audit\nupdate guides, check stack\n(Opencode Go + Zen)", fillcolor="#e1bee7", style=filled];
+    update [label="Update LAST REVIEW date\nresume task", fillcolor="#c8e6c9", style=filled];
+    start -> check;
+    check -> recent [label="recent"];
+    check -> old [label="stale"];
+    old -> audit;
+    audit -> update;
+    update -> recent;
+}

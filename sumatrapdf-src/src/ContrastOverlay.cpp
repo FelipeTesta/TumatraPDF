@@ -5,6 +5,13 @@ License: GPLv3 */
 #include "Settings.h"
 #include "MainWindow.h"
 #include "Canvas.h"
+#include "DocController.h"
+#include "MarkdownModel.h"
+#include "wingui/UIModels.h"
+#include "wingui/Layout.h"
+#include "wingui/WinGui.h"
+#include "wingui/WebView.h"
+#include "SumatraLog.h"
 
 // Convert opacity percentage (0-100) to BYTE alpha (0-255)
 static BYTE AlphaFromOpacity(int opacity) {
@@ -41,6 +48,10 @@ void CreateContrastOverlay(MainWindow* win) {
         return;
     }
     if (!win->hwndCanvas) {
+        return;
+    }
+    // No-op for webview mode (markdown) - contrast is handled via in-page overlay
+    if (win->AsMarkdown()) {
         return;
     }
     // Get canvas position and size
@@ -101,6 +112,39 @@ void UpdateContrastOverlay(MainWindow* win) {
 }
 
 void UpdateContrastOverlayOpacity(MainWindow* win) {
+    // Native CSS style approach for markdown contrast (replaces WebView overlay div)
+    if (win->AsMarkdown()) {
+        auto mm = win->AsMarkdown();
+        struct WebviewWnd* wv = mm->GetWebviewWnd();
+        if (wv) {
+            int opacity = win->contrastOpacity;
+            float cssOpacity = opacity / 100.0f;
+
+            if (win->contrastEnabled) {
+                // Set dark background and gray text directly on body via inline styles
+                // Using gray/dark shades based on contrast opacity (no invert filter)
+                TempStr js = fmt(
+                    "document.body.style.backgroundColor = '#%02x%02x%02x';"
+                    "document.body.style.color = '#%02x%02x%02x';",
+                    (int)(255 * (1.0f - cssOpacity)),  // bright text on dark background
+                    (int)(255 * (1.0f - cssOpacity)),
+                    (int)(255 * (1.0f - cssOpacity)),
+                    (int)(255 * cssOpacity),           // text color at full opacity
+                    (int)(255 * cssOpacity),
+                    (int)(255 * cssOpacity));
+                wv->Eval(js);
+            } else {
+                // Remove inline styles when contrast is OFF
+                TempStr js = fmt(
+                    "document.body.style.backgroundColor = '';"
+                    "document.body.style.color = '';");
+                wv->Eval(js);
+            }
+        }
+        LogInfo("[md] contrast opacity -> %d", win->contrastOpacity);
+        return;
+    }
+    // Fixed-page path: update layered window attributes (unchanged)
     if (!win->hwndContrastOverlay) {
         return;
     }

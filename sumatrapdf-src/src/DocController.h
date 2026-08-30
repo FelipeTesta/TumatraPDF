@@ -51,6 +51,16 @@ struct DocControllerCallback {
     // the controller replaced its TocTree (built in the background): show the
     // new one. Must not return while anything still points into the old tree.
     virtual void TocChanged(DocController*) = 0;
+
+    // called when continuous auto-scroll reaches the bottom of a webview document
+    virtual void OnAutoScrollBottom() {}
+
+    // called periodically during webview auto-scroll with remaining pixels to bottom
+    virtual void OnAutoScrollProgress(int remainingPx) {}
+
+    // get contrast overlay state for webview documents
+    virtual bool GetContrastEnabled() const { return false; }
+    virtual int GetContrastOpacity() const { return 50; }
 };
 
 struct DocController {

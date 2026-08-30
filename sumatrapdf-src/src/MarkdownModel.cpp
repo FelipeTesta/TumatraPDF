@@ -12,6 +12,8 @@
 #include "wingui/HtmlWindow.h"
 #include "wingui/BrowserDocView.h"
 #include "wingui/UIModels.h"
+#include "wingui/Layout.h"
+#include "wingui/WinGui.h"
 
 #include "Settings.h"
 #include "DisplayMode.h"
@@ -24,6 +26,8 @@
 #include "EmbeddedResources.h"
 #include "MarkdownModel.h"
 #include "MarkdownToc.h"
+#include "wingui/WebView.h"
+#include "SumatraLog.h"
 
 constexpr const char* kMdVirtualHost = "https://sumatrapdf.markdown/";
 constexpr int kMdVirtualHostLen = sizeof("https://sumatrapdf.markdown/") - 1;
@@ -345,6 +349,13 @@ bool MarkdownModel::CanFindInPage() const {
     return docView && docView->CanFindInPage();
 }
 
+struct WebviewWnd* MarkdownModel::GetWebviewWnd() const {
+    if (docView) {
+        return docView->GetWebviewWnd();
+    }
+    return nullptr;
+}
+
 void MarkdownModel::FindStart(Str term, bool matchCase, bool wholeWord, int gen) {
     if (docView) {
         docView->FindStart(term, matchCase, wholeWord, gen, -1);
@@ -392,6 +403,53 @@ void MarkdownModel::OnFindResult(int gen, int current, int total) {
 
 void MarkdownModel::OnFindAllResult(Str payload) {
     cb->FindAllResultReceived(payload);
+}
+
+void MarkdownModel::OnAutoScrollBottom() {
+    if (cb) {
+        cb->OnAutoScrollBottom();
+    }
+}
+
+void MarkdownModel::OnAutoScrollProgress(int remainingPx) {
+    if (cb) {
+        cb->OnAutoScrollProgress(remainingPx);
+    }
+}
+
+void MarkdownModel::RestoreContrastOverlay() {
+    if (!cb) {
+        return;
+    }
+    bool enabled = cb->GetContrastEnabled();
+    int opacity = cb->GetContrastOpacity();
+    struct WebviewWnd* wv = GetWebviewWnd();
+    if (!wv) {
+        return;
+    }
+    float cssOpacity = opacity / 100.0f;
+
+    if (enabled) {
+        // Set dark background and gray text directly on body via inline styles
+        // Using gray/dark shades based on contrast opacity (no invert filter)
+        TempStr js = fmt(
+            "document.body.style.backgroundColor = '#%02x%02x%02x';"
+            "document.body.style.color = '#%02x%02x%02x';",
+            (int)(255 * (1.0f - cssOpacity)),  // bright text on dark background
+            (int)(255 * (1.0f - cssOpacity)),
+            (int)(255 * (1.0f - cssOpacity)),
+            (int)(255 * cssOpacity),           // text color at full opacity
+            (int)(255 * cssOpacity),
+            (int)(255 * cssOpacity));
+        wv->Eval(js);
+    } else {
+        // Remove inline styles when contrast is OFF
+        TempStr js = fmt(
+            "document.body.style.backgroundColor = '';"
+            "document.body.style.color = '';");
+        wv->Eval(js);
+    }
+    LogInfo("[md] contrast enabled=%d opacity=%d", enabled, opacity);
 }
 
 void MarkdownModel::SelectAll() const {
@@ -594,11 +652,32 @@ MarkdownModel* MarkdownModel::AsMarkdown() {
 }
 
 void MarkdownModel::SetZoomVirtual(float zoom, Point* /*fixPt*/) {
-    if (zoom > 0) {
+    // Handle fit-width/fit-page etc. modes (negative values that are valid zoom modes)
+    // Previously, kZoomFitWidth (-2) was rejected because zoom <= 0 check came first.
+    // Now we check IsValidZoom first so fit modes are preserved.
+    if (zoom <= 0 && !IsValidZoom(zoom)) {
+        zoom = 100.0f;
+    } else if (zoom > 0) {
         zoom = limitValue(zoom, kZoomMin, kZoomMax);
     }
-    if (zoom <= 0 || !IsValidZoom(zoom)) {
-        zoom = 100.0f;
+    // For fit modes in WebView2, use JavaScript to set zoom factor via CSS zoom property
+    if (docView && (kZoomFitPage == zoom || kZoomFitWidth == zoom || kZoomFitHeight == zoom || kZoomFitContent == zoom)) {
+        struct WebviewWnd* wv = GetWebviewWnd();
+        if (wv) {
+            float jsZoom = 100.0f;
+            if (kZoomFitWidth == zoom) {
+                // Approximate fit-width: set default zoom; users can adjust with +/- buttons
+                jsZoom = 100.0f;
+            } else if (kZoomFitPage == zoom) {
+                jsZoom = 100.0f;
+            } else if (kZoomFitContent == zoom) {
+                jsZoom = 150.0f; // approximate fit-content
+            } else if (kZoomFitHeight == zoom) {
+                jsZoom = 100.0f;
+            }
+            TempStr js = fmt("document.body.style.zoom = '%f';", jsZoom / 100.0f);
+            wv->Eval(js);
+        }
     }
     ZoomTo(zoom);
     zoomVirtual = zoom;
@@ -796,6 +875,11 @@ void MarkdownModel::OnDocumentComplete(Str url) {
     if (cb && pageNo > 0) {
         cb->PageNoChanged(this, pageNo);
     }
+
+    // Restore contrast overlay for webview mode
+    RestoreContrastOverlay();
+
+    LogInfo("[md] doc complete");
 
     // finish a pending "jump to a match on another page": the fresh document
     // has no find state, so re-run the search and go to the requested match

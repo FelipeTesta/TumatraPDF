@@ -15,6 +15,7 @@
 
 #include "AppTools.h"
 #include "Accelerators.h"
+#include "SumatraLog.h"
 
 constexpr const char* kChmVirtualHost = "https://sumatrapdf.chm/";
 constexpr const WCHAR* kChmVirtualHostW = L"https://sumatrapdf.chm/";
@@ -292,6 +293,20 @@ void BrowserWebviewWnd::OnJsNotifyCb(void* ctx, Str method, Str paramsJson) {
         // downstream (BrowserFindAllResultReceived) still parses the flat
         // "<gen> <total> <recs>" form, so reassemble it here
         self->cb->OnFindAllResult(fmt("%d %d %s", st.Int(0), st.Int(1), st.Text(2)));
+        return;
+    }
+    if (str::Eq(method, "autoscrollBottom")) {
+        if (self->cb) {
+            self->cb->OnAutoScrollBottom();
+        }
+        LogInfo("[webview] autoscrollBottom notify");
+        return;
+    }
+    if (str::Eq(method, "autoscrollProgress")) {
+        if (self->cb) {
+            int remainingPx = st.Int(0);
+            self->cb->OnAutoScrollProgress(remainingPx);
+        }
         return;
     }
     logf("BrowserOnJsNotify: unhandled '%s'\n", method);

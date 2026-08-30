@@ -22,27 +22,7 @@
 #include "SumatraPDF.h"
 #include "Translations.h"
 #include "TrimConfigDialog.h"
-
-struct TrimConfigWnd : Wnd {
-    MainWindow* win = nullptr;
-    HFONT font = nullptr;
-    Edit* editTop = nullptr;
-    Edit* editBottom = nullptr;
-    Button* btnSave = nullptr;
-    Button* btnReset = nullptr;
-    Button* btnCancel = nullptr;
-    int savedTop = 0, savedBottom = 0; // values at dialog open (for cancel)
-    bool suppressEditUpdate = false;   // prevents feedback loop when syncing edits
-
-    bool Create(MainWindow* mainWin);
-    void OnEditTopChanged();
-    void OnEditBottomChanged();
-    void OnReset();
-    void OnSave();
-    void OnCancel();
-    void SyncEditsFromLine();
-    void ScheduleDelete();
-};
+#include "Theme.h"
 
 static TrimConfigWnd* gTrimConfigWnd = nullptr;
 
@@ -160,6 +140,10 @@ void TrimConfigWnd::OnSave() {
         gRenderCache->FreeForDisplayModel(trimDm);
     }
     HwndRepaintNow(win->hwndCanvas);
+    // Clear modeless dialog registration
+    if (GetCurrentModelessDialog() == hwnd) {
+        SetCurrentModelessDialog(nullptr);
+    }
     ScheduleDelete();
 }
 
@@ -172,6 +156,10 @@ void TrimConfigWnd::OnCancel() {
         trimDm->RelayoutKeepingView();
     }
     HwndRepaintNow(win->hwndCanvas);
+    // Clear modeless dialog registration
+    if (GetCurrentModelessDialog() == hwnd) {
+        SetCurrentModelessDialog(nullptr);
+    }
     ScheduleDelete();
 }
 
@@ -329,7 +317,44 @@ bool TrimConfigWnd::Create(MainWindow* mainWin) {
     RedrawWindow(hwnd, nullptr, nullptr, RDW_ERASE | RDW_INVALIDATE | RDW_ALLCHILDREN);
     HwndSetFocus(hwnd);
     HwndRepaintNow(win->hwndCanvas); // show both red lines immediately
+
+    // Register as modeless dialog for IsDialogMessage (enables Enter -> default button)
+    isDialog = true;
+    SetCurrentModelessDialog(hwnd);
+
+    // Apply dark mode to popup window (title bar, controls)
+    ApplyDarkModeToPopupWindow(hwnd);
+
     return true;
+}
+
+LRESULT TrimConfigWnd::OnMessageReflect(UINT msg, WPARAM wparam, LPARAM /*lparam*/) {
+    if (msg == WM_CTLCOLORDLG || msg == WM_CTLCOLORSTATIC) {
+        HDC hdc = (HDC)wparam;
+        COLORREF bgColor = ThemeWindowControlBackgroundColor();
+        COLORREF textColor = ThemeWindowTextColor();
+        SetBkColor(hdc, bgColor);
+        SetTextColor(hdc, textColor);
+        return (LRESULT)BackgroundBrush();
+    }
+    return 0;
+}
+
+LRESULT TrimConfigWnd::WndProc(HWND hwndIn, UINT msg, WPARAM wp, LPARAM lp) {
+    if (msg == WM_ACTIVATE) {
+        if (LOWORD(wp) == WA_INACTIVE) {
+            if (GetCurrentModelessDialog() == hwndIn) {
+                SetCurrentModelessDialog(nullptr);
+            }
+        } else {
+            SetCurrentModelessDialog(hwndIn);
+        }
+    } else if (msg == WM_DESTROY) {
+        if (GetCurrentModelessDialog() == hwndIn) {
+            SetCurrentModelessDialog(nullptr);
+        }
+    }
+    return WndProcDefault(hwndIn, msg, wp, lp);
 }
 
 void ShowTrimConfigDialog(MainWindow* win) {

@@ -24,6 +24,7 @@ struct TocTree;
 struct TocItem;
 struct FindBarWnd;
 struct FindWindowWnd;
+struct ArchScaleDialogWnd;
 
 // one link numbered by keyboard link following (CmdToggleKeyboardLinkFollowing).
 // stored in page coordinates so the badges stay glued to their links while
@@ -40,6 +41,14 @@ struct FindMatch {
     int endPage = 0;
     int endGlyph = 0;
     Str snippet; // UTF-8, owned (freed when findMatches is rebuilt)
+};
+
+// Arch Tools measurement record
+struct ArchMeasurement {
+    float p1x, p1y, p2x, p2y; // PAGE coords of the two points
+    float x, y, len;          // measured values in real units (or page units if no scale)
+    int unit;                 // 0=mm,1=cm,2=m,3=in,4=ft
+    bool scaled;              // true if values are in real units (scale applied)
 };
 
 // factor by how large the non-maximized caption should be in relation to the tabbar
@@ -320,7 +329,7 @@ struct MainWindow {
     // --- begin auto-scroll feature ---
     bool autoScrollActive = false;
     float autoScrollSpeed = 2.0f; // pixels per tick
-    float autoScrollSpeedMultiplier = 1.0f;
+    float autoScrollSpeedMultiplier = 0.008f;
     float autoScrollAccum = 0.0f;
     int autoScrollEtaMinutes = 0;      // ETA in minutes, computed on demand
     DWORD autoScrollEtaStartTick = 0;  // countdown base (reset on each recalc)
@@ -328,8 +337,14 @@ struct MainWindow {
     int autoScrollEtaPageNo = 0;       // page ETA was computed for
     int autoScrollEtaToolbarWidth = 0; // cached toolbar width (reposition only on resize)
     HWND hwndEtaLabel = nullptr;
-    DWORD autoScrollTimerMinutes = 0; // 0 = no timer
+    HWND hwndSpeedLabel = nullptr;
+    DWORD autoScrollTimerMinutes = 0; // 0 = no timer (effective value used by tick)
+    DWORD autoScrollTimerMinutesSetting = 30; // configured minutes from UI input (default 30)
+    bool autoScrollTimerEnabled = false;      // timer checkbox state
     DWORD autoScrollStartTick = 0;
+    HWND hwndTimerCheck = nullptr;
+    HWND hwndTimerLabel = nullptr;
+    HWND hwndTimerEdit = nullptr;
     // --- end auto-scroll feature ---
 
     // --- trim config dialog state ---
@@ -339,6 +354,47 @@ struct MainWindow {
     int trimConfigBottom = 0;   // pending bottom distance (page units)
     bool trimDragging = false;  // true while dragging a red line
     // --- end trim config dialog state ---
+
+    // --- arch tools state ---
+    int archToolMode = 0;        // 0=off, 1=scale, 2=measure
+    int archUnit = 2;            // 0=mm,1=cm,2=m,3=in,4=ft
+    float archScaleFactor = 0.0f; // page units per real unit
+    float archScaleAnchorX = 0.0f;
+    float archScaleAnchorY = 0.0f;
+    bool archScaleSet = false;
+    bool archScaleLineDefined = false; // true when a scale line has been drawn (for dialog ✅)
+    Point archPoint1;            // screen coords during draw
+    Point archPoint2;
+    int archDragLine = 0;        // 0 none, 1 first point placed, 2 done
+    bool archSnap = true;        // default true
+    Vec<ArchMeasurement> archMeasurements;
+    // Per-document measurements store (not persisted to disk, discarded on close)
+    struct ArchMeasurementsByDoc {
+        Str path;
+        Vec<ArchMeasurement> measurements;
+        ArchMeasurementsByDoc() = default;
+        ArchMeasurementsByDoc(Str p) : path(str::Dup(p)) {}
+        ~ArchMeasurementsByDoc() { str::Free(path); }
+    };
+    Vec<ArchMeasurementsByDoc> archMeasurementsByDoc;
+    // Persistent scale line endpoints in PAGE coordinates
+    float archScaleLineP1x = 0.0f;
+    float archScaleLineP1y = 0.0f;
+    float archScaleLineP2x = 0.0f;
+    float archScaleLineP2y = 0.0f;
+    // Floating scale dialog
+    HWND hwndArchScaleDialog = nullptr;
+    ArchScaleDialogWnd* archScaleDialog = nullptr;
+    // Drag tracking for click-click vs click-drag
+    Point archDragStartPos;
+    bool archDragMoved = false;
+    // New UI: second toolbar (below main toolbar)
+    bool archToolsOn = false;        // second toolbar open + lines visible
+    bool archEraseMode = false;      // transient: 'e' held + drawing on
+    Point archMousePos{0, 0};        // track mouse for red erase overlay
+    HWND hwndReBar2 = nullptr;       // second toolbar rebar
+    HWND hwndToolbar2 = nullptr;     // second toolbar
+    // --- end arch tools state ---
 
     // true while selecting and when CurrentTab()->selectionOnPage != nullptr
     bool showSelection = false;
@@ -442,6 +498,7 @@ struct MainWindow {
             bool showMenuBarRebar = false;
             bool aiChatVisible = false;
             int aiChatDx = 0;
+            bool archToolsOn = false;
         };
         Layout layout; // last applied layout state
         // desired visibility of the sidebar / AI chat panels; applied
@@ -613,6 +670,11 @@ struct MainWindow {
     void DeleteToolTip() const;
 
     bool CreateUIAProvider();
+
+    // Arch Tools per-document measurements
+    void ArchSaveMeasurementsForCurrentTab();
+    void ArchRestoreMeasurementsForTab(WindowTab* tab);
+    void ArchClearMeasurementsForPath(Str path);
 };
 
 bool HasOpenedDocuments(MainWindow*);

@@ -65,12 +65,15 @@
 #include "Translations.h"
 
 #include "RefHover.h"
+#include "MarkdownModel.h"
+#include "wingui/WebView.h"
+#include "SumatraLog.h"
 
 static constexpr float kBaseIntervalMs = 20.0f;
 static constexpr float kMaxSpeedMultiplier = 10.0f;
-static constexpr float kMinSpeedMultiplier = 0.1f;
-static constexpr float kSpeedUpFactor = 1.2f;
-static constexpr float kSpeedDownFactor = 0.8f;
+static constexpr float kMinSpeedMultiplier = 0.008f;
+static constexpr float kSpeedUpFactor = 1.5f;
+static constexpr float kSpeedDownFactor = 0.6666667f; // 2/3 step down
 
 // Calculate effective scroll speed in pixels per second
 float AutoScrollPxPerSec(MainWindow* win) {
@@ -111,21 +114,33 @@ void RecalcAutoScrollEta(MainWindow* win) {
 
 // Toggle continuous auto-scroll on/off
 void AutoScrollToggle(MainWindow* win) {
-    if (!win || !win->AsFixed()) {
+    if (!win) {
+        return;
+    }
+    // Accept both fixed-page (PDF/ebook) and webview (markdown) documents
+    auto dm = win->AsFixed();
+    auto mm = win->AsMarkdown();
+    if (!dm && !mm) {
         return;
     }
     win->autoScrollActive = !win->autoScrollActive;
     if (win->autoScrollActive) {
         win->autoScrollAccum = 0;
         win->autoScrollStartTick = GetTickCount();
+        // Feed the timer stop-logic: use configured minutes if timer enabled, else 0 (no limit)
+        win->autoScrollTimerMinutes = win->autoScrollTimerEnabled ? win->autoScrollTimerMinutesSetting : 0;
         RecalcAutoScrollEta(win);
         UpdateToolbarEtaText(win, win->autoScrollEtaMinutes);
         SetTimer(win->hwndCanvas, kContinuousAutoScrollTimerID, USER_TIMER_MINIMUM, nullptr);
+        const char* mode = dm ? "fixed" : "webview";
+        LogInfo("[autoscroll] start mode=%s speed=%.2f timerMinutes=%u", mode, win->autoScrollSpeedMultiplier, win->autoScrollTimerMinutes);
     } else {
         KillTimer(win->hwndCanvas, kContinuousAutoScrollTimerID);
         UpdateToolbarEtaText(win, -1);
+        LogInfo("[autoscroll] stop");
     }
     SetToolbarButtonCheckedState(win, CmdAutoScrollToggle, win->autoScrollActive);
+    UpdateToolbarSpeedLabel(win);
 }
 
 // Adjust continuous auto-scroll speed multiplier
@@ -150,6 +165,7 @@ void AutoScrollSpeedAdjust(MainWindow* win, int direction) {
     if (win->autoScrollActive) {
         RecalcAutoScrollEta(win);
     }
+    UpdateToolbarSpeedLabel(win);
 }
 
 // Start middle-click-style auto-scroll at current cursor position
@@ -179,47 +195,104 @@ void AutoScrollContinuousTick(MainWindow* win, HWND hwnd) {
         return;
     }
     auto dm = win->AsFixed();
-    if (!dm) {
-        return;
-    }
-    // Check end of document
-    if (dm->IsAtDocumentEnd()) {
-        win->autoScrollActive = false;
-        KillTimer(hwnd, kContinuousAutoScrollTimerID);
-        UpdateToolbarEtaText(win, -1);
-        SetToolbarButtonCheckedState(win, CmdAutoScrollToggle, false);
-        return;
-    }
-    // Timer check
-    if (win->autoScrollTimerMinutes > 0 && win->autoScrollStartTick > 0) {
-        DWORD elapsedMs = GetTickCount() - win->autoScrollStartTick;
-        if (elapsedMs >= (DWORD)win->autoScrollTimerMinutes * 60 * 1000) {
+    if (dm) {
+        // Fixed-page path (PDF, ebook, etc.)
+        // Check end of document
+        if (dm->IsAtDocumentEnd()) {
             win->autoScrollActive = false;
             KillTimer(hwnd, kContinuousAutoScrollTimerID);
             UpdateToolbarEtaText(win, -1);
             SetToolbarButtonCheckedState(win, CmdAutoScrollToggle, false);
             return;
         }
-    }
-    // Scroll
-    float speed = win->autoScrollSpeed * win->autoScrollSpeedMultiplier;
-    win->autoScrollAccum += speed;
-    int dy = (int)win->autoScrollAccum;
-    if (dy != 0) {
-        win->autoScrollAccum -= dy;
-        win->MoveDocBy(0, dy);
-    }
-    // ETA: recalc on page change, countdown by wall clock between
-    if (dm->CurrentPageNo() != win->autoScrollEtaPageNo) {
-        RecalcAutoScrollEta(win);
-    }
-    int remaining = win->autoScrollEtaMinutes - (int)((GetTickCount() - win->autoScrollEtaStartTick) / 60000);
-    if (remaining < 0) {
-        remaining = 0;
-    }
-    if (remaining != win->autoScrollEtaLastShown) {
-        win->autoScrollEtaLastShown = remaining;
-        UpdateToolbarEtaText(win, remaining);
+        // Timer check
+        if (win->autoScrollTimerMinutes > 0 && win->autoScrollStartTick > 0) {
+            DWORD elapsedMs = GetTickCount() - win->autoScrollStartTick;
+            if (elapsedMs >= (DWORD)win->autoScrollTimerMinutes * 60 * 1000) {
+                win->autoScrollActive = false;
+                KillTimer(hwnd, kContinuousAutoScrollTimerID);
+                UpdateToolbarEtaText(win, -1);
+                SetToolbarButtonCheckedState(win, CmdAutoScrollToggle, false);
+                return;
+            }
+        }
+        // Scroll
+        float speed = win->autoScrollSpeed * win->autoScrollSpeedMultiplier;
+        win->autoScrollAccum += speed;
+        int dy = (int)win->autoScrollAccum;
+        if (dy != 0) {
+            win->autoScrollAccum -= dy;
+            win->MoveDocBy(0, dy);
+        }
+        // ETA: recalc on page change, countdown by wall clock between
+        if (dm->CurrentPageNo() != win->autoScrollEtaPageNo) {
+            RecalcAutoScrollEta(win);
+        }
+        int remaining = win->autoScrollEtaMinutes - (int)((GetTickCount() - win->autoScrollEtaStartTick) / 60000);
+        if (remaining < 0) {
+            remaining = 0;
+        }
+        if (remaining != win->autoScrollEtaLastShown) {
+            win->autoScrollEtaLastShown = remaining;
+            UpdateToolbarEtaText(win, remaining);
+        }
+    } else {
+        // WebView2 path (markdown)
+        auto mm = win->AsMarkdown();
+        if (!mm) {
+            return;
+        }
+        struct WebviewWnd* wv = mm->GetWebviewWnd();
+        if (!wv) {
+            return;
+        }
+        static bool sLoggedWebviewTickStart = false;
+        if (!sLoggedWebviewTickStart) {
+            sLoggedWebviewTickStart = true;
+            LogInfo("[autoscroll] webview tick start");
+        }
+        // Scroll by the same pixel delta used for fixed pages
+        float speed = win->autoScrollSpeed * win->autoScrollSpeedMultiplier;
+        win->autoScrollAccum += speed;
+        int dy = (int)win->autoScrollAccum;
+        if (dy != 0) {
+            win->autoScrollAccum -= dy;
+            TempStr js = fmt("window.scrollBy(0, %d);", dy);
+            wv->Eval(js);
+        }
+        // Stop-at-bottom detection: one-shot Eval to check scroll position
+        // We piggyback on the existing scroll notification bridge (__sumatra__.notify)
+        // by sending a one-shot check. The result comes async via jsNotify.
+        // For simplicity, we also check synchronously via a one-shot eval that
+        // posts a notify we can handle. But since jsNotify is async, we use a
+        // simpler approach: check if scrollY + innerHeight >= scrollHeight - 2px.
+        // We'll do this check periodically (every few ticks) to avoid overhead.
+        static int sBottomCheckCounter = 0;
+        if (++sBottomCheckCounter >= 5) { // check every ~5 ticks (~100ms)
+            sBottomCheckCounter = 0;
+            TempStr js = fmt(
+                "(function(){var y=window.scrollY||window.pageYOffset||0;"
+                "var h=window.innerHeight;"
+                "var sh=document.documentElement.scrollHeight;"
+                "var rem=sh-(y+h);"
+                "if(rem<0) rem=0;"
+                "window.__sumatra__.notify('autoscrollProgress',rem);"
+                "if((y+h)>=sh-2){window.__sumatra__.notify('autoscrollBottom',1);}}())");
+            wv->Eval(js);
+        }
+        // Timer check (same as fixed-page)
+        if (win->autoScrollTimerMinutes > 0 && win->autoScrollStartTick > 0) {
+            DWORD elapsedMs = GetTickCount() - win->autoScrollStartTick;
+            if (elapsedMs >= (DWORD)win->autoScrollTimerMinutes * 60 * 1000) {
+                win->autoScrollActive = false;
+                KillTimer(hwnd, kContinuousAutoScrollTimerID);
+                UpdateToolbarEtaText(win, -1);
+                SetToolbarButtonCheckedState(win, CmdAutoScrollToggle, false);
+                return;
+            }
+        }
+        // ETA: not implemented for webview mode (single-page scroll, no page count)
+        // Could be added later by estimating from scroll position vs scrollHeight
     }
 }
 

@@ -98,6 +98,7 @@
 #include "TabGroupsManage.h"
 #include "TableOfContents.h"
 #include "Tabs.h"
+#include "ArchVector.h"
 #include "Toolbar.h"
 #include "AutoScroll.h"
 #include "FindBar.h"
@@ -114,6 +115,7 @@
 #include "AdvancedSettingsDialog.h"
 #include "ChangeThemeDialog.h"
 #include "TrimConfigDialog.h"
+#include "ArchScaleDialog.h"
 #include "NavFilesInFolder.h"
 #include "Installer.h"
 #include "RegistryPreview.h"
@@ -828,10 +830,25 @@ void UpdateTabFileDisplayStateForTab(WindowTab* tab) {
     UpdateSidebarDisplayState(tab, fs);
     // Persist autoscroll speed multiplier
     fs->autoScrollSpeedMultiplier = win->autoScrollSpeedMultiplier;
+    // Destroy any leaked contrast overlay from previous document
+    DestroyContrastOverlay(win);
     // Persist invert colors and contrast overlay state
     fs->invertColors = GetInvertPageColors();
     fs->contrastEnabled = win->contrastEnabled;
     fs->contrastOpacity = win->contrastOpacity;
+    // Persist arch tools state (per-document)
+    if (gGlobalPrefs->archToolsEnabled) {
+        fs->archScaleFactor = win->archScaleFactor;
+        fs->archScaleAnchorX = win->archScaleAnchorX;
+        fs->archScaleAnchorY = win->archScaleAnchorY;
+        fs->archScaleLineP2x = win->archScaleLineP2x;
+        fs->archScaleLineP2y = win->archScaleLineP2y;
+        fs->archScaleLineDefined = win->archScaleLineDefined;
+        fs->archScaleLineP1x = win->archScaleLineP1x;
+        fs->archScaleLineP1y = win->archScaleLineP1y;
+        fs->archUnit = win->archUnit;
+        fs->archScaleSet = win->archScaleSet;
+    }
 }
 
 static bool gForceRtl = false;
@@ -1075,6 +1092,10 @@ struct ControllerCallbackHandler : DocControllerCallback {
         BrowserFindResultReceived(win, gen, current, total);
     }
     void FindAllResultReceived(Str payload) override { BrowserFindAllResultReceived(win, payload); }
+    void OnAutoScrollBottom() override;
+    void OnAutoScrollProgress(int remainingPx) override;
+    bool GetContrastEnabled() const override { return win->contrastEnabled; }
+    int GetContrastOpacity() const override { return win->contrastOpacity; }
     void TocChanged(DocController* ctrl) override;
 };
 
@@ -1084,6 +1105,29 @@ void ControllerCallbackHandler::TocChanged(DocController* ctrl) {
         return;
     }
     ReloadTocTree(tab);
+}
+
+void ControllerCallbackHandler::OnAutoScrollBottom() {
+    if (win->autoScrollActive) {
+        win->autoScrollActive = false;
+        KillTimer(win->hwndCanvas, kContinuousAutoScrollTimerID);
+        UpdateToolbarEtaText(win, -1);
+        SetToolbarButtonCheckedState(win, CmdAutoScrollToggle, false);
+        LogInfo("[autoscroll] bottom reached");
+    }
+}
+
+void ControllerCallbackHandler::OnAutoScrollProgress(int remainingPx) {
+    if (win->autoScrollActive) {
+        float pxPerSec = AutoScrollPxPerSec(win);
+        if (pxPerSec > 0) {
+            win->autoScrollEtaMinutes = (int)(((float)remainingPx / pxPerSec) / 60.0f);
+            if (win->autoScrollEtaMinutes < 0) {
+                win->autoScrollEtaMinutes = 0;
+            }
+            UpdateToolbarEtaText(win, win->autoScrollEtaMinutes);
+        }
+    }
 }
 
 DocControllerCallback* CreateControllerCallbackHandler(MainWindow* win) {
@@ -2037,14 +2081,48 @@ static void ReplaceDocumentInCurrentTab(LoadArgs* args, DocController* ctrl, Fil
     }
     // Restore per-document autoscroll speed multiplier
     if (fs) {
-        win->autoScrollSpeedMultiplier = fs->autoScrollSpeedMultiplier < 0.1f ? 0.1f : fs->autoScrollSpeedMultiplier;
+        win->autoScrollSpeedMultiplier = fs->autoScrollSpeedMultiplier < 0.008f ? 0.008f : fs->autoScrollSpeedMultiplier;
         // Restore per-document invert colors and contrast overlay state
         SetInvertPageColors(fs->invertColors);
         win->contrastEnabled = fs->contrastEnabled;
         win->contrastOpacity = fs->contrastOpacity;
+        // Restore arch tools state (per-document)
+        if (gGlobalPrefs->archToolsEnabled) {
+            win->archScaleFactor = fs->archScaleFactor;
+            win->archScaleAnchorX = fs->archScaleAnchorX;
+            win->archScaleAnchorY = fs->archScaleAnchorY;
+            win->archScaleLineP2x = fs->archScaleLineP2x;
+            win->archScaleLineP2y = fs->archScaleLineP2y;
+            win->archUnit = fs->archUnit;
+            win->archScaleSet = fs->archScaleSet;
+            // Restore scale line endpoints in MainWindow for drawing
+            win->archScaleLineP1x = fs->archScaleAnchorX;
+            win->archScaleLineP1y = fs->archScaleAnchorY;
+        }
+    } else {
+        // Fresh document: reset to defaults
+        win->autoScrollSpeedMultiplier = 0.008f;
+        win->contrastEnabled = false;
+        win->contrastOpacity = 50;
+        // Reset arch tools state
+        if (gGlobalPrefs->archToolsEnabled) {
+            win->archScaleFactor = 0.0f;
+            win->archScaleAnchorX = 0.0f;
+            win->archScaleAnchorY = 0.0f;
+            win->archScaleLineP1x = 0.0f;
+            win->archScaleLineP1y = 0.0f;
+            win->archScaleLineP2x = 0.0f;
+            win->archScaleLineP2y = 0.0f;
+            win->archUnit = 2; // meters default
+            win->archScaleSet = false;
+            win->archMeasurements.Reset();
+        }
     }
+    // Clear arch vector cache so stale segments from previous doc don't leak
+    ArchClearVectorCache();
     // apply loaded per-doc color state immediately (was loading state without repaint)
     UpdateDocumentColors();
+    UpdateToolbarSpeedLabel(win);
 
     DisplayMode displayMode = gGlobalPrefs->defaultDisplayModeEnum;
     float zoomVirtual = gGlobalPrefs->defaultZoomFloat;
@@ -2679,7 +2757,11 @@ static MainWindow* CreateMainWindow() {
     win->infotip->Create(args);
 
     CreateTabbar(win);
+    // Initialize autoscroll timer settings from global prefs before toolbar creation
+    win->autoScrollTimerMinutesSetting = (DWORD)gGlobalPrefs->autoScrollTimerMinutes;
+    win->autoScrollTimerEnabled = gGlobalPrefs->autoScrollTimerEnabled;
     CreateToolbar(win);
+    CreateToolbar2(win);
     // create the floating find bar hidden; it owns win->hwndFindEdit
     win->findBar = CreateFindBar(win);
     CreateSidebar(win);
@@ -4109,6 +4191,32 @@ void LoadModelIntoTab(WindowTab* tab) {
         win->ctrl->GoToPage(win->ctrl->CurrentPageNo(), false);
     }
     tab->canvasRc = win->canvasRc;
+
+    // Restore arch tools measurements for the new tab
+    win->ArchRestoreMeasurementsForTab(tab);
+
+    // Restore arch tools scale calibration from FileState for the new tab (tab-switch case)
+    if (gGlobalPrefs->archToolsEnabled) {
+        Str fp = tab->filePath;
+        FileState* fs = gFileHistory.FindByPath(fp);
+        if (fs) {
+            win->archScaleFactor = fs->archScaleFactor;
+            win->archScaleAnchorX = fs->archScaleAnchorX;
+            win->archScaleAnchorY = fs->archScaleAnchorY;
+            win->archScaleLineP2x = fs->archScaleLineP2x;
+            win->archScaleLineP2y = fs->archScaleLineP2y;
+            win->archScaleLineDefined = fs->archScaleLineDefined;
+            win->archScaleLineP1x = fs->archScaleLineP1x;
+            win->archScaleLineP1y = fs->archScaleLineP1y;
+            win->archUnit = fs->archUnit;
+            win->archScaleSet = fs->archScaleSet;
+        } else {
+            // Fresh document: reset arch scale line state
+            win->archScaleLineDefined = false;
+            win->archScaleLineP1x = 0.0f;
+            win->archScaleLineP1y = 0.0f;
+        }
+    }
 
     win->showSelection = tab->selectionOnPage != nullptr;
     if (win->showSelection) {
@@ -6209,8 +6317,8 @@ static bool IsUiLayoutEq(UILayout* s1, UILayout* s2) {
            s1->isFullScreen == s2->isFullScreen && s1->tabsVisible == s2->tabsVisible &&
            s1->isToolbarVisible == s2->isToolbarVisible && s1->tocVisible == s2->tocVisible &&
            s1->showFavorites == s2->showFavorites && s1->favoritesAsTab == s2->favoritesAsTab &&
-           s1->showMenuBarRebar == s2->showMenuBarRebar && s1->aiChatVisible == s2->aiChatVisible &&
-           s1->aiChatDx == s2->aiChatDx;
+            s1->showMenuBarRebar == s2->showMenuBarRebar && s1->aiChatVisible == s2->aiChatVisible &&
+            s1->aiChatDx == s2->aiChatDx && s1->archToolsOn == s2->archToolsOn;
 }
 
 static bool RelayoutFrame(MainWindow* win, bool updateToolbars, int sidebarDx) {
@@ -6237,6 +6345,7 @@ static bool RelayoutFrame(MainWindow* win, bool updateToolbars, int sidebarDx) {
     curState.showMenuBarRebar = IsShowingMenuBarRebar(win);
     curState.aiChatVisible = win->uiState.aiChatVisible;
     curState.aiChatDx = win->aiChatDx;
+    curState.archToolsOn = win->archToolsOn;
 
     // skip redundant relayouts when all layout-affecting state is unchanged
     if (IsUiLayoutEq(&curState, &win->uiState.layout) && updateToolbars && sidebarDx == -1) {
@@ -6387,6 +6496,21 @@ static bool RelayoutFrame(MainWindow* win, bool updateToolbars, int sidebarDx) {
             rc.y += rebarDy;
         }
     }
+    // Second toolbar (Arch Tools) - positioned below main toolbar when visible
+    if (win->archToolsOn && win->hwndReBar2) {
+        Rect rcRebar2 = HwndWindowRect(win->hwndReBar2);
+        int rebar2Dy = rcRebar2.dy;
+        bool atBottom = ToolbarAtBottom();
+        int rebar2Y = atBottom ? (rc.y + rc.dy - rebar2Dy) : rc.y;
+        if (updateToolbars) {
+            dh.SetWindowPos(win->hwndReBar2, nullptr, rc.x, rebar2Y, rc.dx, rebar2Dy, SWP_NOZORDER);
+        }
+        // reserve the second toolbar's space
+        rc.dy -= rebar2Dy;
+        if (!atBottom) {
+            rc.y += rebar2Dy;
+        }
+    }
     // in overlay mode the toolbar floats over the canvas and is positioned
     // separately (see PositionOverlayToolbar below); don't touch its visibility
     // here so a relayout doesn't flash it on/off
@@ -6453,37 +6577,45 @@ static bool RelayoutFrame(MainWindow* win, bool updateToolbars, int sidebarDx) {
         toc.dx = limitValue(toc.dx, kSidebarMinDx, maxSidebarDx);
         win->sidebarDx = toc.dx; // remember what's applied
 
-        toc.dy = 0;
+        int curY = rc.y;
+        int remainingDy = rc.dy;
+
         if (tocVisible) {
+            int tocDy = 0;
             if (!favVisible) {
-                toc.dy = rc.dy;
+                tocDy = remainingDy;
             } else {
-                toc.dy = gGlobalPrefs->tocDy;
-                if (toc.dy > 0) {
-                    toc.dy = limitValue(gGlobalPrefs->tocDy, 0, rc.dy);
+                tocDy = gGlobalPrefs->tocDy;
+                if (tocDy > 0) {
+                    tocDy = limitValue(gGlobalPrefs->tocDy, 0, remainingDy);
                 } else {
-                    toc.dy = rc.dy / 2; // default value
+                    tocDy = remainingDy / 2; // default split with fav
                 }
             }
-        }
-
-        if (tocVisible && favVisible) {
-            toc.dy = limitValue(toc.dy, kTocMinDy, rc.dy - kTocMinDy);
-        }
-
-        if (tocVisible) {
-            Rect rToc(rc.TL(), toc);
-            dh.MoveWindow(win->hwndTocBox, rToc);
             if (favVisible) {
-                Rect rSplitV(rc.x, rc.y + toc.dy, toc.dx, kSplitterDy);
+                tocDy = limitValue(tocDy, kTocMinDy, remainingDy - kTocMinDy);
+            }
+            Rect rToc(rc.x, curY, toc.dx, tocDy);
+            dh.MoveWindow(win->hwndTocBox, rToc);
+            curY += tocDy;
+            remainingDy -= tocDy;
+            if (favVisible) {
+                Rect rSplitV(rc.x, curY, toc.dx, kSplitterDy);
                 dh.MoveWindow(win->favSplitter->hwnd, rSplitV);
-                toc.dy += kSplitterDy;
+                curY += kSplitterDy;
+                remainingDy -= kSplitterDy;
             }
         }
+
         if (favVisible) {
-            Rect rFav(rc.x, rc.y + toc.dy, toc.dx, rc.dy - toc.dy);
+            int favDy = remainingDy;
+            favDy = limitValue(favDy, kTocMinDy, remainingDy);
+            Rect rFav(rc.x, curY, toc.dx, favDy);
             dh.MoveWindow(win->hwndFavBox, rFav);
+            curY += favDy;
+            remainingDy -= favDy;
         }
+
         Rect rSplitH(rc.x + toc.dx, rc.y, kSplitterDx, rc.dy);
         dh.MoveWindow(win->sidebarSplitter->hwnd, rSplitH);
 
@@ -7886,6 +8018,31 @@ static bool FrameOnKeydown(MainWindow* win, WPARAM key, LPARAM lp) {
     }
 
     if (VK_ESCAPE == key) {
+        // Arch Tools: ESC cancels draw mode or closes floating Scale dialog
+        if (gGlobalPrefs->archToolsEnabled && win->archToolMode != 0) {
+            if (win->hwndArchScaleDialog && IsWindowVisible(win->hwndArchScaleDialog)) {
+                // Close floating Scale dialog
+                PostMessageW(win->hwndArchScaleDialog, WM_CLOSE, 0, 0);
+                LogInfo("[arch] Esc cancel: closed Scale dialog, mode=%d", win->archToolMode);
+            } else {
+                // Cancel draw mode
+                int oldMode = win->archToolMode;
+                win->archToolMode = 0;
+                win->archDragLine = 0;
+                win->archScaleLineDefined = false;
+                win->archEraseMode = false;
+                win->archPoint1 = Point{0, 0};
+                win->archPoint2 = Point{0, 0};
+                if (GetCapture() == win->hwndCanvas) {
+                    ReleaseCapture();
+                }
+                win->mouseAction = MouseAction::None;
+                UpdateToolbar2State(win);
+                ScheduleRepaint(win, 0);
+                LogInfo("[arch] Esc cancel: draw mode cancelled, was mode=%d", oldMode);
+            }
+            return true;
+        }
         CancelDrag(win);
         return true;
     }
@@ -8325,6 +8482,8 @@ static void OnFavSplitterMove(Splitter::MoveEvent* ev) {
     // the relayout run unconditionally
     ScheduleUiUpdate(win, kUiRelayout | kUiNoToolbars);
 }
+
+
 
 // Records the desired sidebar visibility in UIState and schedules the
 // deferred update, which shows/hides the sidebar windows and relayouts
@@ -10143,6 +10302,121 @@ static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, L
             AutoScrollSpeedAdjust(win, -1);
             break;
 
+        case CmdAutoScrollTimerToggle: {
+            bool on = (IsDlgButtonChecked(win->hwndToolbar, CmdAutoScrollTimerToggle) == BST_CHECKED);
+            win->autoScrollTimerEnabled = on;
+            if (win->autoScrollActive) {
+                win->autoScrollTimerMinutes = on ? win->autoScrollTimerMinutesSetting : 0;
+                win->autoScrollStartTick = GetTickCount();
+            }
+            gGlobalPrefs->autoScrollTimerEnabled = on;
+            break;
+        }
+        case CmdAutoScrollTimerEdit: {
+            WCHAR buf[32] = {0};
+            GetWindowTextW(win->hwndTimerEdit, buf, 32);
+            int m = _wtoi(buf);
+            if (m < 1) m = 1;
+            if (m > 600) m = 600;
+            win->autoScrollTimerMinutesSetting = (DWORD)m;
+            if (win->autoScrollActive && win->autoScrollTimerEnabled) {
+                win->autoScrollTimerMinutes = (DWORD)m;
+                win->autoScrollStartTick = GetTickCount();
+            }
+            gGlobalPrefs->autoScrollTimerMinutes = m;
+            break;
+        }
+
+        case CmdArchScale: {
+            if (!gGlobalPrefs->archToolsEnabled) break;
+            // Open floating scale dialog
+            LogInfo("[arch] CmdArchScale: opening scale dialog");
+            // If no scale line defined yet, arm drawing mode so user can draw one
+            if (!win->archScaleLineDefined) {
+                win->archToolMode = 1; // scale drawing mode
+                if (win->hwndCanvas) {
+                    SetCursor(LoadCursor(nullptr, IDC_CROSS));
+                }
+            }
+            ShowArchScaleDialog(win);
+            break;
+        }
+        case CmdArchMeasure: {
+            if (!gGlobalPrefs->archToolsEnabled) break;
+            int oldMode = win->archToolMode;
+            if (win->archToolMode == 2) {
+                win->archToolMode = 0;
+                // Restore normal cursor when exiting measure mode
+                if (win->hwndCanvas) {
+                    SetCursor(LoadCursor(nullptr, IDC_ARROW));
+                }
+            } else {
+                win->archToolMode = 2; // Measure mode
+                // Set crosshair cursor immediately when entering measure mode
+                if (win->hwndCanvas) {
+                    SetCursor(LoadCursor(nullptr, IDC_CROSS));
+                }
+            }
+            LogInfo("[arch] CmdArchMeasure: archToolMode=%d -> %d", oldMode, win->archToolMode);
+            // Update second toolbar Measure button checked state
+            UpdateToolbar2State(win);
+            break;
+        }
+        case CmdArchClear: {
+            if (!gGlobalPrefs->archToolsEnabled) break;
+            // Clear measurements ONLY — keep scale calibration intact
+            int count = (int)len(win->archMeasurements);
+            win->archMeasurements.Reset();
+            LogInfo("[arch] CmdArchClear: cleared %d measurements (scale kept)", count);
+            ScheduleRepaint(win, 0);
+            break;
+        }
+        case CmdArchResetScale: {
+            if (!gGlobalPrefs->archToolsEnabled) break;
+            // Reset ONLY the scale calibration (keep measurements)
+            win->archScaleSet = false;
+            win->archScaleLineDefined = false;
+            win->archScaleFactor = 0.0f;
+            win->archScaleLineP1x = win->archScaleLineP1y = 0.0f;
+            win->archScaleLineP2x = win->archScaleLineP2y = 0.0f;
+            LogInfo("[arch] CmdArchResetScale: reset scale only");
+            ScheduleRepaint(win, 0);
+            break;
+        }
+        case CmdArchToolsToggle: {
+            if (!gGlobalPrefs->archToolsEnabled) break;
+            win->archToolsOn = !win->archToolsOn;
+            if (win->archToolsOn) {
+                // Show second toolbar
+                if (win->hwndReBar2) {
+                    ShowWindow(win->hwndReBar2, SW_SHOW);
+                }
+                // Update Measure button checked state
+                UpdateToolbar2State(win);
+            } else {
+                // Hide second toolbar
+                if (win->hwndReBar2) {
+                    ShowWindow(win->hwndReBar2, SW_HIDE);
+                }
+                // Reset arch tool state
+                win->archToolMode = 0;
+                win->archEraseMode = false;
+                win->archDragLine = 0;
+                win->archPoint1 = Point{0, 0};
+                win->archPoint2 = Point{0, 0};
+                if (GetCapture() == win->hwndCanvas) {
+                    ReleaseCapture();
+                }
+                win->mouseAction = MouseAction::None;
+            }
+            // Explicitly set checked state for the toggle button (fixes underline drawing)
+            SetToolbarButtonCheckedState(win, CmdArchToolsToggle, win->archToolsOn);
+            LogInfo("[arch] CmdArchToolsToggle: archToolsOn=%d", win->archToolsOn);
+            RelayoutFrame(win);
+            ScheduleRepaint(win, 0);
+            break;
+        }
+
         case CmdScrollUpHalfPage: {
             if (win->IsCurrentTabAbout()) {
                 HomePageOnVScroll(win, SB_PAGEUP);
@@ -10892,10 +11166,40 @@ static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, L
         case CmdContrastToggle:
             if (ShouldToggle(cmd, win->contrastEnabled)) {
                 win->contrastEnabled = !win->contrastEnabled;
-                if (win->contrastEnabled) {
-                    CreateContrastOverlay(win);
+                if (win->AsMarkdown()) {
+                    auto mm = win->AsMarkdown();
+                    struct WebviewWnd* wv = mm->GetWebviewWnd();
+                    if (wv) {
+                        if (win->contrastEnabled) {
+                            // Set dark background and gray text directly via inline styles
+                            // Using gray/dark shades based on contrast opacity (no invert filter)
+                            float cssOpacity = win->contrastOpacity / 100.0f;
+                            TempStr js = fmt(
+                                "document.body.style.backgroundColor = '#%02x%02x%02x';"
+                                "document.body.style.color = '#%02x%02x%02x';",
+                                (int)(255 * (1.0f - cssOpacity)),  // bright text on dark background
+                                (int)(255 * (1.0f - cssOpacity)),
+                                (int)(255 * (1.0f - cssOpacity)),
+                                (int)(255 * cssOpacity),
+                                (int)(255 * cssOpacity),
+                                (int)(255 * cssOpacity));
+                            wv->Eval(js);
+                        } else {
+                            // Remove inline styles when contrast is toggled off
+                            TempStr js = fmt(
+                                "document.body.style.backgroundColor = '';"
+                                "document.body.style.color = '';");
+                            wv->Eval(js);
+                        }
+                    }
+                    LogInfo("[md] contrast toggle -> %d", win->contrastEnabled);
                 } else {
-                    DestroyContrastOverlay(win);
+                    // Fixed-page path (PDF, ebook, etc.)
+                    if (win->contrastEnabled) {
+                        CreateContrastOverlay(win);
+                    } else {
+                        DestroyContrastOverlay(win);
+                    }
                 }
                 SetToolbarButtonCheckedState(win, CmdContrastToggle, win->contrastEnabled);
             }
@@ -13796,6 +14100,80 @@ TempStr WindowStateDuringLoadResultTemp(int* exitCodeOut) {
         *exitCodeOut = 1;
     }
     return ToStrTemp(out);
+}
+
+// Arch Tools per-document measurements save/restore
+void MainWindow::ArchSaveMeasurementsForCurrentTab() {
+    if (!gGlobalPrefs->archToolsEnabled) {
+        return;
+    }
+    WindowTab* tab = CurrentTab();
+    if (!tab || tab->IsNonDocumentTab()) {
+        return;
+    }
+    Str path = tab->filePath;
+    if (!path) {
+        return;
+    }
+    // Find existing entry
+    for (int i = 0; i < archMeasurementsByDoc.len; ++i) {
+        if (str::Eq(archMeasurementsByDoc[i].path, path)) {
+            // Replace measurements
+            archMeasurementsByDoc[i].measurements.Reset();
+            for (int j = 0; j < archMeasurements.len; ++j) {
+                archMeasurementsByDoc[i].measurements.Append(archMeasurements[j]);
+            }
+            return;
+        }
+    }
+    // Create new entry
+    ArchMeasurementsByDoc entry(path);
+    for (int j = 0; j < archMeasurements.len; ++j) {
+        entry.measurements.Append(archMeasurements[j]);
+    }
+    archMeasurementsByDoc.Append(entry);
+}
+
+void MainWindow::ArchRestoreMeasurementsForTab(WindowTab* tab) {
+    if (!gGlobalPrefs->archToolsEnabled) {
+        archMeasurements.Reset();
+        return;
+    }
+    if (!tab || tab->IsNonDocumentTab()) {
+        archMeasurements.Reset();
+        return;
+    }
+    Str path = tab->filePath;
+    if (!path) {
+        archMeasurements.Reset();
+        return;
+    }
+    for (int i = 0; i < archMeasurementsByDoc.len; ++i) {
+        if (str::Eq(archMeasurementsByDoc[i].path, path)) {
+            archMeasurements.Reset();
+            for (int j = 0; j < archMeasurementsByDoc[i].measurements.len; ++j) {
+                archMeasurements.Append(archMeasurementsByDoc[i].measurements[j]);
+            }
+            return;
+        }
+    }
+    // No stored measurements for this document
+    archMeasurements.Reset();
+}
+
+void MainWindow::ArchClearMeasurementsForPath(Str path) {
+    if (!path) {
+        return;
+    }
+    for (int i = 0; i < archMeasurementsByDoc.len; ++i) {
+        if (str::Eq(archMeasurementsByDoc[i].path, path)) {
+            archMeasurementsByDoc[i].measurements.Reset();
+            // Remove the entry by swapping with last
+            archMeasurementsByDoc[i] = archMeasurementsByDoc[archMeasurementsByDoc.len - 1];
+            archMeasurementsByDoc.len--;
+            return;
+        }
+    }
 }
 
 void ShutdownCleanup() {

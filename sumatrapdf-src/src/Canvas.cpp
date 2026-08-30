@@ -47,7 +47,9 @@
 #include "MainWindow.h"
 #include "Canvas.h"
 #include "TrimConfigDialog.h"
+#include "ArchScaleDialog.h"
 #include "Menu.h"
+#include "ArchVector.h"
 #include "Commands.h"
 #include "uia/Provider.h"
 #include "SearchAndDDE.h"
@@ -64,6 +66,10 @@
 #include "Translations.h"
 
 #include "RefHover.h"
+#include "SumatraLog.h"
+
+// Conversion table: meters per unit (index matches ArchUnit enum: 0=mm,1=cm,2=m,3=in,4=ft)
+static const float kMeterPerUnit[5] = {0.001f, 0.01f, 1.0f, 0.0254f, 0.3048f};
 
 // if set instead of trying to render pages we don't have, we simply do nothing
 // this reduces the flickering when going quickly through pages but creates
@@ -1480,6 +1486,7 @@ bool IsDragDistance(int x1, int x2, int y1, int y2) {
 
 // Forward declaration
 static RectF CalculateResizedRect(MainWindow* win, int x, int y);
+static void FinalizeArchMeasurement(MainWindow* win, DisplayModel* dm, int pageNo);
 
 // --- touch text selection (issue #538) --------------------------------------
 // Everything here logs under "touch:" so a session on a real touchscreen can be
@@ -1614,7 +1621,22 @@ static bool OnTouchLongPress(MainWindow* win, int x, int y) {
     return true;
 }
 
+// Arch Tools: snap screen point to vector segments
+static PointF ArchSnapScreenPoint(MainWindow* win, DisplayModel* dm, int pageNo, Point screenPt) {
+    if (!win->archSnap) {
+        return dm->CvtFromScreen(screenPt, pageNo);
+    }
+    ArchSnapResult snap = ArchSnapToVector(dm, pageNo, (float)screenPt.x, (float)screenPt.y, 8.0f);
+    if (snap.snapped) {
+        return PointF{snap.pageX, snap.pageY};
+    }
+    return dm->CvtFromScreen(screenPt, pageNo);
+}
+
 static void OnMouseMove(MainWindow* win, int x, int y, WPARAM /*key*/) {
+    // Track mouse position for erase mode overlay
+    win->archMousePos = Point{x, y};
+
     if (win->trimDragging) {
         auto* dm = win->AsFixed();
         if (dm) {
@@ -1647,6 +1669,40 @@ static void OnMouseMove(MainWindow* win, int x, int y, WPARAM /*key*/) {
         }
         return;
     }
+
+    // Arch Tools: handle scale/measure mouse move (drag preview)
+    if (gGlobalPrefs->archToolsEnabled && win->archToolMode != 0 && win->archDragLine == 1 && win->AsFixed()) {
+        DisplayModel* dm = win->AsFixed();
+        int pageNo = dm->CurrentPageNo();
+        if (dm->ValidPageNo(pageNo)) {
+            Point screenPt{x, y};
+            PointF pagePt = ArchSnapScreenPoint(win, dm, pageNo, screenPt);
+            // Shift constraint: snap to horizontal or vertical
+            if (GetAsyncKeyState(VK_SHIFT) & 0x8000) {
+                PointF p1page = dm->CvtFromScreen(win->archPoint1, pageNo);
+                float dx = pagePt.x - p1page.x;
+                float dy = pagePt.y - p1page.y;
+                if (fabsf(dx) > fabsf(dy)) {
+                    pagePt.y = p1page.y;
+                } else {
+                    pagePt.x = p1page.x;
+                }
+            }
+            win->archPoint2 = dm->CvtToScreen(pageNo, pagePt);
+            // Track drag distance for click-click vs click-drag detection
+            if (!win->archDragMoved) {
+                int dx = x - win->archDragStartPos.x;
+                int dy = y - win->archDragStartPos.y;
+                if (dx * dx + dy * dy > 16) { // ~4px threshold
+                    win->archDragMoved = true;
+                    LogInfo("[arch] OnMouseMove: drag threshold crossed, moved=true (mode=%d)", win->archToolMode);
+                }
+            }
+            ScheduleRepaint(win, 0);
+            return;
+        }
+    }
+
     DisplayModel* dm = win->AsFixed();
     // ReportIf(!dm); // can happen if reload fails, we delete DisplayModel
     if (!dm) return;
@@ -2008,6 +2064,18 @@ static bool IsFullPageImage(DisplayModel* dm, IPageElement* el, int pageNo) {
     return imgArea >= 0.8f * pageArea;
 }
 
+// Helper: distance from point to line segment (page coords)
+static float ArchPointSegDist(float px, float py, float ax, float ay, float bx, float by) {
+    float dx = bx - ax, dy = by - ay;
+    float len2 = dx * dx + dy * dy;
+    float t = len2 > 0 ? ((px - ax) * dx + (py - ay) * dy) / len2 : 0.0f;
+    if (t < 0.0f) t = 0.0f;
+    if (t > 1.0f) t = 1.0f;
+    float cx = ax + t * dx, cy = ay + t * dy;
+    float ex = px - cx, ey = py - cy;
+    return sqrtf(ex * ex + ey * ey);
+}
+
 static void OnMouseLeftButtonDown(MainWindow* win, int x, int y, WPARAM key) {
     // lf("Left button clicked on %d %d", x, y);
     if (win->trimConfigMode != 0) {
@@ -2031,6 +2099,142 @@ static void OnMouseLeftButtonDown(MainWindow* win, int x, int y, WPARAM key) {
             }
         }
     }
+
+    // Arch Tools: erase mode — works whenever Arch Tools is ON, regardless of draw mode
+    if (gGlobalPrefs->archToolsEnabled && win->archToolsOn && win->AsFixed()) {
+        DisplayModel* dm = win->AsFixed();
+        int pageNo = dm->CurrentPageNo();
+        if (dm->ValidPageNo(pageNo) && (GetAsyncKeyState('E') & 0x8000)) {
+            win->archEraseMode = true;
+            Point screenPt{x, y};
+            // Raw conversion, NO snap — compare against stored lines directly
+            PointF pagePt = dm->CvtFromScreen(screenPt, pageNo);
+            float zoom = dm->GetZoomReal(pageNo);
+            if (zoom <= 0) zoom = 1.0f;
+            float thresholdPage = 8.0f / zoom;
+            bool removed = false;
+
+            // Check measurements
+            for (int i = 0; i < win->archMeasurements.len; ++i) {
+                ArchMeasurement& m = win->archMeasurements[i];
+                if (ArchPointSegDist(pagePt.x, pagePt.y, m.p1x, m.p1y, m.p2x, m.p2y) < thresholdPage) {
+                    win->archMeasurements[i] = win->archMeasurements[win->archMeasurements.len - 1];
+                    win->archMeasurements.len--;
+                    removed = true;
+                    LogInfo("[arch] erase: removed measurement at index %d", i);
+                    break;
+                }
+            }
+
+            // Check scale line
+            if (!removed && win->archScaleSet) {
+                if (ArchPointSegDist(pagePt.x, pagePt.y,
+                                     win->archScaleLineP1x, win->archScaleLineP1y,
+                                     win->archScaleLineP2x, win->archScaleLineP2y) < thresholdPage) {
+                    win->archScaleSet = false;
+                    win->archScaleLineDefined = false;
+                    win->archScaleFactor = 0.0f;
+                    win->archScaleLineP1x = win->archScaleLineP1y = 0.0f;
+                    win->archScaleLineP2x = win->archScaleLineP2y = 0.0f;
+                    removed = true;
+                    LogInfo("[arch] erase: removed scale line");
+                }
+            }
+
+            ScheduleRepaint(win, 0);
+            return; // consume the click, do not start draw
+        }
+    }
+
+    // Arch Tools: handle scale/measure mouse interaction (click-click + click-drag)
+    if (gGlobalPrefs->archToolsEnabled && win->archToolMode != 0 && win->AsFixed()) {
+        DisplayModel* dm = win->AsFixed();
+        int pageNo = dm->CurrentPageNo();
+        if (dm->ValidPageNo(pageNo)) {
+            Point screenPt{x, y};
+            PointF pagePt = ArchSnapScreenPoint(win, dm, pageNo, screenPt);
+            LogInfo("[arch] OnMouseLeftButtonDown: mode=%d dragLine=%d pagePt=(%.2f,%.2f) moved=%d",
+                    win->archToolMode, win->archDragLine, pagePt.x, pagePt.y, win->archDragMoved);
+
+            if (win->archToolMode == 1) { // Scale mode
+                if (win->archDragLine == 0) {
+                    // First click: start drawing a new line (click or drag)
+                    // No auto-select of existing PDF vector segments
+                    win->archPoint1 = dm->CvtToScreen(pageNo, pagePt);
+                    win->archDragLine = 1;
+                    win->archDragStartPos = Point{x, y};
+                    win->archDragMoved = false;
+                    SetCapture(win->hwndCanvas);
+                    win->mouseAction = MouseAction::Dragging;
+                    LogInfo("[arch] Scale: first point placed, waiting for 2nd click or drag");
+                    return;
+                } else if (win->archDragLine == 1 && !win->archDragMoved) {
+                    // Second click (not a drag): finalize the line
+                    // Shift constraint: snap to horizontal or vertical
+                    if (GetAsyncKeyState(VK_SHIFT) & 0x8000) {
+                        PointF p1page = dm->CvtFromScreen(win->archPoint1, pageNo);
+                        float dx = pagePt.x - p1page.x;
+                        float dy = pagePt.y - p1page.y;
+                        if (fabsf(dx) > fabsf(dy)) {
+                            pagePt.y = p1page.y;
+                        } else {
+                            pagePt.x = p1page.x;
+                        }
+                    }
+                    win->archPoint2 = dm->CvtToScreen(pageNo, pagePt);
+                    win->archDragLine = 2;
+                    win->archScaleLineDefined = true;
+                    // Store in page coords
+                    PointF p1page = dm->CvtFromScreen(win->archPoint1, pageNo);
+                    PointF p2page = dm->CvtFromScreen(win->archPoint2, pageNo);
+                    win->archScaleLineP1x = p1page.x;
+                    win->archScaleLineP1y = p1page.y;
+                    win->archScaleLineP2x = p2page.x;
+                    win->archScaleLineP2y = p2page.y;
+                    ReleaseCapture();
+                    win->mouseAction = MouseAction::None;
+                    LogInfo("[arch] Scale: line finalized by 2nd click p1=(%.2f,%.2f) p2=(%.2f,%.2f)",
+                            p1page.x, p1page.y, p2page.x, p2page.y);
+                    ScheduleRepaint(win, 0);
+                    return;
+                }
+            } else if (win->archToolMode == 2) { // Measure mode
+                if (win->archDragLine == 0) {
+                    // First click: start measuring
+                    win->archPoint1 = dm->CvtToScreen(pageNo, pagePt);
+                    win->archDragLine = 1;
+                    win->archDragStartPos = Point{x, y};
+                    win->archDragMoved = false;
+                    SetCapture(win->hwndCanvas);
+                    win->mouseAction = MouseAction::Dragging;
+                    LogInfo("[arch] Measure: first point placed, waiting for 2nd click or drag");
+                    return;
+                } else if (win->archDragLine == 1 && !win->archDragMoved) {
+                    // Second click (not a drag): finalize measurement
+                    // Shift constraint: snap to horizontal or vertical
+                    if (GetAsyncKeyState(VK_SHIFT) & 0x8000) {
+                        PointF p1page = dm->CvtFromScreen(win->archPoint1, pageNo);
+                        float dx = pagePt.x - p1page.x;
+                        float dy = pagePt.y - p1page.y;
+                        if (fabsf(dx) > fabsf(dy)) {
+                            pagePt.y = p1page.y;
+                        } else {
+                            pagePt.x = p1page.x;
+                        }
+                    }
+                    win->archPoint2 = dm->CvtToScreen(pageNo, pagePt);
+                    win->archDragLine = 2;
+                    ReleaseCapture();
+                    win->mouseAction = MouseAction::None;
+                    LogInfo("[arch] Measure: line finalized by 2nd click, finalizing measurement");
+                    // Finalize measurement
+                    FinalizeArchMeasurement(win, dm, pageNo);
+                    return;
+                }
+            }
+        }
+    }
+
     if (IsRightDragging(win)) {
         return;
     }
@@ -2224,6 +2428,48 @@ static void OnMouseLeftButtonDown(MainWindow* win, int x, int y, WPARAM key) {
     }
 }
 
+static void FinalizeArchMeasurement(MainWindow* win, DisplayModel* dm, int pageNo) {
+    Point screenPt1 = win->archPoint1;
+    Point screenPt2 = win->archPoint2;
+    PointF pagePt1 = dm->CvtFromScreen(screenPt1, pageNo);
+    PointF pagePt2 = dm->CvtFromScreen(screenPt2, pageNo);
+    float dxPage = fabsf(pagePt2.x - pagePt1.x);
+    float dyPage = fabsf(pagePt2.y - pagePt1.y);
+    float lenPage = sqrtf(dxPage * dxPage + dyPage * dyPage);
+
+    ArchMeasurement meas;
+    meas.p1x = pagePt1.x;
+    meas.p1y = pagePt1.y;
+    meas.p2x = pagePt2.x;
+    meas.p2y = pagePt2.y;
+    meas.unit = win->archUnit; // stored but not used for display anymore
+
+    if (win->archScaleSet && win->archScaleFactor > 0.0f) {
+        // archScaleFactor is now page units per METER (canonical)
+        // Result is in METERS
+        meas.x = dxPage / win->archScaleFactor;
+        meas.y = dyPage / win->archScaleFactor;
+        meas.len = lenPage / win->archScaleFactor;
+        meas.scaled = true;
+    } else {
+        // No scale defined: store page units, mark as unscaled
+        meas.x = dxPage;
+        meas.y = dyPage;
+        meas.len = lenPage;
+        meas.scaled = false;
+    }
+
+    int idx = win->archMeasurements.Append(meas);
+
+    const WCHAR* unitNames[] = {L"mm", L"cm", L"m", L"in", L"ft"};
+    LogInfo("[arch] FinalizeArchMeasurement: idx=%d p1=(%.2f,%.2f) p2=(%.2f,%.2f) dx=%.2f dy=%.2f len=%.2f scaled=%d factor=%.4f unit=%s",
+            idx, pagePt1.x, pagePt1.y, pagePt2.x, pagePt2.y,
+            meas.x, meas.y, meas.len, meas.scaled, win->archScaleFactor, unitNames[win->archUnit]);
+
+    win->archDragLine = 0; // ready for next measurement
+    ScheduleRepaint(win, 0);
+}
+
 static void OnMouseLeftButtonUp(MainWindow* win, int x, int y, WPARAM key) {
     if (win->trimDragging) {
         if (GetCapture() == win->hwndCanvas) ReleaseCapture();
@@ -2232,6 +2478,69 @@ static void OnMouseLeftButtonUp(MainWindow* win, int x, int y, WPARAM key) {
         win->mouseAction = MouseAction::None;
         return;
     }
+
+    // Arch Tools: handle scale/measure mouse up (drag case)
+    if (gGlobalPrefs->archToolsEnabled && win->archToolMode != 0 && win->archDragLine == 1 && win->AsFixed()) {
+        DisplayModel* dm = win->AsFixed();
+        int pageNo = dm->CurrentPageNo();
+        if (dm->ValidPageNo(pageNo)) {
+            if (GetCapture() == win->hwndCanvas) ReleaseCapture();
+            win->mouseAction = MouseAction::None;
+
+            if (win->archDragMoved) {
+                // Drag case: finalize the line
+                if (win->archToolMode == 1) { // Scale mode
+                    // Re-apply Shift constraint at release for correctness
+                    if (GetAsyncKeyState(VK_SHIFT) & 0x8000) {
+                        PointF p1page = dm->CvtFromScreen(win->archPoint1, pageNo);
+                        PointF p2page = dm->CvtFromScreen(win->archPoint2, pageNo);
+                        float dx = p2page.x - p1page.x;
+                        float dy = p2page.y - p1page.y;
+                        if (fabsf(dx) > fabsf(dy)) {
+                            p2page.y = p1page.y;
+                        } else {
+                            p2page.x = p1page.x;
+                        }
+                        win->archPoint2 = dm->CvtToScreen(pageNo, p2page);
+                    }
+                    win->archDragLine = 2;
+                    win->archScaleLineDefined = true;
+                    // Store in page coords
+                    PointF p1page = dm->CvtFromScreen(win->archPoint1, pageNo);
+                    PointF p2page = dm->CvtFromScreen(win->archPoint2, pageNo);
+                    win->archScaleLineP1x = p1page.x;
+                    win->archScaleLineP1y = p1page.y;
+                    win->archScaleLineP2x = p2page.x;
+                    win->archScaleLineP2y = p2page.y;
+                    LogInfo("[arch] OnMouseLeftButtonUp: drag finalized mode=scale p1=(%.2f,%.2f) p2=(%.2f,%.2f)",
+                            p1page.x, p1page.y, p2page.x, p2page.y);
+                    ScheduleRepaint(win, 0);
+                } else if (win->archToolMode == 2) { // Measure mode
+                    // Re-apply Shift constraint at release for correctness
+                    if (GetAsyncKeyState(VK_SHIFT) & 0x8000) {
+                        PointF p1page = dm->CvtFromScreen(win->archPoint1, pageNo);
+                        PointF p2page = dm->CvtFromScreen(win->archPoint2, pageNo);
+                        float dx = p2page.x - p1page.x;
+                        float dy = p2page.y - p1page.y;
+                        if (fabsf(dx) > fabsf(dy)) {
+                            p2page.y = p1page.y;
+                        } else {
+                            p2page.x = p1page.x;
+                        }
+                        win->archPoint2 = dm->CvtToScreen(pageNo, p2page);
+                    }
+                    LogInfo("[arch] OnMouseLeftButtonUp: drag finalized mode=measure, finalizing measurement");
+                    FinalizeArchMeasurement(win, dm, pageNo);
+                }
+            } else {
+                // Click case: keep archDragLine=1, wait for second click
+                // (handled in OnMouseLeftButtonDown)
+                LogInfo("[arch] OnMouseLeftButtonUp: click (no drag), waiting for 2nd click (mode=%d)", win->archToolMode);
+            }
+            return;
+        }
+    }
+
     DisplayModel* dm = win->AsFixed();
     ReportIf(!dm);
 
@@ -3154,11 +3463,126 @@ static void OnPaintDocument(MainWindow* win) {
         // on top of a stale frame that already had a ring.
         bool showFocus = CanvasShouldShowKeyboardFocus(win);
         if (!gNoFlickerRender || shouldPaint || showFocus) {
+            // Arch Tools: draw scale line, measurements, and in-progress line INTO offscreen buffer BEFORE Flush
+            // to prevent flicker. Gated by archToolsOn (not archToolMode).
+            if (gGlobalPrefs->archToolsEnabled && win->archToolsOn && win->AsFixed()) {
+                auto* dm = win->AsFixed();
+                HDC bufHdc = win->buffer->GetDC();
+                Gdiplus::Graphics gs(bufHdc);
+
+                // Draw persistent scale line (green)
+                if (win->archScaleSet) {
+                    int pageNo = dm->CurrentPageNo();
+                    if (dm->ValidPageNo(pageNo)) {
+                        Point p1 = dm->CvtToScreen(pageNo, PointF{win->archScaleLineP1x, win->archScaleLineP1y});
+                        Point p2 = dm->CvtToScreen(pageNo, PointF{win->archScaleLineP2x, win->archScaleLineP2y});
+                        Gdiplus::Pen pen(Gdiplus::Color(255, 0, 200, 0), 2); // green
+                        gs.DrawLine(&pen, p1.x, p1.y, p2.x, p2.y);
+                        // Endpoint circles
+                        Gdiplus::SolidBrush brush(Gdiplus::Color(255, 0, 200, 0));
+                        int r = 4;
+                        gs.FillEllipse(&brush, p1.x - r, p1.y - r, 2 * r, 2 * r);
+                        gs.FillEllipse(&brush, p2.x - r, p2.y - r, 2 * r, 2 * r);
+                        // Label at midpoint showing real measure - theme-aware bg (semi-transparent dark)
+                        const WCHAR* unitNames[] = {L"mm", L"cm", L"m", L"in", L"ft"};
+                        float dx = win->archScaleLineP2x - win->archScaleLineP1x;
+                        float dy = win->archScaleLineP2y - win->archScaleLineP1y;
+                        float pageLenPt = sqrtf(dx * dx + dy * dy);
+                        // archScaleFactor is now page units per METER (canonical)
+                        // realLen in meters = pageLenPt / archScaleFactor
+                        // Convert to current display unit
+                        float realLenM = (win->archScaleFactor > 0) ? (pageLenPt / win->archScaleFactor) : 0.0f;
+                        float displayLen = realLenM / kMeterPerUnit[win->archUnit];
+                        WCHAR label[128];
+                        swprintf_s(label, L"%.2f %s", displayLen, unitNames[win->archUnit]);
+                        // Apply decimal separator preference
+                        if (gGlobalPrefs->archDecimalSeparator == 1) {
+                            for (WCHAR* p = label; *p; ++p) {
+                                if (*p == L'.') *p = L',';
+                            }
+                        }
+                        int midX = (p1.x + p2.x) / 2;
+                        int midY = (p1.y + p2.y) / 2;
+                        Gdiplus::Font font(L"MS Shell Dlg", 9, Gdiplus::FontStyleBold);
+                        Gdiplus::SolidBrush textBrush(Gdiplus::Color(255, 0, 150, 0));
+                        // Semi-transparent dark background matching theme - measure text for proper size
+                        Gdiplus::SolidBrush bgBrush(Gdiplus::Color(180, 30, 30, 30));
+                        Gdiplus::RectF textSize;
+                        gs.MeasureString(label, -1, &font, Gdiplus::PointF(0, 0), &textSize);
+                        Gdiplus::RectF bgRect((float)midX + 6, (float)midY - 16, textSize.Width + 8, textSize.Height + 4);
+                        gs.FillRectangle(&bgBrush, bgRect);
+                        gs.DrawString(label, -1, &font, Gdiplus::PointF(bgRect.X + 4, bgRect.Y + 2), &textBrush);
+                    }
+                }
+
+                // Draw saved measurements (blue)
+                for (const ArchMeasurement& meas : win->archMeasurements) {
+                    int pageNo = dm->CurrentPageNo(); // measurements are on current page
+                    if (dm->ValidPageNo(pageNo)) {
+                        Point p1 = dm->CvtToScreen(pageNo, PointF{meas.p1x, meas.p1y});
+                        Point p2 = dm->CvtToScreen(pageNo, PointF{meas.p2x, meas.p2y});
+                        Gdiplus::Pen pen(Gdiplus::Color(255, 0, 100, 255), 2); // blue
+                        gs.DrawLine(&pen, p1.x, p1.y, p2.x, p2.y);
+                        // Endpoint circles
+                        Gdiplus::SolidBrush brush(Gdiplus::Color(255, 0, 100, 255));
+                        int r = 3;
+                        gs.FillEllipse(&brush, p1.x - r, p1.y - r, 2 * r, 2 * r);
+                        gs.FillEllipse(&brush, p2.x - r, p2.y - r, 2 * r, 2 * r);
+                        // Label at midpoint - theme-aware bg - measure text for proper size
+                        const WCHAR* unitNames[] = {L"mm", L"cm", L"m", L"in", L"ft"};
+                        WCHAR label[128];
+                        // meas.x/y/len are now in METERS (canonical). Convert to current display unit.
+                        float dispX = meas.x / kMeterPerUnit[win->archUnit];
+                        float dispY = meas.y / kMeterPerUnit[win->archUnit];
+                        float dispLen = meas.len / kMeterPerUnit[win->archUnit];
+                        swprintf_s(label, L"x=%.2f y=%.2f L=%.2f %s", dispX, dispY, dispLen, unitNames[win->archUnit]);
+                        // Apply decimal separator preference
+                        if (gGlobalPrefs->archDecimalSeparator == 1) {
+                            for (WCHAR* p = label; *p; ++p) {
+                                if (*p == L'.') *p = L',';
+                            }
+                        }
+                        int midX = (p1.x + p2.x) / 2;
+                        int midY = (p1.y + p2.y) / 2;
+                        Gdiplus::Font font(L"MS Shell Dlg", 9);
+                        Gdiplus::SolidBrush textBrush(Gdiplus::Color(255, 200, 200, 200));
+                        Gdiplus::SolidBrush bgBrush(Gdiplus::Color(180, 30, 30, 30));
+                        Gdiplus::RectF textSize;
+                        gs.MeasureString(label, -1, &font, Gdiplus::PointF(0, 0), &textSize);
+                        Gdiplus::RectF bgRect((float)midX + 4, (float)midY - 14, textSize.Width + 8, textSize.Height + 4);
+                        gs.FillRectangle(&bgBrush, bgRect);
+                        gs.DrawString(label, -1, &font, Gdiplus::PointF(bgRect.X + 4, bgRect.Y + 2), &textBrush);
+                    }
+                }
+
+                // Draw in-progress line (orange highlight)
+                if (win->archDragLine > 0) {
+                    Gdiplus::Pen pen(Gdiplus::Color(255, 255, 165, 0), 2); // orange
+                    pen.SetDashStyle(Gdiplus::DashStyleDash);
+                    gs.DrawLine(&pen, win->archPoint1.x, win->archPoint1.y, win->archPoint2.x, win->archPoint2.y);
+                    // Endpoint circles
+                    Gdiplus::SolidBrush brush(Gdiplus::Color(255, 255, 165, 0));
+                    int r = 4;
+                    gs.FillEllipse(&brush, win->archPoint1.x - r, win->archPoint1.y - r, 2 * r, 2 * r);
+                    gs.FillEllipse(&brush, win->archPoint2.x - r, win->archPoint2.y - r, 2 * r, 2 * r);
+                }
+
+                // Erase mode: draw red "+" crosshair overlay at mouse position
+                if (win->archEraseMode) {
+                    Gdiplus::Pen redPen(Gdiplus::Color(255, 255, 0, 0), 3); // red 3px
+                    int cx = win->archMousePos.x;
+                    int cy = win->archMousePos.y;
+                    int sz = 16;
+                    gs.DrawLine(&redPen, cx - sz, cy, cx + sz, cy);
+                    gs.DrawLine(&redPen, cx, cy - sz, cx, cy + sz);
+                }
+            }
+
             win->buffer->Flush(hdc);
         }
     }
 
-    // trim config: draw both draggable red lines on top of the page
+    // trim config: draw both draggable red lines on top of the page (after Flush, on screen DC)
     if (win->trimConfigMode != 0) {
         auto* dm = win->AsFixed();
         if (dm) {
@@ -3176,6 +3600,7 @@ static void OnPaintDocument(MainWindow* win) {
             gs.DrawLine(&pen, tl.x, bottomLineY, tl.x + pageW, bottomLineY);
         }
     }
+
     DrawCanvasKeyboardFocusIfNeeded(win, hdc);
 
     EndPaint(win->hwndCanvas, &ps);
@@ -3268,6 +3693,27 @@ static LRESULT OnSetCursor(MainWindow* win, HWND hwnd) {
     ReportIf(win->hwndCanvas != hwnd);
     if (win->mouseAction != MouseAction::None) {
         win->DeleteToolTip();
+    }
+
+    // Arch Tools: crosshair cursor when Arch Tools is ON
+    if (gGlobalPrefs->archToolsEnabled && win->archToolsOn && win->AsFixed()) {
+        // Erase mode: hold 'E' key -> crosshair (red "+" overlay drawn in OnPaintDocument)
+        if (GetAsyncKeyState('E') & 0x8000) {
+            win->archEraseMode = true;
+            SetCursorCached(IDC_CROSS);
+            win->DeleteToolTip();
+            return TRUE;
+        } else {
+            win->archEraseMode = false;
+        }
+        // Draw mode (scale/measure): crosshair cursor
+        if (win->archToolMode != 0) {
+            SetCursorCached(IDC_CROSS);
+            win->DeleteToolTip();
+            return TRUE;
+        }
+        // Arch Tools ON but not in draw mode: let default cursor
+        return FALSE;
     }
 
     // the laser dot replaces every other cursor, and while pointing at the page

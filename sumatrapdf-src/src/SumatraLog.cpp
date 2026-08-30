@@ -43,6 +43,9 @@ Str gLogFilePath;
 // 1 MB - 128 to stay under 1 MB even after appending (an estimate)
 constexpr int kMaxLogBuf = (1024 * 1024) - 128;
 
+// Max log file size before rotation (5 MB)
+constexpr int64_t kMaxLogFileSize = 5 * 1024 * 1024;
+
 static LARGE_INTEGER lastPipeOpenTryTime = {};
 
 static void maybeOpenLogPipe() {
@@ -102,6 +105,16 @@ static void logToPipe(Str s) {
     gPipeMutex.Unlock();
 }
 
+// Get level tag for file output
+static const char* LevelTag(LogLevel lvl) {
+    switch (lvl) {
+        case LogLevel::Error: return "[ERROR] ";
+        case LogLevel::Warn:  return "[WARN] ";
+        case LogLevel::Info:  return "[INFO] ";
+    }
+    return "";
+}
+
 static void log2(Str s, bool always) {
     bool skipLog = !always && gSkipDuplicateLines && gLogBuf && str::Contains(*gLogBuf, s);
 
@@ -152,6 +165,18 @@ static void log2(Str s, bool always) {
     }
 
     if (gLogFilePath) {
+        // Check file size and rotate if > 5MB
+        WIN32_FILE_ATTRIBUTE_DATA fad;
+        if (GetFileAttributesExW(CWStrTemp(gLogFilePath), GetFileExInfoStandard, &fad)) {
+            int64_t fileSize = (int64_t)fad.nFileSizeHigh << 32 | fad.nFileSizeLow;
+            if (fileSize > kMaxLogFileSize) {
+                // Truncate by opening with "w" once
+                auto* f = fopen(gLogFilePath.s, "w");
+                if (f) {
+                    fclose(f);
+                }
+            }
+        }
         auto* f = fopen(gLogFilePath.s, "a");
         if (f != nullptr) {
             fwrite(s.s, 1, n, f);
@@ -172,6 +197,55 @@ void loga(Str s) {
         return;
     }
     log2(s, true);
+}
+
+// Format with va_list into temp arena (similar to test_util's FmtVTemp)
+static TempStr LogFormatVTemp(const char* fmt, va_list args) {
+    Arena* a = GetTempArena();
+    char message[512]{};
+    Str msgBuf = Str(message, dimof(message));
+    va_list argsCopy;
+    va_copy(argsCopy, args);
+    int count = str::VsnprintfUtf8(msgBuf, fmt, argsCopy);
+    va_end(argsCopy);
+    if ((count >= 0) && (count < dimofi(message))) {
+        return str::Dup(a, Str(message, count));
+    }
+
+    va_copy(argsCopy, args);
+    int needed = _vscprintf(fmt, argsCopy);
+    va_end(argsCopy);
+    if (needed < 0) {
+        return str::Dup(a, StrL("vsnprintf() returned -1"));
+    }
+
+    char* buf = AllocArray<char>(a, needed + 1);
+    if (!buf) {
+        return {};
+    }
+
+    Str bufStr = Str(buf, needed + 1);
+    va_copy(argsCopy, args);
+    int count2 = str::VsnprintfUtf8(bufStr, fmt, argsCopy);
+    va_end(argsCopy);
+    if (count2 < 0) {
+        return str::Dup(a, StrL("vsnprintf() returned -1"));
+    }
+    return Str(buf, count2);
+}
+
+void log_level(LogLevel lvl, const char* fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    TempStr msg = LogFormatVTemp(fmt, args);
+    va_end(args);
+    
+    // Prepend level tag for file output (debugger/console get raw message)
+    // Use str::Builder to avoid FmtArg const char* deletion issue
+    str::Builder buf;
+    buf.Append(LevelTag(lvl));
+    buf.Append(msg);
+    log2(ToStrTemp(buf), false);
 }
 
 void StartLogToFile(Str path, bool removeIfExists) {

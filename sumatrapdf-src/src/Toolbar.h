@@ -11,6 +11,7 @@ void UpdateToolbarFindText(MainWindow*);
 void UpdateToolbarPageText(MainWindow*, int pageCount, bool updateOnly = false);
 void UpdateToolbarEtaText(MainWindow* win, int minutes);
 void RepositionEtaLabel(MainWindow* win);
+void UpdateToolbarSpeedLabel(MainWindow* win);
 void UpdateFindbox(MainWindow*);
 void SetToolbarButtonEnableState(MainWindow*, int cmdId, bool isEnabled);
 void SetToolbarButtonCheckedState(MainWindow*, int cmdId, bool isChecked);
@@ -31,6 +32,11 @@ HIMAGELIST BuildStdToolbarImageList(int dx);
 Rect GetToolbarButtonScreenRect(MainWindow*, int cmdId);
 
 TempStr ToolbarButtonsResultTemp(int* exitCodeOut);
+
+// Second toolbar (Arch Tools)
+void CreateToolbar2(MainWindow*);
+void DestroyToolbar2(MainWindow*);
+void UpdateToolbar2State(MainWindow*);
 
 int GetMenuBarRebarHeight(MainWindow*);
 void CreateMenuBarRebar(MainWindow*);

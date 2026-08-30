@@ -1,0 +1,18 @@
+digraph UpgradeCycle {
+    rankdir=TB;
+    node [shape=box, style=rounded];
+    check [label="check-updates.ps1\ncompare Version.h vs\nupdatecheck-pre-release.txt", fillcolor="#bbdefb", style=filled];
+    nonew [label="No update\ncontinue", fillcolor="#c8e6c9", style=filled];
+    new [label="New upstream version\nMERGE.md guide generated", fillcolor="#fff9c4", style=filled];
+    patch [label="Apply direct patches\nto sumatrapdf-src/src/", fillcolor="#e1bee7", style=filled];
+    build [label="bun cmd/build.ts\n0 err / 0 warn", fillcolor="#c8e6c9", style=filled];
+    test [label="Smoke test + runtime\nvalidate features", fillcolor="#c8e6c9", style=filled];
+    commit [label="Commit + push", fillcolor="#c8e6c9", style=filled];
+    check -> nonew [label="none"];
+    check -> new [label="available"];
+    new -> patch;
+    patch -> build;
+    build -> test;
+    test -> commit;
+    commit -> check [style=dashed, label="loop"];
+}

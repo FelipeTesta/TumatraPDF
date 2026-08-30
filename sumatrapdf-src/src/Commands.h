@@ -295,7 +295,15 @@ enum {
     CmdViewportCropToggle = 484,
     CmdMarginTrimToggle = 485,
     CmdTrimConfig = 486,
-    CmdNone = 487,
+    CmdArchScale = 487,
+    CmdArchMeasure = 488,
+    CmdArchScaleApply = 489,
+    CmdArchClear = 490,
+    CmdArchToolsToggle = 491,
+    CmdArchResetScale = 492,
+    CmdAutoScrollTimerToggle = 493,
+    CmdAutoScrollTimerEdit = 494,
+    CmdNone = 495,
 
     /* range for file history */
     CmdFileHistoryFirst,

@@ -157,6 +157,12 @@ ShowLinks = false
 ; Show ETA label during auto-scroll
 AutoScrollShowEta = true
 
+; Autoscroll timer duration in minutes (1-600, 0 = no timer)
+AutoScrollTimerMinutes = 30
+
+; Enable autoscroll auto-stop timer
+AutoScrollTimerEnabled = false
+
 ; if true, draw a focus ring around the document when it has keyboard focus (Tab
 ; to the page area) (introduced in version 3.7)
 ShowDocumentFocusIndicator = false
@@ -217,6 +223,18 @@ DisableReadAloud = false
 ; if true, disables AI Chat sidebar feature completely: hides menu entries,
 ; toolbar buttons, and commands for all AI providers (introduced in version 3.7)
 DisableAIChat = false
+
+; if true, enables Arch Tools (scale and measure) feature: shows sidebar tab,
+; toolbar buttons, and commands (introduced in version 3.7)
+ArchToolsEnabled = true
+
+; default unit for Arch Tools scale/measure: 0=mm,1=cm,2=m,3=in,4=ft (introduced
+; in version 3.8)
+ArchUnit = 1
+
+; decimal separator for Arch Tools numeric input/display: 0=dot (.), 1=comma (,)
+; (introduced in version 3.8)
+ArchDecimalSeparator = 1
 
 ; if true, mouse wheel scrolling is faster when mouse is over a scrollbar
 ; (introduced in version 3.6)
@@ -953,7 +971,7 @@ FileStates [
     TocState =
 
     ; Autoscroll speed multiplier for this document
-    AutoScrollSpeedMultiplier = 0.1
+    AutoScrollSpeedMultiplier = 0.008
 
     ; invert page colors for this document
     InvertColors = false
@@ -963,6 +981,36 @@ FileStates [
 
     ; contrast overlay opacity for this document (0-100)
     ContrastOpacity = 50
+
+    ; arch tools scale factor (page units per real unit)
+    ArchScaleFactor = 0
+
+    ; arch scale anchor X in page coords
+    ArchScaleAnchorX = 0
+
+    ; arch scale anchor Y in page coords
+    ArchScaleAnchorY = 0
+
+    ; arch scale line point 2 X in page coords
+    ArchScaleLineP2x = 0
+
+    ; arch scale line point 2 Y in page coords
+    ArchScaleLineP2y = 0
+
+    ; whether arch scale line endpoints are defined
+    ArchScaleLineDefined = false
+
+    ; arch scale line point 1 X in page coords
+    ArchScaleLineP1x = 0
+
+    ; arch scale line point 1 Y in page coords
+    ArchScaleLineP1y = 0
+
+    ; arch unit: 0=mm,1=cm,2=m,3=in,4=ft
+    ArchUnit = 2
+
+    ; whether arch scale is defined for this doc
+    ArchScaleSet = false
   ]
 ]
 

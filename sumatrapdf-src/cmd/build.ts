@@ -6,6 +6,7 @@ let clean = false;
 let config = "Debug";
 let platform = "x64";
 let outDir = join("out", "dbg64");
+let finalExeDir = join("..", "Compiled");
 
 let t = `/t:TumatraPDF`;
 
@@ -26,7 +27,7 @@ async function main() {
 
   console.log(`${config} ${platform} build`);
   if (clean) {
-    const dirs = [outDir];
+    const dirs = [outDir, finalExeDir];
     for (const dir of dirs) {
       clearDirPreserveSettings(dir);
     }
@@ -38,7 +39,15 @@ async function main() {
   const p = `/p:Configuration=${config};Platform=${platform}`;
   await runLogged(msbuildPath, [sln, t, p, `/m`]);
 
-  // await runLogged(resolve(join(outDir, "test_util.exe")), [], outDir);
+  // Copy freshly compiled exe to final folder
+  const srcExe = join(outDir, "TumatraPDF.exe");
+  const dstExe = join(finalExeDir, "TumatraPDF.exe");
+  try {
+    require("fs").copyFileSync(srcExe, dstExe);
+    console.log(`Copied ${srcExe} to ${dstExe}`);
+  } catch (e) {
+    console.warn(`Failed to copy exe: ${e}`);
+  }
 
   const elapsed = ((performance.now() - timeStart) / 1000).toFixed(1);
   console.log(`build took ${elapsed}s`);

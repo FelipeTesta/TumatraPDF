@@ -302,6 +302,14 @@ static SeqStrings gCommandNames =
     "CmdViewportCropToggle\0"
     "CmdMarginTrimToggle\0"
     "CmdTrimConfig\0"
+    "CmdArchScale\0"
+    "CmdArchMeasure\0"
+    "CmdArchScaleApply\0"
+    "CmdArchClear\0"
+    "CmdArchToolsToggle\0"
+    "CmdArchResetScale\0"
+    "CmdAutoScrollTimerToggle\0"
+    "CmdAutoScrollTimerEdit\0"
     "CmdNone\0"
     "\0";
 
@@ -592,6 +600,14 @@ static i32 gCommandIds[] = {
     CmdViewportCropToggle,
     CmdMarginTrimToggle,
     CmdTrimConfig,
+    CmdArchScale,
+    CmdArchMeasure,
+    CmdArchScaleApply,
+    CmdArchClear,
+    CmdArchToolsToggle,
+    CmdArchResetScale,
+    CmdAutoScrollTimerToggle,
+    CmdAutoScrollTimerEdit,
     CmdNone,
 };
 
@@ -882,6 +898,14 @@ SeqStrings gCommandDescriptions =
     "Toggle Viewport Crop\0"
     "Toggle margin trimming\0"
     "Configure margin trimming\0"
+    "Toggle Arch Scale Tool\0"
+    "Toggle Arch Measure Tool\0"
+    "Apply Arch Scale\0"
+    "Clear Arch Measurements\0"
+    "Toggle Arch Tools Toolbar\0"
+    "Reset Arch Scale\0"
+    "Toggle Auto-Scroll Timer\0"
+    "Edit Auto-Scroll Timer Duration\0"
     "Do nothing\0"
     "\0";
 // clang-format on

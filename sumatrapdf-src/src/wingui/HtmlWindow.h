@@ -36,6 +36,12 @@ struct HtmlWindowCallback {
     // 'mdfindall' payload ("<gen> <total> <records>")
     virtual void OnFindAllResult(Str) {}
 
+    // called when continuous auto-scroll reaches the bottom of a webview document
+    virtual void OnAutoScrollBottom() {}
+
+    // called periodically during webview auto-scroll with remaining pixels to bottom
+    virtual void OnAutoScrollProgress(int remainingPx) {}
+
     virtual ~HtmlWindowCallback() = default;
 };
 

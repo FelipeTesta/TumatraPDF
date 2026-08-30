@@ -38,6 +38,9 @@ class BrowserDocView {
     void CopySelection();
     LRESULT SendMsg(UINT msg, WPARAM wp, LPARAM lp);
 
+    // Accessor for WebView2 integration (autoscroll, contrast)
+    struct WebviewWnd* GetWebviewWnd() const { return wv; }
+
   private:
     enum class Backend {
         None,

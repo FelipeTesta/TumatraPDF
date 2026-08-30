@@ -1,5 +1,6 @@
 # TumatraPDF — Development Log
 
+- 2026-08-25 — research session — confirmed Markdown (.md/.markdown) reading support ALREADY EXISTS, inherited from upstream master. Zero code changes. Refs: ext map GuessFileType.cpp:66-67, dispatch EngineCreate.cpp:179, cmark-gfm vendored + FZ_ENABLE_MD=1, open filter "*.md;*.markdown" SumatraPDF.cpp:5750, dual render WebView2 default / MuPDF fallback via markdownUI.useFixedPageUI. Runtime verification pending (user tests later).
 - 2026-08-24 — lint batch — removed unused cache param (RenderCache), corrected misleading persist comment (autoscroll speed handlers).
 - 2026-08-24 — refactor batch — AutoScroll logic extracted to src/AutoScroll.{h,cpp} (ETA math out of Toolbar, tick out of Canvas, commands thin), toolbar overlay brush hoisted + early-out, WM_SIZE ETA reposition width-gated, TabWnd::Paint StringFormat hoisted, ContrastOverlay alpha dedup.
 - 2026-08-24 — cleanup batch — dead close-icon code removed (TabsCtrl), dead custom-draw underline removed (Toolbar), orphan TumatraPDF-static.vcxproj deleted, MERGE.md corrected, misc lint fixes.
@@ -725,3 +726,120 @@ Line positions use tRef = marginTrimEnabled ? gGlobalPrefs->trim.top : 0 (layout
 ### 2026-08-24
 - Invert restore fixed: UpdateDocumentColors() called unconditionally after LoadDocument per-doc state apply (was loading invert/contrast state without repaint).
 - Autoscroll default speed for unadjusted docs = minimum 0.1 (FileState AutoScrollSpeedMultiplier default 1.0 -> 0.1 in gen-settings.ts; Settings.h/cpp regenerated); per-doc last-used restore already existed.
+
+## 2026-08-25 — Markdown WebView2: AutoScroll + Contrast via JS
+
+### What
+Native WebView2 support for AutoScroll + Contrast on Markdown (.md). Previously both silently no-op'd / invisible in default webview mode. MuPDF fallback (`markdownUI.useFixedPageUI=true`) untouched. CHM untouched.
+
+### AutoScroll md-webview
+- `AutoScrollToggle` guard relaxed — accepts webview-mode docs
+- `AutoScrollContinuousTick` branches: DisplayModel → `MoveDocBy(0,dy)`; webview → `wv->Eval("window.scrollBy(0,dy)")`
+- Stop-at-bottom: JS posts `autoscrollBottom` → `BrowserDocView::OnJsNotifyCb` → virtual `DocController::OnAutoScrollBottom()` → `MarkdownModel` forwards → `ControllerCallbackHandler` stops timer + updates toolbar
+- F7/F8 speed multiplier shared unchanged
+
+### Contrast md-webview
+- `CmdContrastToggle` branches: webview → inject/toggle fixed-position `div#__sumatra_contrast` (`background:#000`, `pointer-events:none`, `z-index` max) via `Eval`; opacity = `(contrastOpacity*255)/100/255.0f` — identical math to Win32 overlay
+- `CmdContrastIncrease/Decrease` → `UpdateContrastOverlayOpacity` dispatches JS path when `win->AsMarkdown()`
+- `CreateContrastOverlay` early-return no-op for markdown
+- `RestoreContrastOverlay()` called from `MarkdownModel::OnDocumentComplete` → persistence across navigation
+- New virtuals: `DocController::OnAutoScrollBottom`, `GetContrastEnabled`, `GetContrastOpacity`; accessor `BrowserDocView::GetWebviewWnd`
+
+### Files
+11 files changed +232/-40
+
+### Build
+`bun cmd/build.ts` — 0 err / 0 warn (35s). Deployed `Compiled\TumatraPDF.exe` 21,899,776 bytes @ 2026-08-25 21:56. Runtime interactive test PENDING (user verifies F9 / Ctrl+Shift+C on .md).
+
+---
+
+## 2026-08-26 — Round 3: Speed Label Slot, Min Speed Reduction, Contrast Leak Fix
+
+### What
+Three targeted fixes for toolbar layout, speed scaling, and contrast cross-doc leak.
+
+### Speed label layout
+Migrated from floating "left of [-]" (which caused overlap) to dedicated toolbar slot via fake placeholder button `SpeedInfoId` + `TbSetButtonDx` (cloned page-counter pattern). Occupies toolbar space like a native control.
+
+### Min speed reduced to 1/6
+`0.1f` → `0.0167f` across `MainWindow.h`, `LoadDocument`, `AutoScrollSpeedAdjust`, and `gen-settings.ts` (regenerated).
+
+### Contrast black-screen leak
+Fixed by calling `DestroyContrastOverlay(win)` unconditionally on document change (`LoadDocument`) and in OFF toggle branch for all modes (clears tainted cross-doc Win32 layers).
+
+### Build
+`bun cmd/build.ts` — 0 errors / 0 warnings (118.5s, 21,911,552 bytes).
+
+## 2026-08-25 — Follow-up: md Toolbar + Logging + Instrumentation
+
+### What
+Regression fixes after runtime test of md-webview features. Cumulative diff 15 files +382/-44.
+
+### Fix 1 — Toolbar hidden on .md (PRE-EXISTING upstream bug)
+- Root: `CommandAvailability.cpp` ~L379 `ctx.isChm = AsChm() || AsMarkdown()` → CHM blacklist applied to markdown → AutoScroll×3 + ContrastToggle disabled/hidden for .md
+- Fix: `isChm = AsChm()` only; new `removeIfMarkdown[]` hides only fixed-page cmds (`ViewportCrop`/`MarginTrim`/`TrimConfig`) for .md; AutoScroll×3 + ContrastToggle now enabled for .md; CHM unchanged
+
+### Fix 2 — Contrast persistence AUDITED (no code change)
+- `UpdateTabFileDisplayStateForTab` saves `contrastEnabled`/`contrastOpacity` for all types including md; `LoadDocument` restores → already correct
+- Note: black veil on reopen = persisted contrast ON → `Ctrl+Shift+C` toggles off (by design, matches PDF behavior)
+
+### Fix 3 — File logging upgrade (user request, TumatraPDF2-style auto-log)
+- `SumatraLog.h/.cpp`: file output now `[YYYY-MM-DD HH:MM:SS.mmm] [INFO]/[WARN]/[ERROR]` tags; rotation truncate >5MB; `StartLogToFile` unconditional (was already)
+- Log file: `%LOCALAPPDATA%\SumatraPDF\<hash>\sumatra-log.txt` (hash = install dir)
+
+### Instrumentation added
+- `[md] doc complete / contrast restore / contrast toggle / contrast opacity`
+- `[autoscroll] start|stop / webview tick start / bottom reached`
+- `[webview] autoscrollBottom notify`
+
+### Build
+`bun cmd/build.ts` — 0 err / 0 warn (34.1s). Deployed `Compiled\TumatraPDF.exe` 21,907,456 bytes @ 2026-08-25.
+
+## 2026-08-25 — Follow-up Round 2: Speed Label + md ETA + Contrast Leak Fix
+
+### What
+Polish round 2 for md autoscroll/contrast — speed visibility, md ETA parity, fresh-doc state leak. Cumulative diff 10 files +329/-40 vs round 1 base.
+
+### Fix 1 — Fresh-doc min speed default
+- `MainWindow.h`: `autoScrollSpeedMultiplier` default 1.0f → 0.1f (matches `FileState` 0.1). Fresh docs (no persisted state) now start at minimum speed — adjustable before start via F7/F8 or [+]/[-].
+
+### Fix 2 — Contrast cross-tab leak (fresh .md inherited prev tab state)
+- `SumatraPDF.cpp` `LoadDocument` else-branch (`fs == nullptr`): resets `contrastEnabled=false`, `contrastOpacity=50`, `autoScrollSpeedMultiplier=0.1f`. Fresh .md no longer inherits previous tab's contrast/speed.
+
+### Fix 3 — Contrast OFF cleanup
+- WebView2 `div#__sumatra_contrast`: OFF now `d.remove()` instead of `display:none` — DOM removed, no hidden overlay.
+
+### New 1 — Speed label `%d px/min` in toolbar
+- `Toolbar.cpp`: `CreateSpeedLabel` / `RepositionSpeedLabel` / `UpdateToolbarSpeedLabel` — static text left of [-] button, always visible with doc open, shows current `AutoScrollPxPerSec` (`%d px/min`). Updates on F7/F8, [+]/[-] clicks, doc load.
+
+### New 2 — ETA for .md webview (parity with PDF)
+- Parallel chain: JS `autoscrollProgress` notify ~100ms → `BrowserDocView::OnJsNotifyCb` → virtual `DocController::OnAutoScrollProgress(remainingPx)` → `ControllerCallbackHandler` computes `etaMinutes = remainingPx / AutoScrollPxPerSec` → `UpdateToolbarEtaText`. Fixed-page PDF ETA verified intact — no regression.
+
+### Build
+`bun cmd/build.ts` — 0 err / 0 warn (20.7s). Deployed `Compiled\TumatraPDF.exe` 21,907,456 bytes @ 2026-08-25.
+## 2026-08-29 � Arch Tools Fase 12: Scale regression + Measure underline inversion + rename
+- **Scale OnOk regression fix:** guard changed from !win->archScaleSet || win->archScaleFactor <= 0.0f to !(win->archScaleLineDefined || win->archScaleSet) so a freshly drawn scale line (archScaleSet still false until OnOk) is accepted; factor recomputed from stored archScaleLineP1/P2.
+- **Measure underline inverted:** removed BTNS_CHECK auto-toggle from CmdArchMeasure button in CreateToolbar2 (Toolbar.cpp:1958-1960); UpdateToolbar2State is now the sole manager of checked state (called from CmdArchMeasure handler, CmdArchToolsToggle, and ESC in FrameOnKeydown). Underline now tracks rchToolMode == 2 correctly (was appearing when OFF, hiding when ON).
+- **Rename:** 2nd-toolbar button Limpar linhas ? Clean lines (Toolbar.cpp:1942).
+- **Build:** 0 errors / 0 warnings (un ./cmd/build.ts). **Deploy:** Compiled\TumatraPDF.exe (21.9 MB). **Smoke:** clean launch -for-testing -console, no crash, no new dump.
+
+## 2026-08-29 — Autoscroll Timer UI (Fase 15, BUILD OK)
+- Adicionado controle Timer na toolbar ANTES do botão Autoscroll: `[checkbox][Timer:][input numérico]`.
+- Comportamento: checkbox ON → autoscroll para sozinho após N min (valor do input, padrão 30). OFF → sem limite.
+- Backend de auto-parada já existia (AutoScroll.cpp `AutoScrollContinuousTick` para quando `autoScrollTimerMinutes > 0` e tempo passa); a UI agora alimenta `autoScrollTimerMinutes`.
+- Arquivos editados: `MainWindow.h` (autoScrollTimerMinutesSetting=30, autoScrollTimerEnabled=false, HWNDs dos controles), `AutoScroll.cpp` (feed do campo em AutoScrollToggle), `SumatraPDF.cpp` (handlers CmdAutoScrollTimerToggle/Edit + apply de gGlobalPrefs), `Toolbar.cpp` (placeholder TimerInfoId + CreateTimerControls/RepositionTimerControls + WM_CTLCOLORBTN dark mode), `Settings.h` (campos AutoScrollTimerMinutes/AutoScrollTimerEnabled regenerados), `cmd/gen-settings.ts` (campos).
+- PENDENTE: verificação UI pelo usuário (amanhã) — `[checkbox][Timer:][input]` antes de Autoscroll; timer para autoscroll após N min.
+- Build: OK (0 erros, 1 warning unrelated em test_util). Commands.h regenerado, Settings em sync, deploy feito, smoke test limpo.
+
+## 2026-08-29 (2) — Fase 15 fixes: autoscroll speed + timer visual
+- Autoscroll: `kMinSpeedMultiplier` (AutoScroll.cpp) 0.1f -> 0.008f; velocidade mínima agora ~100 px/min (antes ~1400). Persistência de `AutoScrollSpeedMultiplier` garantida (load+save); default = mínimo se nunca usado.
+- Timer control: `TimerInfoId` 110->130px; layout com tokens de design (kCtrlGapX=4, kCtrlH=18) — gaps consistentes + centragem vertical. Início de design system mínimo.
+- Build: 0 erros. Deploy + smoke OK.
+
+## 2026-08-30 — Fase 15 Fixes (speed clamp, persistência, timer visual, build fix)
+
+- **Autoscroll speed clamp**: `kMinSpeedMultiplier` 0.1f → 0.008f (AutoScroll.cpp:74). Min speed agora ~100 px/min (era ~1400).
+- **Lembrar última velocidade**: persistência via FileState `autoScrollSpeedMultiplier` (já existia, per-documento). Defaults baixados 0.0167f → 0.008f (MainWindow.h:332, SumatraPDF.cpp:2084/2104, gen-settings.ts:792). "Se nunca usado → mínimo" correto.
+- **Timer visual**: design tokens `kCtrlGapX=4`, `kCtrlH=18` (Toolbar.cpp:54-56); `TimerInfoId` 110 → 130 (Toolbar.cpp:1201); CreateTimerControls/RepositionTimerControls com token math. Fix bug `slot`→`r` em CreateTimerControls (Toolbar.cpp:1361).
+- **Build fix**: revert regressão `..\vs2022\TumatraPDF.sln` → `vs2022\TumatraPDF.sln` (build.ts:37). Build roda de `sumatrapdf-src` (`bun cmd/build.ts`). 0 err / 0 warn. Deploy automático p/ Compiled\TumatraPDF.exe. Smoke limpo (0 crash dumps).
+- **Pendente**: teste UI prático pelo usuário (amanhã) — timer control [checkbox][Timer:][input] antes de Autoscroll; speed mínimo; persistência; alinhamento visual.

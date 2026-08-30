@@ -608,6 +608,7 @@ function sumatrapdf_files()
     "ContrastOverlay.*",
     "AutoScroll.*",
     "TrimConfigDialog.*",
+    "ArchScaleDialog.*",
     "CaptionGlyphs.*",
     "ChmDump.*",
     "ChmModel.*",
@@ -859,6 +860,7 @@ end
 function engines_files()
   files_in_dir("src", {
     "Annotation.*",
+    "ArchVector.*",
     "ChmFile.*",
     "DocProperties.*",
     "EbookDoc.*",

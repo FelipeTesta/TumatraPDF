@@ -154,6 +154,8 @@ void UpdateTabWidth(MainWindow* win) {
 void RemoveTab(WindowTab* tab) {
     UpdateTabFileDisplayStateForTab(tab);
     MainWindow* win = tab->win;
+    // Clear arch tools measurements for the closed document (discard on close)
+    win->ArchClearMeasurementsForPath(tab->filePath);
     win->tabSelectionHistory->Remove(tab);
     int idx = win->GetTabIdx(tab);
     WindowTab* tab2 = win->tabsCtrl->RemoveTab<WindowTab*>(idx);
@@ -690,6 +692,12 @@ void SaveCurrentWindowTab(MainWindow* win) {
         UpdateTocExpansionState(tab->tocState, win->tocTreeView, tocTree);
     }
     VerifyWindowTab(win, tab);
+
+    // Save arch tools measurements for the current tab before switching
+    win->ArchSaveMeasurementsForCurrentTab();
+
+    // Save arch tools scale calibration and other per-tab display state
+    UpdateTabFileDisplayStateForTab(tab);
 
     // update the selection history
     win->tabSelectionHistory->Remove(tab);

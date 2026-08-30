@@ -7,6 +7,7 @@ struct HtmlWindowCallback;
 struct MarkdownCacheEntry;
 struct MarkdownLaunchTask;
 struct MarkdownTocBuildTask;
+struct WebviewWnd;
 
 struct MarkdownModel : DocController {
     explicit MarkdownModel(DocControllerCallback* cb);
@@ -70,6 +71,13 @@ struct MarkdownModel : DocController {
     void DownloadData(Str url, Str data);
     void UpdateTheme();
 
+    // HtmlWindowCallback
+    void OnAutoScrollBottom();
+    void OnAutoScrollProgress(int remainingPx);
+
+    // Restore contrast overlay for webview mode
+    void RestoreContrastOverlay();
+
     Str fileName;
     Str baseDir;
     // true when displaying .html/.htm files: they are served to the browser raw
@@ -109,6 +117,9 @@ struct MarkdownModel : DocController {
     bool DisplayPage(Str pageUrl);
 
     MarkdownCacheEntry* FindDataForUrl(Str url) const;
+
+    // Accessor for WebView2 autoscroll/contrast integration
+    struct WebviewWnd* GetWebviewWnd() const;
 
     void SaveHtmlScrollPos();
     void SaveHtmlScrollPosForPage(int pageNo);

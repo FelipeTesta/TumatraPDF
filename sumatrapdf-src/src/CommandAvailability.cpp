@@ -231,6 +231,8 @@ static UINT_PTR removeIfChm[] = {
     CmdViewportCropToggle,
     CmdMarginTrimToggle,
     CmdTrimConfig,
+    CmdArchScale,
+    CmdArchMeasure,
     CmdRotateLeft,
     CmdRotateRight,
     CmdTogglePresentationMode,
@@ -251,6 +253,13 @@ static UINT_PTR removeIfChm[] = {
     CmdAutoScrollToggle,
     CmdAutoScrollSpeedUp,
     CmdAutoScrollSpeedDown,
+    0,
+};
+
+static UINT_PTR removeIfMarkdown[] = {
+    CmdViewportCropToggle,
+    CmdMarginTrimToggle,
+    CmdTrimConfig,
     0,
 };
 
@@ -376,7 +385,7 @@ AppCommandCtx NewAppCommandCtx(MainWindow* win, Point cursorPos) {
     ctx.allowToggleMenuBar = true;
 
     if (ctx.tab) {
-        ctx.isChm = ctx.tab->AsChm() || ctx.tab->AsMarkdown();
+        ctx.isChm = ctx.tab->AsChm();
         Str currentPath = win->ctrl ? win->ctrl->GetFilePath() : ctx.filePath;
         ctx.isMarkdown = str::EndsWithI(currentPath, StrL(".md")) || str::EndsWithI(currentPath, StrL(".markdown"));
         EngineBase* engine = ctx.tab->GetEngine();
@@ -588,6 +597,10 @@ CommandVisibility GetCommandVisibility(int cmdId, const AppCommandCtx& ctx, Comm
     }
 
     if (ctx.isChm && CmdIdInList(cmdId, removeIfChm)) {
+        return CommandVisibility::Hide;
+    }
+
+    if (ctx.isMarkdown && CmdIdInList(cmdId, removeIfMarkdown)) {
         return CommandVisibility::Hide;
     }
 

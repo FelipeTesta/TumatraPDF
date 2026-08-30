@@ -1,0 +1,32 @@
+digraph ArchTools {
+    rankdir=TB;
+    node [shape=box, style=rounded];
+    compound=true;
+
+    toggle [label="Arch Tools toggle (main toolbar, CmdArchToolsToggle)\nOpens 2nd toolbar + shows lines", fillcolor="#c8e6c9", style=filled];
+    off [label="Arch Tools OFF\nhide 2nd toolbar + lines", fillcolor="#ffcdd2", style=filled];
+    scale [label="Scale mode (CmdArchScale)\nopen floating dialog", fillcolor="#bbdefb", style=filled];
+    measure [label="Measure mode (CmdArchMeasure, toggle)\ndraw lines -> x/y/length labels", fillcolor="#bbdefb", style=filled];
+    erase [label="Hold 'E' (Arch Tools ON)\nred '+' cursor -> click line = delete", fillcolor="#fff9c4", style=filled];
+    clean [label="Clean lines (CmdArchClear)\nclear all measurements", fillcolor="#e1bee7", style=filled];
+    reset [label="Reset Scale (CmdArchResetScale)\nclear scale only", fillcolor="#e1bee7", style=filled];
+    esc [label="Esc\ncancel draw / close dialog", fillcolor="#f5f5f5", style=filled];
+
+    toggle -> scale;
+    toggle -> measure;
+    toggle -> off [style=dashed, label="toggle off"];
+    scale -> measure [style=dashed, label="after set"];
+    erase -> toggle [style=dotted, label="Arch Tools ON"];
+    clean -> measure;
+    reset -> scale;
+    esc -> toggle;
+
+    subgraph cluster_files {
+        label="Key files";
+        f1 [label="src/ArchScaleDialog.{h,cpp}\nfloating Scale dialog", shape=box];
+        f2 [label="src/ArchVector.{h,cpp}\nvector extract + snap + hit-test", shape=box];
+        f3 [label="src/Canvas.cpp\noverlay draw + erase", shape=box];
+        f4 [label="src/Toolbar.cpp\n2nd toolbar + underline", shape=box];
+        f5 [label="src/SumatraPDF.cpp\nhandlers + RelayoutFrame", shape=box];
+    }
+}

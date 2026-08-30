@@ -108,6 +108,12 @@
     <ClInclude Include="..\src\AppTools.h">
       <Filter>src</Filter>
     </ClInclude>
+    <ClInclude Include="..\src\ArchScaleDialog.h">
+      <Filter>src</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\ArchVector.h">
+      <Filter>src</Filter>
+    </ClInclude>
     <ClInclude Include="..\src\AutoScroll.h">
       <Filter>src</Filter>
     </ClInclude>
@@ -582,6 +588,12 @@
       <Filter>src</Filter>
     </ClCompile>
     <ClCompile Include="..\src\AppUnitTests.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\ArchScaleDialog.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\ArchVector.cpp">
       <Filter>src</Filter>
     </ClCompile>
     <ClCompile Include="..\src\AutoScroll.cpp">

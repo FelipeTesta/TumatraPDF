@@ -48,12 +48,17 @@ The features below were developed on top of SumatraPDF and **do not exist in the
 **Toolbar interface:**
 - Play/Pause toggle button (▶/⏸ icon)
 - + and - buttons for speed adjustment
+- Speed label `%d px/min` in dedicated toolbar slot via fake placeholder button `SpeedInfoId` + `TbSetButtonDx` (cloned page-counter pattern) — occupies space like a native control, no overlap
 - Numeric field for timer (minutes, 0 = no limit)
-- Label showing ETA (e.g.: "⏱ 12min remaining")
+- Label showing ETA (e.g.: "⏱ 12min remaining") — works on both PDF (fixed pages: remaining height / speed) and Markdown (webview `autoscrollProgress` ~100ms → `DocController::OnAutoScrollProgress` → `UpdateToolbarEtaText`)
 
-**Persistence:** Speed and timer saved in `TumatraPDF-settings.txt` (`AutoScrollSpeed`, `AutoScrollTimerMinutes`).
+**Persistence:** Speed and timer saved in `TumatraPDF-settings.txt` (`AutoScrollSpeed`, `AutoScrollTimerMinutes`). Fresh docs start at min speed `0.0167×` (`0.1f` → `0.0167f` in `MainWindow.h`, `LoadDocument`, `AutoScrollSpeedAdjust`, `gen-settings.ts`). Any persisted value < 0.1 clamps to 0.1.
 
 **Advanced Options:** `AutoScrollShowEta` (default `true`) — set to `false` to hide the ETA label in the toolbar entirely.
+
+**Markdown (.md):** Works in WebView2 mode (default) via `window.scrollBy(0,dy)` JS injection; stop-at-bottom via JS `autoscrollBottom` → native `DocController::OnAutoScrollBottom`; ETA via JS `autoscrollProgress` → `OnAutoScrollProgress` → ETA `remainingPx / AutoScrollPxPerSec`. MuPDF fallback (`useFixedPageUI=true`) unchanged. F7/F8 multiplier shared. Toolbar buttons (toggle/±) now visible/enabled for .md — fixed 2026-08-25 (was `AsChm()||AsMarkdown()` CHM blacklist → `AsChm()` only + `removeIfMarkdown[]` for fixed-page cmds). PDF ETA path untouched — no regression.
+
+> **Timer UI (Fase 15):** controle `[checkbox][Timer:][input]` adicionado à toolbar antes do botão Autoscroll — **BUILD OK** (aguardando teste prático do usuário — ver `LOG.md` Fase 15).
 
 ---
 
@@ -76,7 +81,9 @@ The features below were developed on top of SumatraPDF and **do not exist in the
 - Toggle button (🌓/☀ icon)
 - Slider/numeric input from 0% to 100% (0% = no overlay, 100% = full black)
 
-**Persistence:** State and value saved (`ContrastEnabled`, `ContrastOpacity`).
+**Persistence:** State and value saved (`ContrastEnabled`, `ContrastOpacity`). Fresh docs (no `FileState`) reset `contrastEnabled=false` / `contrastOpacity=50` / `autoScrollSpeedMultiplier=0.1f` — no cross-tab leak (`LoadDocument` else-branch). **Win32 overlay cross-doc leak fix:** `DestroyContrastOverlay(win)` called unconditionally on document change (`LoadDocument`) and in OFF toggle branch for all modes (clears tainted cross-doc Win32 layers).
+
+**Markdown (.md):** Works in WebView2 mode (default) via injected `div#__sumatra_contrast` CSS overlay (`Eval`, `pointer-events:none`, max `z-index`); opacity `contrastOpacity*255/100/255.0f` — same math as Win32 overlay; OFF now `d.remove()` not `display:none`. Persisted via `RestoreContrastOverlay` on `OnDocumentComplete`. MuPDF fallback unchanged. Per-doc persistence applies to .md too — reopen restores saved `ContrastEnabled`/`ContrastOpacity`; black veil on reopen = persisted ON → `Ctrl+Shift+C` toggles off (by design, matches PDF).
 
 ---
 
@@ -148,7 +155,35 @@ The script compares the version in `sumatrapdf-src/src/Version.h` with the pre-r
 
 ---
 
-### 5. 🎨 Own Visual Identity
+### 5. 📐 Arch Tools (Scale + Measure)
+
+**Status:** 🟡 Build-verified, runtime validation in progress (2026-08-29, Fase 12)
+
+**What it does:** For architecture PDFs (vector drawings). Define a scale by drawing/selecting a line and entering its real length; then measure any line to get real-world x / y / length.
+
+**How it works:**
+- A second toolbar (below the main one) opens via the "Arch Tools" toggle button on the main toolbar. Lines (scale + measurements) are visible only when Arch Tools = ON.
+- **Scale:** draw a line on the page (snaps to vector endpoints), open the floating Scale dialog, type the real length + ✅ → computes the scale factor (page units / real unit). Drawing a new line replaces the previous one.
+- **Measure:** draw lines; each shows its real x / y / length (in the chosen unit) as a label on the page.
+- **Clean lines** (`CmdArchClear`): clears all measurements. **Reset Scale** (`CmdArchResetScale`): clears scale calibration only.
+- **Erase:** hold `E` while Arch Tools is ON → red "+" cursor; click a drawn line to delete it individually.
+- **Esc:** cancels the current draw / closes the Scale dialog.
+
+**Controls:**
+| Access | Action |
+|---|---|
+| Main toolbar "Arch Tools" toggle | Show/hide 2nd toolbar + lines |
+| 2nd toolbar "Scale" | Enter scale mode (opens dialog) |
+| 2nd toolbar "Measure" | Toggle measure mode |
+| 2nd toolbar "Clean lines" | Clear all measurements |
+| 2nd toolbar "Reset Scale" | Clear scale calibration |
+| Hold `E` + click | Erase individual line |
+| `Esc` | Cancel draw / close dialog |
+
+**Technical:** `src/ArchScaleDialog.{h,cpp}` (floating dialog), `src/ArchVector.{h,cpp}` (PDF vector segment extraction + snap + hit-test), `src/Canvas.cpp` (draw overlay + erase), `src/Toolbar.cpp` (2nd toolbar + underline), `src/SumatraPDF.cpp` (command handlers + RelayoutFrame). Per-document state in `FileState` + `MainWindow`. Modularity gate: global pref `archToolsEnabled` (default on; off = zero cost).
+
+---
+### 6. 🎨 Own Visual Identity
 
 - **Binary name:** `TumraPDF.exe` (allows side-by-side installation with original SumatraPDF)
 - **Window:** Title "TumatraPDF" instead of "SumatraPDF"
@@ -166,6 +201,7 @@ The script compares the version in `sumatrapdf-src/src/Version.h` with the pre-r
 | Contrast Filter | `src/ContrastOverlay.cpp`, `src/Canvas.cpp` | `WM_CREATE` (overlay window) |
 | Viewport Crop | `src/DisplayModel.cpp`, `src/SumatraPDF.cpp` | `GetViewPort()`, `ScrollYBy()` |
 | Update | `scripts/check-updates.ps1`, `MERGE.md` | N/A (external tool) |
+| Arch Tools (Scale+Measure) | `src/ArchScaleDialog.{h,cpp}`, `src/ArchVector.{h,cpp}`, `src/Canvas.cpp`, `src/Toolbar.cpp`, `src/SumatraPDF.cpp` | `CmdArchToolsToggle`/`CmdArchScale`/`CmdArchMeasure`, `OnPaintDocument`, `UpdateToolbar2State` |
 
 **How to build:** See "Build" section below.
 
@@ -180,6 +216,7 @@ The script compares the version in `sumatrapdf-src/src/Version.h` with the pre-r
 - [x] Temas: Light+Dark apenas, Dark padrão
 - [x] Menu "New Tools" com comandos TumatraPDF
 - [x] Viewport crop + margin trim (zoom bug fixed)
+- [x] Arch Tools (Scale + Measure) — 2nd toolbar, scale/measure/erase, build-verified
 - [ ] Testes automatizados para novas funcionalidades
 
 ---
@@ -227,12 +264,30 @@ Inventory of debug tooling in `sumatrapdf-src/` (research 2026-08-16):
 - **Flags:** `-for-testing -console -log -stress-test -bench -render -extract-text -set-color-range`
 - **Static analysis:** `cmd/clang-tidy.ts`, `cmd/cppcheck.ts`
 - **Codegen:** `cmd/gen-{commands,settings,flags}.ts`; log viewer `src/tools/logview`; 112 `tests/issue-*.ts`
+- **Logging:** `SumatraLog.h/.cpp` — auto-log to `%LOCALAPPDATA%\SumatraPDF\<hash>\sumatra-log.txt` (`StartLogToFile` unconditional); file output `[YYYY-MM-DD HH:MM:SS.mmm] [INFO]/[WARN]/[ERROR]` + rotation truncate >5MB; instrumentation tags `[md] doc complete / contrast restore / toggle / opacity`, `[autoscroll] start|stop / webview tick / bottom reached`, `[webview] autoscrollBottom notify`
 
 **Known issues (fix next session):**
 - `cmd/build-asan.ts` references `SumatraPDF.sln`/`SumatraPDF-static` — renamed to `TumatraPDF.sln` → ASan + windbg pipeline broken
 - `.vscode/launch.json`/`tasks.json` target `SumatraPDF-dll.exe`/`SumatraPDF.sln` → no F5 debug in VS Code
 - `-dbg-control` lacks commands for custom feature state (crop rect, trim, autoscroll ETA, contrast/invert)
 - Scroll delay 3.7.20958 vs 3.6.17065: root cause = upstream smooth-scroll (default TRUE since 2026-07-29); `smoothScroll=false` → instant scroll. Residual delay: `uitask::Post` deferral + async render thread. trim=on intensifies it (fix separate)
+
+## Análise de código com tree-sitter (MCP)
+
+O servidor MCP `tree-sitter` fornece análise estrutural do código-fonte sem necessidade de manter arquivos `.dot` manuais de arquitetura.
+
+Fluxo recomendado (sempre registrar o projeto antes de consultar):
+1. **Registrar projeto**: `tree-sitter_register_project_tool` (path = raiz do repo, ex.: `sumatrapdf-src`).
+2. **Visão geral**: `tree-sitter_analyze_project` (detecta linguagens e layout de diretórios).
+3. **Símbolos de um arquivo**: `tree-sitter_get_symbols` (funções, classes, imports).
+4. **AST**: `tree-sitter_get_ast` (árvore sintática de um arquivo).
+5. **Dependências/includes**: `tree-sitter_get_dependencies` (grafo de includes).
+6. **Uso de símbolo**: `tree-sitter_find_usage` (onde uma função/classe é usada no projeto).
+7. **Busca de texto**: `tree-sitter_find_text` — **EVITAR** em repositórios C++ grandes com subpastas vendor/ext (ex.: `mupdf/`), pois causa timeout do MCP (-32001). Nesses casos usar `grep` direcionado.
+8. **Queries**: `tree-sitter_run_query` (queries tree-sitter avançadas).
+9. **Listar**: `tree-sitter_list_projects_tool`, `tree-sitter_list_languages`, `tree-sitter_list_files`.
+
+Regra: `FLOW/*.dot` são mapas de **PROCESSO** (fluxo de trabalho), NÃO arquitetura de código. Não manter `.dot` manual de arquitetura — usar tree-sitter para entender estrutura (símbolos + grafo de dependências) antes de planejar.
 
 ## Architecture
 
@@ -241,12 +296,12 @@ Based on SumatraPDF:
 - **Build:** Premake5 → Visual Studio 2022
 - **UI:** Native Win32 API
 - **PDF engine:** MuPDF
-- **Formats:** PDF, EPUB, MOBI, CBZ/CBR, FB2, CHM, XPS, DjVu
+- **Formats:** PDF, EPUB, MOBI, CBZ/CBR, FB2, CHM, XPS, DjVu, Markdown (.md/.markdown)
 - **Native auto-update:** `src/UpdateCheck.cpp` (SumatraPDF)
 
 ## Status
 
-🟢 Complete — All core features implemented (AutoScroll, Contrast Filter, Viewport Crop & Margin Trim, Dark Theme default, New Tools menu). Binary: `TumatraPDF.exe`.
+🟢 Complete — All core features implemented (AutoScroll, Contrast Filter, Viewport Crop & Margin Trim, Dark Theme default, New Tools menu, Arch Tools Scale+Measure). Binary: `TumatraPDF.exe`. Arch Tools: build-verified, runtime validation in progress (Fase 12, 2026-08-29).
 
 ## 2026-08-17 - Trim Cache + ETA Option Visibility
 

@@ -789,10 +789,20 @@ const fileSettings: Field[] = [
   field("Index", Int, 0, "temporary value needed for FileHistory::cmpOpenCount").notSaved(),
   field("Himl", { name: "", ctype: "HIMAGELIST" }, "NULL", "image list holding the file's shell icon").notSaved(),
   field("IconIdx", Int, -1, "index of the file's shell icon in Himl, -1 if not loaded yet").notSaved(),
-  field("AutoScrollSpeedMultiplier", Float, 0.1, "Autoscroll speed multiplier for this document"),
+  field("AutoScrollSpeedMultiplier", Float, 0.008, "Autoscroll speed multiplier for this document"),
   field("InvertColors", Bool, false, "invert page colors for this document"),
   field("ContrastEnabled", Bool, false, "contrast overlay enabled for this document"),
   field("ContrastOpacity", Int, 50, "contrast overlay opacity for this document (0-100)"),
+  field("ArchScaleFactor", Float, 0.0, "arch tools scale factor (page units per real unit)"),
+  field("ArchScaleAnchorX", Float, 0.0, "arch scale anchor X in page coords"),
+  field("ArchScaleAnchorY", Float, 0.0, "arch scale anchor Y in page coords"),
+  field("ArchScaleLineP2x", Float, 0.0, "arch scale line point 2 X in page coords"),
+  field("ArchScaleLineP2y", Float, 0.0, "arch scale line point 2 Y in page coords"),
+  field("ArchScaleLineDefined", Bool, false, "whether arch scale line endpoints are defined"),
+  field("ArchScaleLineP1x", Float, 0.0, "arch scale line point 1 X in page coords"),
+  field("ArchScaleLineP1y", Float, 0.0, "arch scale line point 1 Y in page coords"),
+  field("ArchUnit", Int, 2, "arch unit: 0=mm,1=cm,2=m,3=in,4=ft"),
+  field("ArchScaleSet", Bool, false, "whether arch scale is defined for this doc"),
 ];
 
 const tabState: Field[] = [
@@ -1002,6 +1012,8 @@ const globalPrefs: Field[] = [
   field("ShowToc", Bool, true, "if true, show the table of contents (Bookmarks) sidebar when the document has one"),
   field("ShowLinks", Bool, false, "if true, draw a blue border around links in the document").ver("3.6"),
   field("AutoScrollShowEta", Bool, true, "Show ETA label during auto-scroll"),
+  field("AutoScrollTimerMinutes", Int, 30, "Autoscroll timer duration in minutes (1-600, 0 = no timer)"),
+  field("AutoScrollTimerEnabled", Bool, false, "Enable autoscroll auto-stop timer"),
   field(
     "ShowDocumentFocusIndicator",
     Bool,
@@ -1078,6 +1090,24 @@ const globalPrefs: Field[] = [
     false,
     "if true, disables AI Chat sidebar feature completely: hides menu entries, toolbar buttons, and commands for all AI providers",
   ).ver("3.7"),
+  field(
+    "ArchToolsEnabled",
+    Bool,
+    true,
+    "if true, enables Arch Tools (scale and measure) feature: shows sidebar tab, toolbar buttons, and commands",
+  ).ver("3.7"),
+  field(
+    "ArchUnit",
+    Int,
+    1,
+    "default unit for Arch Tools scale/measure: 0=mm,1=cm,2=m,3=in,4=ft",
+  ).ver("3.8"),
+  field(
+    "ArchDecimalSeparator",
+    Int,
+    1,
+    "decimal separator for Arch Tools numeric input/display: 0=dot (.), 1=comma (,)",
+  ).ver("3.8"),
   field(
     "FastScrollOverScrollbar",
     Bool,
