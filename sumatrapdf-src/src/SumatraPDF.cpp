@@ -815,6 +815,46 @@ static void UpdateSidebarDisplayState(WindowTab* tab, FileState* fs) {
     *fs->tocState = tab->tocState;
 }
 
+bool IsCurrentDocMarkdown(MainWindow* win);
+
+static Str SerializeMeasurements(const Vec<ArchMeasurement>& measurements) {
+    str::Builder sb;
+    for (int i = 0; i < len(measurements); i++) {
+        const ArchMeasurement& m = measurements[i];
+        if (i > 0)
+            sb.Append(StrL(";"));
+        TempStr item = fmt("%g,%g,%g,%g,%g,%g,%g,%d,%d",
+            m.p1x, m.p1y, m.p2x, m.p2y,
+            m.len, m.x, m.y,
+            (int)m.unit, m.scaled ? 1 : 0);
+        sb.Append(item);
+    }
+    return sb.TakeStr();
+}
+
+static Vec<ArchMeasurement> DeserializeMeasurements(const char* s) {
+    Vec<ArchMeasurement> result;
+    if (!s || !*s)
+        return result;
+    while (*s) {
+        ArchMeasurement m = {};
+        int scaledInt = 0;
+        int n = sscanf(s, "%g,%g,%g,%g,%g,%g,%g,%d,%d",
+            &m.p1x, &m.p1y, &m.p2x, &m.p2y,
+            &m.len, &m.x, &m.y,
+            (int*)&m.unit, &scaledInt);
+        if (n == 9) {
+            m.scaled = (scaledInt != 0);
+            result.Append(m);
+        }
+        const char* next = strchr(s, ';');
+        if (!next)
+            break;
+        s = next + 1;
+    }
+    return result;
+}
+
 void UpdateTabFileDisplayStateForTab(WindowTab* tab) {
     if (!tab || !tab->ctrl) {
         return;
@@ -850,6 +890,7 @@ void UpdateTabFileDisplayStateForTab(WindowTab* tab) {
         fs->archScaleLineP1y = win->archTools.scaleLineP1y;
         fs->archUnit = win->archTools.unit;
         fs->archScaleSet = win->archTools.scaleSet;
+        fs->archMeasurements = SerializeMeasurements(win->archTools.measurements);
     }
 }
 
@@ -2101,6 +2142,8 @@ static void ReplaceDocumentInCurrentTab(LoadArgs* args, DocController* ctrl, Fil
             win->archTools.scaleLineP1x = fs->archScaleAnchorX;
             win->archTools.scaleLineP1y = fs->archScaleAnchorY;
         }
+        // Restore arch measurements
+        win->archTools.measurements = DeserializeMeasurements(fs->archMeasurements.s);
     } else {
         // Fresh document: reset to defaults
         win->autoScroll.speedMultiplier = 0.008f;
@@ -6348,6 +6391,9 @@ bool RelayoutFrame(MainWindow* win, bool updateToolbars, int sidebarDx) {
     curState.aiChatVisible = win->uiState.aiChatVisible;
     curState.aiChatDx = win->aiChatDx;
     curState.archToolsOn = win->archTools.on;
+
+    if (IsCurrentDocMarkdown(win) && win->archTools.hwndReBar2)
+        ShowWindow(win->archTools.hwndReBar2, SW_HIDE);
 
     // skip redundant relayouts when all layout-affecting state is unchanged
     if (IsUiLayoutEq(&curState, &win->uiState.layout) && updateToolbars && sidebarDx == -1) {
@@ -11052,21 +11098,13 @@ static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, L
                     struct WebviewWnd* wv = mm->GetWebviewWnd();
                     if (wv) {
                         if (win->contrastEnabled) {
-                            // Set dark background and gray text directly via inline styles
-                            // Using gray/dark shades based on contrast opacity (no invert filter)
-                            float cssOpacity = win->contrastOpacity / 100.0f;
+                            int gray = (int)(255.0 * (1.0 - win->contrastOpacity / 100.0) + 0.5);
                             TempStr js = fmt(
-                                "document.body.style.backgroundColor = '#%02x%02x%02x';"
-                                "document.body.style.color = '#%02x%02x%02x';",
-                                (int)(255 * (1.0f - cssOpacity)),  // bright text on dark background
-                                (int)(255 * (1.0f - cssOpacity)),
-                                (int)(255 * (1.0f - cssOpacity)),
-                                (int)(255 * cssOpacity),
-                                (int)(255 * cssOpacity),
-                                (int)(255 * cssOpacity));
+                                "document.body.style.backgroundColor = '#FAFAFA';"
+                                "document.body.style.color = 'rgb(%d,%d,%d)';",
+                                gray, gray, gray);
                             wv->Eval(js);
                         } else {
-                            // Remove inline styles when contrast is toggled off
                             TempStr js = fmt(
                                 "document.body.style.backgroundColor = '';"
                                 "document.body.style.color = '';");
