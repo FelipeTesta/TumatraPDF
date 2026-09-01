@@ -9639,6 +9639,110 @@ static void PrintCurrentFileDeferred(MainWindow* win) {
     PrintCurrentFile(win);
 }
 
+// ---- File command wrappers (C5 extraction) ----
+
+static void HandleCmdNewWindow(MainWindow* win) {
+    CreateAndShowMainWindow(nullptr);
+}
+
+static void HandleCmdOpenFile(MainWindow* win) {
+    OpenFile(win);
+}
+
+static void HandleCmdOpenFileWithOSFilePicker(MainWindow* win) {
+    OpenFileWithOSFilePicker(win);
+}
+
+static void HandleCmdToggleFilePicker(MainWindow* win) {
+    ToggleFilePicker();
+    for (MainWindow* w : gWindows) {
+        UpdateAppMenu(w, w->menu);
+    }
+}
+
+static void HandleCmdShowInFolder(MainWindow* win) {
+    ShowCurrentFileInFolder(win);
+}
+
+static void HandleCmdShowGeneratedHTML(MainWindow* win) {
+    ShowGeneratedMarkdownHtml(win);
+}
+
+static void HandleCmdOpenPrevFileInFolder(MainWindow* win) {
+    OpenNextPrevFileInFolder(win, false);
+}
+
+static void HandleCmdOpenNextFileInFolder(MainWindow* win) {
+    OpenNextPrevFileInFolder(win, true);
+}
+
+static void HandleCmdNavigateFilesInFolder(MainWindow* win) {
+    ShowNavFilesInFolder(win);
+}
+
+static void HandleCmdRenameFile(MainWindow* win) {
+    RenameCurrentFile(win);
+}
+
+static void HandleCmdDeleteFile(MainWindow* win) {
+    DeleteCurrentFile(win);
+}
+
+static void HandleCmdDeleteFileAndOpenNext(MainWindow* win) {
+    DeleteCurrentFileAndOpenNext(win);
+}
+
+static void HandleCmdSaveAs(MainWindow* win) {
+    SaveCurrentFileAs(win);
+}
+
+static void HandleCmdPrint(MainWindow* win) {
+    uitask::Post(MkFunc0(PrintCurrentFileDeferred, win), "CmdPrint");
+}
+
+static void HandleCmdCopyFilePath(MainWindow* win) {
+    WindowTab* tab = win->CurrentTab();
+    if (tab) {
+        CopyFilePath(tab);
+    }
+}
+
+static void HandleCmdClearHistory(MainWindow* win) {
+    ClearHistory(win);
+}
+
+static void HandleCmdRemoveDeletedFilesFromHistory(MainWindow* win) {
+    RemoveDeletedFilesFromHistory(win);
+}
+
+static void HandleCmdDeleteCachedFiles(MainWindow* win) {
+    DeleteCachedFiles(win);
+}
+
+static void HandleCmdReopenLastClosedFile(MainWindow* win) {
+    ReopenLastClosedFile(win);
+}
+
+static void HandleCmdShowLog(MainWindow* win) {
+    ShowLogFileSmart();
+}
+
+static void HandleCmdScreenshot(MainWindow* win) {
+    TakeScreenshots();
+}
+
+static void HandleCmdExit(MainWindow* win) {
+    OnMenuExit();
+}
+
+static void HandleCmdReloadDocument(MainWindow* win) {
+    ReloadDocument(win, false);
+}
+
+static void HandleCmdCreateShortcutToFile(MainWindow* win) {
+    CreateLnkShortcut(win);
+}
+
 static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     int cmdId = LOWORD(wp);
     bool openAnnotationEdit = false;
@@ -9793,7 +9897,7 @@ static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, L
         }
 
         case CmdNewWindow:
-            CreateAndShowMainWindow(nullptr);
+            HandleCmdNewWindow(win);
             break;
 
         case CmdTabGroupSave:
@@ -9813,18 +9917,15 @@ static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, L
             break;
 
         case CmdOpenFile:
-            OpenFile(win);
+            HandleCmdOpenFile(win);
             break;
 
         case CmdOpenFileWithOSFilePicker:
-            OpenFileWithOSFilePicker(win);
+            HandleCmdOpenFileWithOSFilePicker(win);
             break;
 
         case CmdToggleFilePicker:
-            ToggleFilePicker();
-            for (MainWindow* w : gWindows) {
-                UpdateAppMenu(w, w->menu);
-            }
+            HandleCmdToggleFilePicker(win);
             break;
 
         case CmdToggleBoolSetting: {
@@ -9852,52 +9953,53 @@ static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, L
         }
 
         case CmdShowInFolder:
-            ShowCurrentFileInFolder(win);
+            HandleCmdShowInFolder(win);
             break;
 
         case CmdShowGeneratedHTML:
-            ShowGeneratedMarkdownHtml(win);
+            HandleCmdShowGeneratedHTML(win);
             break;
 
         case CmdOpenPrevFileInFolder:
+            if (!win->IsCurrentTabAbout()) {
+                HandleCmdOpenPrevFileInFolder(win);
+            }
+            break;
+
         case CmdOpenNextFileInFolder:
             if (!win->IsCurrentTabAbout()) {
-                // folder browsing should also work when an error page is displayed,
-                // so special-case it before the win->IsDocLoaded() check
-                bool forward = cmdId == CmdOpenNextFileInFolder;
-                OpenNextPrevFileInFolder(win, forward);
+                HandleCmdOpenNextFileInFolder(win);
             }
             break;
 
         case CmdNavigateFilesInFolder:
             // also works on the home page, where it starts in the folder of the
             // most recently opened document
-            ShowNavFilesInFolder(win);
+            HandleCmdNavigateFilesInFolder(win);
             break;
 
         case CmdRenameFile:
-            RenameCurrentFile(win);
+            HandleCmdRenameFile(win);
             break;
 
         case CmdDeleteFile:
-            DeleteCurrentFile(win);
+            HandleCmdDeleteFile(win);
             break;
 
         case CmdDeleteFileAndOpenNext:
-            DeleteCurrentFileAndOpenNext(win);
+            HandleCmdDeleteFileAndOpenNext(win);
             break;
 
         case CmdSaveAs:
-            SaveCurrentFileAs(win);
+            HandleCmdSaveAs(win);
             break;
 
         case CmdPrint:
-            // not PrintCurrentFile(win): see PrintCurrentFileDeferred
-            uitask::Post(MkFunc0(PrintCurrentFileDeferred, win), "CmdPrint");
+            HandleCmdPrint(win);
             break;
 
         case CmdCopyFilePath:
-            CopyFilePath(tab);
+            HandleCmdCopyFilePath(win);
             break;
 
         case CmdCommandPalette: {
@@ -9939,27 +10041,27 @@ static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, L
             break;
 
         case CmdClearHistory:
-            ClearHistory(win);
+            HandleCmdClearHistory(win);
             break;
 
         case CmdRemoveDeletedFilesFromHistory:
-            RemoveDeletedFilesFromHistory(win);
+            HandleCmdRemoveDeletedFilesFromHistory(win);
             break;
 
         case CmdDeleteCachedFiles:
-            DeleteCachedFiles(win);
+            HandleCmdDeleteCachedFiles(win);
             break;
 
         case CmdReopenLastClosedFile:
-            ReopenLastClosedFile(win);
+            HandleCmdReopenLastClosedFile(win);
             break;
 
         case CmdShowLog:
-            ShowLogFileSmart();
+            HandleCmdShowLog(win);
             break;
 
         case CmdScreenshot:
-            TakeScreenshots();
+            HandleCmdScreenshot(win);
             break;
 
         case CmdSetScreenshotHotkey:
@@ -10042,15 +10144,15 @@ static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, L
         } break;
 
         case CmdExit:
-            OnMenuExit();
+            HandleCmdExit(win);
             break;
 
         case CmdReloadDocument:
-            ReloadDocument(win, false);
+            HandleCmdReloadDocument(win);
             break;
 
         case CmdCreateShortcutToFile:
-            CreateLnkShortcut(win);
+            HandleCmdCreateShortcutToFile(win);
             break;
 
         case CmdZoomFitWidthAndContinuous:

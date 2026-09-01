@@ -1,5 +1,42 @@
 # TumatraPDF — Development Log
 
+## 2026-09-01 — 16C C5 FileCommands Extraction Complete
+
+### What
+Extracted 24 File domain command handlers from SumatraPDF.cpp FrameOnCommand switch into HandleCmdXxx wrapper pattern:
+- Created 24 static wrapper functions in SumatraPDF.cpp (before FrameOnCommand)
+- Replaced all 24 inline case bodies with clean `HandleCmdXxx(win); break;` dispatch calls
+- Cleared all stubs in Commands_File.cpp to avoid multiple definition conflicts
+- Split combined CmdOpenPrevFileInFolder/CmdOpenNextFileInFolder case into two separate cases
+
+### Key Decision
+Unlike C2/C3/C4 (which moved handlers to separate .cpp files), C5 wrappers live IN SumatraPDF.cpp because the underlying helpers (OpenFile, ClearHistory, etc.) are static functions with deep inter-dependencies within SumatraPDF.cpp. The wrappers only thin-dispatch; actual extraction of helpers requires making them non-static first.
+
+### Build
+`C:\Users\Testa\.bun\bin\bun.exe cmd/build.ts` from sumatrapdf-src dir — 0 errors / 0 warnings. Deployed to Compiled\TumatraPDF.exe (21,972,480 bytes).
+
+### 16C Status
+- C1 ✅ (handler mapping)
+- C2 ✅ (AutoScroll extraction)
+- C3 ✅ (ArchTools extraction)
+- C4 ✅ (ViewCommands extraction)
+- C5 ✅ (FileCommands wrapper extraction)
+
+## 2026-08-31 — Session: Feature Restoration + 16C C5 FileCommands Analysis
+
+### What
+1. Restored 3 features lost during merge/revert cycle: contrast #FAFAFA for .md, SerializeMeasurements/DeserializeMeasurements persistence, hwndReBar2 SW_HIDE for .md. Build 0 err/0 warn.
+2. Analyzed 16C C5 (FileCommands extraction) — mapped all 24 File domain `case Cmd` statements in FrameOnCommand. ALL are simple 1-3 line single-function calls. Zero complex cases.
+3. Identified C5 blocker: all helper functions (OpenFile, ClearHistory, etc.) are `static` in SumatraPDF.cpp — inaccessible from Commands_File.cpp.
+4. Attempted C5a (File Navigation extraction) on branch `feature/16c-c5-checkpoint` (commit `ca5dea5`) — failed with 40+ C3861 errors because extracted functions still call static helpers. Reverted via `git stash`.
+5. Established correct C5 approach: create HandleCmdXxx wrappers IN SumatraPDF.cpp first, keep static helpers in place, extract helpers only when dependency chain is fully mapped.
+
+### Build
+`C:\Users\Testa\.bun\bin\bun.exe cmd/build.ts` from sumatrapdf-src dir — 0 errors / 0 warnings.
+
+### Key Lesson
+C5 extraction cannot follow the same pattern as C2/C3/C4 because file-domain helpers have deep static dependency chains within SumatraPDF.cpp. Strategy: (1) wrap case bodies in HandleCmdXxx(win) functions in SumatraPDF.cpp, (2) declare in Commands_File.h, (3) move helpers out only after all dependencies are non-static or relocated.
+
 - 2026-08-25 — research session — confirmed Markdown (.md/.markdown) reading support ALREADY EXISTS, inherited from upstream master. Zero code changes. Refs: ext map GuessFileType.cpp:66-67, dispatch EngineCreate.cpp:179, cmark-gfm vendored + FZ_ENABLE_MD=1, open filter "*.md;*.markdown" SumatraPDF.cpp:5750, dual render WebView2 default / MuPDF fallback via markdownUI.useFixedPageUI. Runtime verification pending (user tests later).
 - 2026-08-24 — lint batch — removed unused cache param (RenderCache), corrected misleading persist comment (autoscroll speed handlers).
 - 2026-08-24 — refactor batch — AutoScroll logic extracted to src/AutoScroll.{h,cpp} (ETA math out of Toolbar, tick out of Canvas, commands thin), toolbar overlay brush hoisted + early-out, WM_SIZE ETA reposition width-gated, TabWnd::Paint StringFormat hoisted, ContrastOverlay alpha dedup.

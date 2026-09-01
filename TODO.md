@@ -128,7 +128,7 @@ Fase 13b: escala e medições independentes por documento (HashMap archMeasureme
 - [x] C2: Extrair AutoScrollCommands (menor, bem conhecido)
 - [x] C3: Extrair ArchToolsCommands
 - [x] C4: Extrair ViewCommands
-- [ ] C5: Extrair FileCommands
+- [x] C5: Extrair FileCommands — 24 HandleCmdXxx wrappers em SumatraPDF.cpp, dispatch convertido, stubs Commands_File.cpp limpos (2026-09-01)
 - [x] Build + smoke test após CADA extração (dispatch permanece em SumatraPDF.cpp)
 
 ### 16D — Accessors tipados gGlobalPrefs (por último)
@@ -136,3 +136,4 @@ Fase 13b: escala e medições independentes por documento (HashMap archMeasureme
 
 <!-- 16B DONE 2026-08-30: AutoScrollState + ArchToolsState structs created in MainWindow.h; ~90% of .cpp refs renamed via mechanical PowerShell; bare identifiers in measurement functions fixed with this->; build 0 err/0 warn, deploy, smoke clean. -->
 <!-- 16C-2 DONE 2026-08-30: Markdown contrast (light bg + dark gray text), Arch Tools hidden for .md, AutoScroll commands extracted → Commands_AutoScroll.{h,cpp}; build 0 err/0 warn, deploy, smoke clean. -->
+<!-- 16C-C5 DONE 2026-09-01: 24 HandleCmdXxx wrappers in SumatraPDF.cpp, dispatch converted, stubs cleared, build 0/0 -->
