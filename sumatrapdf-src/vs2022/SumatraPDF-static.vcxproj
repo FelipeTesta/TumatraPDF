@@ -1351,6 +1351,10 @@
     <ClCompile Include="..\src\ArchScaleDialog.cpp" />
     <ClCompile Include="..\src\ArchVector.cpp" />
     <ClCompile Include="..\src\AutoScroll.cpp" />
+    <ClCompile Include="..\src\Commands_AutoScroll.cpp" />
+    <ClCompile Include="..\src\Commands_ArchTools.cpp" />
+    <ClCompile Include="..\src\Commands_View.cpp" />
+    <ClCompile Include="..\src\Commands_File.cpp" />
     <ClCompile Include="..\src\AvifReader.cpp" />
     <ClCompile Include="..\src\BasePch.cpp">
       <PrecompiledHeader>Create</PrecompiledHeader>

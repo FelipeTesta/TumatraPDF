@@ -77,13 +77,13 @@ static constexpr float kSpeedDownFactor = 0.6666667f; // 2/3 step down
 
 // Calculate effective scroll speed in pixels per second
 float AutoScrollPxPerSec(MainWindow* win) {
-    float speed = win->autoScrollSpeed * win->autoScrollSpeedMultiplier;
+    float speed = win->autoScroll.speed * win->autoScroll.speedMultiplier;
     return speed * 100.0f; // speed is pixels per tick, timer fires ~100x/sec
 }
 
 // Recompute ETA from remaining pages and current speed
 void RecalcAutoScrollEta(MainWindow* win) {
-    if (!win->autoScrollActive) {
+    if (!win->autoScroll.active) {
         return;
     }
     auto dm = win->AsFixed();
@@ -93,23 +93,23 @@ void RecalcAutoScrollEta(MainWindow* win) {
     int remainingPages = dm->PageCount() - dm->CurrentPageNo();
     float speedPxPerSec = AutoScrollPxPerSec(win);
     if (remainingPages <= 0 || speedPxPerSec <= 0) {
-        win->autoScrollEtaMinutes = 0;
+        win->autoScroll.etaMinutes = 0;
     } else {
         auto pageInfo = dm->GetPageInfo(dm->CurrentPageNo());
         if (!pageInfo) {
-            win->autoScrollEtaMinutes = 0;
+            win->autoScroll.etaMinutes = 0;
         } else {
             int pageHeightPx = (int)pageInfo->pos.dy;
             float etaSec = (remainingPages * pageHeightPx) / speedPxPerSec;
-            win->autoScrollEtaMinutes = (int)(etaSec / 60.0f);
-            if (win->autoScrollEtaMinutes < 0) {
-                win->autoScrollEtaMinutes = 0;
+            win->autoScroll.etaMinutes = (int)(etaSec / 60.0f);
+            if (win->autoScroll.etaMinutes < 0) {
+                win->autoScroll.etaMinutes = 0;
             }
         }
     }
-    win->autoScrollEtaStartTick = GetTickCount();
-    win->autoScrollEtaLastShown = -1;
-    win->autoScrollEtaPageNo = dm->CurrentPageNo();
+    win->autoScroll.etaStartTick = GetTickCount();
+    win->autoScroll.etaLastShown = -1;
+    win->autoScroll.etaPageNo = dm->CurrentPageNo();
 }
 
 // Toggle continuous auto-scroll on/off
@@ -123,23 +123,23 @@ void AutoScrollToggle(MainWindow* win) {
     if (!dm && !mm) {
         return;
     }
-    win->autoScrollActive = !win->autoScrollActive;
-    if (win->autoScrollActive) {
-        win->autoScrollAccum = 0;
-        win->autoScrollStartTick = GetTickCount();
+    win->autoScroll.active = !win->autoScroll.active;
+    if (win->autoScroll.active) {
+        win->autoScroll.accum = 0;
+        win->autoScroll.startTick = GetTickCount();
         // Feed the timer stop-logic: use configured minutes if timer enabled, else 0 (no limit)
-        win->autoScrollTimerMinutes = win->autoScrollTimerEnabled ? win->autoScrollTimerMinutesSetting : 0;
+        win->autoScroll.timerMinutes = win->autoScroll.timerEnabled ? win->autoScroll.timerMinutesSetting : 0;
         RecalcAutoScrollEta(win);
-        UpdateToolbarEtaText(win, win->autoScrollEtaMinutes);
+        UpdateToolbarEtaText(win, win->autoScroll.etaMinutes);
         SetTimer(win->hwndCanvas, kContinuousAutoScrollTimerID, USER_TIMER_MINIMUM, nullptr);
         const char* mode = dm ? "fixed" : "webview";
-        LogInfo("[autoscroll] start mode=%s speed=%.2f timerMinutes=%u", mode, win->autoScrollSpeedMultiplier, win->autoScrollTimerMinutes);
+        LogInfo("[autoscroll] start mode=%s speed=%.2f timerMinutes=%u", mode, win->autoScroll.speedMultiplier, win->autoScroll.timerMinutes);
     } else {
         KillTimer(win->hwndCanvas, kContinuousAutoScrollTimerID);
         UpdateToolbarEtaText(win, -1);
         LogInfo("[autoscroll] stop");
     }
-    SetToolbarButtonCheckedState(win, CmdAutoScrollToggle, win->autoScrollActive);
+    SetToolbarButtonCheckedState(win, CmdAutoScrollToggle, win->autoScroll.active);
     UpdateToolbarSpeedLabel(win);
 }
 
@@ -149,20 +149,20 @@ void AutoScrollSpeedAdjust(MainWindow* win, int direction) {
         return;
     }
     if (direction > 0) {
-        win->autoScrollSpeedMultiplier = std::min(win->autoScrollSpeedMultiplier * kSpeedUpFactor, kMaxSpeedMultiplier);
+        win->autoScroll.speedMultiplier = std::min(win->autoScroll.speedMultiplier * kSpeedUpFactor, kMaxSpeedMultiplier);
     } else {
-        win->autoScrollSpeedMultiplier =
-            std::max(win->autoScrollSpeedMultiplier * kSpeedDownFactor, kMinSpeedMultiplier);
+        win->autoScroll.speedMultiplier =
+            std::max(win->autoScroll.speedMultiplier * kSpeedDownFactor, kMinSpeedMultiplier);
     }
     // persist to in-memory FileState; written to disk on next settings save (app exit)
     WindowTab* tab = win->CurrentTab();
     if (tab && tab->filePath) {
         FileState* fs = gFileHistory.FindByPath(tab->filePath);
         if (fs) {
-            fs->autoScrollSpeedMultiplier = win->autoScrollSpeedMultiplier;
+            fs->autoScrollSpeedMultiplier = win->autoScroll.speedMultiplier;
         }
     }
-    if (win->autoScrollActive) {
+    if (win->autoScroll.active) {
         RecalcAutoScrollEta(win);
     }
     UpdateToolbarSpeedLabel(win);
@@ -190,7 +190,7 @@ void AutoScrollContinuousTick(MainWindow* win, HWND hwnd) {
     if (GetKeyState(VK_CONTROL) & 0x8000) {
         return;
     }
-    if (!win->autoScrollActive) {
+    if (!win->autoScroll.active) {
         KillTimer(hwnd, kContinuousAutoScrollTimerID);
         return;
     }
@@ -199,17 +199,17 @@ void AutoScrollContinuousTick(MainWindow* win, HWND hwnd) {
         // Fixed-page path (PDF, ebook, etc.)
         // Check end of document
         if (dm->IsAtDocumentEnd()) {
-            win->autoScrollActive = false;
+            win->autoScroll.active = false;
             KillTimer(hwnd, kContinuousAutoScrollTimerID);
             UpdateToolbarEtaText(win, -1);
             SetToolbarButtonCheckedState(win, CmdAutoScrollToggle, false);
             return;
         }
         // Timer check
-        if (win->autoScrollTimerMinutes > 0 && win->autoScrollStartTick > 0) {
-            DWORD elapsedMs = GetTickCount() - win->autoScrollStartTick;
-            if (elapsedMs >= (DWORD)win->autoScrollTimerMinutes * 60 * 1000) {
-                win->autoScrollActive = false;
+        if (win->autoScroll.timerMinutes > 0 && win->autoScroll.startTick > 0) {
+            DWORD elapsedMs = GetTickCount() - win->autoScroll.startTick;
+            if (elapsedMs >= (DWORD)win->autoScroll.timerMinutes * 60 * 1000) {
+                win->autoScroll.active = false;
                 KillTimer(hwnd, kContinuousAutoScrollTimerID);
                 UpdateToolbarEtaText(win, -1);
                 SetToolbarButtonCheckedState(win, CmdAutoScrollToggle, false);
@@ -217,23 +217,23 @@ void AutoScrollContinuousTick(MainWindow* win, HWND hwnd) {
             }
         }
         // Scroll
-        float speed = win->autoScrollSpeed * win->autoScrollSpeedMultiplier;
-        win->autoScrollAccum += speed;
-        int dy = (int)win->autoScrollAccum;
+        float speed = win->autoScroll.speed * win->autoScroll.speedMultiplier;
+        win->autoScroll.accum += speed;
+        int dy = (int)win->autoScroll.accum;
         if (dy != 0) {
-            win->autoScrollAccum -= dy;
+            win->autoScroll.accum -= dy;
             win->MoveDocBy(0, dy);
         }
         // ETA: recalc on page change, countdown by wall clock between
-        if (dm->CurrentPageNo() != win->autoScrollEtaPageNo) {
+        if (dm->CurrentPageNo() != win->autoScroll.etaPageNo) {
             RecalcAutoScrollEta(win);
         }
-        int remaining = win->autoScrollEtaMinutes - (int)((GetTickCount() - win->autoScrollEtaStartTick) / 60000);
+        int remaining = win->autoScroll.etaMinutes - (int)((GetTickCount() - win->autoScroll.etaStartTick) / 60000);
         if (remaining < 0) {
             remaining = 0;
         }
-        if (remaining != win->autoScrollEtaLastShown) {
-            win->autoScrollEtaLastShown = remaining;
+        if (remaining != win->autoScroll.etaLastShown) {
+            win->autoScroll.etaLastShown = remaining;
             UpdateToolbarEtaText(win, remaining);
         }
     } else {
@@ -252,11 +252,11 @@ void AutoScrollContinuousTick(MainWindow* win, HWND hwnd) {
             LogInfo("[autoscroll] webview tick start");
         }
         // Scroll by the same pixel delta used for fixed pages
-        float speed = win->autoScrollSpeed * win->autoScrollSpeedMultiplier;
-        win->autoScrollAccum += speed;
-        int dy = (int)win->autoScrollAccum;
+        float speed = win->autoScroll.speed * win->autoScroll.speedMultiplier;
+        win->autoScroll.accum += speed;
+        int dy = (int)win->autoScroll.accum;
         if (dy != 0) {
-            win->autoScrollAccum -= dy;
+            win->autoScroll.accum -= dy;
             TempStr js = fmt("window.scrollBy(0, %d);", dy);
             wv->Eval(js);
         }
@@ -281,10 +281,10 @@ void AutoScrollContinuousTick(MainWindow* win, HWND hwnd) {
             wv->Eval(js);
         }
         // Timer check (same as fixed-page)
-        if (win->autoScrollTimerMinutes > 0 && win->autoScrollStartTick > 0) {
-            DWORD elapsedMs = GetTickCount() - win->autoScrollStartTick;
-            if (elapsedMs >= (DWORD)win->autoScrollTimerMinutes * 60 * 1000) {
-                win->autoScrollActive = false;
+        if (win->autoScroll.timerMinutes > 0 && win->autoScroll.startTick > 0) {
+            DWORD elapsedMs = GetTickCount() - win->autoScroll.startTick;
+            if (elapsedMs >= (DWORD)win->autoScroll.timerMinutes * 60 * 1000) {
+                win->autoScroll.active = false;
                 KillTimer(hwnd, kContinuousAutoScrollTimerID);
                 UpdateToolbarEtaText(win, -1);
                 SetToolbarButtonCheckedState(win, CmdAutoScrollToggle, false);

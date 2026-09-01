@@ -1,4 +1,4 @@
-/* Copyright 2022 the SumatraPDF project authors (see AUTHORS file).
+﻿/* Copyright 2022 the SumatraPDF project authors (see AUTHORS file).
    License: GPLv3 */
 
 #include "base/Base.h"
@@ -903,7 +903,7 @@ static LRESULT CALLBACK WndProcToolbar(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp
         {
             bool isBgCtrl = (win->hwndPageBg == hwndCtrl);
             bool isEditCtrl = (win->hwndPageEdit == hwndCtrl);
-            bool isTimerCtrl = (win->hwndTimerCheck == hwndCtrl || win->hwndTimerLabel == hwndCtrl || win->hwndTimerEdit == hwndCtrl);
+            bool isTimerCtrl = (win->autoScroll.hwndTimerCheck == hwndCtrl || win->autoScroll.hwndTimerLabel == hwndCtrl || win->autoScroll.hwndTimerEdit == hwndCtrl);
             SetTextColor(hdc, ThemeWindowTextColor());
             SetBkMode(hdc, TRANSPARENT);
             // the page box is a white field on the light theme's gray toolbar.
@@ -977,7 +977,7 @@ static LRESULT CALLBACK WndProcToolbar(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp
     if (WM_SIZE == msg) {
         MainWindow* win = FindMainWindowByHwnd(hwnd);
         if (win) {
-            if (win->hwndEtaLabel && IsWindowVisible(win->hwndEtaLabel)) {
+            if (win->autoScroll.hwndEtaLabel && IsWindowVisible(win->autoScroll.hwndEtaLabel)) {
                 // skip if toolbar client width unchanged
                 RECT rcToolbar;
                 GetClientRect(hwnd, &rcToolbar);
@@ -988,7 +988,7 @@ static LRESULT CALLBACK WndProcToolbar(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp
                 }
             }
             // reposition timer controls
-            if (win->hwndTimerCheck) {
+            if (win->autoScroll.hwndTimerCheck) {
                 RepositionTimerControls(win);
             }
         }
@@ -1199,9 +1199,9 @@ void UpdateToolbarPageText(MainWindow* win, int pageCount, bool updateOnly) {
 }
 
 // Creates the ETA label for autoscroll, placed after the autoscroll button
-// group: [sep] [Autoscroll] [−] [+] [sep] -> ETA label
+// group: [sep] [Autoscroll] [ÔêÆ] [+] [sep] -> ETA label
 static void CreateEtaLabel(MainWindow* win) {
-    if (win->hwndEtaLabel != nullptr) {
+    if (win->autoScroll.hwndEtaLabel != nullptr) {
         return; // already created
     }
     Rect r = TbGetRect(win->hwndToolbar, CmdAutoScrollSpeedUp); // last button of autoscroll group after -/+ swap
@@ -1212,14 +1212,14 @@ static void CreateEtaLabel(MainWindow* win) {
 
     HWND h = CreateWindowExW(0, WC_STATICW, L"ETA: --", SS_CENTER | WS_CHILD, x, y, dx, dy, win->hwndToolbar,
                              (HMENU) nullptr, GetModuleHandle(nullptr), nullptr);
-    win->hwndEtaLabel = h;
+    win->autoScroll.hwndEtaLabel = h;
 }
 
 // Positions the ETA label anchored after the last visible toolbar button
 // (instead of the right edge of the toolbar) and hides it when there is no
 // room left, so it can't overlap buttons or get clipped on narrow windows.
 void RepositionEtaLabel(MainWindow* win) {
-    HWND hwndLabel = win->hwndEtaLabel;
+    HWND hwndLabel = win->autoScroll.hwndEtaLabel;
     HWND hwndToolbar = win->hwndToolbar;
     if (!hwndLabel || !hwndToolbar) {
         return;
@@ -1254,36 +1254,36 @@ void RepositionEtaLabel(MainWindow* win) {
 }
 
 void UpdateToolbarEtaText(MainWindow* win, int minutes) {
-    if (win->hwndEtaLabel == nullptr) {
+    if (win->autoScroll.hwndEtaLabel == nullptr) {
         return;
     }
     if (!gGlobalPrefs->autoScrollShowEta) {
-        if (IsWindowVisible(win->hwndEtaLabel)) {
-            ShowWindow(win->hwndEtaLabel, SW_HIDE);
+        if (IsWindowVisible(win->autoScroll.hwndEtaLabel)) {
+            ShowWindow(win->autoScroll.hwndEtaLabel, SW_HIDE);
             HwndInvalidate(win->hwndToolbar, true);
         }
         return;
     }
-    if (!win->autoScrollActive || minutes < 0) {
-        ShowWindow(win->hwndEtaLabel, SW_HIDE);
+    if (!win->autoScroll.active || minutes < 0) {
+        ShowWindow(win->autoScroll.hwndEtaLabel, SW_HIDE);
         return;
     }
-    ShowWindow(win->hwndEtaLabel, SW_SHOW);
-    HwndSetText(win->hwndEtaLabel, fmt("ETA: %dmin", minutes));
+    ShowWindow(win->autoScroll.hwndEtaLabel, SW_SHOW);
+    HwndSetText(win->autoScroll.hwndEtaLabel, fmt("ETA: %dmin", minutes));
     // reposition only when toolbar width changed (anchored after last button)
     Rect rc = HwndClientRect(win->hwndToolbar);
-    if (rc.dx != win->autoScrollEtaToolbarWidth) {
-        win->autoScrollEtaToolbarWidth = rc.dx;
+    if (rc.dx != win->autoScroll.etaToolbarWidth) {
+        win->autoScroll.etaToolbarWidth = rc.dx;
         RepositionEtaLabel(win);
     }
     // invalidate only the label, not the whole toolbar
-    HwndInvalidateRect(win->hwndEtaLabel, HwndClientRect(win->hwndEtaLabel), false);
+    HwndInvalidateRect(win->autoScroll.hwndEtaLabel, HwndClientRect(win->autoScroll.hwndEtaLabel), false);
 }
 
 // Creates the speed label for autoscroll, placed between Autoscroll toggle and [-] button
-// Layout: [sep] [Autoscroll] [Speed] [−] [+] [sep] -> ETA label
+// Layout: [sep] [Autoscroll] [Speed] [ÔêÆ] [+] [sep] -> ETA label
 static void CreateSpeedLabel(MainWindow* win) {
-    if (win->hwndSpeedLabel != nullptr) {
+    if (win->autoScroll.hwndSpeedLabel != nullptr) {
         return; // already created
     }
     Rect r = TbGetRect(win->hwndToolbar, CmdAutoScrollSpeedDown); // "-" button
@@ -1294,12 +1294,12 @@ static void CreateSpeedLabel(MainWindow* win) {
 
     HWND h = CreateWindowExW(0, WC_STATICW, L"0 px/min", SS_CENTER | WS_CHILD, x, y, dx, dy, win->hwndToolbar,
                              (HMENU) nullptr, GetModuleHandle(nullptr), nullptr);
-    win->hwndSpeedLabel = h;
+    win->autoScroll.hwndSpeedLabel = h;
 }
 
 // Positions the speed label inside the SpeedInfoId slot (between Autoscroll and [-])
 static void RepositionSpeedLabel(MainWindow* win) {
-    HWND hwndLabel = win->hwndSpeedLabel;
+    HWND hwndLabel = win->autoScroll.hwndSpeedLabel;
     HWND hwndToolbar = win->hwndToolbar;
     if (!hwndLabel || !hwndToolbar) {
         return;
@@ -1314,25 +1314,25 @@ static void RepositionSpeedLabel(MainWindow* win) {
 }
 
 void UpdateToolbarSpeedLabel(MainWindow* win) {
-    if (win->hwndSpeedLabel == nullptr) {
+    if (win->autoScroll.hwndSpeedLabel == nullptr) {
         return;
     }
     if (!win->ctrl) {
-        ShowWindow(win->hwndSpeedLabel, SW_HIDE);
+        ShowWindow(win->autoScroll.hwndSpeedLabel, SW_HIDE);
         return;
     }
     float pxPerSec = AutoScrollPxPerSec(win);
     int pxPerMin = (int)(pxPerSec * 60.0f + 0.5f);
-    ShowWindow(win->hwndSpeedLabel, SW_SHOW);
-    HwndSetText(win->hwndSpeedLabel, fmt("%d px/min", pxPerMin));
+    ShowWindow(win->autoScroll.hwndSpeedLabel, SW_SHOW);
+    HwndSetText(win->autoScroll.hwndSpeedLabel, fmt("%d px/min", pxPerMin));
     RepositionSpeedLabel(win);
-    HwndInvalidateRect(win->hwndSpeedLabel, HwndClientRect(win->hwndSpeedLabel), false);
+    HwndInvalidateRect(win->autoScroll.hwndSpeedLabel, HwndClientRect(win->autoScroll.hwndSpeedLabel), false);
 }
 
 // Creates the timer controls for autoscroll: [checkbox] [static "Timer:"] [numeric edit]
 // Placed in the TimerInfoId slot (before Autoscroll button)
 static void CreateTimerControls(MainWindow* win) {
-    if (win->hwndTimerCheck != nullptr) {
+    if (win->autoScroll.hwndTimerCheck != nullptr) {
         return; // already created
     }
     Rect r = TbGetRect(win->hwndToolbar, TimerInfoId);
@@ -1347,31 +1347,31 @@ static void CreateTimerControls(MainWindow* win) {
     const int ctrlH = DpiScale(win->hwndFrame, kCtrlH);
 
     // Checkbox: left-aligned, vertically centered in slot
-    win->hwndTimerCheck = CreateWindowExW(0, L"Button", L"", BS_AUTOCHECKBOX | WS_CHILD | WS_VISIBLE,
+    win->autoScroll.hwndTimerCheck = CreateWindowExW(0, L"Button", L"", BS_AUTOCHECKBOX | WS_CHILD | WS_VISIBLE,
                                           r.x + ctrlGapX, r.y + (r.dy - ctrlH) / 2, ctrlH, ctrlH,
                                           win->hwndToolbar, (HMENU)(INT_PTR)CmdAutoScrollTimerToggle, h, nullptr);
 
     // Static "Timer:" label: right of checkbox with gap
-    win->hwndTimerLabel = CreateWindowExW(0, WC_STATICW, L"Timer:", SS_CENTER | WS_CHILD | WS_VISIBLE,
+    win->autoScroll.hwndTimerLabel = CreateWindowExW(0, WC_STATICW, L"Timer:", SS_CENTER | WS_CHILD | WS_VISIBLE,
                                           r.x + ctrlGapX + ctrlH + ctrlGapX, r.y, DpiScale(win->hwndFrame, 40), r.dy,
                                           win->hwndToolbar, nullptr, h, nullptr);
 
     // Numeric edit (minutes): right of label, fill remaining width
     int editX = r.x + ctrlGapX + ctrlH + 2 * ctrlGapX + DpiScale(win->hwndFrame, 40);
     int editW = std::max(r.dx - (editX - r.x) - ctrlGapX, 20); // guard: at least 20px wide
-    win->hwndTimerEdit = CreateWindowExW(0, WC_EDITW, L"30", ES_NUMBER | ES_AUTOHSCROLL | WS_CHILD | WS_VISIBLE,
+    win->autoScroll.hwndTimerEdit = CreateWindowExW(0, WC_EDITW, L"30", ES_NUMBER | ES_AUTOHSCROLL | WS_CHILD | WS_VISIBLE,
                                          editX, r.y + (r.dy - ctrlH) / 2, editW, ctrlH,
                                          win->hwndToolbar, (HMENU)(INT_PTR)CmdAutoScrollTimerEdit, h, nullptr);
 
-    SetWindowFont(win->hwndTimerCheck, font, FALSE);
-    SetWindowFont(win->hwndTimerLabel, font, FALSE);
-    SetWindowFont(win->hwndTimerEdit, font, FALSE);
+    SetWindowFont(win->autoScroll.hwndTimerCheck, font, FALSE);
+    SetWindowFont(win->autoScroll.hwndTimerLabel, font, FALSE);
+    SetWindowFont(win->autoScroll.hwndTimerEdit, font, FALSE);
 
     // Initialize from state
-    CheckDlgButton(win->hwndToolbar, CmdAutoScrollTimerToggle, win->autoScrollTimerEnabled ? BST_CHECKED : BST_UNCHECKED);
+    CheckDlgButton(win->hwndToolbar, CmdAutoScrollTimerToggle, win->autoScroll.timerEnabled ? BST_CHECKED : BST_UNCHECKED);
     WCHAR buf[16];
-    StringCchPrintfW(buf, 16, L"%u", win->autoScrollTimerMinutesSetting);
-    SetWindowTextW(win->hwndTimerEdit, buf);
+    StringCchPrintfW(buf, 16, L"%u", win->autoScroll.timerMinutesSetting);
+    SetWindowTextW(win->autoScroll.hwndTimerEdit, buf);
 
     RepositionTimerControls(win);
 }
@@ -1379,7 +1379,7 @@ static void CreateTimerControls(MainWindow* win) {
 // Positions the timer controls inside the TimerInfoId slot
 static void RepositionTimerControls(MainWindow* win) {
     HWND hwndToolbar = win->hwndToolbar;
-    if (!hwndToolbar || !win->hwndTimerCheck || !win->hwndTimerLabel || !win->hwndTimerEdit) {
+    if (!hwndToolbar || !win->autoScroll.hwndTimerCheck || !win->autoScroll.hwndTimerLabel || !win->autoScroll.hwndTimerEdit) {
         return;
     }
     Rect slot = TbGetRect(hwndToolbar, TimerInfoId);
@@ -1387,13 +1387,13 @@ static void RepositionTimerControls(MainWindow* win) {
     const int ctrlGapX = DpiScale(win->hwndFrame, kCtrlGapX);
     const int ctrlH = DpiScale(win->hwndFrame, kCtrlH);
     // Checkbox: left-aligned, vertically centered in slot
-    MoveWindow(win->hwndTimerCheck, slot.x + ctrlGapX, slot.y + (slot.dy - ctrlH) / 2, ctrlH, ctrlH, TRUE);
+    MoveWindow(win->autoScroll.hwndTimerCheck, slot.x + ctrlGapX, slot.y + (slot.dy - ctrlH) / 2, ctrlH, ctrlH, TRUE);
     // Static "Timer:" label: right of checkbox with gap
-    MoveWindow(win->hwndTimerLabel, slot.x + ctrlGapX + ctrlH + ctrlGapX, slot.y, DpiScale(win->hwndFrame, 40), slot.dy, TRUE);
+    MoveWindow(win->autoScroll.hwndTimerLabel, slot.x + ctrlGapX + ctrlH + ctrlGapX, slot.y, DpiScale(win->hwndFrame, 40), slot.dy, TRUE);
     // Edit: right of label, fill remaining width (guard: at least 20px wide)
     int editX = slot.x + ctrlGapX + ctrlH + 2 * ctrlGapX + DpiScale(win->hwndFrame, 40);
     int editW = std::max(slot.dx - (editX - slot.x) - ctrlGapX, 20);
-    MoveWindow(win->hwndTimerEdit, editX, slot.y + (slot.dy - ctrlH) / 2, editW, ctrlH, TRUE);
+    MoveWindow(win->autoScroll.hwndTimerEdit, editX, slot.y + (slot.dy - ctrlH) / 2, editW, ctrlH, TRUE);
 }
 
 static void CreatePageBox(MainWindow* win, HFONT font, int iconDy) {
@@ -1957,20 +1957,20 @@ void ReCreateToolbar(MainWindow* win) {
         HwndDestroyWindowSafe(&win->hwndPageEdit);
         HwndDestroyWindowSafe(&win->hwndPageBg);
         HwndDestroyWindowSafe(&win->hwndPageTotal);
-        HwndDestroyWindowSafe(&win->hwndEtaLabel);
-        HwndDestroyWindowSafe(&win->hwndSpeedLabel);
-        HwndDestroyWindowSafe(&win->hwndTimerCheck);
-        HwndDestroyWindowSafe(&win->hwndTimerLabel);
-        HwndDestroyWindowSafe(&win->hwndTimerEdit);
+        HwndDestroyWindowSafe(&win->autoScroll.hwndEtaLabel);
+        HwndDestroyWindowSafe(&win->autoScroll.hwndSpeedLabel);
+        HwndDestroyWindowSafe(&win->autoScroll.hwndTimerCheck);
+        HwndDestroyWindowSafe(&win->autoScroll.hwndTimerLabel);
+        HwndDestroyWindowSafe(&win->autoScroll.hwndTimerEdit);
         HwndDestroyWindowSafe(&win->hwndToolbar);
         HwndDestroyWindowSafe(&win->hwndReBar);
     }
     // Re-initialize autoscroll timer settings from global prefs
-    win->autoScrollTimerMinutesSetting = (DWORD)gGlobalPrefs->autoScrollTimerMinutes;
-    win->autoScrollTimerEnabled = gGlobalPrefs->autoScrollTimerEnabled;
+    win->autoScroll.timerMinutesSetting = (DWORD)gGlobalPrefs->autoScrollTimerMinutes;
+    win->autoScroll.timerEnabled = gGlobalPrefs->autoScrollTimerEnabled;
     CreateToolbar(win);
     // Recreate second toolbar if it existed
-    if (win->hwndReBar2) {
+    if (win->archTools.hwndReBar2) {
         DestroyToolbar2(win);
         CreateToolbar2(win);
     }
@@ -1978,7 +1978,7 @@ void ReCreateToolbar(MainWindow* win) {
 
 // Second toolbar (Arch Tools) - shown below main toolbar when Arch Tools is ON
 void CreateToolbar2(MainWindow* win) {
-    if (win->hwndReBar2) {
+    if (win->archTools.hwndReBar2) {
         return; // already created
     }
     bool isRtl = IsUIRtl();
@@ -1993,17 +1993,17 @@ void CreateToolbar2(MainWindow* win) {
     DWORD exStyle = WS_EX_TOOLWINDOW;
     if (isRtl) exStyle |= WS_EX_LAYOUTRTL;
 
-    win->hwndReBar2 = CreateWindowExW(exStyle, REBARCLASSNAME, nullptr, style, 0, 0, 0, 0, hwndParent, (HMENU)IDC_REBAR,
+    win->archTools.hwndReBar2 = CreateWindowExW(exStyle, REBARCLASSNAME, nullptr, style, 0, 0, 0, 0, hwndParent, (HMENU)IDC_REBAR,
                                       hinst, nullptr);
-    SetWindowSubclass(win->hwndReBar2, ReBarWndProc, 0, 0);
+    SetWindowSubclass(win->archTools.hwndReBar2, ReBarWndProc, 0, 0);
 
     REBARINFO rbi{};
     rbi.cbSize = sizeof(REBARINFO);
     rbi.fMask = 0;
     rbi.himl = (HIMAGELIST) nullptr;
-    SendMessageW(win->hwndReBar2, RB_SETBARINFO, 0, (LPARAM)&rbi);
+    SendMessageW(win->archTools.hwndReBar2, RB_SETBARINFO, 0, (LPARAM)&rbi);
     if (!IsCurrentThemeDefault()) {
-        SendMessageW(win->hwndReBar2, RB_SETBKCOLOR, 0, ThemeControlBackgroundColor());
+        SendMessageW(win->archTools.hwndReBar2, RB_SETBKCOLOR, 0, ThemeControlBackgroundColor());
     }
 
     style = WS_CHILD | WS_CLIPSIBLINGS | TBSTYLE_TOOLTIPS | TBSTYLE_FLAT;
@@ -2012,15 +2012,15 @@ void CreateToolbar2(MainWindow* win) {
     if (isRtl) exStyle |= WS_EX_LAYOUTRTL;
     HMENU cmd = (HMENU)IDC_TOOLBAR;
     HWND hwndToolbar2 =
-        CreateWindowExW(exStyle, TOOLBARCLASSNAME, nullptr, style, 0, 0, 0, 0, win->hwndReBar2, cmd, hinst, nullptr);
-    win->hwndToolbar2 = hwndToolbar2;
+        CreateWindowExW(exStyle, TOOLBARCLASSNAME, nullptr, style, 0, 0, 0, 0, win->archTools.hwndReBar2, cmd, hinst, nullptr);
+    win->archTools.hwndToolbar2 = hwndToolbar2;
     TbSetButtonStructSize(hwndToolbar2, sizeofi(TBBUTTON));
 
     // Unconditionally strip comctl32 v6 themes so NM_CUSTOMDRAW clrText/font are honored under any Windows theme
     SetWindowTheme(hwndToolbar2, L"", L"");
 
     if (UseDarkModeLib()) {
-        DarkMode::setWindowNotifyCustomDrawSubclass(win->hwndReBar2);
+        DarkMode::setWindowNotifyCustomDrawSubclass(win->archTools.hwndReBar2);
     }
 
     // Add 4 buttons: Scale, Measure, Clean lines, Reset Scale
@@ -2078,31 +2078,31 @@ void CreateToolbar2(MainWindow* win) {
     rbBand.cxMinChild = rc.dx * kToolbar2ButtonsCount;
     rbBand.cyMinChild = rc.dy + (2 * rc.y);
     rbBand.cx = 0;
-    SendMessageW(win->hwndReBar2, RB_INSERTBAND, (WPARAM)-1, (LPARAM)&rbBand);
+    SendMessageW(win->archTools.hwndReBar2, RB_INSERTBAND, (WPARAM)-1, (LPARAM)&rbBand);
 
-    SetWindowPos(win->hwndReBar2, nullptr, 0, 0, 0, 0, SWP_NOZORDER);
+    SetWindowPos(win->archTools.hwndReBar2, nullptr, 0, 0, 0, 0, SWP_NOZORDER);
 
     // Initially hidden
-    ShowWindow(win->hwndReBar2, SW_HIDE);
+    ShowWindow(win->archTools.hwndReBar2, SW_HIDE);
 
     // Subclass toolbar2 for WM_CTLCOLOR handling (same as main toolbar)
     if (!DefWndProcToolbar) {
         DefWndProcToolbar = (WNDPROC)GetWindowLongPtr(win->hwndToolbar, GWLP_WNDPROC);
     }
-    SetWindowLongPtr(win->hwndToolbar2, GWLP_WNDPROC, (LONG_PTR)WndProcToolbar);
+    SetWindowLongPtr(win->archTools.hwndToolbar2, GWLP_WNDPROC, (LONG_PTR)WndProcToolbar);
 }
 
 void DestroyToolbar2(MainWindow* win) {
-    if (win->hwndReBar2) {
-        HwndDestroyWindowSafe(&win->hwndToolbar2);
-        HwndDestroyWindowSafe(&win->hwndReBar2);
+    if (win->archTools.hwndReBar2) {
+        HwndDestroyWindowSafe(&win->archTools.hwndToolbar2);
+        HwndDestroyWindowSafe(&win->archTools.hwndReBar2);
     }
 }
 
 void UpdateToolbar2State(MainWindow* win) {
-    if (!win->hwndToolbar2) return;
+    if (!win->archTools.hwndToolbar2) return;
     // Update Measure button checked state based on archToolMode
-    SetToolbarButtonCheckedState(win, CmdArchMeasure, win->archToolMode == 2);
+    SetToolbarButtonCheckedState(win, CmdArchMeasure, win->archTools.toolMode == 2);
     // Scale button is not a toggle (it opens dialog), so no checked state needed
     // Reset Scale is a push button, no checked state
 }

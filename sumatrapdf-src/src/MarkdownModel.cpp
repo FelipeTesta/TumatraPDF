@@ -427,20 +427,16 @@ void MarkdownModel::RestoreContrastOverlay() {
     if (!wv) {
         return;
     }
-    float cssOpacity = opacity / 100.0f;
 
     if (enabled) {
-        // Set dark background and gray text directly on body via inline styles
-        // Using gray/dark shades based on contrast opacity (no invert filter)
+        // Markdown contrast: light background (#FAFAFA) + dark gray text
+        // gray = round(255 * (1 - contrastOpacity/100))
+        // opacity=0 -> black (#000000), opacity=50 -> medium gray (#808080), opacity=100 -> light gray (#C0C0C0)
+        int gray = (int)(255.0 * (1.0 - opacity / 100.0) + 0.5);
         TempStr js = fmt(
-            "document.body.style.backgroundColor = '#%02x%02x%02x';"
-            "document.body.style.color = '#%02x%02x%02x';",
-            (int)(255 * (1.0f - cssOpacity)),  // bright text on dark background
-            (int)(255 * (1.0f - cssOpacity)),
-            (int)(255 * (1.0f - cssOpacity)),
-            (int)(255 * cssOpacity),           // text color at full opacity
-            (int)(255 * cssOpacity),
-            (int)(255 * cssOpacity));
+            "document.body.style.backgroundColor = '#FAFAFA';"
+            "document.body.style.color = 'rgb(%d,%d,%d)';",
+            gray, gray, gray);
         wv->Eval(js);
     } else {
         // Remove inline styles when contrast is OFF

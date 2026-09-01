@@ -619,6 +619,8 @@ struct FileState {
     int archUnit;
     // whether arch scale is defined for this doc
     bool archScaleSet;
+    // arch tools measurements serialized for this document
+    Str archMeasurements;
 };
 
 // a subset of FileState required for restoring the state of a single
@@ -1612,16 +1614,17 @@ static const FieldInfo gFileStateFields[] = {
     {offsetof(FileState, archScaleLineP1y), SettingType::Float, (intptr_t)"0"},
     {offsetof(FileState, archUnit), SettingType::Int, 2},
     {offsetof(FileState, archScaleSet), SettingType::Bool, false},
+    {offsetof(FileState, archMeasurements), SettingType::String, (intptr_t)""},
 };
 static StructInfo gFileStateInfo = {
     sizeof(FileState),
-    35,
+    36,
     gFileStateFields,
     "FilePath\0Favorites\0IsPinned\0IsMissing\0OpenCount\0DecryptionKey\0UseDefaultState\0DisplayMode\0ScrollPos\0PageN"
     "o\0Zoom\0Rotation\0WindowState\0WindowPos\0ShowToc\0SidebarDx\0DisplayR2L\0BgCol\0TabCol\0ReparseIdx\0TocState\0Au"
     "toScrollSpeedMultiplier\0InvertColors\0ContrastEnabled\0ContrastOpacity\0ArchScaleFactor\0ArchScaleAnchorX\0ArchSc"
     "aleAnchorY\0ArchScaleLineP2x\0ArchScaleLineP2y\0ArchScaleLineDefined\0ArchScaleLineP1x\0ArchScaleLineP1y\0ArchUnit"
-    "\0ArchScaleSet",
+    "\0ArchScaleSet\0ArchMeasurements",
     "path of the document\0pages of this document bookmarked in the Favorites menu\0if true, the document is "
     "\"pinned\" to the Frequently Read list, so that recently opened documents don't displace it\0if true, the file is "
     "considered missing and won't be shown in any list\0number of times this document has been opened recently\0data "
@@ -1641,7 +1644,8 @@ static StructInfo gFileStateInfo = {
     "units per real unit)\0arch scale anchor X in page coords\0arch scale anchor Y in page coords\0arch scale line "
     "point 2 X in page coords\0arch scale line point 2 Y in page coords\0whether arch scale line endpoints are "
     "defined\0arch scale line point 1 X in page coords\0arch scale line point 1 Y in page coords\0arch unit: "
-    "0=mm,1=cm,2=m,3=in,4=ft\0whether arch scale is defined for this doc",
+    "0=mm,1=cm,2=m,3=in,4=ft\0whether arch scale is defined for this doc\0arch tools measurements serialized for this "
+    "document",
     false};
 
 static const FieldInfo gPointF_1_Fields[] = {

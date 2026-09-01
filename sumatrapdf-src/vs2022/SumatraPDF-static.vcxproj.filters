@@ -599,6 +599,18 @@
     <ClCompile Include="..\src\AutoScroll.cpp">
       <Filter>src</Filter>
     </ClCompile>
+    <ClCompile Include="..\src\Commands_AutoScroll.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\Commands_ArchTools.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\Commands_View.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\Commands_File.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
     <ClCompile Include="..\src\AvifReader.cpp">
       <Filter>src</Filter>
     </ClCompile>

@@ -1011,6 +1011,9 @@ FileStates [
 
     ; whether arch scale is defined for this doc
     ArchScaleSet = false
+
+    ; arch tools measurements serialized for this document
+    ArchMeasurements = 
   ]
 ]
 

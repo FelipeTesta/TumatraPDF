@@ -803,6 +803,7 @@ const fileSettings: Field[] = [
   field("ArchScaleLineP1y", Float, 0.0, "arch scale line point 1 Y in page coords"),
   field("ArchUnit", Int, 2, "arch unit: 0=mm,1=cm,2=m,3=in,4=ft"),
   field("ArchScaleSet", Bool, false, "whether arch scale is defined for this doc"),
+  field("ArchMeasurements", Str, "", "arch tools measurements serialized for this document"),
 ];
 
 const tabState: Field[] = [

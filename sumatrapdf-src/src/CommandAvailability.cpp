@@ -260,6 +260,11 @@ static UINT_PTR removeIfMarkdown[] = {
     CmdViewportCropToggle,
     CmdMarginTrimToggle,
     CmdTrimConfig,
+    CmdArchToolsToggle,
+    CmdArchScale,
+    CmdArchMeasure,
+    CmdArchClear,
+    CmdArchResetScale,
     0,
 };
 
