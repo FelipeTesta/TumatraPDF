@@ -11200,10 +11200,14 @@ static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, L
                     struct WebviewWnd* wv = mm->GetWebviewWnd();
                     if (wv) {
                         if (win->contrastEnabled) {
-                            int gray = (int)(255.0 * (1.0 - win->contrastOpacity / 100.0) + 0.5);
+                            bool invert = GetInvertPageColors();
+                            int gray = invert
+                                ? (int)(255.0 * (win->contrastOpacity / 100.0) + 0.5)
+                                : (int)(255.0 * (1.0 - win->contrastOpacity / 100.0) + 0.5);
                             TempStr js = fmt(
-                                "document.body.style.backgroundColor = '#FAFAFA';"
+                                "document.body.style.backgroundColor = '%s';"
                                 "document.body.style.color = 'rgb(%d,%d,%d)';",
+                                invert ? StrL("#050505") : StrL("#FAFAFA"),
                                 gray, gray, gray);
                             wv->Eval(js);
                         } else {

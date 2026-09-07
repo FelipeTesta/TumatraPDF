@@ -137,3 +137,42 @@ Fase 13b: escala e medições independentes por documento (HashMap archMeasureme
 <!-- 16B DONE 2026-08-30: AutoScrollState + ArchToolsState structs created in MainWindow.h; ~90% of .cpp refs renamed via mechanical PowerShell; bare identifiers in measurement functions fixed with this->; build 0 err/0 warn, deploy, smoke clean. -->
 <!-- 16C-2 DONE 2026-08-30: Markdown contrast (light bg + dark gray text), Arch Tools hidden for .md, AutoScroll commands extracted → Commands_AutoScroll.{h,cpp}; build 0 err/0 warn, deploy, smoke clean. -->
 <!-- 16C-C5 DONE 2026-09-01: 24 HandleCmdXxx wrappers in SumatraPDF.cpp, dispatch converted, stubs cleared, build 0/0 -->
+
+---
+
+## Análise Esforço x Resultado — Próximos Passos (2026-09-01)
+
+### Matriz de Decisão
+
+| Ação | Esforço | Resultado | Risco | ROI | Prioridade |
+|---|---|---|---|---|---|
+| **16C-F6: Extrair init/window creation do SumatraPDF.cpp** | Médio (pattern C2-C5 já estabelecido) | Alto (-800~1200 linhas, god file ~10k) | Médio (static deps, mas pattern comprovado) | ★★★★★ | 🔴 1 |
+| **Canvas.cpp: Extrair event handling** | Alto (5091 linhas, mouse/keyboard entrelaçados com rendering) | Alto (2o maior arquivo) | Alto (rendering code, sem pattern) | ★★★☆☆ | 🟡 2 |
+| **16D: Encapsular gGlobalPrefs** | Alto (152 acessos em SumatraPDF.cpp, toca muitos arquivos) | Alto (reduz acoplamento global significativamente) | Alto (muitos arquivos, fácil de quebrar) | ★★★☆☆ | 🟡 3 |
+| **EngineMupdf.cpp: Desacoplar helpers de rendering** | Médio (extrair helpers por formato) | Médio (isola dependência MuPDF) | Médio (acoplamento profundo) | ★★★☆☆ | 🟡 4 |
+| **MainWindow.h: FileState struct** | Baixo (pattern estabelecido com AutoScrollState/ArchToolsState) | Médio (organiza god class) | Baixo | ★★★★☆ | 🟢 5 |
+| **Toolbar.cpp: Refinar mais** | Baixo (2368 linhas, já tem design tokens) | Baixo (já modular o suficiente) | Baixo | ★★☆☆☆ | ⚪ 6 |
+
+### Recomendação: Caminho Ótimo
+
+**Fase 16C-F6** (Extração restante SumatraPDF.cpp):
+- Mantém momentum das extrações C2-C5
+- Pattern já validado (HandleCmdXxx wrappers)
+- Reduz god file de ~11.200 para ~10.000 linhas
+- Esforço: médio — reaproveita infra existente
+
+**Depois: FileState struct** (MainWindow.h):
+- Quick win — baixo risco, melhoria organizacional
+- Complementa AutoScrollState/ArchToolsState já feitos
+
+**Evitar por agora:**
+- Canvas.cpp extraction (alto risco, sem pattern,Rendering entrelaçado)
+- gGlobalPrefs encapsulation (muito disruptivo sem testes unitários)
+
+### Ordem Sugerida de Execução
+
+1. [ ] 16C-F6: Extrair init/window creation do SumatraPDF.cpp (reduzir para ~10k linhas)
+2. [ ] MainWindow.h: FileState struct (quick win)
+3. [ ] 16D: gGlobalPrefs typed accessors (só quando houver testes)
+4. [ ] Canvas.cpp: Mapear dependências antes de extrair
+5. [ ] EngineMupdf.cpp: Desacoplar helpers de rendering por formato

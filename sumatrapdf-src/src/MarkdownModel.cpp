@@ -28,6 +28,7 @@
 #include "MarkdownToc.h"
 #include "wingui/WebView.h"
 #include "SumatraLog.h"
+#include "Theme.h"
 
 constexpr const char* kMdVirtualHost = "https://sumatrapdf.markdown/";
 constexpr int kMdVirtualHostLen = sizeof("https://sumatrapdf.markdown/") - 1;
@@ -429,13 +430,16 @@ void MarkdownModel::RestoreContrastOverlay() {
     }
 
     if (enabled) {
-        // Markdown contrast: light background (#FAFAFA) + dark gray text
-        // gray = round(255 * (1 - contrastOpacity/100))
-        // opacity=0 -> black (#000000), opacity=50 -> medium gray (#808080), opacity=100 -> light gray (#C0C0C0)
-        int gray = (int)(255.0 * (1.0 - opacity / 100.0) + 0.5);
+        bool invert = GetInvertPageColors();
+        // Markdown contrast: light bg + dark text (normal) or dark bg + light text (invert)
+        // opacity=0 -> nearly invisible, opacity=100 -> full contrast
+        int gray = invert
+            ? (int)(255.0 * (opacity / 100.0) + 0.5)
+            : (int)(255.0 * (1.0 - opacity / 100.0) + 0.5);
         TempStr js = fmt(
-            "document.body.style.backgroundColor = '#FAFAFA';"
+            "document.body.style.backgroundColor = '%s';"
             "document.body.style.color = 'rgb(%d,%d,%d)';",
+            invert ? StrL("#050505") : StrL("#FAFAFA"),
             gray, gray, gray);
         wv->Eval(js);
     } else {

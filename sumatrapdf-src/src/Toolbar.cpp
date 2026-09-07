@@ -54,6 +54,10 @@ static int kButtonSpacingX = 4;
 // Toolbar custom-control design tokens (DPI base units; wrap with DpiScale at use site)
 constexpr int kCtrlGapX = 4;   // horizontal gap between adjacent custom controls
 constexpr int kCtrlH = 18;     // standard height for checkbox / edit controls
+constexpr int kLabelW = 40;    // "Timer:" label fallback width
+constexpr int kTimerSlotW = 130; // timer controls slot fallback width
+constexpr int kSpeedSlotW = 70;  // speed label slot fallback width
+constexpr int kEtaW = 50;     // ETA label fallback width
 
 // true if any toolbar toggle button (BTNS_CHECK) is currently checked;
 // used by WndProcToolbar WM_PAINT overlay to early-out when no highlight needed
@@ -1192,9 +1196,26 @@ void UpdateToolbarPageText(MainWindow* win, int pageCount, bool updateOnly) {
     if (bi.cx != size2.dx || !updateOnly) {
         TbSetButtonDx(win->hwndToolbar, PageInfoId, size2.dx);
     }
-    // Reserve width for speed label placeholder
-    TbSetButtonDx(win->hwndToolbar, SpeedInfoId, DpiScale(win->hwndFrame, 70));
-    TbSetButtonDx(win->hwndToolbar, TimerInfoId, DpiScale(win->hwndFrame, 130));
+    // Reserve dynamic width for speed label slot — measure actual text when available
+    int speedSlotW = DpiScale(win->hwndFrame, kSpeedSlotW);
+    if (win->autoScroll.hwndSpeedLabel) {
+        TempStr speedTxt = HwndGetTextTemp(win->autoScroll.hwndSpeedLabel);
+        if (speedTxt) {
+            Size spdSz = HwndMeasureText(win->autoScroll.hwndSpeedLabel, speedTxt);
+            speedSlotW = std::max(spdSz.dx + DpiScale(win->hwndFrame, 8), speedSlotW);
+        }
+    }
+    TbSetButtonDx(win->hwndToolbar, SpeedInfoId, speedSlotW);
+    // Reserve dynamic width for timer controls slot — measure "Timer:" label when available
+    int timerSlotW = DpiScale(win->hwndFrame, kTimerSlotW);
+    if (win->autoScroll.hwndTimerLabel) {
+        Size tmrLblSz = HwndMeasureText(win->autoScroll.hwndTimerLabel, "Timer:");
+        int ctrlGapX = DpiScale(win->hwndFrame, kCtrlGapX);
+        int ctrlH = DpiScale(win->hwndFrame, kCtrlH);
+        int needed = ctrlGapX + ctrlH + ctrlGapX + tmrLblSz.dx + ctrlGapX + 20;
+        timerSlotW = std::max(needed, timerSlotW);
+    }
+    TbSetButtonDx(win->hwndToolbar, TimerInfoId, timerSlotW);
     HwndInvalidate(win->hwndToolbar, true);
 }
 
@@ -1237,6 +1258,28 @@ void RepositionEtaLabel(MainWindow* win) {
                 }
             }
         }
+    }
+    // Also check child windows that float over the toolbar — they may extend
+    // further right than the button that reserves their slot
+    if (win->autoScroll.hwndTimerCheck && IsWindowVisible(win->autoScroll.hwndTimerCheck)) {
+        RECT rcChild; GetWindowRect(win->autoScroll.hwndTimerCheck, &rcChild);
+        MapWindowPoints(HWND_DESKTOP, hwndToolbar, (LPPOINT)&rcChild, 2);
+        lastRight = std::max(lastRight, (int)rcChild.right);
+    }
+    if (win->autoScroll.hwndTimerLabel && IsWindowVisible(win->autoScroll.hwndTimerLabel)) {
+        RECT rcChild; GetWindowRect(win->autoScroll.hwndTimerLabel, &rcChild);
+        MapWindowPoints(HWND_DESKTOP, hwndToolbar, (LPPOINT)&rcChild, 2);
+        lastRight = std::max(lastRight, (int)rcChild.right);
+    }
+    if (win->autoScroll.hwndTimerEdit && IsWindowVisible(win->autoScroll.hwndTimerEdit)) {
+        RECT rcChild; GetWindowRect(win->autoScroll.hwndTimerEdit, &rcChild);
+        MapWindowPoints(HWND_DESKTOP, hwndToolbar, (LPPOINT)&rcChild, 2);
+        lastRight = std::max(lastRight, (int)rcChild.right);
+    }
+    if (win->autoScroll.hwndSpeedLabel && IsWindowVisible(win->autoScroll.hwndSpeedLabel)) {
+        RECT rcChild; GetWindowRect(win->autoScroll.hwndSpeedLabel, &rcChild);
+        MapWindowPoints(HWND_DESKTOP, hwndToolbar, (LPPOINT)&rcChild, 2);
+        lastRight = std::max(lastRight, (int)rcChild.right);
     }
     TempStr txt = HwndGetTextTemp(hwndLabel);
     Size size = HwndMeasureText(hwndLabel, txt);
@@ -1307,10 +1350,15 @@ static void RepositionSpeedLabel(MainWindow* win) {
     Rect slot = TbGetRect(hwndToolbar, SpeedInfoId); // placeholder slot
     TempStr txt = HwndGetTextTemp(hwndLabel);
     Size size = HwndMeasureText(hwndLabel, txt);
+    // Clamp label width to slot so it never overflows into adjacent buttons
+    int labelDx = std::min(size.dx, slot.dx);
     // Center label horizontally in the slot, vertically centered
-    int x = slot.x + (slot.dx - size.dx) / 2;
+    int x = slot.x + (slot.dx - labelDx) / 2;
+    if (x < slot.x) {
+        x = slot.x;
+    }
     int y = slot.y + (slot.dy - size.dy) / 2;
-    MoveWindow(hwndLabel, x, y, size.dx, size.dy, TRUE);
+    MoveWindow(hwndLabel, x, y, labelDx, size.dy, TRUE);
 }
 
 void UpdateToolbarSpeedLabel(MainWindow* win) {
@@ -1373,6 +1421,11 @@ static void CreateTimerControls(MainWindow* win) {
     StringCchPrintfW(buf, 16, L"%u", win->autoScroll.timerMinutesSetting);
     SetWindowTextW(win->autoScroll.hwndTimerEdit, buf);
 
+    // Dynamically size the TimerInfoId slot to fit the actual controls
+    Size labelSize = HwndMeasureText(win->autoScroll.hwndTimerLabel, "Timer:");
+    int neededW = ctrlGapX + ctrlH + ctrlGapX + labelSize.dx + ctrlGapX + 20; // checkbox + gaps + label + gap + edit(min)
+    TbSetButtonDx(win->hwndToolbar, TimerInfoId, neededW);
+
     RepositionTimerControls(win);
 }
 
@@ -1386,12 +1439,15 @@ static void RepositionTimerControls(MainWindow* win) {
     // DPI-scaled constants from design tokens
     const int ctrlGapX = DpiScale(win->hwndFrame, kCtrlGapX);
     const int ctrlH = DpiScale(win->hwndFrame, kCtrlH);
+    // Measure actual label width instead of using hardcoded fallback
+    Size labelSize = HwndMeasureText(win->autoScroll.hwndTimerLabel, "Timer:");
+    int labelW = std::max(labelSize.dx, DpiScale(win->hwndFrame, kLabelW));
     // Checkbox: left-aligned, vertically centered in slot
     MoveWindow(win->autoScroll.hwndTimerCheck, slot.x + ctrlGapX, slot.y + (slot.dy - ctrlH) / 2, ctrlH, ctrlH, TRUE);
     // Static "Timer:" label: right of checkbox with gap
-    MoveWindow(win->autoScroll.hwndTimerLabel, slot.x + ctrlGapX + ctrlH + ctrlGapX, slot.y, DpiScale(win->hwndFrame, 40), slot.dy, TRUE);
+    MoveWindow(win->autoScroll.hwndTimerLabel, slot.x + ctrlGapX + ctrlH + ctrlGapX, slot.y, labelW, slot.dy, TRUE);
     // Edit: right of label, fill remaining width (guard: at least 20px wide)
-    int editX = slot.x + ctrlGapX + ctrlH + 2 * ctrlGapX + DpiScale(win->hwndFrame, 40);
+    int editX = slot.x + ctrlGapX + ctrlH + 2 * ctrlGapX + labelW;
     int editW = std::max(slot.dx - (editX - slot.x) - ctrlGapX, 20);
     MoveWindow(win->autoScroll.hwndTimerEdit, editX, slot.y + (slot.dy - ctrlH) / 2, editW, ctrlH, TRUE);
 }

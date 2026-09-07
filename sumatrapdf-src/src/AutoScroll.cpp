@@ -87,29 +87,46 @@ void RecalcAutoScrollEta(MainWindow* win) {
         return;
     }
     auto dm = win->AsFixed();
-    if (!dm) {
-        return;
-    }
-    int remainingPages = dm->PageCount() - dm->CurrentPageNo();
-    float speedPxPerSec = AutoScrollPxPerSec(win);
-    if (remainingPages <= 0 || speedPxPerSec <= 0) {
-        win->autoScroll.etaMinutes = 0;
-    } else {
-        auto pageInfo = dm->GetPageInfo(dm->CurrentPageNo());
-        if (!pageInfo) {
+    if (dm) {
+        int remainingPages = dm->PageCount() - dm->CurrentPageNo();
+        float speedPxPerSec = AutoScrollPxPerSec(win);
+        if (remainingPages <= 0 || speedPxPerSec <= 0) {
             win->autoScroll.etaMinutes = 0;
         } else {
-            int pageHeightPx = (int)pageInfo->pos.dy;
-            float etaSec = (remainingPages * pageHeightPx) / speedPxPerSec;
-            win->autoScroll.etaMinutes = (int)(etaSec / 60.0f);
-            if (win->autoScroll.etaMinutes < 0) {
+            auto pageInfo = dm->GetPageInfo(dm->CurrentPageNo());
+            if (!pageInfo) {
                 win->autoScroll.etaMinutes = 0;
+            } else {
+                int pageHeightPx = (int)pageInfo->pos.dy;
+                float etaSec = (remainingPages * pageHeightPx) / speedPxPerSec;
+                win->autoScroll.etaMinutes = (int)(etaSec / 60.0f);
+                if (win->autoScroll.etaMinutes < 0) {
+                    win->autoScroll.etaMinutes = 0;
+                }
             }
         }
+        win->autoScroll.etaStartTick = GetTickCount();
+        win->autoScroll.etaLastShown = -1;
+        win->autoScroll.etaPageNo = dm->CurrentPageNo();
+        return;
     }
-    win->autoScroll.etaStartTick = GetTickCount();
-    win->autoScroll.etaLastShown = -1;
-    win->autoScroll.etaPageNo = dm->CurrentPageNo();
+    // WebView path (epub/markdown): trigger a one-shot JS eval to report remaining
+    // height. The result arrives async via __sumatra__.notify -> OnAutoScrollProgress
+    // which updates the ETA label.
+    auto mm = win->AsMarkdown();
+    if (mm) {
+        struct WebviewWnd* wv = mm->GetWebviewWnd();
+        if (wv && wv->webview) {
+            TempStr js = fmt(
+                "(function(){var y=window.scrollY||window.pageYOffset||0;"
+                "var h=window.innerHeight;"
+                "var sh=document.documentElement.scrollHeight;"
+                "var rem=sh-(y+h);"
+                "if(rem<0) rem=0;"
+                "window.__sumatra__.notify('autoscrollProgress',rem);}())");
+            wv->Eval(js);
+        }
+    }
 }
 
 // Toggle continuous auto-scroll on/off

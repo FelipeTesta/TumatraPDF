@@ -22,6 +22,16 @@ Unlike C2/C3/C4 (which moved handlers to separate .cpp files), C5 wrappers live 
 - C4 ✅ (ViewCommands extraction)
 - C5 ✅ (FileCommands wrapper extraction)
 
+## 2026-09-01 — Bug Fixes: Speed Label, EPUB ETA, Contrast Invert (.md)
+
+### What
+1. **Speed label overflow (Toolbar.cpp:RepositionSpeedLabel)** — clamped label width to slot width (`int labelDx = std::min(size.dx, slot.dx)`) and guarded `if (x < slot.x) x = slot.x`; `MoveWindow` now uses `labelDx` instead of raw `size.dx`.
+2. **ETA not calculating for epub (AutoScroll.cpp:RecalcAutoScrollEta)** — restructured for both PDF and WebView paths; WebView path fires one-shot JS eval computing `scrollHeight - (scrollY + innerHeight)`, sends via `__sumatra__.notify('autoscrollProgress', rem)` to existing callback pipeline.
+3. **Contrast dark mode ignoring invert in .md (3 files)** — `SumatraPDF.cpp:CmdContrastToggle` checks `GetInvertPageColors()`, swaps bg (`#FAFAFA↔#050505`) and gray formula; `ContrastOverlay.cpp:UpdateContrastOverlayOpacity` checks invert and swaps formula; `MarkdownModel.cpp:RestoreContrastOverlay` checks invert and swaps formula.
+
+### Build
+`C:\Users\Testa\.bun\bin\bun.exe cmd/build.ts` from sumatrapdf-src dir — 0 errors / 0 warnings. Deployed to Compiled\TumatraPDF.exe.
+
 ## 2026-08-31 — Session: Feature Restoration + 16C C5 FileCommands Analysis
 
 ### What
