@@ -278,7 +278,7 @@ static void MaybeMigrateTab(WindowTab* tab, MainWindow* newWin, Point releasePt)
     // newWin->currentTabTemp = AddTabToWindow(newWin, tab);
     // newWin->ctrl = tab->ctrl;
     // UpdateUiForCurrentTab(newWin);
-    // newWin->showSelection = tab->selectionOnPage != nullptr;
+    // newWin->selection.showSelection = tab->selectionOnPage != nullptr;
     // HwndSetFocus(newWin->hwndFrame);
     // newWin->RedrawAll(true);
     // TabsOnChangedDoc(newWin);

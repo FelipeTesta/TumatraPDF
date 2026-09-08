@@ -17,6 +17,7 @@
 #include "DisplayModel.h"
 #include "MainWindow.h"
 #include "Annotation.h"
+#include "Commands.h"
 #include "SumatraPDF.h"
 #include "Toolbar.h"
 #include "FormFields.h"

@@ -603,14 +603,14 @@ void UpdateSelectionToolbarPosition(MainWindow* win) {
     }
     SelectionToolbar* tb = win->selectionToolbar;
     if (!tb || !tb->hwnd || !HwndIsVisible(tb->hwnd)) {
-        if (win->showSelection) {
+        if (win->selection.showSelection) {
             ShowSelectionToolbar(win);
         }
         return;
     }
     if (win->CurrentTab() != tb->tab) {
         HideSelectionToolbar(win);
-        if (win->showSelection) {
+        if (win->selection.showSelection) {
             ShowSelectionToolbar(win);
         }
         return;

@@ -1,5 +1,118 @@
 # TumatraPDF — Development Log
 
+## 2026-09-08 — SelectionState Struct Extraction Complete (BUILD OK)
+
+### What
+Grouped 15 flat selection/touch-input member variables in MainWindow.h into a nested `SelectionState` struct (`win->selection.X`), following the AutoScrollState/ArchToolsState pattern. Pure access-path refactor, no logic change.
+
+### Changed
+- `src/MainWindow.h` — added `struct SelectionState { ... } selection;`
+- 168 access sites renamed in 9 files (Canvas.cpp, Selection.cpp, SumatraPDF.cpp, SumatraTest.cpp, CommandAvailability.cpp, Menu.cpp, LinkFollow.cpp, SelectionToolbar.cpp, Tabs.cpp)
+- Pattern: `X` → `selection.X`; `selectionRect` → `selection.selectionRect` (double "selection" correct)
+
+### Note
+`bun cmd/format.ts <files>` reformats the ENTIRE tree (ignores file args). Cosmetic diffs appeared in unrelated files; left as-is (clang-format is logic-neutral).
+
+### Build
+0 errors / 0 warnings — `bun cmd/build-test.ts` → `..\Compiled\TumatraPDF-test.exe`
+
+## 2026-09-08 — 16C-F6 Phase B: Window Lifecycle Extraction Complete (BUILD OK)
+
+### What
+Extracted remaining 11 functions from SumatraPDF.cpp window-lifetime cluster (L2628-L3069) into `MainWindowCreate.{h,cpp}`, completing the F6 extraction goal.
+
+### Functions extracted
+- `UpdateWindowRtlLayout(win)` — promoted non-static, declared in MainWindowCreate.h
+- `IsMenubarVisible()` — promoted non-static, declared in MainWindowCreate.h
+- `OnSidebarSplitterMove(ev)` — promoted non-static, declared in MainWindowCreate.h
+- `OnFavSplitterMove(ev)` — promoted non-static, declared in MainWindowCreate.h
+- `CreateSidebar(win)` — static in new TU
+- `UpdateToolbarSidebarText(win)` — static in new TU
+- `DwmFrameBorderColorForCurrentTheme()` — static in new TU
+- `SetWindowBorderColor()` — static in new TU
+- `SetWindowRoundedCorners()` — static in new TU
+- `CreateMainWindow(win)` — promoted, declared in MainWindowCreate.h
+- `RenameFileInHistory(win)` — moved (used only by CreateMainWindow)
+
+### Static blockers resolved
+4 functions promoted from `static` to external linkage + declared in MainWindowCreate.h:
+- `UpdateWindowRtlLayout`, `IsMenubarVisible`, `OnSidebarSplitterMove`, `OnFavSplitterMove`
+
+### Files modified
+- `src/MainWindowCreate.h` — added 4 new declarations
+- `src/MainWindowCreate.cpp` — 11 function bodies added
+- `src/SumatraPDF.cpp` — 11 bodies removed, 4 forward-declarations removed, 3 static keywords removed
+
+### Build
+`bun cmd/build-test.ts` — 0 errors / 0 warnings (46s). Deployed to Compiled\TumatraPDF-test.exe.
+
+### 16C Status
+- C1 ✅ (handler mapping)
+- C2 ✅ (AutoScroll extraction)
+- C3 ✅ (ArchTools extraction)
+- C4 ✅ (ViewCommands extraction)
+- C5 ✅ (FileCommands wrapper extraction)
+- F6-A ✅ (Window lifecycle extraction — ShowMainWindow, CreateAndShowMainWindow, DeleteMainWindow, UpdateAfterThemeChange, MaybeShowDefaultAppNotification)
+- F6-B ✅ (CreateMainWindow + CreateSidebar + DWM helpers)
+
+### Estimated reduction
+~380 lines total removed from SumatraPDF.cpp across Phase A+B (14,212 → ~13,830 lines).
+
+## 2026-09-08 — 16C-F6 Phase A: Window Lifecycle Extraction (BUILD OK)
+
+### What
+Extracted 5 window lifecycle functions from SumatraPDF.cpp (14,212 lines) into new `MainWindowCreate.{h,cpp}`:
+- `ShowMainWindow` (56 lines) — was already declared in SumatraPDF.h
+- `MaybeShowDefaultAppNotification` (46 lines) + static constants `kNotifDefaultApp`, `kMaxDefaultAppLinks`
+- `CreateAndShowMainWindow` (26 lines) — was already declared in SumatraPDF.h
+- `DeleteMainWindow` (22 lines) — was already declared in SumatraPDF.h
+- `UpdateAfterThemeChange` (33 lines)
+
+### Static blockers resolved
+3 functions promoted from `static` to external linkage:
+- `CreateMainWindow()` — declared in MainWindowCreate.h, body stays in SumatraPDF.cpp
+- `UpdateWindowFrameBorderColor()` — declared in MainWindowCreate.h
+- `ApplyDarkModeToInfotip()` — declared in MainWindowCreate.h
+
+`RelayoutFrame()` exported via MainWindowCreate.h (was only forward-declared locally in SumatraPDF.cpp).
+
+### Files created
+- `src/MainWindowCreate.h` — declarations for promoted statics + RelayoutFrame
+- `src/MainWindowCreate.cpp` — 5 extracted function bodies
+
+### Files modified
+- `src/SumatraPDF.cpp` — removed 5 function bodies, removed `static` from 3 functions, removed redundant RelayoutFrame forward-decl, added `#include "MainWindowCreate.h"`
+- `vs2022/TumatraPDF.vcxproj` + `.filters` — added MainWindowCreate.cpp
+- `vs2022/SumatraPDF-static.vcxproj` + `.filters` — added MainWindowCreate.cpp
+
+### Build
+`bun cmd/build.ts` — 0 errors / 0 warnings (40s). Deployed to Compiled\TumatraPDF.exe.
+
+### 16C Status
+- C1 ✅ (handler mapping)
+- C2 ✅ (AutoScroll extraction)
+- C3 ✅ (ArchTools extraction)
+- C4 ✅ (ViewCommands extraction)
+- C5 ✅ (FileCommands wrapper extraction)
+- F6-A ✅ (Window lifecycle extraction — ShowMainWindow, CreateAndShowMainWindow, DeleteMainWindow, UpdateAfterThemeChange, MaybeShowDefaultAppNotification)
+- F6-B ✅ (CreateMainWindow + CreateSidebar + DWM helpers)
+
+### Estimated reduction
+~190 lines removed from SumatraPDF.cpp (net, including promoted statics still in file).
+
+## 2026-09-08 — ToolbarIds.h Fix + Toolbar Design System Status
+
+### What
+1. **ToolbarIds.h CmdLast fix** — Placeholder constants (`PageInfoId`, `WarningMsgId`, `SpeedInfoId`, `TimerInfoId`) initially moved to `Toolbar.h` caused 48 `C2065: 'CmdLast': undeclared identifier` errors because `CmdLast` lives in `Commands.h` which `Toolbar.h` doesn't include. Created `ToolbarIds.h` with include guard + the 4 constexpr declarations. But including `Commands.h` from `ToolbarIds.h` caused 1122 `C2365: redefinition` errors because `Commands.h` has no include guard (SumatraPDF convention). Solution: remove `#include "Commands.h"` from `ToolbarIds.h`; all TUs already include `Commands.h` first via controlled include order.
+2. **5 TUs fixed** — Added `#include "Commands.h"` to `EditAnnotations.cpp`, `FormFields.cpp`, `MainWindow.cpp`, `Selection.cpp`, `SumatraControl.cpp` which had `Toolbar.h` but not `Commands.h`.
+3. **Toolbar Design System status assessed** — `ToolbarLayout.h/cpp` has declarative slots (`ToolbarSlotSpec`, `gToolbarSlots[]`) and layout engine (`LayoutToolbarChildWindows`) but is NOT integrated (never called from Toolbar.cpp). `HandleToolbarOverflow` is a stub. Decision: deprioritize in favor of 16C-F6 (better ROI).
+
+### Build
+`bun cmd/build-test.ts` — 0 errors / 0 warnings. `Compiled\TumatraPDF-test.exe` (21.9 MB).
+
+### Key Learning
+SumatraPDF `Commands.h` is a generated header with NO include guard. Never include it from another header. TUs must include it directly before any header that depends on it (controlled include order).
+
 ## 2026-09-01 — 16C C5 FileCommands Extraction Complete
 
 ### What

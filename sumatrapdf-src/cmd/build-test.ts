@@ -1,0 +1,56 @@
+import { join } from "node:path";
+import { detectVisualStudio, runLogged } from "./util";
+import { clearDirPreserveSettings } from "./clean";
+
+let clean = false;
+let config = "Debug";
+let platform = "x64";
+let outDir = join("out", "dbg64");
+let finalExeDir = join("..", "Compiled");
+let testExeName = "TumatraPDF-test.exe";
+
+let t = "/t:TumatraPDF";
+
+for (const arg of process.argv.slice(2)) {
+  if (arg === "-clean") {
+    clean = true;
+  } else if (arg === "-rel-32") {
+    config = "Release";
+    platform = "Win32";
+    outDir = join("out", "rel32");
+  } else {
+    throw new Error(`unknown argument: ${arg}`);
+  }
+}
+
+async function main() {
+  const timeStart = performance.now();
+
+  console.log(`${config} ${platform} TEST build`);
+  if (clean) {
+    const dirs = [outDir, finalExeDir];
+    for (const dir of dirs) {
+      clearDirPreserveSettings(dir);
+    }
+  }
+
+  const { msbuildPath } = detectVisualStudio();
+  const sln = String.raw`vs2022\TumatraPDF.sln`;
+  const p = `/p:Configuration=${config};Platform=${platform}`;
+  await runLogged(msbuildPath, [sln, t, p, `/m`]);
+
+  // Copy freshly compiled exe to final folder as TEST executable
+  const srcExe = join(outDir, "TumatraPDF.exe");
+  const dstExe = join(finalExeDir, testExeName);
+  try {
+    require("fs").copyFileSync(srcExe, dstExe);
+    console.log(`Copied ${srcExe} to ${dstExe}`);
+  } catch (e) {
+    console.warn(`Failed to copy exe: ${e}`);
+  }
+
+  const elapsed = ((performance.now() - timeStart) / 1000).toFixed(1);
+  console.log(`test build took ${elapsed}s`);
+}
+
+await main();

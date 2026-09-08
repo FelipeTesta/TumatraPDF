@@ -989,6 +989,9 @@
     <ClCompile Include="..\src\Toolbar.cpp">
       <Filter>src</Filter>
     </ClCompile>
+    <ClCompile Include="..\src\ToolbarLayout.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
     <ClCompile Include="..\src\TranslationLangs.cpp">
       <Filter>src</Filter>
     </ClCompile>

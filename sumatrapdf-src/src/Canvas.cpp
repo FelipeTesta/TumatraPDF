@@ -1544,7 +1544,7 @@ static void DragTouchSelHandle(MainWindow* win, int x, int y) {
     int fromPage, fromGlyph, toPage, toGlyph;
     dm->textSelection->GetGlyphRange(&fromPage, &fromGlyph, &toPage, &toGlyph);
     // anchor on the end that isn't moving
-    if (win->touchSelDragging == TouchSelHandle::Start) {
+    if (win->selection.touchSelDragging == TouchSelHandle::Start) {
         dm->textSelection->StartAt(toPage, toGlyph);
     } else {
         dm->textSelection->StartAt(fromPage, fromGlyph);
@@ -1555,7 +1555,7 @@ static void DragTouchSelHandle(MainWindow* win, int x, int y) {
     DeleteOldSelectionInfo(win, false);
     WindowTab* tab = win->CurrentTab();
     tab->selectionOnPage = SelectionOnPage::FromTextSelect(&dm->textSelection->result);
-    win->showSelection = tab->selectionOnPage != nullptr;
+    win->selection.showSelection = tab->selectionOnPage != nullptr;
     ScheduleRepaint(win, 0);
 }
 
@@ -1579,7 +1579,7 @@ static bool OnTouchLongPress(MainWindow* win, int x, int y) {
         logf("touch: long press cancelling mouseAction=%d\n", (int)win->mouseAction);
         win->mouseAction = MouseAction::None;
         win->dragStartPending = false;
-        win->selectingByWord = false;
+        win->selection.selectingByWord = false;
         if (GetCapture() == win->hwndCanvas) {
             ReleaseCapture();
         }
@@ -1614,9 +1614,9 @@ static bool OnTouchLongPress(MainWindow* win, int x, int y) {
         DeleteOldSelectionInfo(win, true);
         return false;
     }
-    win->showSelection = true;
-    win->touchSelHandles = true;
-    win->touchSelDragging = TouchSelHandle::None;
+    win->selection.showSelection = true;
+    win->selection.touchSelHandles = true;
+    win->selection.touchSelDragging = TouchSelHandle::None;
     ScheduleRepaint(win, 0);
     return true;
 }
@@ -1671,7 +1671,8 @@ static void OnMouseMove(MainWindow* win, int x, int y, WPARAM /*key*/) {
     }
 
     // Arch Tools: handle scale/measure mouse move (drag preview)
-    if (gGlobalPrefs->archToolsEnabled && win->archTools.toolMode != 0 && win->archTools.dragLine == 1 && win->AsFixed()) {
+    if (gGlobalPrefs->archToolsEnabled && win->archTools.toolMode != 0 && win->archTools.dragLine == 1 &&
+        win->AsFixed()) {
         DisplayModel* dm = win->AsFixed();
         int pageNo = dm->CurrentPageNo();
         if (dm->ValidPageNo(pageNo)) {
@@ -1695,7 +1696,8 @@ static void OnMouseMove(MainWindow* win, int x, int y, WPARAM /*key*/) {
                 int dy = y - win->archTools.dragStartPos.y;
                 if (dx * dx + dy * dy > 16) { // ~4px threshold
                     win->archTools.dragMoved = true;
-                    LogInfo("[arch] OnMouseMove: drag threshold crossed, moved=true (mode=%d)", win->archTools.toolMode);
+                    LogInfo("[arch] OnMouseMove: drag threshold crossed, moved=true (mode=%d)",
+                            win->archTools.toolMode);
                 }
             }
             ScheduleRepaint(win, 0);
@@ -1707,25 +1709,25 @@ static void OnMouseMove(MainWindow* win, int x, int y, WPARAM /*key*/) {
     // ReportIf(!dm); // can happen if reload fails, we delete DisplayModel
     if (!dm) return;
 
-    if (win->touchSelDragging != TouchSelHandle::None) {
+    if (win->selection.touchSelDragging != TouchSelHandle::None) {
         DragTouchSelHandle(win, x, y);
         return;
     }
-    if (win->lastInputWasTouch) {
+    if (win->selection.lastInputWasTouch) {
         // a finger that wanders isn't holding still, so it isn't a long press
         int slop = DpiScale(win->hwndCanvas, 10);
-        if (abs(x - win->touchDownPos.x) > slop || abs(y - win->touchDownPos.y) > slop) {
+        if (abs(x - win->selection.touchDownPos.x) > slop || abs(y - win->selection.touchDownPos.y) > slop) {
             KillTimer(win->hwndCanvas, kTouchLongPressTimerID);
         }
     }
-    if (win->touchSelHandles && !IsMouseMessageFromTouch()) {
+    if (win->selection.touchSelHandles && !IsMouseMessageFromTouch()) {
         // A real mouse takes the handles away -- they're finger furniture --
         // while leaving the selection alone (issue #538). Windows also
         // synthesizes moves around a touch, untagged and sometimes carrying a
         // stale position, so anything arriving while a finger is on the glass
         // or has only just left doesn't count as the mouse taking over.
-        DWORD sinceTouch = (DWORD)GetTickCount64() - win->touchLastActivityTime;
-        if (win->touchPointerId >= 0 || sinceTouch < kTouchMouseTakeoverMs) {
+        DWORD sinceTouch = (DWORD)GetTickCount64() - win->selection.touchLastActivityTime;
+        if (win->selection.touchPointerId >= 0 || sinceTouch < kTouchMouseTakeoverMs) {
             return;
         }
         logf("touch: mouse moved to %d,%d (%dms after touch), hiding selection handles\n", x, y, (int)sinceTouch);
@@ -1868,15 +1870,15 @@ static void OnMouseMove(MainWindow* win, int x, int y, WPARAM /*key*/) {
             [[fallthrough]];
         case MouseAction::Selecting: {
             win->annotationUnderCursor = nullptr;
-            if (win->selectionDragEdge != SelectionDragEdge::None) {
+            if (win->selection.selectionDragEdge != SelectionDragEdge::None) {
                 // move / resize existing rectangular selection
                 UpdateRectangularSelectionEdit(win, x, y);
-                SetCursorCached(CursorIdForSelectionEdge(win->selectionDragEdge));
+                SetCursorCached(CursorIdForSelectionEdge(win->selection.selectionDragEdge));
             } else {
                 // creating a new selection from the start corner
-                win->selectionRect.dx = x - win->selectionRect.x;
-                win->selectionRect.dy = y - win->selectionRect.y;
-                win->selectionMeasure = dm->CvtFromScreen(win->selectionRect).Size();
+                win->selection.selectionRect.dx = x - win->selection.selectionRect.x;
+                win->selection.selectionRect.dy = y - win->selection.selectionRect.y;
+                win->selection.selectionMeasure = dm->CvtFromScreen(win->selection.selectionRect).Size();
             }
             OnSelectionEdgeAutoscroll(win, x, y);
             ScheduleRepaint(win, 0);
@@ -2128,8 +2130,7 @@ static void OnMouseLeftButtonDown(MainWindow* win, int x, int y, WPARAM key) {
 
             // Check scale line
             if (!removed && win->archTools.scaleSet) {
-                if (ArchPointSegDist(pagePt.x, pagePt.y,
-                                     win->archTools.scaleLineP1x, win->archTools.scaleLineP1y,
+                if (ArchPointSegDist(pagePt.x, pagePt.y, win->archTools.scaleLineP1x, win->archTools.scaleLineP1y,
                                      win->archTools.scaleLineP2x, win->archTools.scaleLineP2y) < thresholdPage) {
                     win->archTools.scaleSet = false;
                     win->archTools.scaleLineDefined = false;
@@ -2193,8 +2194,8 @@ static void OnMouseLeftButtonDown(MainWindow* win, int x, int y, WPARAM key) {
                     win->archTools.scaleLineP2y = p2page.y;
                     ReleaseCapture();
                     win->mouseAction = MouseAction::None;
-                    LogInfo("[arch] Scale: line finalized by 2nd click p1=(%.2f,%.2f) p2=(%.2f,%.2f)",
-                            p1page.x, p1page.y, p2page.x, p2page.y);
+                    LogInfo("[arch] Scale: line finalized by 2nd click p1=(%.2f,%.2f) p2=(%.2f,%.2f)", p1page.x,
+                            p1page.y, p2page.x, p2page.y);
                     ScheduleRepaint(win, 0);
                     return;
                 }
@@ -2262,11 +2263,11 @@ static void OnMouseLeftButtonDown(MainWindow* win, int x, int y, WPARAM key) {
 
     // remember how this sequence started: WM_CONTEXTMENU, which a long press
     // turns into, doesn't say whether a finger or a mouse produced it
-    win->lastInputWasTouch = IsMouseMessageFromTouch();
-    win->touchDownPos = pt;
-    win->touchDownTime = (DWORD)GetMessageTime();
-    if (win->lastInputWasTouch) {
-        logf("touch: down at %d,%d, handles=%d, mouseAction=%d\n", x, y, (int)win->touchSelHandles,
+    win->selection.lastInputWasTouch = IsMouseMessageFromTouch();
+    win->selection.touchDownPos = pt;
+    win->selection.touchDownTime = (DWORD)GetMessageTime();
+    if (win->selection.lastInputWasTouch) {
+        logf("touch: down at %d,%d, handles=%d, mouseAction=%d\n", x, y, (int)win->selection.touchSelHandles,
              (int)win->mouseAction);
         // when touch arrives as mouse messages rather than gestures, this is
         // what turns a held finger into a long press (issue #538)
@@ -2278,7 +2279,7 @@ static void OnMouseLeftButtonDown(MainWindow* win, int x, int y, WPARAM key) {
     TouchSelHandle handle = HitTestTouchSelHandle(win, x, y);
     if (handle != TouchSelHandle::None) {
         logf("touch: grabbed %s handle at %d,%d\n", TouchSelHandleName(handle), x, y);
-        win->touchSelDragging = handle;
+        win->selection.touchSelDragging = handle;
         win->mouseAction = MouseAction::None;
         SetCapture(win->hwndCanvas);
         return;
@@ -2365,9 +2366,9 @@ static void OnMouseLeftButtonDown(MainWindow* win, int x, int y, WPARAM key) {
             PointF ptf = dm->CvtFromScreen(pt, pageNo);
             dm->textSelection->SelectLineAt(pageNo, ptf.x, ptf.y);
             UpdateTextSelection(win, false);
-            win->selectingByWord = false; // a drag now extends by glyph, not word
-            win->showSelection = true;
-            win->selectionRect = Rect(x, y, 0, 0);
+            win->selection.selectingByWord = false; // a drag now extends by glyph, not word
+            win->selection.showSelection = true;
+            win->selection.selectionRect = Rect(x, y, 0, 0);
             win->mouseAction = MouseAction::SelectingText;
             win->dragStartPending = false;
             SetCapture(win->hwndCanvas);
@@ -2394,7 +2395,7 @@ static void OnMouseLeftButtonDown(MainWindow* win, int x, int y, WPARAM key) {
     }
 
     // if clicking on already selected text, prepare for drag-out instead of new selection
-    if (canCopy && !isShift && !isCtrl && isOverText && win->showSelection && IsPointInSelection(win, pt)) {
+    if (canCopy && !isShift && !isCtrl && isOverText && win->selection.showSelection && IsPointInSelection(win, pt)) {
         win->textDragPending = true;
         win->linkOnLastButtonDown = nullptr;
         SetCapture(win->hwndCanvas);
@@ -2419,8 +2420,8 @@ static void OnMouseLeftButtonDown(MainWindow* win, int x, int y, WPARAM key) {
     // A finger doesn't rubber-band: dragging pans the page and a long press
     // selects, so letting touch start a selection here only flashes a
     // rectangle before the gesture takes over (issue #538).
-    bool startDrag = resizeHandle != ResizeHandle::None || isMoveableAnnot || !canCopy || win->lastInputWasTouch ||
-                     (isShift || !isOverText) && !isCtrl;
+    bool startDrag = resizeHandle != ResizeHandle::None || isMoveableAnnot || !canCopy ||
+                     win->selection.lastInputWasTouch || (isShift || !isOverText) && !isCtrl;
     if (startDrag) {
         StartMouseDrag(win, x, y);
     } else {
@@ -2462,9 +2463,11 @@ static void FinalizeArchMeasurement(MainWindow* win, DisplayModel* dm, int pageN
     int idx = win->archTools.measurements.Append(meas);
 
     const WCHAR* unitNames[] = {L"mm", L"cm", L"m", L"in", L"ft"};
-    LogInfo("[arch] FinalizeArchMeasurement: idx=%d p1=(%.2f,%.2f) p2=(%.2f,%.2f) dx=%.2f dy=%.2f len=%.2f scaled=%d factor=%.4f unit=%s",
-            idx, pagePt1.x, pagePt1.y, pagePt2.x, pagePt2.y,
-            meas.x, meas.y, meas.len, meas.scaled, win->archTools.scaleFactor, unitNames[win->archTools.unit]);
+    LogInfo(
+        "[arch] FinalizeArchMeasurement: idx=%d p1=(%.2f,%.2f) p2=(%.2f,%.2f) dx=%.2f dy=%.2f len=%.2f scaled=%d "
+        "factor=%.4f unit=%s",
+        idx, pagePt1.x, pagePt1.y, pagePt2.x, pagePt2.y, meas.x, meas.y, meas.len, meas.scaled,
+        win->archTools.scaleFactor, unitNames[win->archTools.unit]);
 
     win->archTools.dragLine = 0; // ready for next measurement
     ScheduleRepaint(win, 0);
@@ -2480,7 +2483,8 @@ static void OnMouseLeftButtonUp(MainWindow* win, int x, int y, WPARAM key) {
     }
 
     // Arch Tools: handle scale/measure mouse up (drag case)
-    if (gGlobalPrefs->archToolsEnabled && win->archTools.toolMode != 0 && win->archTools.dragLine == 1 && win->AsFixed()) {
+    if (gGlobalPrefs->archToolsEnabled && win->archTools.toolMode != 0 && win->archTools.dragLine == 1 &&
+        win->AsFixed()) {
         DisplayModel* dm = win->AsFixed();
         int pageNo = dm->CurrentPageNo();
         if (dm->ValidPageNo(pageNo)) {
@@ -2535,7 +2539,8 @@ static void OnMouseLeftButtonUp(MainWindow* win, int x, int y, WPARAM key) {
             } else {
                 // Click case: keep archDragLine=1, wait for second click
                 // (handled in OnMouseLeftButtonDown)
-                LogInfo("[arch] OnMouseLeftButtonUp: click (no drag), waiting for 2nd click (mode=%d)", win->archTools.toolMode);
+                LogInfo("[arch] OnMouseLeftButtonUp: click (no drag), waiting for 2nd click (mode=%d)",
+                        win->archTools.toolMode);
             }
             return;
         }
@@ -2544,16 +2549,16 @@ static void OnMouseLeftButtonUp(MainWindow* win, int x, int y, WPARAM key) {
     DisplayModel* dm = win->AsFixed();
     ReportIf(!dm);
 
-    if (win->lastInputWasTouch) {
-        DWORD heldMs = (DWORD)GetMessageTime() - win->touchDownTime;
+    if (win->selection.lastInputWasTouch) {
+        DWORD heldMs = (DWORD)GetMessageTime() - win->selection.touchDownTime;
         logf("touch: up at %d,%d after %dms, dragging=%s, mouseAction=%d\n", x, y, (int)heldMs,
-             TouchSelHandleName(win->touchSelDragging), (int)win->mouseAction);
+             TouchSelHandleName(win->selection.touchSelDragging), (int)win->mouseAction);
     }
     KillTimer(win->hwndCanvas, kTouchLongPressTimerID);
     // let go of a touch selection handle; the handles stay up so the selection
     // can be adjusted again (issue #538)
-    if (win->touchSelDragging != TouchSelHandle::None) {
-        win->touchSelDragging = TouchSelHandle::None;
+    if (win->selection.touchSelDragging != TouchSelHandle::None) {
+        win->selection.touchSelDragging = TouchSelHandle::None;
         if (GetCapture() == win->hwndCanvas) {
             ReleaseCapture();
         }
@@ -2614,8 +2619,8 @@ static void OnMouseLeftButtonUp(MainWindow* win, int x, int y, WPARAM key) {
         }
     } else {
         OnSelectionStop(win, x, y, !didDragMouse);
-        if (MouseAction::Selecting == ma && win->showSelection) {
-            win->selectionMeasure = dm->CvtFromScreen(win->selectionRect).Size();
+        if (MouseAction::Selecting == ma && win->selection.showSelection) {
+            win->selection.selectionMeasure = dm->CvtFromScreen(win->selection.selectionRect).Size();
         }
     }
 
@@ -2662,7 +2667,7 @@ static void OnMouseLeftButtonUp(MainWindow* win, int x, int y, WPARAM key) {
         if ((kindDestinationLaunchURL == kind || kindDestinationLaunchFile == kind)) {
             DeleteOldSelectionInfo(win, true);
             tab->selectionOnPage = SelectionOnPage::FromRectangle(dm, dm->CvtToScreen(pageNo, link->GetRect()));
-            win->showSelection = tab->selectionOnPage != nullptr;
+            win->selection.showSelection = tab->selectionOnPage != nullptr;
             ScheduleRepaint(win, 0);
         }
         SetCanvasCursor(win, IDC_ARROW);
@@ -2686,7 +2691,7 @@ static void OnMouseLeftButtonUp(MainWindow* win, int x, int y, WPARAM key) {
         return;
     }
 
-    if (win->showSelection) {
+    if (win->selection.showSelection) {
         // A click that wasn't a drag, on empty space (clicking text starts a new
         // selection instead): drop the selection, like every other text UI does.
         // This used to go through ClearSearchResult(), which cleared the
@@ -2759,9 +2764,9 @@ static void OnMouseLeftButtonDblClk(MainWindow* win, int x, int y, WPARAM key) {
             // keep the gesture active so dragging after the double-click extends
             // the selection a word at a time (issue #4761). dragStartPending is
             // cleared so that releasing without dragging keeps the whole word.
-            win->selectingByWord = true;
-            win->showSelection = true;
-            win->selectionRect = Rect(x, y, 0, 0);
+            win->selection.selectingByWord = true;
+            win->selection.showSelection = true;
+            win->selection.selectionRect = Rect(x, y, 0, 0);
             win->mouseAction = MouseAction::SelectingText;
             win->dragStartPending = false;
             SetCapture(win->hwndCanvas);
@@ -2783,7 +2788,7 @@ static void OnMouseLeftButtonDblClk(MainWindow* win, int x, int y, WPARAM key) {
 
         DeleteOldSelectionInfo(win, true);
         win->CurrentTab()->selectionOnPage = SelectionOnPage::FromRectangle(dm, rc);
-        win->showSelection = win->CurrentTab()->selectionOnPage != nullptr;
+        win->selection.showSelection = win->CurrentTab()->selectionOnPage != nullptr;
         ScheduleRepaint(win, 0);
     }
 }
@@ -2844,11 +2849,11 @@ static void OnMouseRightButtonDown(MainWindow* win, int x, int y) {
 static void OnMouseRightButtonUp(MainWindow* win, int x, int y, WPARAM key) {
     ReportIf(!win->AsFixed());
     logf("touch: right button up at %d,%d, fromTouch=%d, suppressMenu=%d, rightDragging=%d\n", x, y,
-         (int)IsMouseMessageFromTouch(), (int)win->touchSuppressContextMenu, (int)IsRightDragging(win));
+         (int)IsMouseMessageFromTouch(), (int)win->selection.touchSuppressContextMenu, (int)IsRightDragging(win));
     // A held finger is delivered as a right-click, which would open the context
     // menu on top of the word the hold just selected (issue #538)
-    if (win->touchSuppressContextMenu) {
-        win->touchSuppressContextMenu = false;
+    if (win->selection.touchSuppressContextMenu) {
+        win->selection.touchSuppressContextMenu = false;
         logf("touch: swallowing the right-click that followed the long press\n");
         if (IsRightDragging(win)) {
             StopMouseDrag(win, x, y, true);
@@ -3380,7 +3385,7 @@ static bool DrawDocument(MainWindow* win, HDC hdc, Rect rcArea) {
     // searching). Using "else if" here hid the normal selection highlight
     // when all-match painting was on (issue #5737).
     PaintAllFindMatches(win, hdc);
-    if (win->showSelection) {
+    if (win->selection.showSelection) {
         PaintSelection(win, hdc);
     }
     // keep the floating selection toolbar aligned with the selection while
@@ -3474,8 +3479,10 @@ static void OnPaintDocument(MainWindow* win) {
                 if (win->archTools.scaleSet) {
                     int pageNo = dm->CurrentPageNo();
                     if (dm->ValidPageNo(pageNo)) {
-                        Point p1 = dm->CvtToScreen(pageNo, PointF{win->archTools.scaleLineP1x, win->archTools.scaleLineP1y});
-                        Point p2 = dm->CvtToScreen(pageNo, PointF{win->archTools.scaleLineP2x, win->archTools.scaleLineP2y});
+                        Point p1 =
+                            dm->CvtToScreen(pageNo, PointF{win->archTools.scaleLineP1x, win->archTools.scaleLineP1y});
+                        Point p2 =
+                            dm->CvtToScreen(pageNo, PointF{win->archTools.scaleLineP2x, win->archTools.scaleLineP2y});
                         Gdiplus::Pen pen(Gdiplus::Color(255, 0, 200, 0), 2); // green
                         gs.DrawLine(&pen, p1.x, p1.y, p2.x, p2.y);
                         // Endpoint circles
@@ -3491,7 +3498,8 @@ static void OnPaintDocument(MainWindow* win) {
                         // archScaleFactor is now page units per METER (canonical)
                         // realLen in meters = pageLenPt / archScaleFactor
                         // Convert to current display unit
-                        float realLenM = (win->archTools.scaleFactor > 0) ? (pageLenPt / win->archTools.scaleFactor) : 0.0f;
+                        float realLenM =
+                            (win->archTools.scaleFactor > 0) ? (pageLenPt / win->archTools.scaleFactor) : 0.0f;
                         float displayLen = realLenM / kMeterPerUnit[win->archTools.unit];
                         WCHAR label[128];
                         swprintf_s(label, L"%.2f %s", displayLen, unitNames[win->archTools.unit]);
@@ -3509,7 +3517,8 @@ static void OnPaintDocument(MainWindow* win) {
                         Gdiplus::SolidBrush bgBrush(Gdiplus::Color(180, 30, 30, 30));
                         Gdiplus::RectF textSize;
                         gs.MeasureString(label, -1, &font, Gdiplus::PointF(0, 0), &textSize);
-                        Gdiplus::RectF bgRect((float)midX + 6, (float)midY - 16, textSize.Width + 8, textSize.Height + 4);
+                        Gdiplus::RectF bgRect((float)midX + 6, (float)midY - 16, textSize.Width + 8,
+                                              textSize.Height + 4);
                         gs.FillRectangle(&bgBrush, bgRect);
                         gs.DrawString(label, -1, &font, Gdiplus::PointF(bgRect.X + 4, bgRect.Y + 2), &textBrush);
                     }
@@ -3535,7 +3544,8 @@ static void OnPaintDocument(MainWindow* win) {
                         float dispX = meas.x / kMeterPerUnit[win->archTools.unit];
                         float dispY = meas.y / kMeterPerUnit[win->archTools.unit];
                         float dispLen = meas.len / kMeterPerUnit[win->archTools.unit];
-                        swprintf_s(label, L"x=%.2f y=%.2f L=%.2f %s", dispX, dispY, dispLen, unitNames[win->archTools.unit]);
+                        swprintf_s(label, L"x=%.2f y=%.2f L=%.2f %s", dispX, dispY, dispLen,
+                                   unitNames[win->archTools.unit]);
                         // Apply decimal separator preference
                         if (gGlobalPrefs->archDecimalSeparator == 1) {
                             for (WCHAR* p = label; *p; ++p) {
@@ -3549,7 +3559,8 @@ static void OnPaintDocument(MainWindow* win) {
                         Gdiplus::SolidBrush bgBrush(Gdiplus::Color(180, 30, 30, 30));
                         Gdiplus::RectF textSize;
                         gs.MeasureString(label, -1, &font, Gdiplus::PointF(0, 0), &textSize);
-                        Gdiplus::RectF bgRect((float)midX + 4, (float)midY - 14, textSize.Width + 8, textSize.Height + 4);
+                        Gdiplus::RectF bgRect((float)midX + 4, (float)midY - 14, textSize.Width + 8,
+                                              textSize.Height + 4);
                         gs.FillRectangle(&bgBrush, bgRect);
                         gs.DrawString(label, -1, &font, Gdiplus::PointF(bgRect.X + 4, bgRect.Y + 2), &textBrush);
                     }
@@ -3559,7 +3570,8 @@ static void OnPaintDocument(MainWindow* win) {
                 if (win->archTools.dragLine > 0) {
                     Gdiplus::Pen pen(Gdiplus::Color(255, 255, 165, 0), 2); // orange
                     pen.SetDashStyle(Gdiplus::DashStyleDash);
-                    gs.DrawLine(&pen, win->archTools.point1.x, win->archTools.point1.y, win->archTools.point2.x, win->archTools.point2.y);
+                    gs.DrawLine(&pen, win->archTools.point1.x, win->archTools.point1.y, win->archTools.point2.x,
+                                win->archTools.point2.y);
                     // Endpoint circles
                     Gdiplus::SolidBrush brush(Gdiplus::Color(255, 255, 165, 0));
                     int r = 4;
@@ -3738,8 +3750,8 @@ static LRESULT OnSetCursor(MainWindow* win, HWND hwnd) {
             SetCursorCached(IDC_IBEAM);
             return TRUE;
         case MouseAction::Selecting:
-            if (win->selectionDragEdge != SelectionDragEdge::None) {
-                SetCursorCached(CursorIdForSelectionEdge(win->selectionDragEdge));
+            if (win->selection.selectionDragEdge != SelectionDragEdge::None) {
+                SetCursorCached(CursorIdForSelectionEdge(win->selection.selectionDragEdge));
                 return TRUE;
             }
             break;
@@ -4263,16 +4275,16 @@ static LRESULT OnGesture(MainWindow* win, UINT msg, WPARAM wp, LPARAM lp) {
                 if (h != TouchSelHandle::None) {
                     // this finger is here to move the selection, not the page
                     logf("touch: gesture grabbed %s handle at %d,%d\n", TouchSelHandleName(h), cpt.x, cpt.y);
-                    win->touchSelDragging = h;
+                    win->selection.touchSelDragging = h;
                 }
             }
-            if (win->touchSelDragging != TouchSelHandle::None) {
+            if (win->selection.touchSelDragging != TouchSelHandle::None) {
                 if (!(gi.dwFlags & GF_BEGIN)) {
                     DragTouchSelHandle(win, cpt.x, cpt.y);
                 }
                 if (gi.dwFlags & GF_END) {
-                    logf("touch: released %s handle\n", TouchSelHandleName(win->touchSelDragging));
-                    win->touchSelDragging = TouchSelHandle::None;
+                    logf("touch: released %s handle\n", TouchSelHandleName(win->selection.touchSelDragging));
+                    win->selection.touchSelDragging = TouchSelHandle::None;
                 }
                 break;
             }
@@ -4456,44 +4468,44 @@ static void EnsurePointerApiLoaded() {
 static void OnTouchPointer(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     Point pt = HwndScreenToClient(hwnd, Point(GET_X_LPARAM(lp), GET_Y_LPARAM(lp)));
     DWORD now = (DWORD)GetTickCount64();
-    win->touchLastActivityTime = now;
+    win->selection.touchLastActivityTime = now;
     if (msg == WM_POINTERDOWN) {
-        win->touchDownPos = pt;
-        win->touchDownTime = now;
-        win->touchPointerId = LOWORD(wp);
-        win->touchLongPressDone = false;
+        win->selection.touchDownPos = pt;
+        win->selection.touchDownTime = now;
+        win->selection.touchPointerId = LOWORD(wp);
+        win->selection.touchLongPressDone = false;
         logf("touch: pointer down at %d,%d\n", pt.x, pt.y);
         SetTimer(hwnd, kTouchLongPressTimerID, kTouchLongPressMs, nullptr);
         return;
     }
-    if ((int)LOWORD(wp) != win->touchPointerId) {
+    if ((int)LOWORD(wp) != win->selection.touchPointerId) {
         // a second finger: that's a gesture, not a press
         KillTimer(hwnd, kTouchLongPressTimerID);
         return;
     }
     if (msg == WM_POINTERUPDATE) {
-        if (win->touchLongPressDone) {
-            if (win->touchSelDragging != TouchSelHandle::None) {
+        if (win->selection.touchLongPressDone) {
+            if (win->selection.touchSelDragging != TouchSelHandle::None) {
                 DragTouchSelHandle(win, pt.x, pt.y);
             }
             return;
         }
         int slop = DpiScale(hwnd, 10);
-        if (abs(pt.x - win->touchDownPos.x) > slop || abs(pt.y - win->touchDownPos.y) > slop) {
+        if (abs(pt.x - win->selection.touchDownPos.x) > slop || abs(pt.y - win->selection.touchDownPos.y) > slop) {
             // moved: this is a pan, not a press
             KillTimer(hwnd, kTouchLongPressTimerID);
         }
         return;
     }
     if (msg == WM_POINTERUP) {
-        logf("touch: pointer up at %d,%d after %dms, longPressDone=%d\n", pt.x, pt.y, (int)(now - win->touchDownTime),
-             (int)win->touchLongPressDone);
+        logf("touch: pointer up at %d,%d after %dms, longPressDone=%d\n", pt.x, pt.y,
+             (int)(now - win->selection.touchDownTime), (int)win->selection.touchLongPressDone);
         KillTimer(hwnd, kTouchLongPressTimerID);
-        if (win->touchSelDragging != TouchSelHandle::None) {
-            logf("touch: released %s handle\n", TouchSelHandleName(win->touchSelDragging));
-            win->touchSelDragging = TouchSelHandle::None;
+        if (win->selection.touchSelDragging != TouchSelHandle::None) {
+            logf("touch: released %s handle\n", TouchSelHandleName(win->selection.touchSelDragging));
+            win->selection.touchSelDragging = TouchSelHandle::None;
         }
-        win->touchPointerId = -1;
+        win->selection.touchPointerId = -1;
     }
 }
 
@@ -4662,8 +4674,8 @@ static LRESULT WndProcCanvasFixedPageUI(MainWindow* win, HWND hwnd, UINT msg, WP
             // arrives after we've already selected the word. Swallow that one
             // menu -- and only that one, so a later right-click still opens it
             // (issue #538).
-            if (!fromKeyboard && win->touchSuppressContextMenu) {
-                win->touchSuppressContextMenu = false;
+            if (!fromKeyboard && win->selection.touchSuppressContextMenu) {
+                win->selection.touchSuppressContextMenu = false;
                 logf("touch: swallowing the context menu that followed the long press\n");
                 return 0;
             }
@@ -4674,7 +4686,8 @@ static LRESULT WndProcCanvasFixedPageUI(MainWindow* win, HWND hwnd, UINT msg, WP
             // On a device where a hold does arrive as WM_CONTEXTMENU (a pen,
             // or touch with panning off) treat it as a long press too; the
             // gesture path above has usually handled it already.
-            if (!fromKeyboard && (win->lastInputWasTouch || IsMouseMessageFromTouch()) && OnTouchLongPress(win, x, y)) {
+            if (!fromKeyboard && (win->selection.lastInputWasTouch || IsMouseMessageFromTouch()) &&
+                OnTouchLongPress(win, x, y)) {
                 return 0;
             }
             OnWindowContextMenu(win, x, y);
@@ -4915,9 +4928,9 @@ static void OnTimer(MainWindow* win, HWND hwnd, WPARAM timerId) {
 
         case kTouchLongPressTimerID: {
             KillTimer(hwnd, kTouchLongPressTimerID);
-            Point dp = win->touchDownPos;
+            Point dp = win->selection.touchDownPos;
             logf("touch: long press timer fired at %d,%d, mouseAction=%d\n", dp.x, dp.y, (int)win->mouseAction);
-            win->touchLongPressDone = true;
+            win->selection.touchLongPressDone = true;
             if (OnTouchLongPress(win, dp.x, dp.y)) {
                 // The press selects the word and stops there. Carrying straight
                 // on into a drag looks like a good idea but the finger is never
@@ -4925,7 +4938,7 @@ static void OnTimer(MainWindow* win, HWND hwnd, WPARAM timerId) {
                 // before it is even lifted; extending is what the handles are
                 // for (issue #538).
                 // Windows will raise its own press-and-hold menu next
-                win->touchSuppressContextMenu = true;
+                win->selection.touchSuppressContextMenu = true;
             }
             break;
         }

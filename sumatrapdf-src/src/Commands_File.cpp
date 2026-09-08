@@ -9,37 +9,48 @@
 // ---- View external viewer ----
 
 void HandleCmdViewWithExternalViewer(MainWindow* win, Str cmdLine, Str filter) {
-    (void)win; (void)cmdLine; (void)filter;
+    (void)win;
+    (void)cmdLine;
+    (void)filter;
 }
 
 // ---- Theme ----
 
 void HandleCmdSetTheme(MainWindow* win, Str theme) {
-    (void)win; (void)theme;
+    (void)win;
+    (void)theme;
 }
 
 // ---- Fix default app ----
 
 void HandleCmdFixDefaultApp(MainWindow* win, Str ext) {
-    (void)win; (void)ext;
+    (void)win;
+    (void)ext;
 }
 
 // ---- Selection handler ----
 
 void HandleCmdSelectionHandler(MainWindow* win, Str exe, Str url, Str method, Str body, Str contentType, Str headers) {
-    (void)win; (void)exe; (void)url; (void)method; (void)body; (void)contentType; (void)headers;
+    (void)win;
+    (void)exe;
+    (void)url;
+    (void)method;
+    (void)body;
+    (void)contentType;
+    (void)headers;
 }
 
 // ---- Exec ----
 
 void HandleCmdExec(MainWindow* win, Str filter, Str cmdLine) {
-    (void)win; (void)filter; (void)cmdLine;
+    (void)win;
+    (void)filter;
+    (void)cmdLine;
 }
 
 // ---- New window ----
 
-void HandleCmdNewWindow(MainWindow* win) {
-}
+void HandleCmdNewWindow(MainWindow* win) {}
 
 // ---- Tab group save ----
 
@@ -55,33 +66,29 @@ void HandleCmdTabGroupRestore(MainWindow* win) {
 
 // ---- Duplicate in new window ----
 
-void HandleCmdDuplicateInNewWindow(MainWindow* win) {
-}
+void HandleCmdDuplicateInNewWindow(MainWindow* win) {}
 
 // ---- Duplicate in new tab ----
 
-void HandleCmdDuplicateInNewTab(MainWindow* win) {
-}
+void HandleCmdDuplicateInNewTab(MainWindow* win) {}
 
 // ---- Open file ----
 
-void HandleCmdOpenFile(MainWindow* win) {
-}
+void HandleCmdOpenFile(MainWindow* win) {}
 
 // ---- Open file with OS file picker ----
 
-void HandleCmdOpenFileWithOSFilePicker(MainWindow* win) {
-}
+void HandleCmdOpenFileWithOSFilePicker(MainWindow* win) {}
 
 // ---- Toggle file picker ----
 
-void HandleCmdToggleFilePicker(MainWindow* win) {
-}
+void HandleCmdToggleFilePicker(MainWindow* win) {}
 
 // ---- Toggle bool setting ----
 
 void HandleCmdToggleBoolSetting(MainWindow* win, Str settingName) {
-    (void)win; (void)settingName;
+    (void)win;
+    (void)settingName;
 }
 
 // ---- Show in folder ----
@@ -141,13 +148,15 @@ void HandleCmdCopyFilePath(MainWindow* win) {
 // ---- Command palette ----
 
 void HandleCmdCommandPalette(MainWindow* win, Str mode) {
-    (void)win; (void)mode;
+    (void)win;
+    (void)mode;
 }
 
 // ---- AI chat ----
 
 void HandleCmdAIChat(MainWindow* win, int backend) {
-    (void)win; (void)backend;
+    (void)win;
+    (void)backend;
 }
 
 // ---- Clear history ----
@@ -219,19 +228,22 @@ void HandleCmdListPrinters(MainWindow* win) {
 // ---- Next/prev tab ----
 
 void HandleCmdNextPrevTab(MainWindow* win, bool reverse) {
-    (void)win; (void)reverse;
+    (void)win;
+    (void)reverse;
 }
 
 // ---- Next/prev tab smart ----
 
 void HandleCmdNextPrevTabSmart(MainWindow* win, int cmdId) {
-    (void)win; (void)cmdId;
+    (void)win;
+    (void)cmdId;
 }
 
 // ---- Move tab ----
 
 void HandleCmdMoveTab(MainWindow* win, int dir) {
-    (void)win; (void)dir;
+    (void)win;
+    (void)dir;
 }
 
 // ---- Close all tabs ----
@@ -243,7 +255,8 @@ void HandleCmdCloseAllTabs(MainWindow* win) {
 // ---- Close tabs ----
 
 void HandleCmdCloseTabs(MainWindow* win, int cmdId) {
-    (void)win; (void)cmdId;
+    (void)win;
+    (void)cmdId;
 }
 
 // ---- Exit ----

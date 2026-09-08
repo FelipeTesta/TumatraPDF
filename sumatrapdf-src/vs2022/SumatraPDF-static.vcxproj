@@ -1354,6 +1354,7 @@
     <ClCompile Include="..\src\Commands_AutoScroll.cpp" />
     <ClCompile Include="..\src\Commands_ArchTools.cpp" />
     <ClCompile Include="..\src\Commands_View.cpp" />
+    <ClCompile Include="..\src\MainWindowCreate.cpp" />
     <ClCompile Include="..\src\Commands_File.cpp" />
     <ClCompile Include="..\src\AvifReader.cpp" />
     <ClCompile Include="..\src\BasePch.cpp">
@@ -1520,6 +1521,7 @@
     <ClCompile Include="..\src\Theme.cpp" />
     <ClCompile Include="..\src\TipText.cpp" />
     <ClCompile Include="..\src\Toolbar.cpp" />
+    <ClCompile Include="..\src\ToolbarLayout.cpp" />
     <ClCompile Include="..\src\TranslationLangs.cpp" />
     <ClCompile Include="..\src\Translations.cpp" />
     <ClCompile Include="..\src\TreeModel.cpp" />

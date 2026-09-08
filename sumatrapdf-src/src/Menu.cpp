@@ -1826,7 +1826,7 @@ static bool IsFileCloseMenuEnabled() {
 }
 
 static void SetMenuStateForSelection(WindowTab* tab, HMENU menu) {
-    bool isTextSelected = tab && tab->win && tab->win->showSelection && tab->selectionOnPage;
+    bool isTextSelected = tab && tab->win && tab->win->selection.showSelection && tab->selectionOnPage;
     for (int i = 0; disableIfNoSelection[i]; i++) {
         MenuSetEnabled(menu, (int)disableIfNoSelection[i], isTextSelected);
     }

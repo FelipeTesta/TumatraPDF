@@ -117,13 +117,13 @@ void RecalcAutoScrollEta(MainWindow* win) {
     if (mm) {
         struct WebviewWnd* wv = mm->GetWebviewWnd();
         if (wv && wv->webview) {
-            TempStr js = fmt(
-                "(function(){var y=window.scrollY||window.pageYOffset||0;"
-                "var h=window.innerHeight;"
-                "var sh=document.documentElement.scrollHeight;"
-                "var rem=sh-(y+h);"
-                "if(rem<0) rem=0;"
-                "window.__sumatra__.notify('autoscrollProgress',rem);}())");
+            TempStr js =
+                fmt("(function(){var y=window.scrollY||window.pageYOffset||0;"
+                    "var h=window.innerHeight;"
+                    "var sh=document.documentElement.scrollHeight;"
+                    "var rem=sh-(y+h);"
+                    "if(rem<0) rem=0;"
+                    "window.__sumatra__.notify('autoscrollProgress',rem);}())");
             wv->Eval(js);
         }
     }
@@ -150,7 +150,8 @@ void AutoScrollToggle(MainWindow* win) {
         UpdateToolbarEtaText(win, win->autoScroll.etaMinutes);
         SetTimer(win->hwndCanvas, kContinuousAutoScrollTimerID, USER_TIMER_MINIMUM, nullptr);
         const char* mode = dm ? "fixed" : "webview";
-        LogInfo("[autoscroll] start mode=%s speed=%.2f timerMinutes=%u", mode, win->autoScroll.speedMultiplier, win->autoScroll.timerMinutes);
+        LogInfo("[autoscroll] start mode=%s speed=%.2f timerMinutes=%u", mode, win->autoScroll.speedMultiplier,
+                win->autoScroll.timerMinutes);
     } else {
         KillTimer(win->hwndCanvas, kContinuousAutoScrollTimerID);
         UpdateToolbarEtaText(win, -1);
@@ -166,7 +167,8 @@ void AutoScrollSpeedAdjust(MainWindow* win, int direction) {
         return;
     }
     if (direction > 0) {
-        win->autoScroll.speedMultiplier = std::min(win->autoScroll.speedMultiplier * kSpeedUpFactor, kMaxSpeedMultiplier);
+        win->autoScroll.speedMultiplier =
+            std::min(win->autoScroll.speedMultiplier * kSpeedUpFactor, kMaxSpeedMultiplier);
     } else {
         win->autoScroll.speedMultiplier =
             std::max(win->autoScroll.speedMultiplier * kSpeedDownFactor, kMinSpeedMultiplier);
@@ -287,14 +289,14 @@ void AutoScrollContinuousTick(MainWindow* win, HWND hwnd) {
         static int sBottomCheckCounter = 0;
         if (++sBottomCheckCounter >= 5) { // check every ~5 ticks (~100ms)
             sBottomCheckCounter = 0;
-            TempStr js = fmt(
-                "(function(){var y=window.scrollY||window.pageYOffset||0;"
-                "var h=window.innerHeight;"
-                "var sh=document.documentElement.scrollHeight;"
-                "var rem=sh-(y+h);"
-                "if(rem<0) rem=0;"
-                "window.__sumatra__.notify('autoscrollProgress',rem);"
-                "if((y+h)>=sh-2){window.__sumatra__.notify('autoscrollBottom',1);}}())");
+            TempStr js =
+                fmt("(function(){var y=window.scrollY||window.pageYOffset||0;"
+                    "var h=window.innerHeight;"
+                    "var sh=document.documentElement.scrollHeight;"
+                    "var rem=sh-(y+h);"
+                    "if(rem<0) rem=0;"
+                    "window.__sumatra__.notify('autoscrollProgress',rem);"
+                    "if((y+h)>=sh-2){window.__sumatra__.notify('autoscrollBottom',1);}}())");
             wv->Eval(js);
         }
         // Timer check (same as fixed-page)
