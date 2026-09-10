@@ -70,10 +70,25 @@
 #include "SumatraLog.h"
 
 static constexpr float kBaseIntervalMs = 20.0f;
-static constexpr float kMaxSpeedMultiplier = 10.0f;
-static constexpr float kMinSpeedMultiplier = 0.008f;
-static constexpr float kSpeedUpFactor = 1.5f;
-static constexpr float kSpeedDownFactor = 0.6666667f; // 2/3 step down
+
+// Round-step speed lookup table in px/min
+static constexpr int kSpeedSteps[] = {25, 50, 75, 100, 150, 200, 300, 400, 600, 800, 1200, 1600};
+static constexpr int kSpeedStepCount = sizeof(kSpeedSteps) / sizeof(kSpeedSteps[0]);
+
+// Find nearest speed step index from current speedMultiplier
+static int FindCurrentSpeedStep(float speedMultiplier, float baseSpeed) {
+    float pxPerMin = baseSpeed * speedMultiplier * 100.0f * 60.0f;
+    int best = 0;
+    int bestDist = abs((int)pxPerMin - kSpeedSteps[0]);
+    for (int i = 1; i < kSpeedStepCount; i++) {
+        int dist = abs((int)pxPerMin - kSpeedSteps[i]);
+        if (dist < bestDist) {
+            best = i;
+            bestDist = dist;
+        }
+    }
+    return best;
+}
 
 // Calculate effective scroll speed in pixels per second
 float AutoScrollPxPerSec(MainWindow* win) {
@@ -146,11 +161,15 @@ void AutoScrollToggle(MainWindow* win) {
         win->autoScroll.startTick = GetTickCount();
         // Feed the timer stop-logic: use configured minutes if timer enabled, else 0 (no limit)
         win->autoScroll.timerMinutes = win->autoScroll.timerEnabled ? win->autoScroll.timerMinutesSetting : 0;
+        // Snap to nearest round step on start
+        int step = FindCurrentSpeedStep(win->autoScroll.speedMultiplier, win->autoScroll.speed);
+        int pxPerMin = kSpeedSteps[step];
+        win->autoScroll.speedMultiplier = (float)pxPerMin / (win->autoScroll.speed * 100.0f * 60.0f);
         RecalcAutoScrollEta(win);
         UpdateToolbarEtaText(win, win->autoScroll.etaMinutes);
         SetTimer(win->hwndCanvas, kContinuousAutoScrollTimerID, USER_TIMER_MINIMUM, nullptr);
         const char* mode = dm ? "fixed" : "webview";
-        LogInfo("[autoscroll] start mode=%s speed=%.2f timerMinutes=%u", mode, win->autoScroll.speedMultiplier,
+        LogInfo("[autoscroll] start mode=%s speed=%d px/min timerMinutes=%u", mode, pxPerMin,
                 win->autoScroll.timerMinutes);
     } else {
         KillTimer(win->hwndCanvas, kContinuousAutoScrollTimerID);
@@ -166,13 +185,15 @@ void AutoScrollSpeedAdjust(MainWindow* win, int direction) {
     if (!win) {
         return;
     }
+    int step = FindCurrentSpeedStep(win->autoScroll.speedMultiplier, win->autoScroll.speed);
     if (direction > 0) {
-        win->autoScroll.speedMultiplier =
-            std::min(win->autoScroll.speedMultiplier * kSpeedUpFactor, kMaxSpeedMultiplier);
+        step = std::min(step + 1, kSpeedStepCount - 1);
     } else {
-        win->autoScroll.speedMultiplier =
-            std::max(win->autoScroll.speedMultiplier * kSpeedDownFactor, kMinSpeedMultiplier);
+        step = std::max(step - 1, 0);
     }
+    int pxPerMin = kSpeedSteps[step];
+    // Convert back to multiplier: multiplier = pxPerMin / (speed * 100 * 60)
+    win->autoScroll.speedMultiplier = (float)pxPerMin / (win->autoScroll.speed * 100.0f * 60.0f);
     // persist to in-memory FileState; written to disk on next settings save (app exit)
     WindowTab* tab = win->CurrentTab();
     if (tab && tab->filePath) {

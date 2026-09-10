@@ -219,6 +219,10 @@ The script compares the version in `sumatrapdf-src/src/Version.h` with the pre-r
 - [x] Arch Tools (Scale + Measure) — 2nd toolbar, scale/measure/erase, build-verified
 - [x] Modularização: design tokens (16A), structs (16B), command dispatch C2-C5 (16C)
 - [x] ToolbarIds.h: placeholder IDs extraction
+- [x] 16C-F6: window lifecycle extraction (MainWindowCreate.{h,cpp})
+- [x] Design system: text centering (buttons/inputs), ToolbarLayout
+- [x] Autoscroll round-step speed table (25–1600 px/min)
+- [x] Toolbar wrapping (TBSTYLE_WRAPABLE) — buttons wrap to 2nd row on narrow windows
 - [ ] Testes automatizados para novas funcionalidades
 
 ---
@@ -303,7 +307,7 @@ Based on SumatraPDF:
 
 ## Status
 
-🟢 Core features complete. Modularization in progress (Fase 16: design tokens ✅, structs ✅, command dispatch C2-C5 ✅, 16C-F6 ✅). SumatraPDF.cpp reduced from 14,212 to ~13,830 lines. Next: 16D (FileState struct) or Canvas.cpp extraction. Toolbar design system (ToolbarLayout.h/cpp) written but not yet integrated.
+🟢 Core features complete. Modularization in progress: 16A-16C ✅, 16C-F6 ✅, Design system ✅, Autoscroll ✅, Toolbar wrapping ✅, ToolbarLayout ✅. SumatraPDF.cpp: 14,212 → ~13,830 lines. Next: 16D (FileState struct) or Canvas.cpp extraction.
 
 ## 2026-08-17 - Trim Cache + ETA Option Visibility
 

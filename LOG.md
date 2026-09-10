@@ -1,5 +1,42 @@
 # TumatraPDF — Development Log
 
+## 2026-09-10 — ToolbarLayout Integration Complete (BUILD OK)
+
+### What
+Integrated ToolbarLayout module as the single entry point for toolbar child positioning, replacing manual repositioning functions.
+
+### Changes
+- Removed 3 old manual functions from Toolbar.cpp: RepositionEtaLabel, RepositionSpeedLabel, RepositionTimerControls
+- Simplified WM_SIZE handler to only call LayoutToolbarChildWindows(win)
+- Updated UpdateToolbarEtaText to call PositionFloatingLabels
+- Updated UpdateToolbarSpeedLabel to call LayoutToolbarChildWindows
+- Removed redundant calls from CreateTimerControls
+- Removed forward declarations from Toolbar.h
+- Implemented HandleToolbarOverflow in ToolbarLayout.cpp (hide priority: edit → label, never hide checkbox)
+- Fixed kCtrlH → gToolbarTokens.ctrlH in ToolbarLayout.cpp
+- Files modified: src/Toolbar.cpp, src/Toolbar.h, src/ToolbarLayout.cpp
+
+### Build
+- 0 errors, 0 warnings via `bun cmd/build-test.ts`
+
+## 2026-09-08 — Autoscroll Round Steps + Toolbar Wrapping
+
+### Autoscroll Round Steps
+- Replaced geometric speed progression (×1.5/×0.667) with round-step lookup table
+- Speed steps: 25, 50, 75, 100, 150, 200, 300, 400, 600, 800, 1200, 1600 px/min
+- `FindCurrentSpeedStep()` snaps to nearest step on start
+- File: `src/AutoScroll.cpp`
+
+### Toolbar Wrapping
+- Added `TBSTYLE_WRAPABLE` to main toolbar and arch tools toolbar
+- Buttons now wrap to second row when window narrows (instead of hiding)
+- Added `LayoutToolbarChildWindows(win)` call in WM_SIZE handler for floating child repositioning
+- Rebar `RBS_VARHEIGHT` already supports multi-row; `RelayoutFrame` auto-adapts
+- File: `src/Toolbar.cpp`
+
+### Build
+- 0 errors, 0 warnings via `bun cmd/build-test.ts`
+
 ## 2026-09-08 — SelectionState Struct Extraction Complete (BUILD OK)
 
 ### What

@@ -150,7 +150,7 @@ Fase 13b: escala e medições independentes por documento (HashMap archMeasureme
 | **Canvas.cpp: Extrair event handling** | Alto (5091 linhas, mouse/keyboard entrelaçados com rendering) | Alto (2o maior arquivo) | Alto (rendering code, sem pattern) | ★★★☆☆ | 🟡 2 |
 | **16D: Encapsular gGlobalPrefs** | Alto (152 acessos em SumatraPDF.cpp, toca muitos arquivos) | Alto (reduz acoplamento global significativamente) | Alto (muitos arquivos, fácil de quebrar) | ★★★☆☆ | 🟡 3 |
 | **EngineMupdf.cpp: Desacoplar helpers de rendering** | Médio (extrair helpers por formato) | Médio (isola dependência MuPDF) | Médio (acoplamento profundo) | ★★★☆☆ | 🟡 4 |
-| **MainWindow.h: FileState struct** | Baixo (pattern estabelecido com AutoScrollState/ArchToolsState) | Médio (organiza god class) | Baixo | ★★★★☆ | 🟢 5 |
+| ~~MainWindow.h: FileState struct~~ → **SelectionState struct** ✅ | Baixo (pattern estabelecido com AutoScrollState/ArchToolsState) | Médio (organiza god class) | Baixo | ★★★★☆ | 🟢 5 ✅ |
 | **Toolbar.cpp: Refinar mais** | Baixo (2368 linhas, já tem design tokens) | Baixo (já modular o suficiente) | Baixo | ★★☆☆☆ | ⚪ 6 |
 
 ### Recomendação: Caminho Ótimo
@@ -171,8 +171,15 @@ Fase 13b: escala e medições independentes por documento (HashMap archMeasureme
 
 ### Ordem Sugerida de Execução
 
-1. [ ] 16C-F6: Extrair init/window creation do SumatraPDF.cpp (reduzir para ~10k linhas)
-2. [ ] MainWindow.h: FileState struct (quick win)
+1. [x] 16C-F6: Extrair init/window creation do SumatraPDF.cpp (reduzido de 14,212 para ~13,830 linhas) ✅ 2026-09-08
+2. [x] MainWindow.h: SelectionState struct (15 membros selection/touch agrupados) ✅ 2026-09-08
 3. [ ] 16D: gGlobalPrefs typed accessors (só quando houver testes)
 4. [ ] Canvas.cpp: Mapear dependências antes de extrair
 5. [ ] EngineMupdf.cpp: Desacoplar helpers de rendering por formato
+
+## Design System Rules (2026-09-08)
+
+### Botões e Inputs — Centralização de Conteúdo
+- **Regra**: Botões e inputs devem centralizar conteúdo (texto/ícones) horizontal E verticalmente dentro dos seus bounds
+- Aplica-se a: controles ToolbarLayout, botões toolbar, inputs timer/speed, e quaisquer novos elementos UI
+- Status: 📐 Regra definida, pendente implementação

@@ -108,9 +108,12 @@ static void logToPipe(Str s) {
 // Get level tag for file output
 static const char* LevelTag(LogLevel lvl) {
     switch (lvl) {
-        case LogLevel::Error: return "[ERROR] ";
-        case LogLevel::Warn:  return "[WARN] ";
-        case LogLevel::Info:  return "[INFO] ";
+        case LogLevel::Error:
+            return "[ERROR] ";
+        case LogLevel::Warn:
+            return "[WARN] ";
+        case LogLevel::Info:
+            return "[INFO] ";
     }
     return "";
 }
@@ -239,7 +242,7 @@ void log_level(LogLevel lvl, const char* fmt, ...) {
     va_start(args, fmt);
     TempStr msg = LogFormatVTemp(fmt, args);
     va_end(args);
-    
+
     // Prepend level tag for file output (debugger/console get raw message)
     // Use str::Builder to avoid FmtArg const char* deletion issue
     str::Builder buf;

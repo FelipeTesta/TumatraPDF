@@ -230,9 +230,41 @@ int MeasureChildTextWidth(MainWindow* win, HWND hwndChild, const char* fallbackT
 
 // Clamp/hide overflow for narrow windows
 void HandleToolbarOverflow(MainWindow* win) {
-    // Speed label already clamps in RepositionSpeedLabel
-    // ETA label already hides in PositionFloatingLabels
-    // Timer controls: could hide edit first, then label, keep checkbox
-    // For now, slot width update handles most cases
-    (void)win;
+    // Priority 1: Hide speed label text or clamp — handled by slot sizing / PositionToolbarChildWindows
+    // Priority 2: Hide timer edit (show only checkbox + label)
+    // Priority 3: Hide timer label (show only checkbox)
+    // Never hide checkbox (it's the toggle)
+    HWND hwndToolbar = win->hwndToolbar;
+    if (!hwndToolbar) return;
+
+    Rect timerSlot = TbGetRect(hwndToolbar, TimerInfoId);
+    if (timerSlot.IsEmpty()) return;
+
+    HWND hwndCheck = win->autoScroll.hwndTimerCheck;
+    HWND hwndLabel = win->autoScroll.hwndTimerLabel;
+    HWND hwndEdit = win->autoScroll.hwndTimerEdit;
+
+    if (!hwndCheck) return;
+
+    // Determine available width for timer slot
+    int slotW = timerSlot.dx;
+    int ctrlH = gToolbarTokens.ctrlH;
+    int minWidthForCheck = ctrlH + DpiScale(win->hwndFrame, 8);
+    int minWidthForCheckAndLabel = minWidthForCheck + DpiScale(win->hwndFrame, 45);
+
+    if (slotW < minWidthForCheckAndLabel && hwndEdit) {
+        if (IsWindowVisible(hwndEdit)) {
+            ShowWindow(hwndEdit, SW_HIDE);
+        }
+    } else if (hwndEdit && !IsWindowVisible(hwndEdit)) {
+        ShowWindow(hwndEdit, SW_SHOW);
+    }
+
+    if (slotW < minWidthForCheck && hwndLabel) {
+        if (IsWindowVisible(hwndLabel)) {
+            ShowWindow(hwndLabel, SW_HIDE);
+        }
+    } else if (hwndLabel && !IsWindowVisible(hwndLabel)) {
+        ShowWindow(hwndLabel, SW_SHOW);
+    }
 }

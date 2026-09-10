@@ -208,8 +208,7 @@ void TabWnd::Paint(VirtWndPaintCtx& ctx) {
         gfx.FillEllipse(&redBr, dotX, dotY, dotRadius * 2, dotRadius * 2);
         gfx.SetSmoothingMode(Gdiplus::SmoothingModeNone);
     }
-
-    }
+}
 
 bool TabWnd::OnMouseDown(VirtWndMouseEvent& ev) {
     tabsCtrl->OnTabMouseDown(this, ev);

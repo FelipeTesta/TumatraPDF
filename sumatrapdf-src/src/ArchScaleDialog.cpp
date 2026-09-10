@@ -347,11 +347,10 @@ bool ArchScaleDialogWnd::Create(MainWindow* mainWin) {
         auto pad = Insets{4, 8, 4, 8};
 
         btnDraw = CreateButton(hwnd, _TRA("Desenhar linha"),
-            MkMethod0<ArchScaleDialogWnd, &ArchScaleDialogWnd::OnDrawLine>(this), isRtl);
+                               MkMethod0<ArchScaleDialogWnd, &ArchScaleDialogWnd::OnDrawLine>(this), isRtl);
         hbox->AddChild(new Padding(btnDraw, pad));
 
-        btnOk = CreateButton(hwnd, _TRA("✅"),
-            MkMethod0<ArchScaleDialogWnd, &ArchScaleDialogWnd::OnOk>(this), isRtl);
+        btnOk = CreateButton(hwnd, _TRA("✅"), MkMethod0<ArchScaleDialogWnd, &ArchScaleDialogWnd::OnOk>(this), isRtl);
         btnOk->isDefault = true;
         hbox->AddChild(new Padding(btnOk, pad));
 
