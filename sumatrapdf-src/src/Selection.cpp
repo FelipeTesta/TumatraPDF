@@ -48,7 +48,11 @@ Rect SelectionOnPage::GetRect(DisplayModel* dm) const {
         return Rect();
     }
 
-    return dm->CvtToScreen(pageNo, rect);
+    RectF adjustedRect = rect;
+    if (dm->marginTrimEnabled) {
+        adjustedRect.y += (float)gGlobalPrefs->trim.top;
+    }
+    return dm->CvtToScreen(pageNo, adjustedRect);
 }
 
 Vec<SelectionOnPage>* SelectionOnPage::FromRectangle(DisplayModel* dm, Rect rect) {

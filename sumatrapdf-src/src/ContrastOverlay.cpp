@@ -25,6 +25,8 @@ static LRESULT CALLBACK WndProcContrastOverlay(HWND hwnd, UINT msg, WPARAM wp, L
         return DefWindowProcW(hwnd, msg, wp, lp);
     }
     switch (msg) {
+        case WM_NCHITTEST:
+            return HTTRANSPARENT;
         case WM_PAINT: {
             PAINTSTRUCT ps;
             HDC hdc = BeginPaint(hwnd, &ps);

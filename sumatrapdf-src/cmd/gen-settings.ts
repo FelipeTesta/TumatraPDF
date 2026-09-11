@@ -1016,6 +1016,12 @@ const globalPrefs: Field[] = [
   field("AutoScrollTimerMinutes", Int, 30, "Autoscroll timer duration in minutes (1-600, 0 = no timer)"),
   field("AutoScrollTimerEnabled", Bool, false, "Enable autoscroll auto-stop timer"),
   field(
+    "AutoScrollSpeedMultiplier",
+    Float,
+    0.008,
+    "default autoscroll speed multiplier for new documents (last used speed is saved here)",
+  ),
+  field(
     "ShowDocumentFocusIndicator",
     Bool,
     false,

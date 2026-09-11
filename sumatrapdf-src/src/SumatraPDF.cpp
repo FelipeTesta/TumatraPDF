@@ -2118,7 +2118,7 @@ static void ReplaceDocumentInCurrentTab(LoadArgs* args, DocController* ctrl, Fil
     // Restore per-document autoscroll speed multiplier
     if (fs) {
         win->autoScroll.speedMultiplier =
-            fs->autoScrollSpeedMultiplier < 0.008f ? 0.008f : fs->autoScrollSpeedMultiplier;
+            fs->autoScrollSpeedMultiplier < 0.008f ? gGlobalPrefs->autoScrollSpeedMultiplier : fs->autoScrollSpeedMultiplier;
         // Restore per-document invert colors and contrast overlay state
         SetInvertPageColors(fs->invertColors);
         win->contrastEnabled = fs->contrastEnabled;

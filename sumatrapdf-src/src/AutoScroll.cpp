@@ -165,6 +165,8 @@ void AutoScrollToggle(MainWindow* win) {
         int step = FindCurrentSpeedStep(win->autoScroll.speedMultiplier, win->autoScroll.speed);
         int pxPerMin = kSpeedSteps[step];
         win->autoScroll.speedMultiplier = (float)pxPerMin / (win->autoScroll.speed * 100.0f * 60.0f);
+        // persist snapped speed to global prefs
+        gGlobalPrefs->autoScrollSpeedMultiplier = win->autoScroll.speedMultiplier;
         RecalcAutoScrollEta(win);
         UpdateToolbarEtaText(win, win->autoScroll.etaMinutes);
         SetTimer(win->hwndCanvas, kContinuousAutoScrollTimerID, USER_TIMER_MINIMUM, nullptr);
@@ -202,10 +204,94 @@ void AutoScrollSpeedAdjust(MainWindow* win, int direction) {
             fs->autoScrollSpeedMultiplier = win->autoScroll.speedMultiplier;
         }
     }
+    // persist to global prefs as last-used speed for new documents
+    gGlobalPrefs->autoScrollSpeedMultiplier = win->autoScroll.speedMultiplier;
     if (win->autoScroll.active) {
         RecalcAutoScrollEta(win);
     }
     UpdateToolbarSpeedLabel(win);
+}
+
+// --- Timer-done overlay: shows "∴" at bottom of screen for 3 seconds ---
+static HWND gTimerDoneHwnd = nullptr;
+static constexpr UINT_PTR kTimerDoneOverlayTimerId = 99;
+static constexpr wchar_t kTimerDoneOverlayClass[] = L"TumatraTimerDoneOverlay";
+
+static LRESULT CALLBACK TimerDoneOverlayProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    switch (msg) {
+    case WM_PAINT: {
+        PAINTSTRUCT ps;
+        HDC hdc = BeginPaint(hwnd, &ps);
+        RECT rc;
+        GetClientRect(hwnd, &rc);
+        SetBkMode(hdc, TRANSPARENT);
+        SetTextColor(hdc, RGB(255, 165, 0));
+        HFONT hFont = CreateFontW(52, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+            DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+            CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
+        HFONT hOld = (HFONT)SelectObject(hdc, hFont);
+        DrawTextW(hdc, L"\u2234", -1, &rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        SelectObject(hdc, hOld);
+        DeleteObject(hFont);
+        EndPaint(hwnd, &ps);
+        return 0;
+    }
+    case WM_TIMER:
+        if (wp == kTimerDoneOverlayTimerId) {
+            KillTimer(hwnd, kTimerDoneOverlayTimerId);
+            DestroyWindow(hwnd);
+            gTimerDoneHwnd = nullptr;
+        }
+        return 0;
+    case WM_LBUTTONDOWN:
+        KillTimer(hwnd, kTimerDoneOverlayTimerId);
+        DestroyWindow(hwnd);
+        gTimerDoneHwnd = nullptr;
+        return 0;
+    case WM_DESTROY:
+        gTimerDoneHwnd = nullptr;
+        return 0;
+    }
+    return DefWindowProcW(hwnd, msg, wp, lp);
+}
+
+static void RegisterTimerDoneOverlayClass() {
+    static bool registered = false;
+    if (registered) return;
+    registered = true;
+    WNDCLASSEXW wc = {};
+    wc.cbSize = sizeof(wc);
+    wc.lpfnWndProc = TimerDoneOverlayProc;
+    wc.hInstance = GetModuleHandleW(nullptr);
+    wc.lpszClassName = kTimerDoneOverlayClass;
+    wc.hbrBackground = CreateSolidBrush(RGB(30, 30, 30));
+    RegisterClassExW(&wc);
+}
+
+static void ShowTimerDoneOverlay(MainWindow* win) {
+    if (gTimerDoneHwnd) {
+        KillTimer(gTimerDoneHwnd, kTimerDoneOverlayTimerId);
+        DestroyWindow(gTimerDoneHwnd);
+        gTimerDoneHwnd = nullptr;
+    }
+    RegisterTimerDoneOverlayClass();
+    int screenW = GetSystemMetrics(SM_CXSCREEN);
+    int screenH = GetSystemMetrics(SM_CYSCREEN);
+    int overlayW = 200;
+    int overlayH = 80;
+    int x = (screenW - overlayW) / 2;
+    int y = screenH - overlayH - 40;
+    HWND hwndPopup = CreateWindowExW(
+        WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+        kTimerDoneOverlayClass, L"",
+        WS_POPUP | WS_VISIBLE,
+        x, y, overlayW, overlayH,
+        nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+    if (!hwndPopup) return;
+    gTimerDoneHwnd = hwndPopup;
+    ShowWindow(hwndPopup, SW_SHOW);
+    UpdateWindow(hwndPopup);
+    SetTimer(hwndPopup, kTimerDoneOverlayTimerId, 3000, nullptr);
 }
 
 // Start middle-click-style auto-scroll at current cursor position
@@ -253,6 +339,8 @@ void AutoScrollContinuousTick(MainWindow* win, HWND hwnd) {
                 KillTimer(hwnd, kContinuousAutoScrollTimerID);
                 UpdateToolbarEtaText(win, -1);
                 SetToolbarButtonCheckedState(win, CmdAutoScrollToggle, false);
+                MessageBeep(MB_OK);
+                ShowTimerDoneOverlay(win);
                 return;
             }
         }
@@ -328,6 +416,8 @@ void AutoScrollContinuousTick(MainWindow* win, HWND hwnd) {
                 KillTimer(hwnd, kContinuousAutoScrollTimerID);
                 UpdateToolbarEtaText(win, -1);
                 SetToolbarButtonCheckedState(win, CmdAutoScrollToggle, false);
+                MessageBeep(MB_OK);
+                ShowTimerDoneOverlay(win);
                 return;
             }
         }

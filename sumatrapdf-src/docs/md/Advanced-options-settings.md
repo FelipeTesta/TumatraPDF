@@ -163,6 +163,10 @@ AutoScrollTimerMinutes = 30
 ; Enable autoscroll auto-stop timer
 AutoScrollTimerEnabled = false
 
+; default autoscroll speed multiplier for new documents (last used speed is
+; saved here)
+AutoScrollSpeedMultiplier = 0.008
+
 ; if true, draw a focus ring around the document when it has keyboard focus (Tab
 ; to the page area) (introduced in version 3.7)
 ShowDocumentFocusIndicator = false

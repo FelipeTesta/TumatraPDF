@@ -102,7 +102,7 @@ static ToolbarButtonInfo gToolbarButtons[] = {
     {TbIcon::None, 0, nullptr}, // separator after autoscroll group
     {TbIcon::Text, CmdContrastToggle, _TRN("Contrast")},
     {TbIcon::Text, CmdInvertColors, _TRN("Invert")},
-    {TbIcon::Text, CmdViewportCropToggle, _TRN("Crop")},
+    {TbIcon::Text, CmdViewportCropToggle, _TRN("Two Column")},
     {TbIcon::Text, CmdMarginTrimToggle, _TRN("Trim")},
     {TbIcon::Text, CmdTrimConfig, _TRN("Trim Config")},
     {TbIcon::None, 0, nullptr}, // separator before Arch Tools toggle
