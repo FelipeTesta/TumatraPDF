@@ -37,6 +37,7 @@ Kind kNotifPageInfo = "pageInfoHelper";
 Kind kNotifAdHoc = "notifAdHoc";
 // debug-only: continuous layout re-done because newly visible pages got measured
 Kind kNotifLazyLayout = "notifLazyLayout";
+Kind kNotifZoomOrView = "zoomOrView";
 
 static Kind kindNotifText = "notifText";
 static Kind kindNotifProgress = "notifProgress";

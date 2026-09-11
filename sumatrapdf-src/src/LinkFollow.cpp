@@ -197,7 +197,7 @@ static void FollowKeyboardLinkTarget(MainWindow* win, const KeyboardLinkTarget& 
         // the last action once the user comes back
         DeleteOldSelectionInfo(win, true);
         tab->selectionOnPage = SelectionOnPage::FromRectangle(dm, dm->CvtToScreen(target.pageNo, target.rect));
-        win->showSelection = tab->selectionOnPage != nullptr;
+        win->selection.showSelection = tab->selectionOnPage != nullptr;
     }
     win->ctrl->HandleLink(dest, win->linkHandler);
 }

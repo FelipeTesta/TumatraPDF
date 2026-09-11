@@ -8,7 +8,6 @@
 
 #include "wingui/PlatformFont.h"
 
-
 using Gdiplus::Font;
 using Gdiplus::Ok;
 using Gdiplus::Status;

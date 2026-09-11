@@ -98,10 +98,7 @@ static void ArchWalkClosepath(fz_context* ctx, void* arg) {
 }
 
 static const fz_path_walker kArchPathWalker = {
-    ArchWalkMoveto,
-    ArchWalkLineto,
-    ArchWalkCurveto,
-    ArchWalkClosepath,
+    ArchWalkMoveto, ArchWalkLineto, ArchWalkCurveto, ArchWalkClosepath,
     nullptr, // quadto
     nullptr, // curvetov
     nullptr, // curvetoy
@@ -114,33 +111,40 @@ typedef struct {
     Vec<ArchVecSeg>* segs;
 } fz_arch_vector_device;
 
-static void ArchVectorStrokePath(fz_context* ctx, fz_device* dev, const fz_path* path,
-                                 const fz_stroke_state* stroke, fz_matrix ctm,
-                                 fz_colorspace*, const float*, float, fz_color_params) {
+static void ArchVectorStrokePath(fz_context* ctx, fz_device* dev, const fz_path* path, const fz_stroke_state* stroke,
+                                 fz_matrix ctm, fz_colorspace*, const float*, float, fz_color_params) {
     fz_arch_vector_device* d = (fz_arch_vector_device*)dev;
     ArchPathWalkState state{ctx, ctm, d->segs, {0, 0}, false};
     fz_walk_path(ctx, path, &kArchPathWalker, &state);
 }
 
 // Passthrough stubs for other device ops (we only care about stroke_path)
-static void ArchVectorFillPath(fz_context*, fz_device*, const fz_path*, int, fz_matrix, fz_colorspace*, const float*, float, fz_color_params) {}
+static void ArchVectorFillPath(fz_context*, fz_device*, const fz_path*, int, fz_matrix, fz_colorspace*, const float*,
+                               float, fz_color_params) {}
 static void ArchVectorClipPath(fz_context*, fz_device*, const fz_path*, int, fz_matrix, fz_rect) {}
-static void ArchVectorClipStrokePath(fz_context*, fz_device*, const fz_path*, const fz_stroke_state*, fz_matrix, fz_rect) {}
-static void ArchVectorFillText(fz_context*, fz_device*, const fz_text*, fz_matrix, fz_colorspace*, const float*, float, fz_color_params) {}
-static void ArchVectorStrokeText(fz_context*, fz_device*, const fz_text*, const fz_stroke_state*, fz_matrix, fz_colorspace*, const float*, float, fz_color_params) {}
+static void ArchVectorClipStrokePath(fz_context*, fz_device*, const fz_path*, const fz_stroke_state*, fz_matrix,
+                                     fz_rect) {}
+static void ArchVectorFillText(fz_context*, fz_device*, const fz_text*, fz_matrix, fz_colorspace*, const float*, float,
+                               fz_color_params) {}
+static void ArchVectorStrokeText(fz_context*, fz_device*, const fz_text*, const fz_stroke_state*, fz_matrix,
+                                 fz_colorspace*, const float*, float, fz_color_params) {}
 static void ArchVectorClipText(fz_context*, fz_device*, const fz_text*, fz_matrix, fz_rect) {}
-static void ArchVectorClipStrokeText(fz_context*, fz_device*, const fz_text*, const fz_stroke_state*, fz_matrix, fz_rect) {}
+static void ArchVectorClipStrokeText(fz_context*, fz_device*, const fz_text*, const fz_stroke_state*, fz_matrix,
+                                     fz_rect) {}
 static void ArchVectorIgnoreText(fz_context*, fz_device*, const fz_text*, fz_matrix) {}
 static void ArchVectorFillShade(fz_context*, fz_device*, fz_shade*, fz_matrix, float, fz_color_params) {}
 static void ArchVectorFillImage(fz_context*, fz_device*, fz_image*, fz_matrix, float, fz_color_params) {}
-static void ArchVectorFillImageMask(fz_context*, fz_device*, fz_image*, fz_matrix, fz_colorspace*, const float*, float, fz_color_params) {}
+static void ArchVectorFillImageMask(fz_context*, fz_device*, fz_image*, fz_matrix, fz_colorspace*, const float*, float,
+                                    fz_color_params) {}
 static void ArchVectorClipImageMask(fz_context*, fz_device*, fz_image*, fz_matrix, fz_rect) {}
 static void ArchVectorPopClip(fz_context*, fz_device*) {}
 static void ArchVectorBeginMask(fz_context*, fz_device*, fz_rect, int, fz_colorspace*, const float*, fz_color_params) {}
 static void ArchVectorEndMask(fz_context*, fz_device*, fz_function*) {}
 static void ArchVectorBeginGroup(fz_context*, fz_device*, fz_rect, fz_colorspace*, int, int, int, float) {}
 static void ArchVectorEndGroup(fz_context*, fz_device*) {}
-static int ArchVectorBeginTile(fz_context*, fz_device*, fz_rect, fz_rect, float, float, fz_matrix, int, int) { return 0; }
+static int ArchVectorBeginTile(fz_context*, fz_device*, fz_rect, fz_rect, float, float, fz_matrix, int, int) {
+    return 0;
+}
 static void ArchVectorEndTile(fz_context*, fz_device*) {}
 
 static fz_device* FzNewArchVectorDevice(fz_context* ctx, Vec<ArchVecSeg>* segs) {
@@ -247,7 +251,7 @@ ArchSnapResult ArchSnapToVector(DisplayModel* dm, int pageNo, float screenX, flo
     }
 
     // Convert screen point to page coordinates
-    Point screenPt = { (int)screenX, (int)screenY };
+    Point screenPt = {(int)screenX, (int)screenY};
     PointF pagePt = dm->CvtFromScreen(screenPt, pageNo);
 
     // Get cached segments
@@ -337,8 +341,8 @@ ArchSnapResult ArchSnapToVector(DisplayModel* dm, int pageNo, float screenX, flo
     return result;
 }
 
-bool ArchHitTestSegment(DisplayModel* dm, int pageNo, float pageX, float pageY, float thresholdPage,
-                        float* outX0, float* outY0, float* outX1, float* outY1) {
+bool ArchHitTestSegment(DisplayModel* dm, int pageNo, float pageX, float pageY, float thresholdPage, float* outX0,
+                        float* outY0, float* outX1, float* outY1) {
     if (!dm || !dm->engine || pageNo < 1) {
         return false;
     }

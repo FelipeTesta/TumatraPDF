@@ -26,6 +26,7 @@
 #include "WindowTab.h"
 #include "Selection.h"
 #include "SelectionToolbar.h"
+#include "Commands.h"
 #include "SelectTextKeyboard.h"
 #include "Toolbar.h"
 #include "Translations.h"
@@ -47,7 +48,11 @@ Rect SelectionOnPage::GetRect(DisplayModel* dm) const {
         return Rect();
     }
 
-    return dm->CvtToScreen(pageNo, rect);
+    RectF adjustedRect = rect;
+    if (dm->marginTrimEnabled) {
+        adjustedRect.y += (float)gGlobalPrefs->trim.top;
+    }
+    return dm->CvtToScreen(pageNo, adjustedRect);
 }
 
 Vec<SelectionOnPage>* SelectionOnPage::FromRectangle(DisplayModel* dm, Rect rect) {
@@ -97,9 +102,9 @@ Vec<SelectionOnPage>* SelectionOnPage::FromTextSelect(TextSel* textSel) {
 
 void DeleteOldSelectionInfo(MainWindow* win, bool alsoTextSel) {
     HideSelectionToolbar(win);
-    win->showSelection = false;
-    win->selectionMeasure = SizeF();
-    win->selectionDragEdge = SelectionDragEdge::None;
+    win->selection.showSelection = false;
+    win->selection.selectionMeasure = SizeF();
+    win->selection.selectionDragEdge = SelectionDragEdge::None;
     WindowTab* tab = win->CurrentTab();
     if (!tab) {
         return;
@@ -114,7 +119,7 @@ void DeleteOldSelectionInfo(MainWindow* win, bool alsoTextSel) {
 
 // Rectangular (Ctrl+drag) selection: move/resize after it exists.
 bool IsRectangularSelection(MainWindow* win) {
-    if (!win || !win->showSelection) {
+    if (!win || !win->selection.showSelection) {
         return false;
     }
     WindowTab* tab = win->CurrentTab();
@@ -294,13 +299,13 @@ bool StartRectangularSelectionEdit(MainWindow* win, int x, int y, SelectionDragE
     if (bounds.IsEmpty()) {
         return false;
     }
-    win->selectionDragEdge = edge;
-    win->selectionEditOrig = NormalizeScreenRect(bounds);
-    win->selectionRect = win->selectionEditOrig;
+    win->selection.selectionDragEdge = edge;
+    win->selection.selectionEditOrig = NormalizeScreenRect(bounds);
+    win->selection.selectionRect = win->selection.selectionEditOrig;
     win->dragStart = Point(x, y);
     win->dragStartPending = true;
-    win->showSelection = true;
-    win->selectingByWord = false;
+    win->selection.showSelection = true;
+    win->selection.selectingByWord = false;
     win->mouseAction = MouseAction::Selecting;
     win->linkOnLastButtonDown = nullptr;
     win->textDragPending = false;
@@ -312,13 +317,15 @@ bool StartRectangularSelectionEdit(MainWindow* win, int x, int y, SelectionDragE
 }
 
 void UpdateRectangularSelectionEdit(MainWindow* win, int x, int y) {
-    if (!win || win->selectionDragEdge == SelectionDragEdge::None) {
+    if (!win || win->selection.selectionDragEdge == SelectionDragEdge::None) {
         return;
     }
     int dx = x - win->dragStart.x;
     int dy = y - win->dragStart.y;
-    win->selectionRect = ApplySelectionEdgeDrag(win->selectionEditOrig, win->selectionDragEdge, dx, dy);
-    win->selectionMeasure = win->AsFixed() ? win->AsFixed()->CvtFromScreen(win->selectionRect).Size() : SizeF();
+    win->selection.selectionRect =
+        ApplySelectionEdgeDrag(win->selection.selectionEditOrig, win->selection.selectionDragEdge, dx, dy);
+    win->selection.selectionMeasure =
+        win->AsFixed() ? win->AsFixed()->CvtFromScreen(win->selection.selectionRect).Size() : SizeF();
 }
 
 void PaintTransparentRectangles(HDC hdc, Rect screenRc, Vec<Rect>& rects, COLORREF selectionColor, u8 alpha, int pad,
@@ -381,7 +388,7 @@ bool GetTouchSelHandleRects(MainWindow* win, Rect& startOut, Rect& endOut) {
 }
 
 TouchSelHandle HitTestTouchSelHandle(MainWindow* win, int x, int y) {
-    if (!win->touchSelHandles) {
+    if (!win->selection.touchSelHandles) {
         return TouchSelHandle::None;
     }
     Rect start, end;
@@ -403,17 +410,17 @@ TouchSelHandle HitTestTouchSelHandle(MainWindow* win, int x, int y) {
 }
 
 void HideTouchSelHandles(MainWindow* win) {
-    if (!win->touchSelHandles) {
+    if (!win->selection.touchSelHandles) {
         return;
     }
-    win->touchSelHandles = false;
-    win->touchSelDragging = TouchSelHandle::None;
+    win->selection.touchSelHandles = false;
+    win->selection.touchSelDragging = TouchSelHandle::None;
     ScheduleRepaint(win, 0);
 }
 
 static void PaintTouchSelHandles(MainWindow* win, HDC hdc) {
     Rect start, end;
-    if (!win->touchSelHandles || !GetTouchSelHandleRects(win, start, end)) {
+    if (!win->selection.touchSelHandles || !GetTouchSelHandleRects(win, start, end)) {
         return;
     }
     ParsedColor* parsedCol = GetPrefsColor(gGlobalPrefs->fixedPageUI.selectionColor);
@@ -434,7 +441,7 @@ void PaintSelection(MainWindow* win, HDC hdc) {
 
     if (win->mouseAction == MouseAction::Selecting) {
         // during rectangle selection
-        Rect selRect = win->selectionRect;
+        Rect selRect = win->selection.selectionRect;
         if (selRect.dx < 0) {
             selRect.x += selRect.dx;
             selRect.dx *= -1;
@@ -450,16 +457,16 @@ void PaintSelection(MainWindow* win, HDC hdc) {
         if (MouseAction::SelectingText == win->mouseAction) {
             // double/triple-click set the glyph range immediately; only extend
             // on repaint when the pointer has actually moved (issue #5712).
-            int endX = win->selectionRect.x + win->selectionRect.dx;
-            int endY = win->selectionRect.y + win->selectionRect.dy;
-            bool dragged = IsDragDistance(win->selectionRect.x, endX, win->selectionRect.y, endY);
+            int endX = win->selection.selectionRect.x + win->selection.selectionRect.dx;
+            int endY = win->selection.selectionRect.y + win->selection.selectionRect.dy;
+            bool dragged = IsDragDistance(win->selection.selectionRect.x, endX, win->selection.selectionRect.y, endY);
             UpdateTextSelection(win, dragged);
             if (!win->CurrentTab()->selectionOnPage) {
                 // prevent the selection from disappearing while the
                 // user is still at it (OnSelectionStop removes it
                 // if it is still empty at the end)
                 win->CurrentTab()->selectionOnPage = new Vec<SelectionOnPage>();
-                win->showSelection = true;
+                win->selection.showSelection = true;
             }
         }
 
@@ -493,10 +500,10 @@ void UpdateTextSelection(MainWindow* win, bool select) {
     // logf("UpdateTextSelection: select: %d\n", (int)select);
     DisplayModel* dm = win->AsFixed();
     if (select) {
-        int pageNo = dm->GetPageNoByPoint(win->selectionRect.BR());
+        int pageNo = dm->GetPageNoByPoint(win->selection.selectionRect.BR());
         if (win->ctrl->ValidPageNo(pageNo)) {
-            PointF pt = dm->CvtFromScreen(win->selectionRect.BR(), pageNo);
-            if (win->selectingByWord) {
+            PointF pt = dm->CvtFromScreen(win->selection.selectionRect.BR(), pageNo);
+            if (win->selection.selectingByWord) {
                 // double-click-drag: extend a whole word at a time (issue #4761)
                 dm->textSelection->SelectWordsUpTo(pageNo, pt.x, pt.y);
             } else {
@@ -507,7 +514,7 @@ void UpdateTextSelection(MainWindow* win, bool select) {
 
     DeleteOldSelectionInfo(win);
     win->CurrentTab()->selectionOnPage = SelectionOnPage::FromTextSelect(&dm->textSelection->result);
-    win->showSelection = win->CurrentTab()->selectionOnPage != nullptr;
+    win->selection.showSelection = win->CurrentTab()->selectionOnPage != nullptr;
 
     if (win->uiaProvider) {
         win->uiaProvider->OnSelectionChanged();
@@ -648,15 +655,15 @@ void OnSelectAll(MainWindow* win, bool textOnly) {
             ;
         }
         dm->textSelection->SelectUpTo(pageNo, -1);
-        win->selectionRect = Rect::FromXY(INT_MIN / 2, INT_MIN / 2, INT_MAX, INT_MAX);
+        win->selection.selectionRect = Rect::FromXY(INT_MIN / 2, INT_MIN / 2, INT_MAX, INT_MAX);
         UpdateTextSelection(win);
     } else {
         DeleteOldSelectionInfo(win, true);
-        win->selectionRect = Rect::FromXY(INT_MIN / 2, INT_MIN / 2, INT_MAX, INT_MAX);
-        win->CurrentTab()->selectionOnPage = SelectionOnPage::FromRectangle(dm, win->selectionRect);
+        win->selection.selectionRect = Rect::FromXY(INT_MIN / 2, INT_MIN / 2, INT_MAX, INT_MAX);
+        win->CurrentTab()->selectionOnPage = SelectionOnPage::FromRectangle(dm, win->selection.selectionRect);
     }
 
-    win->showSelection = win->CurrentTab()->selectionOnPage != nullptr;
+    win->selection.showSelection = win->CurrentTab()->selectionOnPage != nullptr;
     ScheduleRepaint(win, 0);
 }
 
@@ -735,20 +742,20 @@ void OnSelectionEdgeAutoscroll(MainWindow* win, int x, int y) {
 
         dx = dm->GetViewPort().x - oldOffset.x;
         dy = dm->GetViewPort().y - oldOffset.y;
-        if (win->selectionDragEdge != SelectionDragEdge::None) {
+        if (win->selection.selectionDragEdge != SelectionDragEdge::None) {
             // move/resize: keep the selection fixed on the document as the view pans
-            win->selectionEditOrig.x -= dx;
-            win->selectionEditOrig.y -= dy;
+            win->selection.selectionEditOrig.x -= dx;
+            win->selection.selectionEditOrig.y -= dy;
             win->dragStart.x -= dx;
             win->dragStart.y -= dy;
-            win->selectionRect.x -= dx;
-            win->selectionRect.y -= dy;
+            win->selection.selectionRect.x -= dx;
+            win->selection.selectionRect.y -= dy;
         } else {
             // new selection: keep the start corner fixed on the document
-            win->selectionRect.x -= dx;
-            win->selectionRect.y -= dy;
-            win->selectionRect.dx += dx;
-            win->selectionRect.dy += dy;
+            win->selection.selectionRect.x -= dx;
+            win->selection.selectionRect.y -= dy;
+            win->selection.selectionRect.dx += dx;
+            win->selection.selectionRect.dy += dy;
         }
     }
 }
@@ -760,10 +767,10 @@ void OnSelectionStart(MainWindow* win, int x, int y, WPARAM /*key*/) {
     StopSelectTextWithKeyboard(win);
     DeleteOldSelectionInfo(win, true);
 
-    win->selectionDragEdge = SelectionDragEdge::None;
-    win->selectionRect = Rect(x, y, 0, 0);
-    win->showSelection = true;
-    win->selectingByWord = false;
+    win->selection.selectionDragEdge = SelectionDragEdge::None;
+    win->selection.selectionRect = Rect(x, y, 0, 0);
+    win->selection.showSelection = true;
+    win->selection.selectingByWord = false;
     win->mouseAction = MouseAction::Selecting;
 
     bool isShift = IsShiftPressed();
@@ -791,47 +798,51 @@ void OnSelectionStop(MainWindow* win, int x, int y, bool aborted) {
     }
     KillTimer(win->hwndCanvas, SMOOTHSCROLL_TIMER_ID);
 
-    bool editingRect = win->selectionDragEdge != SelectionDragEdge::None && win->mouseAction == MouseAction::Selecting;
+    bool editingRect =
+        win->selection.selectionDragEdge != SelectionDragEdge::None && win->mouseAction == MouseAction::Selecting;
 
-    // update the text selection before changing the selectionRect
+    // update the text selection before changing the selection.selectionRect
     if (MouseAction::SelectingText == win->mouseAction) {
         // double/triple-click set the glyph range immediately; a tiny mouse jitter
-        // while the button is held still updates selectionRect.dx/dy. Only extend
+        // while the button is held still updates selection.selectionRect.dx/dy. Only extend
         // the selection on mouse-up when the pointer actually moved (issue #5712).
-        bool dragged = IsDragDistance(win->selectionRect.x, x, win->selectionRect.y, y);
+        bool dragged = IsDragDistance(win->selection.selectionRect.x, x, win->selection.selectionRect.y, y);
         UpdateTextSelection(win, dragged);
     }
 
     if (editingRect) {
         if (aborted) {
             // click without drag on a handle: keep previous selection
-            win->selectionRect = win->selectionEditOrig;
+            win->selection.selectionRect = win->selection.selectionEditOrig;
         } else {
             UpdateRectangularSelectionEdit(win, x, y);
-            win->selectionRect = NormalizeScreenRect(win->selectionRect);
+            win->selection.selectionRect = NormalizeScreenRect(win->selection.selectionRect);
         }
         delete win->CurrentTab()->selectionOnPage;
-        win->CurrentTab()->selectionOnPage = SelectionOnPage::FromRectangle(win->AsFixed(), win->selectionRect);
-        win->showSelection = win->CurrentTab()->selectionOnPage != nullptr;
-        if (win->showSelection) {
-            win->selectionMeasure = win->AsFixed()->CvtFromScreen(win->selectionRect).Size();
+        win->CurrentTab()->selectionOnPage =
+            SelectionOnPage::FromRectangle(win->AsFixed(), win->selection.selectionRect);
+        win->selection.showSelection = win->CurrentTab()->selectionOnPage != nullptr;
+        if (win->selection.showSelection) {
+            win->selection.selectionMeasure = win->AsFixed()->CvtFromScreen(win->selection.selectionRect).Size();
         } else {
-            win->selectionMeasure = SizeF();
+            win->selection.selectionMeasure = SizeF();
         }
-        win->selectionDragEdge = SelectionDragEdge::None;
+        win->selection.selectionDragEdge = SelectionDragEdge::None;
     } else {
-        win->selectionRect = Rect::FromXY(win->selectionRect.x, win->selectionRect.y, x, y);
-        if (aborted || (MouseAction::Selecting == win->mouseAction ? win->selectionRect.IsEmpty()
+        win->selection.selectionRect =
+            Rect::FromXY(win->selection.selectionRect.x, win->selection.selectionRect.y, x, y);
+        if (aborted || (MouseAction::Selecting == win->mouseAction ? win->selection.selectionRect.IsEmpty()
                                                                    : !win->CurrentTab()->selectionOnPage)) {
             DeleteOldSelectionInfo(win, true);
         } else if (win->mouseAction == MouseAction::Selecting) {
-            win->selectionRect = NormalizeScreenRect(win->selectionRect);
-            win->CurrentTab()->selectionOnPage = SelectionOnPage::FromRectangle(win->AsFixed(), win->selectionRect);
-            win->showSelection = win->CurrentTab()->selectionOnPage != nullptr;
+            win->selection.selectionRect = NormalizeScreenRect(win->selection.selectionRect);
+            win->CurrentTab()->selectionOnPage =
+                SelectionOnPage::FromRectangle(win->AsFixed(), win->selection.selectionRect);
+            win->selection.showSelection = win->CurrentTab()->selectionOnPage != nullptr;
         }
-        win->selectionDragEdge = SelectionDragEdge::None;
+        win->selection.selectionDragEdge = SelectionDragEdge::None;
     }
-    win->selectingByWord = false;
+    win->selection.selectingByWord = false;
     // refresh selection-dependent toolbar buttons once, when the selection is
     // finalized, rather than on every repaint while dragging (UpdateTextSelection
     // runs from PaintSelection on each frame, which flickered the toolbar)

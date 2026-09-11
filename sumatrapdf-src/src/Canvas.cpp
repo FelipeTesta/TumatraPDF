@@ -1544,7 +1544,7 @@ static void DragTouchSelHandle(MainWindow* win, int x, int y) {
     int fromPage, fromGlyph, toPage, toGlyph;
     dm->textSelection->GetGlyphRange(&fromPage, &fromGlyph, &toPage, &toGlyph);
     // anchor on the end that isn't moving
-    if (win->touchSelDragging == TouchSelHandle::Start) {
+    if (win->selection.touchSelDragging == TouchSelHandle::Start) {
         dm->textSelection->StartAt(toPage, toGlyph);
     } else {
         dm->textSelection->StartAt(fromPage, fromGlyph);
@@ -1555,7 +1555,7 @@ static void DragTouchSelHandle(MainWindow* win, int x, int y) {
     DeleteOldSelectionInfo(win, false);
     WindowTab* tab = win->CurrentTab();
     tab->selectionOnPage = SelectionOnPage::FromTextSelect(&dm->textSelection->result);
-    win->showSelection = tab->selectionOnPage != nullptr;
+    win->selection.showSelection = tab->selectionOnPage != nullptr;
     ScheduleRepaint(win, 0);
 }
 
@@ -1579,7 +1579,7 @@ static bool OnTouchLongPress(MainWindow* win, int x, int y) {
         logf("touch: long press cancelling mouseAction=%d\n", (int)win->mouseAction);
         win->mouseAction = MouseAction::None;
         win->dragStartPending = false;
-        win->selectingByWord = false;
+        win->selection.selectingByWord = false;
         if (GetCapture() == win->hwndCanvas) {
             ReleaseCapture();
         }
@@ -1614,16 +1614,16 @@ static bool OnTouchLongPress(MainWindow* win, int x, int y) {
         DeleteOldSelectionInfo(win, true);
         return false;
     }
-    win->showSelection = true;
-    win->touchSelHandles = true;
-    win->touchSelDragging = TouchSelHandle::None;
+    win->selection.showSelection = true;
+    win->selection.touchSelHandles = true;
+    win->selection.touchSelDragging = TouchSelHandle::None;
     ScheduleRepaint(win, 0);
     return true;
 }
 
 // Arch Tools: snap screen point to vector segments
 static PointF ArchSnapScreenPoint(MainWindow* win, DisplayModel* dm, int pageNo, Point screenPt) {
-    if (!win->archSnap) {
+    if (!win->archTools.snap) {
         return dm->CvtFromScreen(screenPt, pageNo);
     }
     ArchSnapResult snap = ArchSnapToVector(dm, pageNo, (float)screenPt.x, (float)screenPt.y, 8.0f);
@@ -1635,7 +1635,7 @@ static PointF ArchSnapScreenPoint(MainWindow* win, DisplayModel* dm, int pageNo,
 
 static void OnMouseMove(MainWindow* win, int x, int y, WPARAM /*key*/) {
     // Track mouse position for erase mode overlay
-    win->archMousePos = Point{x, y};
+    win->archTools.mousePos = Point{x, y};
 
     if (win->trimDragging) {
         auto* dm = win->AsFixed();
@@ -1671,7 +1671,8 @@ static void OnMouseMove(MainWindow* win, int x, int y, WPARAM /*key*/) {
     }
 
     // Arch Tools: handle scale/measure mouse move (drag preview)
-    if (gGlobalPrefs->archToolsEnabled && win->archToolMode != 0 && win->archDragLine == 1 && win->AsFixed()) {
+    if (gGlobalPrefs->archToolsEnabled && win->archTools.toolMode != 0 && win->archTools.dragLine == 1 &&
+        win->AsFixed()) {
         DisplayModel* dm = win->AsFixed();
         int pageNo = dm->CurrentPageNo();
         if (dm->ValidPageNo(pageNo)) {
@@ -1679,7 +1680,7 @@ static void OnMouseMove(MainWindow* win, int x, int y, WPARAM /*key*/) {
             PointF pagePt = ArchSnapScreenPoint(win, dm, pageNo, screenPt);
             // Shift constraint: snap to horizontal or vertical
             if (GetAsyncKeyState(VK_SHIFT) & 0x8000) {
-                PointF p1page = dm->CvtFromScreen(win->archPoint1, pageNo);
+                PointF p1page = dm->CvtFromScreen(win->archTools.point1, pageNo);
                 float dx = pagePt.x - p1page.x;
                 float dy = pagePt.y - p1page.y;
                 if (fabsf(dx) > fabsf(dy)) {
@@ -1688,14 +1689,15 @@ static void OnMouseMove(MainWindow* win, int x, int y, WPARAM /*key*/) {
                     pagePt.x = p1page.x;
                 }
             }
-            win->archPoint2 = dm->CvtToScreen(pageNo, pagePt);
+            win->archTools.point2 = dm->CvtToScreen(pageNo, pagePt);
             // Track drag distance for click-click vs click-drag detection
-            if (!win->archDragMoved) {
-                int dx = x - win->archDragStartPos.x;
-                int dy = y - win->archDragStartPos.y;
+            if (!win->archTools.dragMoved) {
+                int dx = x - win->archTools.dragStartPos.x;
+                int dy = y - win->archTools.dragStartPos.y;
                 if (dx * dx + dy * dy > 16) { // ~4px threshold
-                    win->archDragMoved = true;
-                    LogInfo("[arch] OnMouseMove: drag threshold crossed, moved=true (mode=%d)", win->archToolMode);
+                    win->archTools.dragMoved = true;
+                    LogInfo("[arch] OnMouseMove: drag threshold crossed, moved=true (mode=%d)",
+                            win->archTools.toolMode);
                 }
             }
             ScheduleRepaint(win, 0);
@@ -1707,25 +1709,25 @@ static void OnMouseMove(MainWindow* win, int x, int y, WPARAM /*key*/) {
     // ReportIf(!dm); // can happen if reload fails, we delete DisplayModel
     if (!dm) return;
 
-    if (win->touchSelDragging != TouchSelHandle::None) {
+    if (win->selection.touchSelDragging != TouchSelHandle::None) {
         DragTouchSelHandle(win, x, y);
         return;
     }
-    if (win->lastInputWasTouch) {
+    if (win->selection.lastInputWasTouch) {
         // a finger that wanders isn't holding still, so it isn't a long press
         int slop = DpiScale(win->hwndCanvas, 10);
-        if (abs(x - win->touchDownPos.x) > slop || abs(y - win->touchDownPos.y) > slop) {
+        if (abs(x - win->selection.touchDownPos.x) > slop || abs(y - win->selection.touchDownPos.y) > slop) {
             KillTimer(win->hwndCanvas, kTouchLongPressTimerID);
         }
     }
-    if (win->touchSelHandles && !IsMouseMessageFromTouch()) {
+    if (win->selection.touchSelHandles && !IsMouseMessageFromTouch()) {
         // A real mouse takes the handles away -- they're finger furniture --
         // while leaving the selection alone (issue #538). Windows also
         // synthesizes moves around a touch, untagged and sometimes carrying a
         // stale position, so anything arriving while a finger is on the glass
         // or has only just left doesn't count as the mouse taking over.
-        DWORD sinceTouch = (DWORD)GetTickCount64() - win->touchLastActivityTime;
-        if (win->touchPointerId >= 0 || sinceTouch < kTouchMouseTakeoverMs) {
+        DWORD sinceTouch = (DWORD)GetTickCount64() - win->selection.touchLastActivityTime;
+        if (win->selection.touchPointerId >= 0 || sinceTouch < kTouchMouseTakeoverMs) {
             return;
         }
         logf("touch: mouse moved to %d,%d (%dms after touch), hiding selection handles\n", x, y, (int)sinceTouch);
@@ -1868,15 +1870,15 @@ static void OnMouseMove(MainWindow* win, int x, int y, WPARAM /*key*/) {
             [[fallthrough]];
         case MouseAction::Selecting: {
             win->annotationUnderCursor = nullptr;
-            if (win->selectionDragEdge != SelectionDragEdge::None) {
+            if (win->selection.selectionDragEdge != SelectionDragEdge::None) {
                 // move / resize existing rectangular selection
                 UpdateRectangularSelectionEdit(win, x, y);
-                SetCursorCached(CursorIdForSelectionEdge(win->selectionDragEdge));
+                SetCursorCached(CursorIdForSelectionEdge(win->selection.selectionDragEdge));
             } else {
                 // creating a new selection from the start corner
-                win->selectionRect.dx = x - win->selectionRect.x;
-                win->selectionRect.dy = y - win->selectionRect.y;
-                win->selectionMeasure = dm->CvtFromScreen(win->selectionRect).Size();
+                win->selection.selectionRect.dx = x - win->selection.selectionRect.x;
+                win->selection.selectionRect.dy = y - win->selection.selectionRect.y;
+                win->selection.selectionMeasure = dm->CvtFromScreen(win->selection.selectionRect).Size();
             }
             OnSelectionEdgeAutoscroll(win, x, y);
             ScheduleRepaint(win, 0);
@@ -2101,11 +2103,11 @@ static void OnMouseLeftButtonDown(MainWindow* win, int x, int y, WPARAM key) {
     }
 
     // Arch Tools: erase mode — works whenever Arch Tools is ON, regardless of draw mode
-    if (gGlobalPrefs->archToolsEnabled && win->archToolsOn && win->AsFixed()) {
+    if (gGlobalPrefs->archToolsEnabled && win->archTools.on && win->AsFixed()) {
         DisplayModel* dm = win->AsFixed();
         int pageNo = dm->CurrentPageNo();
         if (dm->ValidPageNo(pageNo) && (GetAsyncKeyState('E') & 0x8000)) {
-            win->archEraseMode = true;
+            win->archTools.eraseMode = true;
             Point screenPt{x, y};
             // Raw conversion, NO snap — compare against stored lines directly
             PointF pagePt = dm->CvtFromScreen(screenPt, pageNo);
@@ -2115,11 +2117,11 @@ static void OnMouseLeftButtonDown(MainWindow* win, int x, int y, WPARAM key) {
             bool removed = false;
 
             // Check measurements
-            for (int i = 0; i < win->archMeasurements.len; ++i) {
-                ArchMeasurement& m = win->archMeasurements[i];
+            for (int i = 0; i < win->archTools.measurements.len; ++i) {
+                ArchMeasurement& m = win->archTools.measurements[i];
                 if (ArchPointSegDist(pagePt.x, pagePt.y, m.p1x, m.p1y, m.p2x, m.p2y) < thresholdPage) {
-                    win->archMeasurements[i] = win->archMeasurements[win->archMeasurements.len - 1];
-                    win->archMeasurements.len--;
+                    win->archTools.measurements[i] = win->archTools.measurements[win->archTools.measurements.len - 1];
+                    win->archTools.measurements.len--;
                     removed = true;
                     LogInfo("[arch] erase: removed measurement at index %d", i);
                     break;
@@ -2127,15 +2129,14 @@ static void OnMouseLeftButtonDown(MainWindow* win, int x, int y, WPARAM key) {
             }
 
             // Check scale line
-            if (!removed && win->archScaleSet) {
-                if (ArchPointSegDist(pagePt.x, pagePt.y,
-                                     win->archScaleLineP1x, win->archScaleLineP1y,
-                                     win->archScaleLineP2x, win->archScaleLineP2y) < thresholdPage) {
-                    win->archScaleSet = false;
-                    win->archScaleLineDefined = false;
-                    win->archScaleFactor = 0.0f;
-                    win->archScaleLineP1x = win->archScaleLineP1y = 0.0f;
-                    win->archScaleLineP2x = win->archScaleLineP2y = 0.0f;
+            if (!removed && win->archTools.scaleSet) {
+                if (ArchPointSegDist(pagePt.x, pagePt.y, win->archTools.scaleLineP1x, win->archTools.scaleLineP1y,
+                                     win->archTools.scaleLineP2x, win->archTools.scaleLineP2y) < thresholdPage) {
+                    win->archTools.scaleSet = false;
+                    win->archTools.scaleLineDefined = false;
+                    win->archTools.scaleFactor = 0.0f;
+                    win->archTools.scaleLineP1x = win->archTools.scaleLineP1y = 0.0f;
+                    win->archTools.scaleLineP2x = win->archTools.scaleLineP2y = 0.0f;
                     removed = true;
                     LogInfo("[arch] erase: removed scale line");
                 }
@@ -2147,32 +2148,32 @@ static void OnMouseLeftButtonDown(MainWindow* win, int x, int y, WPARAM key) {
     }
 
     // Arch Tools: handle scale/measure mouse interaction (click-click + click-drag)
-    if (gGlobalPrefs->archToolsEnabled && win->archToolMode != 0 && win->AsFixed()) {
+    if (gGlobalPrefs->archToolsEnabled && win->archTools.toolMode != 0 && win->AsFixed()) {
         DisplayModel* dm = win->AsFixed();
         int pageNo = dm->CurrentPageNo();
         if (dm->ValidPageNo(pageNo)) {
             Point screenPt{x, y};
             PointF pagePt = ArchSnapScreenPoint(win, dm, pageNo, screenPt);
             LogInfo("[arch] OnMouseLeftButtonDown: mode=%d dragLine=%d pagePt=(%.2f,%.2f) moved=%d",
-                    win->archToolMode, win->archDragLine, pagePt.x, pagePt.y, win->archDragMoved);
+                    win->archTools.toolMode, win->archTools.dragLine, pagePt.x, pagePt.y, win->archTools.dragMoved);
 
-            if (win->archToolMode == 1) { // Scale mode
-                if (win->archDragLine == 0) {
+            if (win->archTools.toolMode == 1) { // Scale mode
+                if (win->archTools.dragLine == 0) {
                     // First click: start drawing a new line (click or drag)
                     // No auto-select of existing PDF vector segments
-                    win->archPoint1 = dm->CvtToScreen(pageNo, pagePt);
-                    win->archDragLine = 1;
-                    win->archDragStartPos = Point{x, y};
-                    win->archDragMoved = false;
+                    win->archTools.point1 = dm->CvtToScreen(pageNo, pagePt);
+                    win->archTools.dragLine = 1;
+                    win->archTools.dragStartPos = Point{x, y};
+                    win->archTools.dragMoved = false;
                     SetCapture(win->hwndCanvas);
                     win->mouseAction = MouseAction::Dragging;
                     LogInfo("[arch] Scale: first point placed, waiting for 2nd click or drag");
                     return;
-                } else if (win->archDragLine == 1 && !win->archDragMoved) {
+                } else if (win->archTools.dragLine == 1 && !win->archTools.dragMoved) {
                     // Second click (not a drag): finalize the line
                     // Shift constraint: snap to horizontal or vertical
                     if (GetAsyncKeyState(VK_SHIFT) & 0x8000) {
-                        PointF p1page = dm->CvtFromScreen(win->archPoint1, pageNo);
+                        PointF p1page = dm->CvtFromScreen(win->archTools.point1, pageNo);
                         float dx = pagePt.x - p1page.x;
                         float dy = pagePt.y - p1page.y;
                         if (fabsf(dx) > fabsf(dy)) {
@@ -2181,39 +2182,39 @@ static void OnMouseLeftButtonDown(MainWindow* win, int x, int y, WPARAM key) {
                             pagePt.x = p1page.x;
                         }
                     }
-                    win->archPoint2 = dm->CvtToScreen(pageNo, pagePt);
-                    win->archDragLine = 2;
-                    win->archScaleLineDefined = true;
+                    win->archTools.point2 = dm->CvtToScreen(pageNo, pagePt);
+                    win->archTools.dragLine = 2;
+                    win->archTools.scaleLineDefined = true;
                     // Store in page coords
-                    PointF p1page = dm->CvtFromScreen(win->archPoint1, pageNo);
-                    PointF p2page = dm->CvtFromScreen(win->archPoint2, pageNo);
-                    win->archScaleLineP1x = p1page.x;
-                    win->archScaleLineP1y = p1page.y;
-                    win->archScaleLineP2x = p2page.x;
-                    win->archScaleLineP2y = p2page.y;
+                    PointF p1page = dm->CvtFromScreen(win->archTools.point1, pageNo);
+                    PointF p2page = dm->CvtFromScreen(win->archTools.point2, pageNo);
+                    win->archTools.scaleLineP1x = p1page.x;
+                    win->archTools.scaleLineP1y = p1page.y;
+                    win->archTools.scaleLineP2x = p2page.x;
+                    win->archTools.scaleLineP2y = p2page.y;
                     ReleaseCapture();
                     win->mouseAction = MouseAction::None;
-                    LogInfo("[arch] Scale: line finalized by 2nd click p1=(%.2f,%.2f) p2=(%.2f,%.2f)",
-                            p1page.x, p1page.y, p2page.x, p2page.y);
+                    LogInfo("[arch] Scale: line finalized by 2nd click p1=(%.2f,%.2f) p2=(%.2f,%.2f)", p1page.x,
+                            p1page.y, p2page.x, p2page.y);
                     ScheduleRepaint(win, 0);
                     return;
                 }
-            } else if (win->archToolMode == 2) { // Measure mode
-                if (win->archDragLine == 0) {
+            } else if (win->archTools.toolMode == 2) { // Measure mode
+                if (win->archTools.dragLine == 0) {
                     // First click: start measuring
-                    win->archPoint1 = dm->CvtToScreen(pageNo, pagePt);
-                    win->archDragLine = 1;
-                    win->archDragStartPos = Point{x, y};
-                    win->archDragMoved = false;
+                    win->archTools.point1 = dm->CvtToScreen(pageNo, pagePt);
+                    win->archTools.dragLine = 1;
+                    win->archTools.dragStartPos = Point{x, y};
+                    win->archTools.dragMoved = false;
                     SetCapture(win->hwndCanvas);
                     win->mouseAction = MouseAction::Dragging;
                     LogInfo("[arch] Measure: first point placed, waiting for 2nd click or drag");
                     return;
-                } else if (win->archDragLine == 1 && !win->archDragMoved) {
+                } else if (win->archTools.dragLine == 1 && !win->archTools.dragMoved) {
                     // Second click (not a drag): finalize measurement
                     // Shift constraint: snap to horizontal or vertical
                     if (GetAsyncKeyState(VK_SHIFT) & 0x8000) {
-                        PointF p1page = dm->CvtFromScreen(win->archPoint1, pageNo);
+                        PointF p1page = dm->CvtFromScreen(win->archTools.point1, pageNo);
                         float dx = pagePt.x - p1page.x;
                         float dy = pagePt.y - p1page.y;
                         if (fabsf(dx) > fabsf(dy)) {
@@ -2222,8 +2223,8 @@ static void OnMouseLeftButtonDown(MainWindow* win, int x, int y, WPARAM key) {
                             pagePt.x = p1page.x;
                         }
                     }
-                    win->archPoint2 = dm->CvtToScreen(pageNo, pagePt);
-                    win->archDragLine = 2;
+                    win->archTools.point2 = dm->CvtToScreen(pageNo, pagePt);
+                    win->archTools.dragLine = 2;
                     ReleaseCapture();
                     win->mouseAction = MouseAction::None;
                     LogInfo("[arch] Measure: line finalized by 2nd click, finalizing measurement");
@@ -2262,11 +2263,11 @@ static void OnMouseLeftButtonDown(MainWindow* win, int x, int y, WPARAM key) {
 
     // remember how this sequence started: WM_CONTEXTMENU, which a long press
     // turns into, doesn't say whether a finger or a mouse produced it
-    win->lastInputWasTouch = IsMouseMessageFromTouch();
-    win->touchDownPos = pt;
-    win->touchDownTime = (DWORD)GetMessageTime();
-    if (win->lastInputWasTouch) {
-        logf("touch: down at %d,%d, handles=%d, mouseAction=%d\n", x, y, (int)win->touchSelHandles,
+    win->selection.lastInputWasTouch = IsMouseMessageFromTouch();
+    win->selection.touchDownPos = pt;
+    win->selection.touchDownTime = (DWORD)GetMessageTime();
+    if (win->selection.lastInputWasTouch) {
+        logf("touch: down at %d,%d, handles=%d, mouseAction=%d\n", x, y, (int)win->selection.touchSelHandles,
              (int)win->mouseAction);
         // when touch arrives as mouse messages rather than gestures, this is
         // what turns a held finger into a long press (issue #538)
@@ -2278,7 +2279,7 @@ static void OnMouseLeftButtonDown(MainWindow* win, int x, int y, WPARAM key) {
     TouchSelHandle handle = HitTestTouchSelHandle(win, x, y);
     if (handle != TouchSelHandle::None) {
         logf("touch: grabbed %s handle at %d,%d\n", TouchSelHandleName(handle), x, y);
-        win->touchSelDragging = handle;
+        win->selection.touchSelDragging = handle;
         win->mouseAction = MouseAction::None;
         SetCapture(win->hwndCanvas);
         return;
@@ -2365,9 +2366,9 @@ static void OnMouseLeftButtonDown(MainWindow* win, int x, int y, WPARAM key) {
             PointF ptf = dm->CvtFromScreen(pt, pageNo);
             dm->textSelection->SelectLineAt(pageNo, ptf.x, ptf.y);
             UpdateTextSelection(win, false);
-            win->selectingByWord = false; // a drag now extends by glyph, not word
-            win->showSelection = true;
-            win->selectionRect = Rect(x, y, 0, 0);
+            win->selection.selectingByWord = false; // a drag now extends by glyph, not word
+            win->selection.showSelection = true;
+            win->selection.selectionRect = Rect(x, y, 0, 0);
             win->mouseAction = MouseAction::SelectingText;
             win->dragStartPending = false;
             SetCapture(win->hwndCanvas);
@@ -2394,7 +2395,7 @@ static void OnMouseLeftButtonDown(MainWindow* win, int x, int y, WPARAM key) {
     }
 
     // if clicking on already selected text, prepare for drag-out instead of new selection
-    if (canCopy && !isShift && !isCtrl && isOverText && win->showSelection && IsPointInSelection(win, pt)) {
+    if (canCopy && !isShift && !isCtrl && isOverText && win->selection.showSelection && IsPointInSelection(win, pt)) {
         win->textDragPending = true;
         win->linkOnLastButtonDown = nullptr;
         SetCapture(win->hwndCanvas);
@@ -2419,8 +2420,8 @@ static void OnMouseLeftButtonDown(MainWindow* win, int x, int y, WPARAM key) {
     // A finger doesn't rubber-band: dragging pans the page and a long press
     // selects, so letting touch start a selection here only flashes a
     // rectangle before the gesture takes over (issue #538).
-    bool startDrag = resizeHandle != ResizeHandle::None || isMoveableAnnot || !canCopy || win->lastInputWasTouch ||
-                     (isShift || !isOverText) && !isCtrl;
+    bool startDrag = resizeHandle != ResizeHandle::None || isMoveableAnnot || !canCopy ||
+                     win->selection.lastInputWasTouch || (isShift || !isOverText) && !isCtrl;
     if (startDrag) {
         StartMouseDrag(win, x, y);
     } else {
@@ -2429,8 +2430,8 @@ static void OnMouseLeftButtonDown(MainWindow* win, int x, int y, WPARAM key) {
 }
 
 static void FinalizeArchMeasurement(MainWindow* win, DisplayModel* dm, int pageNo) {
-    Point screenPt1 = win->archPoint1;
-    Point screenPt2 = win->archPoint2;
+    Point screenPt1 = win->archTools.point1;
+    Point screenPt2 = win->archTools.point2;
     PointF pagePt1 = dm->CvtFromScreen(screenPt1, pageNo);
     PointF pagePt2 = dm->CvtFromScreen(screenPt2, pageNo);
     float dxPage = fabsf(pagePt2.x - pagePt1.x);
@@ -2442,14 +2443,14 @@ static void FinalizeArchMeasurement(MainWindow* win, DisplayModel* dm, int pageN
     meas.p1y = pagePt1.y;
     meas.p2x = pagePt2.x;
     meas.p2y = pagePt2.y;
-    meas.unit = win->archUnit; // stored but not used for display anymore
+    meas.unit = win->archTools.unit; // stored but not used for display anymore
 
-    if (win->archScaleSet && win->archScaleFactor > 0.0f) {
+    if (win->archTools.scaleSet && win->archTools.scaleFactor > 0.0f) {
         // archScaleFactor is now page units per METER (canonical)
         // Result is in METERS
-        meas.x = dxPage / win->archScaleFactor;
-        meas.y = dyPage / win->archScaleFactor;
-        meas.len = lenPage / win->archScaleFactor;
+        meas.x = dxPage / win->archTools.scaleFactor;
+        meas.y = dyPage / win->archTools.scaleFactor;
+        meas.len = lenPage / win->archTools.scaleFactor;
         meas.scaled = true;
     } else {
         // No scale defined: store page units, mark as unscaled
@@ -2459,14 +2460,16 @@ static void FinalizeArchMeasurement(MainWindow* win, DisplayModel* dm, int pageN
         meas.scaled = false;
     }
 
-    int idx = win->archMeasurements.Append(meas);
+    int idx = win->archTools.measurements.Append(meas);
 
     const WCHAR* unitNames[] = {L"mm", L"cm", L"m", L"in", L"ft"};
-    LogInfo("[arch] FinalizeArchMeasurement: idx=%d p1=(%.2f,%.2f) p2=(%.2f,%.2f) dx=%.2f dy=%.2f len=%.2f scaled=%d factor=%.4f unit=%s",
-            idx, pagePt1.x, pagePt1.y, pagePt2.x, pagePt2.y,
-            meas.x, meas.y, meas.len, meas.scaled, win->archScaleFactor, unitNames[win->archUnit]);
+    LogInfo(
+        "[arch] FinalizeArchMeasurement: idx=%d p1=(%.2f,%.2f) p2=(%.2f,%.2f) dx=%.2f dy=%.2f len=%.2f scaled=%d "
+        "factor=%.4f unit=%s",
+        idx, pagePt1.x, pagePt1.y, pagePt2.x, pagePt2.y, meas.x, meas.y, meas.len, meas.scaled,
+        win->archTools.scaleFactor, unitNames[win->archTools.unit]);
 
-    win->archDragLine = 0; // ready for next measurement
+    win->archTools.dragLine = 0; // ready for next measurement
     ScheduleRepaint(win, 0);
 }
 
@@ -2480,20 +2483,21 @@ static void OnMouseLeftButtonUp(MainWindow* win, int x, int y, WPARAM key) {
     }
 
     // Arch Tools: handle scale/measure mouse up (drag case)
-    if (gGlobalPrefs->archToolsEnabled && win->archToolMode != 0 && win->archDragLine == 1 && win->AsFixed()) {
+    if (gGlobalPrefs->archToolsEnabled && win->archTools.toolMode != 0 && win->archTools.dragLine == 1 &&
+        win->AsFixed()) {
         DisplayModel* dm = win->AsFixed();
         int pageNo = dm->CurrentPageNo();
         if (dm->ValidPageNo(pageNo)) {
             if (GetCapture() == win->hwndCanvas) ReleaseCapture();
             win->mouseAction = MouseAction::None;
 
-            if (win->archDragMoved) {
+            if (win->archTools.dragMoved) {
                 // Drag case: finalize the line
-                if (win->archToolMode == 1) { // Scale mode
+                if (win->archTools.toolMode == 1) { // Scale mode
                     // Re-apply Shift constraint at release for correctness
                     if (GetAsyncKeyState(VK_SHIFT) & 0x8000) {
-                        PointF p1page = dm->CvtFromScreen(win->archPoint1, pageNo);
-                        PointF p2page = dm->CvtFromScreen(win->archPoint2, pageNo);
+                        PointF p1page = dm->CvtFromScreen(win->archTools.point1, pageNo);
+                        PointF p2page = dm->CvtFromScreen(win->archTools.point2, pageNo);
                         float dx = p2page.x - p1page.x;
                         float dy = p2page.y - p1page.y;
                         if (fabsf(dx) > fabsf(dy)) {
@@ -2501,25 +2505,25 @@ static void OnMouseLeftButtonUp(MainWindow* win, int x, int y, WPARAM key) {
                         } else {
                             p2page.x = p1page.x;
                         }
-                        win->archPoint2 = dm->CvtToScreen(pageNo, p2page);
+                        win->archTools.point2 = dm->CvtToScreen(pageNo, p2page);
                     }
-                    win->archDragLine = 2;
-                    win->archScaleLineDefined = true;
+                    win->archTools.dragLine = 2;
+                    win->archTools.scaleLineDefined = true;
                     // Store in page coords
-                    PointF p1page = dm->CvtFromScreen(win->archPoint1, pageNo);
-                    PointF p2page = dm->CvtFromScreen(win->archPoint2, pageNo);
-                    win->archScaleLineP1x = p1page.x;
-                    win->archScaleLineP1y = p1page.y;
-                    win->archScaleLineP2x = p2page.x;
-                    win->archScaleLineP2y = p2page.y;
+                    PointF p1page = dm->CvtFromScreen(win->archTools.point1, pageNo);
+                    PointF p2page = dm->CvtFromScreen(win->archTools.point2, pageNo);
+                    win->archTools.scaleLineP1x = p1page.x;
+                    win->archTools.scaleLineP1y = p1page.y;
+                    win->archTools.scaleLineP2x = p2page.x;
+                    win->archTools.scaleLineP2y = p2page.y;
                     LogInfo("[arch] OnMouseLeftButtonUp: drag finalized mode=scale p1=(%.2f,%.2f) p2=(%.2f,%.2f)",
                             p1page.x, p1page.y, p2page.x, p2page.y);
                     ScheduleRepaint(win, 0);
-                } else if (win->archToolMode == 2) { // Measure mode
+                } else if (win->archTools.toolMode == 2) { // Measure mode
                     // Re-apply Shift constraint at release for correctness
                     if (GetAsyncKeyState(VK_SHIFT) & 0x8000) {
-                        PointF p1page = dm->CvtFromScreen(win->archPoint1, pageNo);
-                        PointF p2page = dm->CvtFromScreen(win->archPoint2, pageNo);
+                        PointF p1page = dm->CvtFromScreen(win->archTools.point1, pageNo);
+                        PointF p2page = dm->CvtFromScreen(win->archTools.point2, pageNo);
                         float dx = p2page.x - p1page.x;
                         float dy = p2page.y - p1page.y;
                         if (fabsf(dx) > fabsf(dy)) {
@@ -2527,7 +2531,7 @@ static void OnMouseLeftButtonUp(MainWindow* win, int x, int y, WPARAM key) {
                         } else {
                             p2page.x = p1page.x;
                         }
-                        win->archPoint2 = dm->CvtToScreen(pageNo, p2page);
+                        win->archTools.point2 = dm->CvtToScreen(pageNo, p2page);
                     }
                     LogInfo("[arch] OnMouseLeftButtonUp: drag finalized mode=measure, finalizing measurement");
                     FinalizeArchMeasurement(win, dm, pageNo);
@@ -2535,7 +2539,8 @@ static void OnMouseLeftButtonUp(MainWindow* win, int x, int y, WPARAM key) {
             } else {
                 // Click case: keep archDragLine=1, wait for second click
                 // (handled in OnMouseLeftButtonDown)
-                LogInfo("[arch] OnMouseLeftButtonUp: click (no drag), waiting for 2nd click (mode=%d)", win->archToolMode);
+                LogInfo("[arch] OnMouseLeftButtonUp: click (no drag), waiting for 2nd click (mode=%d)",
+                        win->archTools.toolMode);
             }
             return;
         }
@@ -2544,16 +2549,16 @@ static void OnMouseLeftButtonUp(MainWindow* win, int x, int y, WPARAM key) {
     DisplayModel* dm = win->AsFixed();
     ReportIf(!dm);
 
-    if (win->lastInputWasTouch) {
-        DWORD heldMs = (DWORD)GetMessageTime() - win->touchDownTime;
+    if (win->selection.lastInputWasTouch) {
+        DWORD heldMs = (DWORD)GetMessageTime() - win->selection.touchDownTime;
         logf("touch: up at %d,%d after %dms, dragging=%s, mouseAction=%d\n", x, y, (int)heldMs,
-             TouchSelHandleName(win->touchSelDragging), (int)win->mouseAction);
+             TouchSelHandleName(win->selection.touchSelDragging), (int)win->mouseAction);
     }
     KillTimer(win->hwndCanvas, kTouchLongPressTimerID);
     // let go of a touch selection handle; the handles stay up so the selection
     // can be adjusted again (issue #538)
-    if (win->touchSelDragging != TouchSelHandle::None) {
-        win->touchSelDragging = TouchSelHandle::None;
+    if (win->selection.touchSelDragging != TouchSelHandle::None) {
+        win->selection.touchSelDragging = TouchSelHandle::None;
         if (GetCapture() == win->hwndCanvas) {
             ReleaseCapture();
         }
@@ -2614,8 +2619,8 @@ static void OnMouseLeftButtonUp(MainWindow* win, int x, int y, WPARAM key) {
         }
     } else {
         OnSelectionStop(win, x, y, !didDragMouse);
-        if (MouseAction::Selecting == ma && win->showSelection) {
-            win->selectionMeasure = dm->CvtFromScreen(win->selectionRect).Size();
+        if (MouseAction::Selecting == ma && win->selection.showSelection) {
+            win->selection.selectionMeasure = dm->CvtFromScreen(win->selection.selectionRect).Size();
         }
     }
 
@@ -2662,7 +2667,7 @@ static void OnMouseLeftButtonUp(MainWindow* win, int x, int y, WPARAM key) {
         if ((kindDestinationLaunchURL == kind || kindDestinationLaunchFile == kind)) {
             DeleteOldSelectionInfo(win, true);
             tab->selectionOnPage = SelectionOnPage::FromRectangle(dm, dm->CvtToScreen(pageNo, link->GetRect()));
-            win->showSelection = tab->selectionOnPage != nullptr;
+            win->selection.showSelection = tab->selectionOnPage != nullptr;
             ScheduleRepaint(win, 0);
         }
         SetCanvasCursor(win, IDC_ARROW);
@@ -2686,7 +2691,7 @@ static void OnMouseLeftButtonUp(MainWindow* win, int x, int y, WPARAM key) {
         return;
     }
 
-    if (win->showSelection) {
+    if (win->selection.showSelection) {
         // A click that wasn't a drag, on empty space (clicking text starts a new
         // selection instead): drop the selection, like every other text UI does.
         // This used to go through ClearSearchResult(), which cleared the
@@ -2759,9 +2764,9 @@ static void OnMouseLeftButtonDblClk(MainWindow* win, int x, int y, WPARAM key) {
             // keep the gesture active so dragging after the double-click extends
             // the selection a word at a time (issue #4761). dragStartPending is
             // cleared so that releasing without dragging keeps the whole word.
-            win->selectingByWord = true;
-            win->showSelection = true;
-            win->selectionRect = Rect(x, y, 0, 0);
+            win->selection.selectingByWord = true;
+            win->selection.showSelection = true;
+            win->selection.selectionRect = Rect(x, y, 0, 0);
             win->mouseAction = MouseAction::SelectingText;
             win->dragStartPending = false;
             SetCapture(win->hwndCanvas);
@@ -2783,7 +2788,7 @@ static void OnMouseLeftButtonDblClk(MainWindow* win, int x, int y, WPARAM key) {
 
         DeleteOldSelectionInfo(win, true);
         win->CurrentTab()->selectionOnPage = SelectionOnPage::FromRectangle(dm, rc);
-        win->showSelection = win->CurrentTab()->selectionOnPage != nullptr;
+        win->selection.showSelection = win->CurrentTab()->selectionOnPage != nullptr;
         ScheduleRepaint(win, 0);
     }
 }
@@ -2844,11 +2849,11 @@ static void OnMouseRightButtonDown(MainWindow* win, int x, int y) {
 static void OnMouseRightButtonUp(MainWindow* win, int x, int y, WPARAM key) {
     ReportIf(!win->AsFixed());
     logf("touch: right button up at %d,%d, fromTouch=%d, suppressMenu=%d, rightDragging=%d\n", x, y,
-         (int)IsMouseMessageFromTouch(), (int)win->touchSuppressContextMenu, (int)IsRightDragging(win));
+         (int)IsMouseMessageFromTouch(), (int)win->selection.touchSuppressContextMenu, (int)IsRightDragging(win));
     // A held finger is delivered as a right-click, which would open the context
     // menu on top of the word the hold just selected (issue #538)
-    if (win->touchSuppressContextMenu) {
-        win->touchSuppressContextMenu = false;
+    if (win->selection.touchSuppressContextMenu) {
+        win->selection.touchSuppressContextMenu = false;
         logf("touch: swallowing the right-click that followed the long press\n");
         if (IsRightDragging(win)) {
             StopMouseDrag(win, x, y, true);
@@ -3380,7 +3385,7 @@ static bool DrawDocument(MainWindow* win, HDC hdc, Rect rcArea) {
     // searching). Using "else if" here hid the normal selection highlight
     // when all-match painting was on (issue #5737).
     PaintAllFindMatches(win, hdc);
-    if (win->showSelection) {
+    if (win->selection.showSelection) {
         PaintSelection(win, hdc);
     }
     // keep the floating selection toolbar aligned with the selection while
@@ -3465,17 +3470,19 @@ static void OnPaintDocument(MainWindow* win) {
         if (!gNoFlickerRender || shouldPaint || showFocus) {
             // Arch Tools: draw scale line, measurements, and in-progress line INTO offscreen buffer BEFORE Flush
             // to prevent flicker. Gated by archToolsOn (not archToolMode).
-            if (gGlobalPrefs->archToolsEnabled && win->archToolsOn && win->AsFixed()) {
+            if (gGlobalPrefs->archToolsEnabled && win->archTools.on && win->AsFixed()) {
                 auto* dm = win->AsFixed();
                 HDC bufHdc = win->buffer->GetDC();
                 Gdiplus::Graphics gs(bufHdc);
 
                 // Draw persistent scale line (green)
-                if (win->archScaleSet) {
+                if (win->archTools.scaleSet) {
                     int pageNo = dm->CurrentPageNo();
                     if (dm->ValidPageNo(pageNo)) {
-                        Point p1 = dm->CvtToScreen(pageNo, PointF{win->archScaleLineP1x, win->archScaleLineP1y});
-                        Point p2 = dm->CvtToScreen(pageNo, PointF{win->archScaleLineP2x, win->archScaleLineP2y});
+                        Point p1 =
+                            dm->CvtToScreen(pageNo, PointF{win->archTools.scaleLineP1x, win->archTools.scaleLineP1y});
+                        Point p2 =
+                            dm->CvtToScreen(pageNo, PointF{win->archTools.scaleLineP2x, win->archTools.scaleLineP2y});
                         Gdiplus::Pen pen(Gdiplus::Color(255, 0, 200, 0), 2); // green
                         gs.DrawLine(&pen, p1.x, p1.y, p2.x, p2.y);
                         // Endpoint circles
@@ -3485,16 +3492,17 @@ static void OnPaintDocument(MainWindow* win) {
                         gs.FillEllipse(&brush, p2.x - r, p2.y - r, 2 * r, 2 * r);
                         // Label at midpoint showing real measure - theme-aware bg (semi-transparent dark)
                         const WCHAR* unitNames[] = {L"mm", L"cm", L"m", L"in", L"ft"};
-                        float dx = win->archScaleLineP2x - win->archScaleLineP1x;
-                        float dy = win->archScaleLineP2y - win->archScaleLineP1y;
+                        float dx = win->archTools.scaleLineP2x - win->archTools.scaleLineP1x;
+                        float dy = win->archTools.scaleLineP2y - win->archTools.scaleLineP1y;
                         float pageLenPt = sqrtf(dx * dx + dy * dy);
                         // archScaleFactor is now page units per METER (canonical)
                         // realLen in meters = pageLenPt / archScaleFactor
                         // Convert to current display unit
-                        float realLenM = (win->archScaleFactor > 0) ? (pageLenPt / win->archScaleFactor) : 0.0f;
-                        float displayLen = realLenM / kMeterPerUnit[win->archUnit];
+                        float realLenM =
+                            (win->archTools.scaleFactor > 0) ? (pageLenPt / win->archTools.scaleFactor) : 0.0f;
+                        float displayLen = realLenM / kMeterPerUnit[win->archTools.unit];
                         WCHAR label[128];
-                        swprintf_s(label, L"%.2f %s", displayLen, unitNames[win->archUnit]);
+                        swprintf_s(label, L"%.2f %s", displayLen, unitNames[win->archTools.unit]);
                         // Apply decimal separator preference
                         if (gGlobalPrefs->archDecimalSeparator == 1) {
                             for (WCHAR* p = label; *p; ++p) {
@@ -3509,14 +3517,15 @@ static void OnPaintDocument(MainWindow* win) {
                         Gdiplus::SolidBrush bgBrush(Gdiplus::Color(180, 30, 30, 30));
                         Gdiplus::RectF textSize;
                         gs.MeasureString(label, -1, &font, Gdiplus::PointF(0, 0), &textSize);
-                        Gdiplus::RectF bgRect((float)midX + 6, (float)midY - 16, textSize.Width + 8, textSize.Height + 4);
+                        Gdiplus::RectF bgRect((float)midX + 6, (float)midY - 16, textSize.Width + 8,
+                                              textSize.Height + 4);
                         gs.FillRectangle(&bgBrush, bgRect);
                         gs.DrawString(label, -1, &font, Gdiplus::PointF(bgRect.X + 4, bgRect.Y + 2), &textBrush);
                     }
                 }
 
                 // Draw saved measurements (blue)
-                for (const ArchMeasurement& meas : win->archMeasurements) {
+                for (const ArchMeasurement& meas : win->archTools.measurements) {
                     int pageNo = dm->CurrentPageNo(); // measurements are on current page
                     if (dm->ValidPageNo(pageNo)) {
                         Point p1 = dm->CvtToScreen(pageNo, PointF{meas.p1x, meas.p1y});
@@ -3532,10 +3541,11 @@ static void OnPaintDocument(MainWindow* win) {
                         const WCHAR* unitNames[] = {L"mm", L"cm", L"m", L"in", L"ft"};
                         WCHAR label[128];
                         // meas.x/y/len are now in METERS (canonical). Convert to current display unit.
-                        float dispX = meas.x / kMeterPerUnit[win->archUnit];
-                        float dispY = meas.y / kMeterPerUnit[win->archUnit];
-                        float dispLen = meas.len / kMeterPerUnit[win->archUnit];
-                        swprintf_s(label, L"x=%.2f y=%.2f L=%.2f %s", dispX, dispY, dispLen, unitNames[win->archUnit]);
+                        float dispX = meas.x / kMeterPerUnit[win->archTools.unit];
+                        float dispY = meas.y / kMeterPerUnit[win->archTools.unit];
+                        float dispLen = meas.len / kMeterPerUnit[win->archTools.unit];
+                        swprintf_s(label, L"x=%.2f y=%.2f L=%.2f %s", dispX, dispY, dispLen,
+                                   unitNames[win->archTools.unit]);
                         // Apply decimal separator preference
                         if (gGlobalPrefs->archDecimalSeparator == 1) {
                             for (WCHAR* p = label; *p; ++p) {
@@ -3549,29 +3559,31 @@ static void OnPaintDocument(MainWindow* win) {
                         Gdiplus::SolidBrush bgBrush(Gdiplus::Color(180, 30, 30, 30));
                         Gdiplus::RectF textSize;
                         gs.MeasureString(label, -1, &font, Gdiplus::PointF(0, 0), &textSize);
-                        Gdiplus::RectF bgRect((float)midX + 4, (float)midY - 14, textSize.Width + 8, textSize.Height + 4);
+                        Gdiplus::RectF bgRect((float)midX + 4, (float)midY - 14, textSize.Width + 8,
+                                              textSize.Height + 4);
                         gs.FillRectangle(&bgBrush, bgRect);
                         gs.DrawString(label, -1, &font, Gdiplus::PointF(bgRect.X + 4, bgRect.Y + 2), &textBrush);
                     }
                 }
 
                 // Draw in-progress line (orange highlight)
-                if (win->archDragLine > 0) {
+                if (win->archTools.dragLine > 0) {
                     Gdiplus::Pen pen(Gdiplus::Color(255, 255, 165, 0), 2); // orange
                     pen.SetDashStyle(Gdiplus::DashStyleDash);
-                    gs.DrawLine(&pen, win->archPoint1.x, win->archPoint1.y, win->archPoint2.x, win->archPoint2.y);
+                    gs.DrawLine(&pen, win->archTools.point1.x, win->archTools.point1.y, win->archTools.point2.x,
+                                win->archTools.point2.y);
                     // Endpoint circles
                     Gdiplus::SolidBrush brush(Gdiplus::Color(255, 255, 165, 0));
                     int r = 4;
-                    gs.FillEllipse(&brush, win->archPoint1.x - r, win->archPoint1.y - r, 2 * r, 2 * r);
-                    gs.FillEllipse(&brush, win->archPoint2.x - r, win->archPoint2.y - r, 2 * r, 2 * r);
+                    gs.FillEllipse(&brush, win->archTools.point1.x - r, win->archTools.point1.y - r, 2 * r, 2 * r);
+                    gs.FillEllipse(&brush, win->archTools.point2.x - r, win->archTools.point2.y - r, 2 * r, 2 * r);
                 }
 
                 // Erase mode: draw red "+" crosshair overlay at mouse position
-                if (win->archEraseMode) {
+                if (win->archTools.eraseMode) {
                     Gdiplus::Pen redPen(Gdiplus::Color(255, 255, 0, 0), 3); // red 3px
-                    int cx = win->archMousePos.x;
-                    int cy = win->archMousePos.y;
+                    int cx = win->archTools.mousePos.x;
+                    int cy = win->archTools.mousePos.y;
                     int sz = 16;
                     gs.DrawLine(&redPen, cx - sz, cy, cx + sz, cy);
                     gs.DrawLine(&redPen, cx, cy - sz, cx, cy + sz);
@@ -3696,18 +3708,18 @@ static LRESULT OnSetCursor(MainWindow* win, HWND hwnd) {
     }
 
     // Arch Tools: crosshair cursor when Arch Tools is ON
-    if (gGlobalPrefs->archToolsEnabled && win->archToolsOn && win->AsFixed()) {
+    if (gGlobalPrefs->archToolsEnabled && win->archTools.on && win->AsFixed()) {
         // Erase mode: hold 'E' key -> crosshair (red "+" overlay drawn in OnPaintDocument)
         if (GetAsyncKeyState('E') & 0x8000) {
-            win->archEraseMode = true;
+            win->archTools.eraseMode = true;
             SetCursorCached(IDC_CROSS);
             win->DeleteToolTip();
             return TRUE;
         } else {
-            win->archEraseMode = false;
+            win->archTools.eraseMode = false;
         }
         // Draw mode (scale/measure): crosshair cursor
-        if (win->archToolMode != 0) {
+        if (win->archTools.toolMode != 0) {
             SetCursorCached(IDC_CROSS);
             win->DeleteToolTip();
             return TRUE;
@@ -3738,8 +3750,8 @@ static LRESULT OnSetCursor(MainWindow* win, HWND hwnd) {
             SetCursorCached(IDC_IBEAM);
             return TRUE;
         case MouseAction::Selecting:
-            if (win->selectionDragEdge != SelectionDragEdge::None) {
-                SetCursorCached(CursorIdForSelectionEdge(win->selectionDragEdge));
+            if (win->selection.selectionDragEdge != SelectionDragEdge::None) {
+                SetCursorCached(CursorIdForSelectionEdge(win->selection.selectionDragEdge));
                 return TRUE;
             }
             break;
@@ -4263,16 +4275,16 @@ static LRESULT OnGesture(MainWindow* win, UINT msg, WPARAM wp, LPARAM lp) {
                 if (h != TouchSelHandle::None) {
                     // this finger is here to move the selection, not the page
                     logf("touch: gesture grabbed %s handle at %d,%d\n", TouchSelHandleName(h), cpt.x, cpt.y);
-                    win->touchSelDragging = h;
+                    win->selection.touchSelDragging = h;
                 }
             }
-            if (win->touchSelDragging != TouchSelHandle::None) {
+            if (win->selection.touchSelDragging != TouchSelHandle::None) {
                 if (!(gi.dwFlags & GF_BEGIN)) {
                     DragTouchSelHandle(win, cpt.x, cpt.y);
                 }
                 if (gi.dwFlags & GF_END) {
-                    logf("touch: released %s handle\n", TouchSelHandleName(win->touchSelDragging));
-                    win->touchSelDragging = TouchSelHandle::None;
+                    logf("touch: released %s handle\n", TouchSelHandleName(win->selection.touchSelDragging));
+                    win->selection.touchSelDragging = TouchSelHandle::None;
                 }
                 break;
             }
@@ -4456,44 +4468,44 @@ static void EnsurePointerApiLoaded() {
 static void OnTouchPointer(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     Point pt = HwndScreenToClient(hwnd, Point(GET_X_LPARAM(lp), GET_Y_LPARAM(lp)));
     DWORD now = (DWORD)GetTickCount64();
-    win->touchLastActivityTime = now;
+    win->selection.touchLastActivityTime = now;
     if (msg == WM_POINTERDOWN) {
-        win->touchDownPos = pt;
-        win->touchDownTime = now;
-        win->touchPointerId = LOWORD(wp);
-        win->touchLongPressDone = false;
+        win->selection.touchDownPos = pt;
+        win->selection.touchDownTime = now;
+        win->selection.touchPointerId = LOWORD(wp);
+        win->selection.touchLongPressDone = false;
         logf("touch: pointer down at %d,%d\n", pt.x, pt.y);
         SetTimer(hwnd, kTouchLongPressTimerID, kTouchLongPressMs, nullptr);
         return;
     }
-    if ((int)LOWORD(wp) != win->touchPointerId) {
+    if ((int)LOWORD(wp) != win->selection.touchPointerId) {
         // a second finger: that's a gesture, not a press
         KillTimer(hwnd, kTouchLongPressTimerID);
         return;
     }
     if (msg == WM_POINTERUPDATE) {
-        if (win->touchLongPressDone) {
-            if (win->touchSelDragging != TouchSelHandle::None) {
+        if (win->selection.touchLongPressDone) {
+            if (win->selection.touchSelDragging != TouchSelHandle::None) {
                 DragTouchSelHandle(win, pt.x, pt.y);
             }
             return;
         }
         int slop = DpiScale(hwnd, 10);
-        if (abs(pt.x - win->touchDownPos.x) > slop || abs(pt.y - win->touchDownPos.y) > slop) {
+        if (abs(pt.x - win->selection.touchDownPos.x) > slop || abs(pt.y - win->selection.touchDownPos.y) > slop) {
             // moved: this is a pan, not a press
             KillTimer(hwnd, kTouchLongPressTimerID);
         }
         return;
     }
     if (msg == WM_POINTERUP) {
-        logf("touch: pointer up at %d,%d after %dms, longPressDone=%d\n", pt.x, pt.y, (int)(now - win->touchDownTime),
-             (int)win->touchLongPressDone);
+        logf("touch: pointer up at %d,%d after %dms, longPressDone=%d\n", pt.x, pt.y,
+             (int)(now - win->selection.touchDownTime), (int)win->selection.touchLongPressDone);
         KillTimer(hwnd, kTouchLongPressTimerID);
-        if (win->touchSelDragging != TouchSelHandle::None) {
-            logf("touch: released %s handle\n", TouchSelHandleName(win->touchSelDragging));
-            win->touchSelDragging = TouchSelHandle::None;
+        if (win->selection.touchSelDragging != TouchSelHandle::None) {
+            logf("touch: released %s handle\n", TouchSelHandleName(win->selection.touchSelDragging));
+            win->selection.touchSelDragging = TouchSelHandle::None;
         }
-        win->touchPointerId = -1;
+        win->selection.touchPointerId = -1;
     }
 }
 
@@ -4662,8 +4674,8 @@ static LRESULT WndProcCanvasFixedPageUI(MainWindow* win, HWND hwnd, UINT msg, WP
             // arrives after we've already selected the word. Swallow that one
             // menu -- and only that one, so a later right-click still opens it
             // (issue #538).
-            if (!fromKeyboard && win->touchSuppressContextMenu) {
-                win->touchSuppressContextMenu = false;
+            if (!fromKeyboard && win->selection.touchSuppressContextMenu) {
+                win->selection.touchSuppressContextMenu = false;
                 logf("touch: swallowing the context menu that followed the long press\n");
                 return 0;
             }
@@ -4674,7 +4686,8 @@ static LRESULT WndProcCanvasFixedPageUI(MainWindow* win, HWND hwnd, UINT msg, WP
             // On a device where a hold does arrive as WM_CONTEXTMENU (a pen,
             // or touch with panning off) treat it as a long press too; the
             // gesture path above has usually handled it already.
-            if (!fromKeyboard && (win->lastInputWasTouch || IsMouseMessageFromTouch()) && OnTouchLongPress(win, x, y)) {
+            if (!fromKeyboard && (win->selection.lastInputWasTouch || IsMouseMessageFromTouch()) &&
+                OnTouchLongPress(win, x, y)) {
                 return 0;
             }
             OnWindowContextMenu(win, x, y);
@@ -4915,9 +4928,9 @@ static void OnTimer(MainWindow* win, HWND hwnd, WPARAM timerId) {
 
         case kTouchLongPressTimerID: {
             KillTimer(hwnd, kTouchLongPressTimerID);
-            Point dp = win->touchDownPos;
+            Point dp = win->selection.touchDownPos;
             logf("touch: long press timer fired at %d,%d, mouseAction=%d\n", dp.x, dp.y, (int)win->mouseAction);
-            win->touchLongPressDone = true;
+            win->selection.touchLongPressDone = true;
             if (OnTouchLongPress(win, dp.x, dp.y)) {
                 // The press selects the word and stops there. Carrying straight
                 // on into a drag looks like a good idea but the finger is never
@@ -4925,7 +4938,7 @@ static void OnTimer(MainWindow* win, HWND hwnd, WPARAM timerId) {
                 // before it is even lifted; extending is what the handles are
                 // for (issue #538).
                 // Windows will raise its own press-and-hold menu next
-                win->touchSuppressContextMenu = true;
+                win->selection.touchSuppressContextMenu = true;
             }
             break;
         }

@@ -1,5 +1,202 @@
 # TumatraPDF — Development Log
 
+## 2026-09-10 — ToolbarLayout Integration Complete (BUILD OK)
+
+### What
+Integrated ToolbarLayout module as the single entry point for toolbar child positioning, replacing manual repositioning functions.
+
+### Changes
+- Removed 3 old manual functions from Toolbar.cpp: RepositionEtaLabel, RepositionSpeedLabel, RepositionTimerControls
+- Simplified WM_SIZE handler to only call LayoutToolbarChildWindows(win)
+- Updated UpdateToolbarEtaText to call PositionFloatingLabels
+- Updated UpdateToolbarSpeedLabel to call LayoutToolbarChildWindows
+- Removed redundant calls from CreateTimerControls
+- Removed forward declarations from Toolbar.h
+- Implemented HandleToolbarOverflow in ToolbarLayout.cpp (hide priority: edit → label, never hide checkbox)
+- Fixed kCtrlH → gToolbarTokens.ctrlH in ToolbarLayout.cpp
+- Files modified: src/Toolbar.cpp, src/Toolbar.h, src/ToolbarLayout.cpp
+
+### Build
+- 0 errors, 0 warnings via `bun cmd/build-test.ts`
+
+## 2026-09-08 — Autoscroll Round Steps + Toolbar Wrapping
+
+### Autoscroll Round Steps
+- Replaced geometric speed progression (×1.5/×0.667) with round-step lookup table
+- Speed steps: 25, 50, 75, 100, 150, 200, 300, 400, 600, 800, 1200, 1600 px/min
+- `FindCurrentSpeedStep()` snaps to nearest step on start
+- File: `src/AutoScroll.cpp`
+
+### Toolbar Wrapping
+- Added `TBSTYLE_WRAPABLE` to main toolbar and arch tools toolbar
+- Buttons now wrap to second row when window narrows (instead of hiding)
+- Added `LayoutToolbarChildWindows(win)` call in WM_SIZE handler for floating child repositioning
+- Rebar `RBS_VARHEIGHT` already supports multi-row; `RelayoutFrame` auto-adapts
+- File: `src/Toolbar.cpp`
+
+### Build
+- 0 errors, 0 warnings via `bun cmd/build-test.ts`
+
+## 2026-09-08 — SelectionState Struct Extraction Complete (BUILD OK)
+
+### What
+Grouped 15 flat selection/touch-input member variables in MainWindow.h into a nested `SelectionState` struct (`win->selection.X`), following the AutoScrollState/ArchToolsState pattern. Pure access-path refactor, no logic change.
+
+### Changed
+- `src/MainWindow.h` — added `struct SelectionState { ... } selection;`
+- 168 access sites renamed in 9 files (Canvas.cpp, Selection.cpp, SumatraPDF.cpp, SumatraTest.cpp, CommandAvailability.cpp, Menu.cpp, LinkFollow.cpp, SelectionToolbar.cpp, Tabs.cpp)
+- Pattern: `X` → `selection.X`; `selectionRect` → `selection.selectionRect` (double "selection" correct)
+
+### Note
+`bun cmd/format.ts <files>` reformats the ENTIRE tree (ignores file args). Cosmetic diffs appeared in unrelated files; left as-is (clang-format is logic-neutral).
+
+### Build
+0 errors / 0 warnings — `bun cmd/build-test.ts` → `..\Compiled\TumatraPDF-test.exe`
+
+## 2026-09-08 — 16C-F6 Phase B: Window Lifecycle Extraction Complete (BUILD OK)
+
+### What
+Extracted remaining 11 functions from SumatraPDF.cpp window-lifetime cluster (L2628-L3069) into `MainWindowCreate.{h,cpp}`, completing the F6 extraction goal.
+
+### Functions extracted
+- `UpdateWindowRtlLayout(win)` — promoted non-static, declared in MainWindowCreate.h
+- `IsMenubarVisible()` — promoted non-static, declared in MainWindowCreate.h
+- `OnSidebarSplitterMove(ev)` — promoted non-static, declared in MainWindowCreate.h
+- `OnFavSplitterMove(ev)` — promoted non-static, declared in MainWindowCreate.h
+- `CreateSidebar(win)` — static in new TU
+- `UpdateToolbarSidebarText(win)` — static in new TU
+- `DwmFrameBorderColorForCurrentTheme()` — static in new TU
+- `SetWindowBorderColor()` — static in new TU
+- `SetWindowRoundedCorners()` — static in new TU
+- `CreateMainWindow(win)` — promoted, declared in MainWindowCreate.h
+- `RenameFileInHistory(win)` — moved (used only by CreateMainWindow)
+
+### Static blockers resolved
+4 functions promoted from `static` to external linkage + declared in MainWindowCreate.h:
+- `UpdateWindowRtlLayout`, `IsMenubarVisible`, `OnSidebarSplitterMove`, `OnFavSplitterMove`
+
+### Files modified
+- `src/MainWindowCreate.h` — added 4 new declarations
+- `src/MainWindowCreate.cpp` — 11 function bodies added
+- `src/SumatraPDF.cpp` — 11 bodies removed, 4 forward-declarations removed, 3 static keywords removed
+
+### Build
+`bun cmd/build-test.ts` — 0 errors / 0 warnings (46s). Deployed to Compiled\TumatraPDF-test.exe.
+
+### 16C Status
+- C1 ✅ (handler mapping)
+- C2 ✅ (AutoScroll extraction)
+- C3 ✅ (ArchTools extraction)
+- C4 ✅ (ViewCommands extraction)
+- C5 ✅ (FileCommands wrapper extraction)
+- F6-A ✅ (Window lifecycle extraction — ShowMainWindow, CreateAndShowMainWindow, DeleteMainWindow, UpdateAfterThemeChange, MaybeShowDefaultAppNotification)
+- F6-B ✅ (CreateMainWindow + CreateSidebar + DWM helpers)
+
+### Estimated reduction
+~380 lines total removed from SumatraPDF.cpp across Phase A+B (14,212 → ~13,830 lines).
+
+## 2026-09-08 — 16C-F6 Phase A: Window Lifecycle Extraction (BUILD OK)
+
+### What
+Extracted 5 window lifecycle functions from SumatraPDF.cpp (14,212 lines) into new `MainWindowCreate.{h,cpp}`:
+- `ShowMainWindow` (56 lines) — was already declared in SumatraPDF.h
+- `MaybeShowDefaultAppNotification` (46 lines) + static constants `kNotifDefaultApp`, `kMaxDefaultAppLinks`
+- `CreateAndShowMainWindow` (26 lines) — was already declared in SumatraPDF.h
+- `DeleteMainWindow` (22 lines) — was already declared in SumatraPDF.h
+- `UpdateAfterThemeChange` (33 lines)
+
+### Static blockers resolved
+3 functions promoted from `static` to external linkage:
+- `CreateMainWindow()` — declared in MainWindowCreate.h, body stays in SumatraPDF.cpp
+- `UpdateWindowFrameBorderColor()` — declared in MainWindowCreate.h
+- `ApplyDarkModeToInfotip()` — declared in MainWindowCreate.h
+
+`RelayoutFrame()` exported via MainWindowCreate.h (was only forward-declared locally in SumatraPDF.cpp).
+
+### Files created
+- `src/MainWindowCreate.h` — declarations for promoted statics + RelayoutFrame
+- `src/MainWindowCreate.cpp` — 5 extracted function bodies
+
+### Files modified
+- `src/SumatraPDF.cpp` — removed 5 function bodies, removed `static` from 3 functions, removed redundant RelayoutFrame forward-decl, added `#include "MainWindowCreate.h"`
+- `vs2022/TumatraPDF.vcxproj` + `.filters` — added MainWindowCreate.cpp
+- `vs2022/SumatraPDF-static.vcxproj` + `.filters` — added MainWindowCreate.cpp
+
+### Build
+`bun cmd/build.ts` — 0 errors / 0 warnings (40s). Deployed to Compiled\TumatraPDF.exe.
+
+### 16C Status
+- C1 ✅ (handler mapping)
+- C2 ✅ (AutoScroll extraction)
+- C3 ✅ (ArchTools extraction)
+- C4 ✅ (ViewCommands extraction)
+- C5 ✅ (FileCommands wrapper extraction)
+- F6-A ✅ (Window lifecycle extraction — ShowMainWindow, CreateAndShowMainWindow, DeleteMainWindow, UpdateAfterThemeChange, MaybeShowDefaultAppNotification)
+- F6-B ✅ (CreateMainWindow + CreateSidebar + DWM helpers)
+
+### Estimated reduction
+~190 lines removed from SumatraPDF.cpp (net, including promoted statics still in file).
+
+## 2026-09-08 — ToolbarIds.h Fix + Toolbar Design System Status
+
+### What
+1. **ToolbarIds.h CmdLast fix** — Placeholder constants (`PageInfoId`, `WarningMsgId`, `SpeedInfoId`, `TimerInfoId`) initially moved to `Toolbar.h` caused 48 `C2065: 'CmdLast': undeclared identifier` errors because `CmdLast` lives in `Commands.h` which `Toolbar.h` doesn't include. Created `ToolbarIds.h` with include guard + the 4 constexpr declarations. But including `Commands.h` from `ToolbarIds.h` caused 1122 `C2365: redefinition` errors because `Commands.h` has no include guard (SumatraPDF convention). Solution: remove `#include "Commands.h"` from `ToolbarIds.h`; all TUs already include `Commands.h` first via controlled include order.
+2. **5 TUs fixed** — Added `#include "Commands.h"` to `EditAnnotations.cpp`, `FormFields.cpp`, `MainWindow.cpp`, `Selection.cpp`, `SumatraControl.cpp` which had `Toolbar.h` but not `Commands.h`.
+3. **Toolbar Design System status assessed** — `ToolbarLayout.h/cpp` has declarative slots (`ToolbarSlotSpec`, `gToolbarSlots[]`) and layout engine (`LayoutToolbarChildWindows`) but is NOT integrated (never called from Toolbar.cpp). `HandleToolbarOverflow` is a stub. Decision: deprioritize in favor of 16C-F6 (better ROI).
+
+### Build
+`bun cmd/build-test.ts` — 0 errors / 0 warnings. `Compiled\TumatraPDF-test.exe` (21.9 MB).
+
+### Key Learning
+SumatraPDF `Commands.h` is a generated header with NO include guard. Never include it from another header. TUs must include it directly before any header that depends on it (controlled include order).
+
+## 2026-09-01 — 16C C5 FileCommands Extraction Complete
+
+### What
+Extracted 24 File domain command handlers from SumatraPDF.cpp FrameOnCommand switch into HandleCmdXxx wrapper pattern:
+- Created 24 static wrapper functions in SumatraPDF.cpp (before FrameOnCommand)
+- Replaced all 24 inline case bodies with clean `HandleCmdXxx(win); break;` dispatch calls
+- Cleared all stubs in Commands_File.cpp to avoid multiple definition conflicts
+- Split combined CmdOpenPrevFileInFolder/CmdOpenNextFileInFolder case into two separate cases
+
+### Key Decision
+Unlike C2/C3/C4 (which moved handlers to separate .cpp files), C5 wrappers live IN SumatraPDF.cpp because the underlying helpers (OpenFile, ClearHistory, etc.) are static functions with deep inter-dependencies within SumatraPDF.cpp. The wrappers only thin-dispatch; actual extraction of helpers requires making them non-static first.
+
+### Build
+`C:\Users\Testa\.bun\bin\bun.exe cmd/build.ts` from sumatrapdf-src dir — 0 errors / 0 warnings. Deployed to Compiled\TumatraPDF.exe (21,972,480 bytes).
+
+### 16C Status
+- C1 ✅ (handler mapping)
+- C2 ✅ (AutoScroll extraction)
+- C3 ✅ (ArchTools extraction)
+- C4 ✅ (ViewCommands extraction)
+- C5 ✅ (FileCommands wrapper extraction)
+
+## 2026-09-01 — Bug Fixes: Speed Label, EPUB ETA, Contrast Invert (.md)
+
+### What
+1. **Speed label overflow (Toolbar.cpp:RepositionSpeedLabel)** — clamped label width to slot width (`int labelDx = std::min(size.dx, slot.dx)`) and guarded `if (x < slot.x) x = slot.x`; `MoveWindow` now uses `labelDx` instead of raw `size.dx`.
+2. **ETA not calculating for epub (AutoScroll.cpp:RecalcAutoScrollEta)** — restructured for both PDF and WebView paths; WebView path fires one-shot JS eval computing `scrollHeight - (scrollY + innerHeight)`, sends via `__sumatra__.notify('autoscrollProgress', rem)` to existing callback pipeline.
+3. **Contrast dark mode ignoring invert in .md (3 files)** — `SumatraPDF.cpp:CmdContrastToggle` checks `GetInvertPageColors()`, swaps bg (`#FAFAFA↔#050505`) and gray formula; `ContrastOverlay.cpp:UpdateContrastOverlayOpacity` checks invert and swaps formula; `MarkdownModel.cpp:RestoreContrastOverlay` checks invert and swaps formula.
+
+### Build
+`C:\Users\Testa\.bun\bin\bun.exe cmd/build.ts` from sumatrapdf-src dir — 0 errors / 0 warnings. Deployed to Compiled\TumatraPDF.exe.
+
+## 2026-08-31 — Session: Feature Restoration + 16C C5 FileCommands Analysis
+
+### What
+1. Restored 3 features lost during merge/revert cycle: contrast #FAFAFA for .md, SerializeMeasurements/DeserializeMeasurements persistence, hwndReBar2 SW_HIDE for .md. Build 0 err/0 warn.
+2. Analyzed 16C C5 (FileCommands extraction) — mapped all 24 File domain `case Cmd` statements in FrameOnCommand. ALL are simple 1-3 line single-function calls. Zero complex cases.
+3. Identified C5 blocker: all helper functions (OpenFile, ClearHistory, etc.) are `static` in SumatraPDF.cpp — inaccessible from Commands_File.cpp.
+4. Attempted C5a (File Navigation extraction) on branch `feature/16c-c5-checkpoint` (commit `ca5dea5`) — failed with 40+ C3861 errors because extracted functions still call static helpers. Reverted via `git stash`.
+5. Established correct C5 approach: create HandleCmdXxx wrappers IN SumatraPDF.cpp first, keep static helpers in place, extract helpers only when dependency chain is fully mapped.
+
+### Build
+`C:\Users\Testa\.bun\bin\bun.exe cmd/build.ts` from sumatrapdf-src dir — 0 errors / 0 warnings.
+
+### Key Lesson
+C5 extraction cannot follow the same pattern as C2/C3/C4 because file-domain helpers have deep static dependency chains within SumatraPDF.cpp. Strategy: (1) wrap case bodies in HandleCmdXxx(win) functions in SumatraPDF.cpp, (2) declare in Commands_File.h, (3) move helpers out only after all dependencies are non-static or relocated.
+
 - 2026-08-25 — research session — confirmed Markdown (.md/.markdown) reading support ALREADY EXISTS, inherited from upstream master. Zero code changes. Refs: ext map GuessFileType.cpp:66-67, dispatch EngineCreate.cpp:179, cmark-gfm vendored + FZ_ENABLE_MD=1, open filter "*.md;*.markdown" SumatraPDF.cpp:5750, dual render WebView2 default / MuPDF fallback via markdownUI.useFixedPageUI. Runtime verification pending (user tests later).
 - 2026-08-24 — lint batch — removed unused cache param (RenderCache), corrected misleading persist comment (autoscroll speed handlers).
 - 2026-08-24 — refactor batch — AutoScroll logic extracted to src/AutoScroll.{h,cpp} (ETA math out of Toolbar, tick out of Canvas, commands thin), toolbar overlay brush hoisted + early-out, WM_SIZE ETA reposition width-gated, TabWnd::Paint StringFormat hoisted, ContrastOverlay alpha dedup.
@@ -843,3 +1040,110 @@ Polish round 2 for md autoscroll/contrast — speed visibility, md ETA parity, f
 - **Timer visual**: design tokens `kCtrlGapX=4`, `kCtrlH=18` (Toolbar.cpp:54-56); `TimerInfoId` 110 → 130 (Toolbar.cpp:1201); CreateTimerControls/RepositionTimerControls com token math. Fix bug `slot`→`r` em CreateTimerControls (Toolbar.cpp:1361).
 - **Build fix**: revert regressão `..\vs2022\TumatraPDF.sln` → `vs2022\TumatraPDF.sln` (build.ts:37). Build roda de `sumatrapdf-src` (`bun cmd/build.ts`). 0 err / 0 warn. Deploy automático p/ Compiled\TumatraPDF.exe. Smoke limpo (0 crash dumps).
 - **Pendente**: teste UI prático pelo usuário (amanhã) — timer control [checkbox][Timer:][input] antes de Autoscroll; speed mínimo; persistência; alinhamento visual.
+
+## 2026-08-30 — Fase 16B: MainWindow.h Struct Modularization (AutoScrollState + ArchToolsState)
+
+### What
+Grouped ~274 flat MainWindow member variables into two nested domain structs:
+- **AutoScrollState** (win->autoScroll): active, speed, speedMultiplier, accum, etaMinutes, etaStartTick, etaLastShown, etaPageNo, etaToolbarWidth, hwndEtaLabel, hwndSpeedLabel, timerMinutes, startTick, timerMinutesSetting, timerEnabled, hwndTimerCheck, hwndTimerLabel, hwndTimerEdit.
+- **ArchToolsState** (win->archTools): on, mode, unit, scaleFactor, scaleAnchorX/Y, scaleSet, scaleLineDefined, point1/2, dragLine, snap, measurements, measurementsByDoc, scaleLineP1x/P1y/P2x/P2y, hwndArchScaleDialog, scaleDialog, dragStartPos, dragMoved, eraseMode, mousePos, hwndReBar2, hwndToolbar2.
+
+### Files changed
+- src/MainWindow.h — struct definitions + member renaming (~90% of references)
+- src/SumatraPDF.cpp — win-> prefix updates; bare rchMeasurementsByDoc/rchMeasurements in member functions fixed with 	his->archTools.
+- src/Toolbar.cpp, src/AutoScroll.cpp, src/Canvas.cpp, src/ArchScaleDialog.cpp — win-> prefix updates
+
+### Build
+un cmd/build.ts — **0 errors / 0 warnings** (60.5s). Deployed Compiled\TumatraPDF.exe (21.9 MB). Smoke test clean (no crash dumps).
+
+### Key lesson
+In MainWindow member functions, win is NOT a local variable — bare member names become 	his->archTools.xxx, NOT win->archTools.xxx.
+
+### Next
+- 16C: Split SumatraPDF.cpp (12.743 lines) into per-domain command files
+
+## 2026-08-30 — Fase 16C: Measure Persistence Fix (ArchTools)
+
+### What
+Bug: measure lines disappeared on tab switch (scale persisted correctly)
+
+### Root cause
+Measure stored in-memory Vec only, never serialized to FileState
+
+### Fix
+Added ArchMeasurements field to FileState via gen-settings.ts + Settings.h; added SerializeMeasurements/DeserializeMeasurements helpers; save on tab switch, restore on document load
+
+### Build
+`bun cmd/build.ts` — 0 errors / 0 warnings
+
+### Files modified
+- gen-settings.ts
+- Settings.h (generated)
+- SumatraPDF.cpp
+### Fase 16C-2: Markdown Contrast + Arch Tools Hide (2026-08-30)
+
+#### What
+- Created exclusive contrast system for .md files (independent from regular file contrast)
+- Hidden Arch Tools toolbar and commands when viewing .md files
+
+#### Contrast .md behavior
+- When contrast=ON for .md: background stays light (#FAFAFA), text becomes dark gray
+- Gray level controlled by contrastOpacity: 0=black, 50=gray, 100=light gray
+- Formula: gray = 255 * (1 - opacity/100)
+- Regular files: unchanged (Win32 overlay for PDF, CSS dark mode for others)
+
+#### Arch Tools hidden for .md
+- Added CmdArchTools* to removeIfMarkdown[] in CommandAccuracy.cpp
+- CmdArchToolsToggle early-returns for .md files
+- RelayoutFrame hides hwndReBar2 when current doc is .md
+
+#### Build
+- `bun cmd/build.ts`: 0 errors / 0 warnings (38.0s)
+- Deployed: Compiled\TumatraPDF.exe (21.9 MB)
+- Smoke test: clean (no crash dumps)
+
+#### Files modified
+- src/SumatraPDF.cpp: IsCurrentDocMarkdown() helper, CmdContrastToggle md branch, CmdArchToolsToggle guard, RelayoutFrame hide for md
+- src/MarkdownModel.cpp: RestoreContrastOverlay() CSS formula
+- src/CommandAccuracy.cpp: removeIfMarkdown[] + Arch Tools commands
+
+## 2026-08-30 — Fase 16C-2: Markdown Contrast + Arch Tools Hide + AutoScroll Extraction
+
+### What
+1. Markdown (.md) exclusive contrast system — light bg (#FAFAFA) + dark gray text (formula: gray = 255 * (1 - opacity/100)). Independent from fixed-page contrast (Win32 veil).
+2. Arch Tools hidden for .md files — CmdArchToolsToggle early return, RelayoutFrame hides hwndReBar2, CommandAccuracy.cpp removeIfMarkdown[] updated.
+3. AutoScroll commands extracted from SumatraPDF.cpp → Commands_AutoScroll.{h,cpp} (6 handlers). Pilot extraction validated the split pattern.
+
+### Files modified
+- src/SumatraPDF.cpp (IsCurrentDocMarkdown, CmdContrastToggle, CmdArchToolsToggle, RelayoutFrame, 6 AutoScroll dispatches)
+- src/MarkdownModel.cpp (RestoreContrastOverlay CSS formula)
+- src/CommandAccuracy.cpp (removeIfMarkdown[] + Arch Tools commands)
+- src/Commands_AutoScroll.h (NEW — 6 handler declarations)
+- src/Commands_AutoScroll.cpp (NEW — 6 handler implementations)
+- vs2022/TumatraPDF.vcxproj + .filters
+- vs2022/SumatraPDF-static.vcxproj + .filters
+
+### Build
+ bun cmd/build.ts` — 0 errors / 0 warnings (30.7s). Deployed + smoke clean.
+
+### Fase 16C-3: ViewCommands Extraction + Build Fix (2026-08-30)
+
+#### What
+Extracted 35 view/zoom/rotate command handlers from SumatraPDF.cpp into Commands_View.{h,cpp}. Fixed linker errors caused by missing forward declarations and signature mismatches. Also cleaned up TODO.md (duplicate content, garbled UTF-8).
+
+#### Files created
+- src/Commands_View.h — 35 handler declarations
+- src/Commands_View.cpp — 35 handlers + 7 static helpers moved from SumatraPDF.cpp
+
+#### Files modified
+- src/SumatraPDF.cpp — added #include, replaced 35 case bodies with function calls, removed 7 static helpers (now in Commands_View.cpp), removed static from RelayoutFrame/IsCurrentDocMarkdown, removed default args from RelayoutFrame declaration
+- src/Commands_ArchTools.h — forward declarations for RelayoutFrame/IsCurrentDocMarkdown removed (moved to Commands_View.h)
+- src/Commands_ArchTools.cpp — updated RelayoutFrame forward decl and call to match real signature
+- vs2022/TumatraPDF.vcxproj + .filters — added Commands_View.cpp
+- vs2022/SumatraPDF-static.vcxproj + .filters — added Commands_View.cpp
+
+#### Build
+0 errors / 0 warnings (34.3s). Deployed to Compiled/TumatraPDF.exe.
+
+#### Key lesson
+Extracted files must NOT use static functions from SumatraPDF.cpp. Solutions: (1) move static helpers to the extracted .cpp, or (2) make them non-static + declare in header. Forward declarations preferred to avoid deep include chains.

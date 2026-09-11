@@ -10,7 +10,7 @@ void UpdateToolbarButtonsToolTipsForWindow(MainWindow*);
 void UpdateToolbarFindText(MainWindow*);
 void UpdateToolbarPageText(MainWindow*, int pageCount, bool updateOnly = false);
 void UpdateToolbarEtaText(MainWindow* win, int minutes);
-void RepositionEtaLabel(MainWindow* win);
+
 void UpdateToolbarSpeedLabel(MainWindow* win);
 void UpdateFindbox(MainWindow*);
 void SetToolbarButtonEnableState(MainWindow*, int cmdId, bool isEnabled);
@@ -33,7 +33,8 @@ Rect GetToolbarButtonScreenRect(MainWindow*, int cmdId);
 
 TempStr ToolbarButtonsResultTemp(int* exitCodeOut);
 
-// Second toolbar (Arch Tools)
+int GetToolbarButtonsByID(int cmdId, int (&buttons)[4]);
+void TbSetButtonDx(HWND hwndToolbar, int cmd, int dx);
 void CreateToolbar2(MainWindow*);
 void DestroyToolbar2(MainWindow*);
 void UpdateToolbar2State(MainWindow*);
@@ -47,3 +48,5 @@ bool IsShowingMenuBarRebar(MainWindow*);
 bool HandleMenuBarCommand(MainWindow*, int cmdId);
 bool ActivateMenuBarByAccel(MainWindow*, WCHAR accel);
 void UpdateCustomMenuBarMenuSelect(MainWindow*, WPARAM, LPARAM);
+
+#include "ToolbarIds.h"

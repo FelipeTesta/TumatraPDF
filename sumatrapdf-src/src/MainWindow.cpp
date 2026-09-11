@@ -41,6 +41,7 @@
 #include "RefHover.h"
 #include "WindowTab.h"
 #include "TableOfContents.h"
+#include "Commands.h"
 #include "StressTesting.h"
 #include "Toolbar.h"
 #include "uia/Provider.h"

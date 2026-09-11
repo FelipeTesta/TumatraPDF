@@ -1,4 +1,4 @@
-/* Copyright 2022 the SumatraPDF project authors (see AUTHORS file).
+﻿/* Copyright 2022 the SumatraPDF project authors (see AUTHORS file).
    License: GPLv3 */
 
 #include "base/Base.h"
@@ -69,6 +69,10 @@
 #include "UpdateCheck.h"
 #include "resource.h"
 #include "Commands.h"
+#include "Commands_AutoScroll.h"
+#include "Commands_ArchTools.h"
+#include "Commands_View.h"
+#include "MainWindowCreate.h"
 #include "Flags.h"
 #include "AppSettings.h"
 #include "AppTools.h"
@@ -176,7 +180,6 @@ bool SettingsRememberOpenedFiles() {
 
 static Kind kNotifPersistentWarning = "persistentWarning";
 static Kind kNotifDocErrors = "docErrors";
-static Kind kNotifZoomOrView = "zoomOrView";
 
 HBITMAP gBitmapReloadingCue;
 RenderCache* gRenderCache;
@@ -189,7 +192,6 @@ bool gCrashOnOpen = false;
 bool gRedrawLog = false;
 
 // returns false when the relayout was skipped (nothing layout-affecting changed)
-static bool RelayoutFrame(MainWindow* win, bool updateToolbars = true, int sidebarDx = -1);
 static void UpdateOverlayScrollbarPositions(MainWindow* win);
 
 // message for deferred, coalesced UI updates (see ScheduleUiUpdate)
@@ -813,6 +815,39 @@ static void UpdateSidebarDisplayState(WindowTab* tab, FileState* fs) {
     *fs->tocState = tab->tocState;
 }
 
+bool IsCurrentDocMarkdown(MainWindow* win);
+
+static Str SerializeMeasurements(const Vec<ArchMeasurement>& measurements) {
+    str::Builder sb;
+    for (int i = 0; i < len(measurements); i++) {
+        const ArchMeasurement& m = measurements[i];
+        if (i > 0) sb.Append(StrL(";"));
+        TempStr item = fmt("%g,%g,%g,%g,%g,%g,%g,%d,%d", m.p1x, m.p1y, m.p2x, m.p2y, m.len, m.x, m.y, (int)m.unit,
+                           m.scaled ? 1 : 0);
+        sb.Append(item);
+    }
+    return sb.TakeStr();
+}
+
+static Vec<ArchMeasurement> DeserializeMeasurements(const char* s) {
+    Vec<ArchMeasurement> result;
+    if (!s || !*s) return result;
+    while (*s) {
+        ArchMeasurement m = {};
+        int scaledInt = 0;
+        int n = sscanf(s, "%g,%g,%g,%g,%g,%g,%g,%d,%d", &m.p1x, &m.p1y, &m.p2x, &m.p2y, &m.len, &m.x, &m.y,
+                       (int*)&m.unit, &scaledInt);
+        if (n == 9) {
+            m.scaled = (scaledInt != 0);
+            result.Append(m);
+        }
+        const char* next = strchr(s, ';');
+        if (!next) break;
+        s = next + 1;
+    }
+    return result;
+}
+
 void UpdateTabFileDisplayStateForTab(WindowTab* tab) {
     if (!tab || !tab->ctrl) {
         return;
@@ -829,7 +864,7 @@ void UpdateTabFileDisplayStateForTab(WindowTab* tab) {
     UpdateDisplayStateWindowRect(win, fs, false);
     UpdateSidebarDisplayState(tab, fs);
     // Persist autoscroll speed multiplier
-    fs->autoScrollSpeedMultiplier = win->autoScrollSpeedMultiplier;
+    fs->autoScrollSpeedMultiplier = win->autoScroll.speedMultiplier;
     // Destroy any leaked contrast overlay from previous document
     DestroyContrastOverlay(win);
     // Persist invert colors and contrast overlay state
@@ -838,16 +873,17 @@ void UpdateTabFileDisplayStateForTab(WindowTab* tab) {
     fs->contrastOpacity = win->contrastOpacity;
     // Persist arch tools state (per-document)
     if (gGlobalPrefs->archToolsEnabled) {
-        fs->archScaleFactor = win->archScaleFactor;
-        fs->archScaleAnchorX = win->archScaleAnchorX;
-        fs->archScaleAnchorY = win->archScaleAnchorY;
-        fs->archScaleLineP2x = win->archScaleLineP2x;
-        fs->archScaleLineP2y = win->archScaleLineP2y;
-        fs->archScaleLineDefined = win->archScaleLineDefined;
-        fs->archScaleLineP1x = win->archScaleLineP1x;
-        fs->archScaleLineP1y = win->archScaleLineP1y;
-        fs->archUnit = win->archUnit;
-        fs->archScaleSet = win->archScaleSet;
+        fs->archScaleFactor = win->archTools.scaleFactor;
+        fs->archScaleAnchorX = win->archTools.scaleAnchorX;
+        fs->archScaleAnchorY = win->archTools.scaleAnchorY;
+        fs->archScaleLineP2x = win->archTools.scaleLineP2x;
+        fs->archScaleLineP2y = win->archTools.scaleLineP2y;
+        fs->archScaleLineDefined = win->archTools.scaleLineDefined;
+        fs->archScaleLineP1x = win->archTools.scaleLineP1x;
+        fs->archScaleLineP1y = win->archTools.scaleLineP1y;
+        fs->archUnit = win->archTools.unit;
+        fs->archScaleSet = win->archTools.scaleSet;
+        fs->archMeasurements = SerializeMeasurements(win->archTools.measurements);
     }
 }
 
@@ -1108,8 +1144,8 @@ void ControllerCallbackHandler::TocChanged(DocController* ctrl) {
 }
 
 void ControllerCallbackHandler::OnAutoScrollBottom() {
-    if (win->autoScrollActive) {
-        win->autoScrollActive = false;
+    if (win->autoScroll.active) {
+        win->autoScroll.active = false;
         KillTimer(win->hwndCanvas, kContinuousAutoScrollTimerID);
         UpdateToolbarEtaText(win, -1);
         SetToolbarButtonCheckedState(win, CmdAutoScrollToggle, false);
@@ -1118,14 +1154,14 @@ void ControllerCallbackHandler::OnAutoScrollBottom() {
 }
 
 void ControllerCallbackHandler::OnAutoScrollProgress(int remainingPx) {
-    if (win->autoScrollActive) {
+    if (win->autoScroll.active) {
         float pxPerSec = AutoScrollPxPerSec(win);
         if (pxPerSec > 0) {
-            win->autoScrollEtaMinutes = (int)(((float)remainingPx / pxPerSec) / 60.0f);
-            if (win->autoScrollEtaMinutes < 0) {
-                win->autoScrollEtaMinutes = 0;
+            win->autoScroll.etaMinutes = (int)(((float)remainingPx / pxPerSec) / 60.0f);
+            if (win->autoScroll.etaMinutes < 0) {
+                win->autoScroll.etaMinutes = 0;
             }
-            UpdateToolbarEtaText(win, win->autoScrollEtaMinutes);
+            UpdateToolbarEtaText(win, win->autoScroll.etaMinutes);
         }
     }
 }
@@ -2081,41 +2117,44 @@ static void ReplaceDocumentInCurrentTab(LoadArgs* args, DocController* ctrl, Fil
     }
     // Restore per-document autoscroll speed multiplier
     if (fs) {
-        win->autoScrollSpeedMultiplier = fs->autoScrollSpeedMultiplier < 0.008f ? 0.008f : fs->autoScrollSpeedMultiplier;
+        win->autoScroll.speedMultiplier =
+            fs->autoScrollSpeedMultiplier < 0.008f ? gGlobalPrefs->autoScrollSpeedMultiplier : fs->autoScrollSpeedMultiplier;
         // Restore per-document invert colors and contrast overlay state
         SetInvertPageColors(fs->invertColors);
         win->contrastEnabled = fs->contrastEnabled;
         win->contrastOpacity = fs->contrastOpacity;
         // Restore arch tools state (per-document)
         if (gGlobalPrefs->archToolsEnabled) {
-            win->archScaleFactor = fs->archScaleFactor;
-            win->archScaleAnchorX = fs->archScaleAnchorX;
-            win->archScaleAnchorY = fs->archScaleAnchorY;
-            win->archScaleLineP2x = fs->archScaleLineP2x;
-            win->archScaleLineP2y = fs->archScaleLineP2y;
-            win->archUnit = fs->archUnit;
-            win->archScaleSet = fs->archScaleSet;
+            win->archTools.scaleFactor = fs->archScaleFactor;
+            win->archTools.scaleAnchorX = fs->archScaleAnchorX;
+            win->archTools.scaleAnchorY = fs->archScaleAnchorY;
+            win->archTools.scaleLineP2x = fs->archScaleLineP2x;
+            win->archTools.scaleLineP2y = fs->archScaleLineP2y;
+            win->archTools.unit = fs->archUnit;
+            win->archTools.scaleSet = fs->archScaleSet;
             // Restore scale line endpoints in MainWindow for drawing
-            win->archScaleLineP1x = fs->archScaleAnchorX;
-            win->archScaleLineP1y = fs->archScaleAnchorY;
+            win->archTools.scaleLineP1x = fs->archScaleAnchorX;
+            win->archTools.scaleLineP1y = fs->archScaleAnchorY;
         }
+        // Restore arch measurements
+        win->archTools.measurements = DeserializeMeasurements(fs->archMeasurements.s);
     } else {
         // Fresh document: reset to defaults
-        win->autoScrollSpeedMultiplier = 0.008f;
+        win->autoScroll.speedMultiplier = 0.008f;
         win->contrastEnabled = false;
         win->contrastOpacity = 50;
         // Reset arch tools state
         if (gGlobalPrefs->archToolsEnabled) {
-            win->archScaleFactor = 0.0f;
-            win->archScaleAnchorX = 0.0f;
-            win->archScaleAnchorY = 0.0f;
-            win->archScaleLineP1x = 0.0f;
-            win->archScaleLineP1y = 0.0f;
-            win->archScaleLineP2x = 0.0f;
-            win->archScaleLineP2y = 0.0f;
-            win->archUnit = 2; // meters default
-            win->archScaleSet = false;
-            win->archMeasurements.Reset();
+            win->archTools.scaleFactor = 0.0f;
+            win->archTools.scaleAnchorX = 0.0f;
+            win->archTools.scaleAnchorY = 0.0f;
+            win->archTools.scaleLineP1x = 0.0f;
+            win->archTools.scaleLineP1y = 0.0f;
+            win->archTools.scaleLineP2x = 0.0f;
+            win->archTools.scaleLineP2y = 0.0f;
+            win->archTools.unit = 2; // meters default
+            win->archTools.scaleSet = false;
+            win->archTools.measurements.Reset();
         }
     }
     // Clear arch vector cache so stale segments from previous doc don't leak
@@ -2639,7 +2678,7 @@ static void SetWindowRoundedCorners(HWND hwnd, bool rounded) {
     SetWindowBorderColor(hwnd, borderColor);
 }
 
-static void UpdateWindowFrameBorderColor(MainWindow* win) {
+void UpdateWindowFrameBorderColor(MainWindow* win) {
     if (!win || !win->hwndFrame) {
         return;
     }
@@ -2656,7 +2695,7 @@ static void UpdateWindowFrameBorderColor(MainWindow* win) {
 // was left un-themed because applying a visual style to a tooltip resets its
 // font to the theme's, which is wrong for a control we size and populate
 // ourselves - so put our font back afterwards (issue #5894).
-static void ApplyDarkModeToInfotip(MainWindow* win) {
+void ApplyDarkModeToInfotip(MainWindow* win) {
     if (!win || !win->infotip || !win->infotip->hwnd) {
         return;
     }
@@ -2666,7 +2705,7 @@ static void ApplyDarkModeToInfotip(MainWindow* win) {
     HwndSetFont(win->infotip->hwnd, font);
 }
 
-static MainWindow* CreateMainWindow() {
+MainWindow* CreateMainWindow() {
     Rect windowPos = gGlobalPrefs->windowPos;
     if (!windowPos.IsEmpty()) {
         EnsureAreaVisibility(windowPos);
@@ -2758,8 +2797,8 @@ static MainWindow* CreateMainWindow() {
 
     CreateTabbar(win);
     // Initialize autoscroll timer settings from global prefs before toolbar creation
-    win->autoScrollTimerMinutesSetting = (DWORD)gGlobalPrefs->autoScrollTimerMinutes;
-    win->autoScrollTimerEnabled = gGlobalPrefs->autoScrollTimerEnabled;
+    win->autoScroll.timerMinutesSetting = (DWORD)gGlobalPrefs->autoScrollTimerMinutes;
+    win->autoScroll.timerEnabled = gGlobalPrefs->autoScrollTimerEnabled;
     CreateToolbar(win);
     CreateToolbar2(win);
     // create the floating find bar hidden; it owns win->hwndFindEdit
@@ -2825,202 +2864,6 @@ static MainWindow* CreateMainWindow() {
     ShowMenuBarRebar(win);
 
     return win;
-}
-
-void ShowMainWindow(MainWindow* win, int windowState) {
-    if (WIN_STATE_FULLSCREEN == windowState || WIN_STATE_MAXIMIZED == windowState) {
-        ShowWindow(win->hwndFrame, SW_MAXIMIZE);
-    } else {
-        ShowWindow(win->hwndFrame, SW_SHOW);
-    }
-
-    // Fire the deferred SWP_FRAMECHANGED for custom caption (tabsInTitlebar).
-    // Must happen after ShowWindow so the shell sees a visible window and
-    // creates the taskbar button before we remove the standard frame.
-    if (win->tabsInTitlebar) {
-        uint flags = SWP_FRAMECHANGED | SWP_NOZORDER | SWP_NOSIZE | SWP_NOMOVE;
-        SetWindowPos(win->hwndFrame, nullptr, 0, 0, 0, 0, flags);
-    }
-
-    // go fullscreen before the first paint so the user doesn't see the
-    // intermediate maximized window (EnterFullScreen requires a visible
-    // window, so it can't happen before ShowWindow above)
-    if (WIN_STATE_FULLSCREEN == windowState) {
-        EnterFullScreen(win);
-    }
-
-    // Hidden startup windows can miss the final titlebar/menu-bar geometry
-    // until they become visible. Force one relayout before the first paint.
-    RelayoutFrame(win);
-    UpdateWindow(win->hwndFrame);
-    UpdateToolbarFindText(win);
-    HwndEnsureOnScreen(win->hwndFrame);
-
-    if (IsRunningOnWine()) {
-        Rect wr = HwndWindowRect(win->hwndFrame);
-        Rect cr = HwndClientRect(win->hwndFrame);
-        logf("ShowMainWindow: windowRect=(%d,%d,%d,%d) clientRect=(%d,%d,%d,%d) captionRect=(%d,%d,%d,%d)\n", wr.x,
-             wr.y, wr.dx, wr.dy, cr.x, cr.y, cr.dx, cr.dy, win->captionRect.x, win->captionRect.y, win->captionRect.dx,
-             win->captionRect.dy);
-    }
-
-    // the `true ||` is deliberate (always foreground); silence /analyze C6286/C6240
-#pragma warning(suppress : 6286 6240)
-    if (len(gWindows) == 1 && (true || IsDebuggerPresent())) {
-        HwndToForeground(win->hwndFrame);
-    }
-
-    if (win->tabsInTitlebar && !win->isFullScreen) {
-        RECT r = ToRECT(win->captionRect);
-        HwndInvalidateRect(win->hwndFrame, win->captionRect, true);
-        RedrawWindow(win->hwndFrame, &r, nullptr, RDW_ERASE | RDW_INVALIDATE | RDW_UPDATENOW | RDW_FRAME);
-        if (win->hwndMenuReBar && HwndIsVisible(win->hwndMenuReBar)) {
-            RedrawWindow(win->hwndMenuReBar, nullptr, nullptr,
-                         RDW_ERASE | RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN);
-        }
-        if (win->tabsCtrl && win->tabsCtrl->IsVisible()) {
-            RedrawWindow(win->tabsCtrl->hwnd, nullptr, nullptr, RDW_ERASE | RDW_INVALIDATE | RDW_UPDATENOW);
-        }
-    }
-}
-
-// Kind used so only one default-app bar is shown at a time
-static Kind kNotifDefaultApp = "defaultApp";
-// Cap how many extension links we put in the bar
-constexpr int kMaxDefaultAppLinks = 8;
-
-// On the home page: if we registered as Open With for extensions that no longer
-// open with us, show a bottom bar with per-extension fix links.
-void MaybeShowDefaultAppNotification(MainWindow* win) {
-    if (!win || !win->hwndCanvas || win->isBeingClosed) {
-        return;
-    }
-    if (!win->IsCurrentTabAbout()) {
-        return;
-    }
-    if (!CanAccessDisk() || gPluginMode) {
-        return;
-    }
-    if (!IsOurExeInstalled()) {
-        return;
-    }
-
-    StrVec missing;
-    CollectNonDefaultRegisteredExtensions(missing);
-    if (len(missing) == 0) {
-        RemoveNotificationsForGroup(win->hwndCanvas, kNotifDefaultApp);
-        return;
-    }
-
-    // "SumatraPDF is no longer the default app for opening [pdf](CmdFixDefaultApp .pdf), ..."
-    str::Builder sb;
-    sb.Append(StrL("SumatraPDF is no longer the default app for opening "));
-    int nShow = std::min(len(missing), kMaxDefaultAppLinks);
-    for (int i = 0; i < nShow; i++) {
-        if (i > 0) {
-            sb.Append(StrL(", "));
-        }
-        Str ext = missing[i]; // ".pdf"
-        // link text without the leading dot: "pdf"
-        Str label = (len(ext) > 0 && ext.s[0] == '.') ? Str(ext.s + 1, ext.len - 1) : ext;
-        sb.Append(fmt("[%s](CmdFixDefaultApp %s)", label, ext));
-    }
-    if (len(missing) > nShow) {
-        sb.Append(fmt(" and %d more", len(missing) - nShow));
-    }
-    sb.Append(StrL(". Click a link to fix."));
-
-    NotificationCreateArgs args;
-    args.hwndParent = win->hwndCanvas;
-    args.msg = ToStrTemp(sb);
-    args.timeoutMs = kNotifNoTimeout;
-    args.groupId = kNotifDefaultApp;
-    args.corner = NotifCorner::BottomBar;
-    ShowNotification(args);
-}
-
-MainWindow* CreateAndShowMainWindow(SessionData* data, bool showWin) {
-    int windowState = gGlobalPrefs->windowState;
-    MainWindow* win = CreateMainWindow();
-    if (!win) {
-        return nullptr;
-    }
-    // CreateMainWindow can inadvertently change windowState (e.g. via layout); restore it
-    gGlobalPrefs->windowState = windowState;
-
-    if (data) {
-        windowState = data->windowState;
-        Rect rect = ShiftRectToWorkArea(data->windowPos);
-        HwndMoveWindow(win->hwndFrame, &rect);
-        // TODO: also restore data->sidebarDx
-    }
-
-    // always set up toolbar and sidebar, even if we defer showing
-    ShowOrHideToolbar(win);
-    SetSidebarVisibility(win, false, gGlobalPrefs->showFavorites);
-    ToolbarUpdateStateForWindow(win, true);
-
-    if (showWin) {
-        ShowMainWindow(win, windowState);
-    }
-    return win;
-}
-
-void DeleteMainWindow(MainWindow* win) {
-    int winIdx = gWindows.Remove(win);
-
-    int nWindowsLeft = len(gWindows);
-    logf("DeleteMainWindow: win: 0x%p, hwndFrame: 0x%p, hwndCanvas: 0x%p, winIdx : %d, nWindowsLeft: %d\n", win,
-         win->hwndFrame, win->hwndCanvas, winIdx, nWindowsLeft);
-    if (winIdx < 0) {
-        logf("  not deleting because not in gWindows, probably already deleted\n");
-        return;
-    }
-
-    DeletePropertiesWindow(win->hwndFrame);
-    ImageList_Destroy(TbGetImageList(win->hwndToolbar));
-    RevokeCanvasDropTarget(win->hwndCanvas);
-
-    ReportIf(win->findThread && WaitForSingleObject(win->findThread, 0) == WAIT_TIMEOUT);
-    ReportIf(win->printThread && WaitForSingleObject(win->printThread, 0) == WAIT_TIMEOUT);
-
-    // UIA disconnect/release is in ~MainWindow
-
-    delete win;
-}
-
-void UpdateAfterThemeChange() {
-    // the toolbar image list is rebuilt below, so the icons cached from it are
-    // the wrong color now
-    ClearIconPixmapCache();
-    for (auto* win : gWindows) {
-        DeleteObject(win->brControlBgColor);
-        win->brControlBgColor = CreateSolidBrush(ThemeControlBackgroundColor());
-
-        UpdateControlsColors(win);
-        RebuildMenuBarForWindow(win);
-        UpdateToolbarAfterThemeChange(win);
-        RecreateFindBar(win);
-        UpdateFindWindowTheme(win);
-        UpdateAIChatTheme(win);
-        if (UseDarkModeLib()) {
-            DarkMode::setDarkTitleBarEx(win->hwndFrame, true);
-            DarkMode::setChildCtrlsTheme(win->hwndFrame);
-            if (win->tabsCtrl) {
-                DarkMode::removeTabCtrlSubclass(win->tabsCtrl->hwnd);
-            }
-            DarkMode::setDarkScrollBar(win->hwndCanvas);
-            DarkMode::setWindowMenuBarSubclass(win->hwndFrame);
-            ApplyDarkModeToInfotip(win);
-        }
-        UpdateWindowFrameBorderColor(win);
-        // TODO: this only rerenders canvas, not frame, even with
-        // includingNonClientArea == true.
-        MainWindowRerender(win, true);
-        uint flags = RDW_ERASE | RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN;
-        RedrawWindow(win->hwndFrame, nullptr, nullptr, flags);
-    }
-    UpdateDocumentColors();
 }
 
 static void RenameFileInHistory(Str oldPath, Str newPath) {
@@ -4200,26 +4043,26 @@ void LoadModelIntoTab(WindowTab* tab) {
         Str fp = tab->filePath;
         FileState* fs = gFileHistory.FindByPath(fp);
         if (fs) {
-            win->archScaleFactor = fs->archScaleFactor;
-            win->archScaleAnchorX = fs->archScaleAnchorX;
-            win->archScaleAnchorY = fs->archScaleAnchorY;
-            win->archScaleLineP2x = fs->archScaleLineP2x;
-            win->archScaleLineP2y = fs->archScaleLineP2y;
-            win->archScaleLineDefined = fs->archScaleLineDefined;
-            win->archScaleLineP1x = fs->archScaleLineP1x;
-            win->archScaleLineP1y = fs->archScaleLineP1y;
-            win->archUnit = fs->archUnit;
-            win->archScaleSet = fs->archScaleSet;
+            win->archTools.scaleFactor = fs->archScaleFactor;
+            win->archTools.scaleAnchorX = fs->archScaleAnchorX;
+            win->archTools.scaleAnchorY = fs->archScaleAnchorY;
+            win->archTools.scaleLineP2x = fs->archScaleLineP2x;
+            win->archTools.scaleLineP2y = fs->archScaleLineP2y;
+            win->archTools.scaleLineDefined = fs->archScaleLineDefined;
+            win->archTools.scaleLineP1x = fs->archScaleLineP1x;
+            win->archTools.scaleLineP1y = fs->archScaleLineP1y;
+            win->archTools.unit = fs->archUnit;
+            win->archTools.scaleSet = fs->archScaleSet;
         } else {
             // Fresh document: reset arch scale line state
-            win->archScaleLineDefined = false;
-            win->archScaleLineP1x = 0.0f;
-            win->archScaleLineP1y = 0.0f;
+            win->archTools.scaleLineDefined = false;
+            win->archTools.scaleLineP1x = 0.0f;
+            win->archTools.scaleLineP1y = 0.0f;
         }
     }
 
-    win->showSelection = tab->selectionOnPage != nullptr;
-    if (win->showSelection) {
+    win->selection.showSelection = tab->selectionOnPage != nullptr;
+    if (win->selection.showSelection) {
         ShowSelectionToolbar(win);
     }
     if (win->uiaProvider) {
@@ -4301,8 +4144,8 @@ void UpdateCursorPositionHelper(MainWindow* win, Point pos, NotificationWnd* wnd
     PointF pt = win->AsFixed()->CvtFromScreen(pos);
     TempStr posStr = FormatCursorPositionTemp(engine, pt, cursorPosUnit);
     TempStr selStr = {};
-    if (!win->selectionMeasure.IsEmpty()) {
-        pt = PointF(win->selectionMeasure.dx, win->selectionMeasure.dy);
+    if (!win->selection.selectionMeasure.IsEmpty()) {
+        pt = PointF(win->selection.selectionMeasure.dx, win->selection.selectionMeasure.dy);
         selStr = FormatCursorPositionTemp(engine, pt, cursorPosUnit);
     }
 
@@ -4548,8 +4391,8 @@ static void CloseDocumentInCurrentTab(MainWindow* win, bool keepUIEnabled, bool 
         // to win->GetCurrentTab() which always returns something
         // other calls to DeleteOldSelectionInfo() might
         // incorrectly clear tab->selectionOnPage
-        win->showSelection = false;
-        win->selectionMeasure = SizeF();
+        win->selection.showSelection = false;
+        win->selection.selectionMeasure = SizeF();
     }
 
     if (!keepUIEnabled) {
@@ -6317,11 +6160,11 @@ static bool IsUiLayoutEq(UILayout* s1, UILayout* s2) {
            s1->isFullScreen == s2->isFullScreen && s1->tabsVisible == s2->tabsVisible &&
            s1->isToolbarVisible == s2->isToolbarVisible && s1->tocVisible == s2->tocVisible &&
            s1->showFavorites == s2->showFavorites && s1->favoritesAsTab == s2->favoritesAsTab &&
-            s1->showMenuBarRebar == s2->showMenuBarRebar && s1->aiChatVisible == s2->aiChatVisible &&
-            s1->aiChatDx == s2->aiChatDx && s1->archToolsOn == s2->archToolsOn;
+           s1->showMenuBarRebar == s2->showMenuBarRebar && s1->aiChatVisible == s2->aiChatVisible &&
+           s1->aiChatDx == s2->aiChatDx && s1->archToolsOn == s2->archToolsOn;
 }
 
-static bool RelayoutFrame(MainWindow* win, bool updateToolbars, int sidebarDx) {
+bool RelayoutFrame(MainWindow* win, bool updateToolbars, int sidebarDx) {
     Rect rc = HwndClientRect(win->hwndFrame);
     // don't relayout while the window is minimized
     if (rc.IsEmpty()) {
@@ -6345,7 +6188,9 @@ static bool RelayoutFrame(MainWindow* win, bool updateToolbars, int sidebarDx) {
     curState.showMenuBarRebar = IsShowingMenuBarRebar(win);
     curState.aiChatVisible = win->uiState.aiChatVisible;
     curState.aiChatDx = win->aiChatDx;
-    curState.archToolsOn = win->archToolsOn;
+    curState.archToolsOn = win->archTools.on;
+
+    if (IsCurrentDocMarkdown(win) && win->archTools.hwndReBar2) ShowWindow(win->archTools.hwndReBar2, SW_HIDE);
 
     // skip redundant relayouts when all layout-affecting state is unchanged
     if (IsUiLayoutEq(&curState, &win->uiState.layout) && updateToolbars && sidebarDx == -1) {
@@ -6497,13 +6342,13 @@ static bool RelayoutFrame(MainWindow* win, bool updateToolbars, int sidebarDx) {
         }
     }
     // Second toolbar (Arch Tools) - positioned below main toolbar when visible
-    if (win->archToolsOn && win->hwndReBar2) {
-        Rect rcRebar2 = HwndWindowRect(win->hwndReBar2);
+    if (win->archTools.on && win->archTools.hwndReBar2) {
+        Rect rcRebar2 = HwndWindowRect(win->archTools.hwndReBar2);
         int rebar2Dy = rcRebar2.dy;
         bool atBottom = ToolbarAtBottom();
         int rebar2Y = atBottom ? (rc.y + rc.dy - rebar2Dy) : rc.y;
         if (updateToolbars) {
-            dh.SetWindowPos(win->hwndReBar2, nullptr, rc.x, rebar2Y, rc.dx, rebar2Dy, SWP_NOZORDER);
+            dh.SetWindowPos(win->archTools.hwndReBar2, nullptr, rc.x, rebar2Y, rc.dx, rebar2Dy, SWP_NOZORDER);
         }
         // reserve the second toolbar's space
         rc.dy -= rebar2Dy;
@@ -7289,43 +7134,10 @@ static void SetInverseSearch(MainWindow* win) {
     }
 }
 
-// toggles 'show pages continuously' state
-static void ToggleContinuousView(MainWindow* win) {
-    if (!win->IsDocLoaded()) {
-        return;
-    }
-
-    DisplayMode newMode = win->ctrl->GetDisplayMode();
-    switch (newMode) {
-        case DisplayMode::SinglePage:
-        case DisplayMode::Continuous:
-            newMode = IsContinuous(newMode) ? DisplayMode::SinglePage : DisplayMode::Continuous;
-            break;
-        case DisplayMode::Facing:
-        case DisplayMode::ContinuousFacing:
-            newMode = IsContinuous(newMode) ? DisplayMode::Facing : DisplayMode::ContinuousFacing;
-            break;
-        case DisplayMode::BookView:
-        case DisplayMode::ContinuousBookView:
-            newMode = IsContinuous(newMode) ? DisplayMode::BookView : DisplayMode::ContinuousBookView;
-            break;
-    }
-    SwitchToDisplayMode(win, newMode);
-}
-
-static void ToggleMangaMode(MainWindow* win) {
-    DisplayModel* dm = win->AsFixed();
-    if (!dm) {
-        return;
-    }
-    dm->SetDisplayR2L(!dm->GetDisplayR2L());
-    ScrollState state = dm->GetScrollState();
-    dm->Relayout(dm->GetZoomVirtual(), dm->GetRotation());
-    dm->SetScrollState(state);
-}
+// toggles 'show pages continuously' state (now in Commands_View.cpp)
 
 static Point GetSelectionCenter(MainWindow* win) {
-    bool hasSelection = win->showSelection && win->CurrentTab()->selectionOnPage;
+    bool hasSelection = win->selection.showSelection && win->CurrentTab()->selectionOnPage;
     if (!hasSelection) {
         return {};
     }
@@ -7419,30 +7231,6 @@ static void ShowZoomNotification(MainWindow* win, float zoomLevel) {
     ShowNotification(args);
 }
 
-static void ShowViewModeNotification(MainWindow* win, int cmdId) {
-    NotificationWnd* wnd = GetNotificationForGroup(win->hwndCanvas, kNotifPageInfo);
-    if (wnd) {
-        return;
-    }
-    Str viewName;
-    if (cmdId == CmdSinglePageView) {
-        viewName = _TRA("Single Page");
-    } else if (cmdId == CmdFacingView) {
-        viewName = _TRA("Facing");
-    } else if (cmdId == CmdBookView) {
-        viewName = _TRA("Book View");
-    } else {
-        return;
-    }
-    TempStr msg = fmt("%s: %s", _TRA("View"), viewName);
-    NotificationCreateArgs args;
-    args.groupId = kNotifZoomOrView;
-    args.timeoutMs = 2000;
-    args.hwndParent = win->hwndCanvas;
-    args.msg = msg;
-    ShowNotification(args);
-}
-
 // if suggestedPoint is provided, it's position on canvas and we'll try to preserve that point after zoom
 // if suggestedPoint is nullptr we'll try to pick a smart point to zoom around if smartZoom is true
 void SmartZoom(MainWindow* win, float factor, Point* pt, bool smartZoom) {
@@ -7472,10 +7260,10 @@ void SmartZoom(MainWindow* win, float factor, Point* pt, bool smartZoom) {
 // fills the window, and centre it. The selection itself is left alone so it can
 // still be copied afterwards, and a navigation point is added first so Back
 // returns to the view you zoomed from (issue #1699).
-static void ZoomToSelection(MainWindow* win) {
+void ZoomToSelection(MainWindow* win) {
     DisplayModel* dm = win->AsFixed();
     WindowTab* tab = win->CurrentTab();
-    if (!dm || !tab || !win->showSelection || !tab->selectionOnPage) {
+    if (!dm || !tab || !win->selection.showSelection || !tab->selectionOnPage) {
         return;
     }
 
@@ -7526,7 +7314,7 @@ static void ZoomToSelection(MainWindow* win) {
 /* Zoom document in window 'hwnd' to zoom level 'zoom'.
    'zoom' is given as a floating-point number, 1.0 is 100%, 2.0 is 200% etc.
 */
-static void OnMenuZoom(MainWindow* win, int menuId) {
+void OnMenuZoom(MainWindow* win, int menuId) {
     if (!win->IsDocLoaded()) {
         return;
     }
@@ -7535,7 +7323,7 @@ static void OnMenuZoom(MainWindow* win, int menuId) {
     SmartZoom(win, zoom, nullptr, true);
 }
 
-static void ChangeZoomLevel(MainWindow* win, float newZoom, bool pagesContinuously) {
+void ChangeZoomLevel(MainWindow* win, float newZoom, bool pagesContinuously) {
     if (!win->IsDocLoaded()) {
         return;
     }
@@ -7567,6 +7355,33 @@ static void ChangeZoomLevel(MainWindow* win, float newZoom, bool pagesContinuous
         SwitchToDisplayMode(win, win->CurrentTab()->prevDisplayMode);
         SmartZoom(win, prevZoom, nullptr, true);
     }
+}
+
+// --- Cross-TU helpers for Commands_View.cpp (avoids DisplayModel.h/WindowTab.h includes) ---
+
+bool IsCurrentDocMarkdown(MainWindow* win) {
+    if (!win) return false;
+    WindowTab* tab = win->CurrentTab();
+    if (!tab || !tab->filePath) return false;
+    return str::EndsWithI(tab->filePath, ".md") || str::EndsWithI(tab->filePath, ".markdown");
+}
+
+void RotateDocument(MainWindow* win, int degrees) {
+    DisplayModel* dm = win->AsFixed();
+    if (dm) {
+        dm->RotateBy(degrees);
+    }
+}
+
+void ToggleMangaModeInternal(MainWindow* win) {
+    DisplayModel* dm = win->AsFixed();
+    if (!dm) {
+        return;
+    }
+    dm->SetDisplayR2L(!dm->GetDisplayR2L());
+    ScrollState state = dm->GetScrollState();
+    dm->Relayout(dm->GetZoomVirtual(), dm->GetRotation());
+    dm->SetScrollState(state);
 }
 
 static void FocusPageNoEdit(HWND hwndPageEdit) {
@@ -7867,11 +7682,6 @@ void ToggleFullScreen(MainWindow* win, bool presentation) {
     }
 }
 
-static void TogglePresentationMode(MainWindow* win) {
-    // only DisplayModel currently supports an actual presentation mode
-    ToggleFullScreen(win, win->AsFixed() != nullptr);
-}
-
 // make sure that idx falls within <0, max-1> inclusive range
 // negative numbers wrap from the end
 static int wrapIdx(int idx, int max) {
@@ -8019,20 +7829,20 @@ static bool FrameOnKeydown(MainWindow* win, WPARAM key, LPARAM lp) {
 
     if (VK_ESCAPE == key) {
         // Arch Tools: ESC cancels draw mode or closes floating Scale dialog
-        if (gGlobalPrefs->archToolsEnabled && win->archToolMode != 0) {
-            if (win->hwndArchScaleDialog && IsWindowVisible(win->hwndArchScaleDialog)) {
+        if (gGlobalPrefs->archToolsEnabled && win->archTools.toolMode != 0) {
+            if (win->archTools.hwndArchScaleDialog && IsWindowVisible(win->archTools.hwndArchScaleDialog)) {
                 // Close floating Scale dialog
-                PostMessageW(win->hwndArchScaleDialog, WM_CLOSE, 0, 0);
-                LogInfo("[arch] Esc cancel: closed Scale dialog, mode=%d", win->archToolMode);
+                PostMessageW(win->archTools.hwndArchScaleDialog, WM_CLOSE, 0, 0);
+                LogInfo("[arch] Esc cancel: closed Scale dialog, mode=%d", win->archTools.toolMode);
             } else {
                 // Cancel draw mode
-                int oldMode = win->archToolMode;
-                win->archToolMode = 0;
-                win->archDragLine = 0;
-                win->archScaleLineDefined = false;
-                win->archEraseMode = false;
-                win->archPoint1 = Point{0, 0};
-                win->archPoint2 = Point{0, 0};
+                int oldMode = win->archTools.toolMode;
+                win->archTools.toolMode = 0;
+                win->archTools.dragLine = 0;
+                win->archTools.scaleLineDefined = false;
+                win->archTools.eraseMode = false;
+                win->archTools.point1 = Point{0, 0};
+                win->archTools.point2 = Point{0, 0};
                 if (GetCapture() == win->hwndCanvas) {
                     ReleaseCapture();
                 }
@@ -8140,7 +7950,7 @@ static void OnFrameKeyEsc(MainWindow* win) {
     if (RemoveNotificationsForGroup(win->hwndCanvas, kNotifZoomOrView)) {
         return;
     }
-    if (win->showSelection) {
+    if (win->selection.showSelection) {
         // clear the user's text/rect selection (ClearSearchResult only clears
         // find-match highlights since issue #5737, so it can't do this anymore)
         DeleteOldSelectionInfo(win, true);
@@ -8230,7 +8040,7 @@ static Annotation* MakeAnnotationsFromSelection(WindowTab* tab, AnnotCreateArgs*
     auto* engine = dm->GetEngine();
     bool supportsAnnots = EngineSupportsAnnotations(engine);
     MainWindow* win = tab->win;
-    bool ok = supportsAnnots && win->showSelection && tab->selectionOnPage;
+    bool ok = supportsAnnots && win->selection.showSelection && tab->selectionOnPage;
     if (!ok) {
         return nullptr;
     }
@@ -8483,8 +8293,6 @@ static void OnFavSplitterMove(Splitter::MoveEvent* ev) {
     ScheduleUiUpdate(win, kUiRelayout | kUiNoToolbars);
 }
 
-
-
 // Records the desired sidebar visibility in UIState and schedules the
 // deferred update, which shows/hides the sidebar windows and relayouts
 // (see FrameUpdateUi).
@@ -8645,18 +8453,6 @@ static void CopySelectionInTabToClipboard(WindowTab* tab) {
         args.timeoutMs = 2000;
         ShowNotification(args);
     }
-}
-
-static void OnMenuCustomZoom(MainWindow* win) {
-    if (!win->IsDocLoaded()) {
-        return;
-    }
-
-    float virtZoom = win->ctrl->GetZoomVirtual();
-    if (!Dialog_CustomZoom(win->hwndFrame, IsBrowserDocController(win->ctrl), &virtZoom)) {
-        return;
-    }
-    SmartZoom(win, virtZoom, nullptr, true);
 }
 
 // this is a directory for not important data, like downloaded symbols
@@ -9630,6 +9426,110 @@ static void PrintCurrentFileDeferred(MainWindow* win) {
     PrintCurrentFile(win);
 }
 
+// ---- File command wrappers (C5 extraction) ----
+
+static void HandleCmdNewWindow(MainWindow* win) {
+    CreateAndShowMainWindow(nullptr);
+}
+
+static void HandleCmdOpenFile(MainWindow* win) {
+    OpenFile(win);
+}
+
+static void HandleCmdOpenFileWithOSFilePicker(MainWindow* win) {
+    OpenFileWithOSFilePicker(win);
+}
+
+static void HandleCmdToggleFilePicker(MainWindow* win) {
+    ToggleFilePicker();
+    for (MainWindow* w : gWindows) {
+        UpdateAppMenu(w, w->menu);
+    }
+}
+
+static void HandleCmdShowInFolder(MainWindow* win) {
+    ShowCurrentFileInFolder(win);
+}
+
+static void HandleCmdShowGeneratedHTML(MainWindow* win) {
+    ShowGeneratedMarkdownHtml(win);
+}
+
+static void HandleCmdOpenPrevFileInFolder(MainWindow* win) {
+    OpenNextPrevFileInFolder(win, false);
+}
+
+static void HandleCmdOpenNextFileInFolder(MainWindow* win) {
+    OpenNextPrevFileInFolder(win, true);
+}
+
+static void HandleCmdNavigateFilesInFolder(MainWindow* win) {
+    ShowNavFilesInFolder(win);
+}
+
+static void HandleCmdRenameFile(MainWindow* win) {
+    RenameCurrentFile(win);
+}
+
+static void HandleCmdDeleteFile(MainWindow* win) {
+    DeleteCurrentFile(win);
+}
+
+static void HandleCmdDeleteFileAndOpenNext(MainWindow* win) {
+    DeleteCurrentFileAndOpenNext(win);
+}
+
+static void HandleCmdSaveAs(MainWindow* win) {
+    SaveCurrentFileAs(win);
+}
+
+static void HandleCmdPrint(MainWindow* win) {
+    uitask::Post(MkFunc0(PrintCurrentFileDeferred, win), "CmdPrint");
+}
+
+static void HandleCmdCopyFilePath(MainWindow* win) {
+    WindowTab* tab = win->CurrentTab();
+    if (tab) {
+        CopyFilePath(tab);
+    }
+}
+
+static void HandleCmdClearHistory(MainWindow* win) {
+    ClearHistory(win);
+}
+
+static void HandleCmdRemoveDeletedFilesFromHistory(MainWindow* win) {
+    RemoveDeletedFilesFromHistory(win);
+}
+
+static void HandleCmdDeleteCachedFiles(MainWindow* win) {
+    DeleteCachedFiles(win);
+}
+
+static void HandleCmdReopenLastClosedFile(MainWindow* win) {
+    ReopenLastClosedFile(win);
+}
+
+static void HandleCmdShowLog(MainWindow* win) {
+    ShowLogFileSmart();
+}
+
+static void HandleCmdScreenshot(MainWindow* win) {
+    TakeScreenshots();
+}
+
+static void HandleCmdExit(MainWindow* win) {
+    OnMenuExit();
+}
+
+static void HandleCmdReloadDocument(MainWindow* win) {
+    ReloadDocument(win, false);
+}
+
+static void HandleCmdCreateShortcutToFile(MainWindow* win) {
+    CreateLnkShortcut(win);
+}
+
 static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     int cmdId = LOWORD(wp);
     bool openAnnotationEdit = false;
@@ -9784,7 +9684,7 @@ static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, L
         }
 
         case CmdNewWindow:
-            CreateAndShowMainWindow(nullptr);
+            HandleCmdNewWindow(win);
             break;
 
         case CmdTabGroupSave:
@@ -9804,18 +9704,15 @@ static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, L
             break;
 
         case CmdOpenFile:
-            OpenFile(win);
+            HandleCmdOpenFile(win);
             break;
 
         case CmdOpenFileWithOSFilePicker:
-            OpenFileWithOSFilePicker(win);
+            HandleCmdOpenFileWithOSFilePicker(win);
             break;
 
         case CmdToggleFilePicker:
-            ToggleFilePicker();
-            for (MainWindow* w : gWindows) {
-                UpdateAppMenu(w, w->menu);
-            }
+            HandleCmdToggleFilePicker(win);
             break;
 
         case CmdToggleBoolSetting: {
@@ -9843,52 +9740,53 @@ static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, L
         }
 
         case CmdShowInFolder:
-            ShowCurrentFileInFolder(win);
+            HandleCmdShowInFolder(win);
             break;
 
         case CmdShowGeneratedHTML:
-            ShowGeneratedMarkdownHtml(win);
+            HandleCmdShowGeneratedHTML(win);
             break;
 
         case CmdOpenPrevFileInFolder:
+            if (!win->IsCurrentTabAbout()) {
+                HandleCmdOpenPrevFileInFolder(win);
+            }
+            break;
+
         case CmdOpenNextFileInFolder:
             if (!win->IsCurrentTabAbout()) {
-                // folder browsing should also work when an error page is displayed,
-                // so special-case it before the win->IsDocLoaded() check
-                bool forward = cmdId == CmdOpenNextFileInFolder;
-                OpenNextPrevFileInFolder(win, forward);
+                HandleCmdOpenNextFileInFolder(win);
             }
             break;
 
         case CmdNavigateFilesInFolder:
             // also works on the home page, where it starts in the folder of the
             // most recently opened document
-            ShowNavFilesInFolder(win);
+            HandleCmdNavigateFilesInFolder(win);
             break;
 
         case CmdRenameFile:
-            RenameCurrentFile(win);
+            HandleCmdRenameFile(win);
             break;
 
         case CmdDeleteFile:
-            DeleteCurrentFile(win);
+            HandleCmdDeleteFile(win);
             break;
 
         case CmdDeleteFileAndOpenNext:
-            DeleteCurrentFileAndOpenNext(win);
+            HandleCmdDeleteFileAndOpenNext(win);
             break;
 
         case CmdSaveAs:
-            SaveCurrentFileAs(win);
+            HandleCmdSaveAs(win);
             break;
 
         case CmdPrint:
-            // not PrintCurrentFile(win): see PrintCurrentFileDeferred
-            uitask::Post(MkFunc0(PrintCurrentFileDeferred, win), "CmdPrint");
+            HandleCmdPrint(win);
             break;
 
         case CmdCopyFilePath:
-            CopyFilePath(tab);
+            HandleCmdCopyFilePath(win);
             break;
 
         case CmdCommandPalette: {
@@ -9930,27 +9828,27 @@ static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, L
             break;
 
         case CmdClearHistory:
-            ClearHistory(win);
+            HandleCmdClearHistory(win);
             break;
 
         case CmdRemoveDeletedFilesFromHistory:
-            RemoveDeletedFilesFromHistory(win);
+            HandleCmdRemoveDeletedFilesFromHistory(win);
             break;
 
         case CmdDeleteCachedFiles:
-            DeleteCachedFiles(win);
+            HandleCmdDeleteCachedFiles(win);
             break;
 
         case CmdReopenLastClosedFile:
-            ReopenLastClosedFile(win);
+            HandleCmdReopenLastClosedFile(win);
             break;
 
         case CmdShowLog:
-            ShowLogFileSmart();
+            HandleCmdShowLog(win);
             break;
 
         case CmdScreenshot:
-            TakeScreenshots();
+            HandleCmdScreenshot(win);
             break;
 
         case CmdSetScreenshotHotkey:
@@ -10033,97 +9931,114 @@ static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, L
         } break;
 
         case CmdExit:
-            OnMenuExit();
+            HandleCmdExit(win);
             break;
 
         case CmdReloadDocument:
-            ReloadDocument(win, false);
+            HandleCmdReloadDocument(win);
             break;
 
         case CmdCreateShortcutToFile:
-            CreateLnkShortcut(win);
+            HandleCmdCreateShortcutToFile(win);
             break;
 
         case CmdZoomFitWidthAndContinuous:
-            ChangeZoomLevel(win, kZoomFitWidth, true);
+            HandleCmdZoomFitWidthAndContinuous(win);
             break;
 
         case CmdZoomFitPageAndSinglePage:
-            ChangeZoomLevel(win, kZoomFitPage, false);
+            HandleCmdZoomFitPageAndSinglePage(win);
             break;
 
         case CmdZoomOut:
-        case CmdZoomIn: {
-            if (!win->IsDocLoaded()) {
-                return 0;
-            }
-            float towards = (cmdId == CmdZoomIn) ? kZoomMax : kZoomMin;
-            auto zoom = ctrl->GetNextZoomStep(towards);
-            Point mousePos = HwndGetCursorPos(win->hwndCanvas);
-            SmartZoom(win, zoom, &mousePos, true);
-        } break;
-
-        case CmdZoom6400:
-        case CmdZoom3200:
-        case CmdZoom1600:
-        case CmdZoom800:
-        case CmdZoom400:
-        case CmdZoom200:
-        case CmdZoom150:
-        case CmdZoom125:
-        case CmdZoom100:
-        case CmdZoom50:
-        case CmdZoom25:
-        case CmdZoom12_5:
-        case CmdZoom8_33:
-        case CmdZoomFitPage:
-        case CmdZoomFitWidth:
-        case CmdZoomFitHeight:
-        case CmdZoomFitByOrientation:
-        case CmdZoomFitContent:
-        case CmdZoomShrinkToFit:
-        case CmdZoomActualSize:
-            OnMenuZoom(win, cmdId);
+            HandleCmdZoomOut(win);
+            break;
+        case CmdZoomIn:
+            HandleCmdZoomIn(win);
             break;
 
-        case CmdZoomCustom: {
-            if (cmd && cmd->firstArg) {
-                float virtZoom = cmd->firstArg->floatVal;
-                SmartZoom(win, virtZoom, nullptr, true);
-            } else {
-                OnMenuCustomZoom(win);
-            }
-        } break;
+        case CmdZoom6400:
+            HandleCmdZoom6400(win);
+            break;
+        case CmdZoom3200:
+            HandleCmdZoom3200(win);
+            break;
+        case CmdZoom1600:
+            HandleCmdZoom1600(win);
+            break;
+        case CmdZoom800:
+            HandleCmdZoom800(win);
+            break;
+        case CmdZoom400:
+            HandleCmdZoom400(win);
+            break;
+        case CmdZoom200:
+            HandleCmdZoom200(win);
+            break;
+        case CmdZoom150:
+            HandleCmdZoom150(win);
+            break;
+        case CmdZoom100:
+            HandleCmdZoom100(win);
+            break;
+        case CmdZoom75:
+            HandleCmdZoom75(win);
+            break;
+        case CmdZoom50:
+            HandleCmdZoom50(win);
+            break;
+        case CmdZoom25:
+            HandleCmdZoom25(win);
+            break;
+        case CmdZoom8_33:
+            HandleCmdZoom8_33(win);
+            break;
 
+        case CmdZoomFitPage:
+            HandleCmdZoomFitPage(win);
+            break;
+        case CmdZoomFitWidth:
+            HandleCmdZoomFitWidth(win);
+            break;
+        case CmdZoomFitHeight:
+            HandleCmdZoomFitHeight(win);
+            break;
+        case CmdZoomFitByOrientation:
+            HandleCmdZoomFitByOrientation(win);
+            break;
+        case CmdZoomFitContent:
+            HandleCmdZoomFitContent(win);
+            break;
+
+        case CmdZoomShrinkToFit:
+            HandleCmdZoomShrinkToFit(win);
+            break;
+        case CmdZoomActualSize:
+            HandleCmdZoomActualSize(win);
+            break;
+        case CmdZoomCustom:
+            HandleCmdZoomCustom(win);
+            break;
         case CmdZoomToSelection:
-            ZoomToSelection(win);
+            HandleCmdZoomToSelection(win);
             break;
 
         case CmdSinglePageView:
-            SwitchToDisplayMode(win, DisplayMode::SinglePage, true);
-            ShowViewModeNotification(win, cmdId);
+            HandleCmdSinglePageView(win);
             break;
-
         case CmdFacingView:
-            SwitchToDisplayMode(win, DisplayMode::Facing, true);
-            ShowViewModeNotification(win, cmdId);
+            HandleCmdFacingView(win);
             break;
-
         case CmdBookView:
-            SwitchToDisplayMode(win, DisplayMode::BookView, true);
-            ShowViewModeNotification(win, cmdId);
+            HandleCmdBookView(win);
             break;
 
-        case CmdToggleContinuousView: {
-            bool cur = win->ctrl && IsContinuous(win->ctrl->GetDisplayMode());
-            if (ShouldToggle(cmd, cur)) {
-                ToggleContinuousView(win);
-            }
+        case CmdToggleContinuousView:
+            HandleCmdToggleContinuousView(win);
             break;
-        }
 
         case CmdToggleMangaMode:
-            ToggleMangaMode(win);
+            HandleCmdToggleMangaMode(win);
             break;
 
         case CmdToggleToolbar:
@@ -10289,133 +10204,42 @@ static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, L
             break;
 
         case CmdStartAutoScroll:
-            StartAutoScrollAtCursor(win);
+            HandleCmdStartAutoScroll(win);
             break;
 
         case CmdAutoScrollToggle:
-            AutoScrollToggle(win);
+            HandleCmdAutoScrollToggle(win);
             break;
         case CmdAutoScrollSpeedUp:
-            AutoScrollSpeedAdjust(win, +1);
+            HandleCmdAutoScrollSpeedUp(win);
             break;
         case CmdAutoScrollSpeedDown:
-            AutoScrollSpeedAdjust(win, -1);
+            HandleCmdAutoScrollSpeedDown(win);
             break;
 
-        case CmdAutoScrollTimerToggle: {
-            bool on = (IsDlgButtonChecked(win->hwndToolbar, CmdAutoScrollTimerToggle) == BST_CHECKED);
-            win->autoScrollTimerEnabled = on;
-            if (win->autoScrollActive) {
-                win->autoScrollTimerMinutes = on ? win->autoScrollTimerMinutesSetting : 0;
-                win->autoScrollStartTick = GetTickCount();
-            }
-            gGlobalPrefs->autoScrollTimerEnabled = on;
+        case CmdAutoScrollTimerToggle:
+            HandleCmdAutoScrollTimerToggle(win);
             break;
-        }
-        case CmdAutoScrollTimerEdit: {
-            WCHAR buf[32] = {0};
-            GetWindowTextW(win->hwndTimerEdit, buf, 32);
-            int m = _wtoi(buf);
-            if (m < 1) m = 1;
-            if (m > 600) m = 600;
-            win->autoScrollTimerMinutesSetting = (DWORD)m;
-            if (win->autoScrollActive && win->autoScrollTimerEnabled) {
-                win->autoScrollTimerMinutes = (DWORD)m;
-                win->autoScrollStartTick = GetTickCount();
-            }
-            gGlobalPrefs->autoScrollTimerMinutes = m;
+        case CmdAutoScrollTimerEdit:
+            HandleCmdAutoScrollTimerEdit(win);
             break;
-        }
 
-        case CmdArchScale: {
-            if (!gGlobalPrefs->archToolsEnabled) break;
-            // Open floating scale dialog
-            LogInfo("[arch] CmdArchScale: opening scale dialog");
-            // If no scale line defined yet, arm drawing mode so user can draw one
-            if (!win->archScaleLineDefined) {
-                win->archToolMode = 1; // scale drawing mode
-                if (win->hwndCanvas) {
-                    SetCursor(LoadCursor(nullptr, IDC_CROSS));
-                }
-            }
-            ShowArchScaleDialog(win);
+        case CmdArchScale:
+            HandleCmdArchScale(win);
             break;
-        }
-        case CmdArchMeasure: {
-            if (!gGlobalPrefs->archToolsEnabled) break;
-            int oldMode = win->archToolMode;
-            if (win->archToolMode == 2) {
-                win->archToolMode = 0;
-                // Restore normal cursor when exiting measure mode
-                if (win->hwndCanvas) {
-                    SetCursor(LoadCursor(nullptr, IDC_ARROW));
-                }
-            } else {
-                win->archToolMode = 2; // Measure mode
-                // Set crosshair cursor immediately when entering measure mode
-                if (win->hwndCanvas) {
-                    SetCursor(LoadCursor(nullptr, IDC_CROSS));
-                }
-            }
-            LogInfo("[arch] CmdArchMeasure: archToolMode=%d -> %d", oldMode, win->archToolMode);
-            // Update second toolbar Measure button checked state
-            UpdateToolbar2State(win);
+        case CmdArchMeasure:
+            HandleCmdArchMeasure(win);
             break;
-        }
-        case CmdArchClear: {
-            if (!gGlobalPrefs->archToolsEnabled) break;
-            // Clear measurements ONLY — keep scale calibration intact
-            int count = (int)len(win->archMeasurements);
-            win->archMeasurements.Reset();
-            LogInfo("[arch] CmdArchClear: cleared %d measurements (scale kept)", count);
-            ScheduleRepaint(win, 0);
+        case CmdArchClear:
+            HandleCmdArchClear(win);
             break;
-        }
-        case CmdArchResetScale: {
-            if (!gGlobalPrefs->archToolsEnabled) break;
-            // Reset ONLY the scale calibration (keep measurements)
-            win->archScaleSet = false;
-            win->archScaleLineDefined = false;
-            win->archScaleFactor = 0.0f;
-            win->archScaleLineP1x = win->archScaleLineP1y = 0.0f;
-            win->archScaleLineP2x = win->archScaleLineP2y = 0.0f;
-            LogInfo("[arch] CmdArchResetScale: reset scale only");
-            ScheduleRepaint(win, 0);
+        case CmdArchResetScale:
+            HandleCmdArchResetScale(win);
             break;
-        }
-        case CmdArchToolsToggle: {
-            if (!gGlobalPrefs->archToolsEnabled) break;
-            win->archToolsOn = !win->archToolsOn;
-            if (win->archToolsOn) {
-                // Show second toolbar
-                if (win->hwndReBar2) {
-                    ShowWindow(win->hwndReBar2, SW_SHOW);
-                }
-                // Update Measure button checked state
-                UpdateToolbar2State(win);
-            } else {
-                // Hide second toolbar
-                if (win->hwndReBar2) {
-                    ShowWindow(win->hwndReBar2, SW_HIDE);
-                }
-                // Reset arch tool state
-                win->archToolMode = 0;
-                win->archEraseMode = false;
-                win->archDragLine = 0;
-                win->archPoint1 = Point{0, 0};
-                win->archPoint2 = Point{0, 0};
-                if (GetCapture() == win->hwndCanvas) {
-                    ReleaseCapture();
-                }
-                win->mouseAction = MouseAction::None;
-            }
-            // Explicitly set checked state for the toggle button (fixes underline drawing)
-            SetToolbarButtonCheckedState(win, CmdArchToolsToggle, win->archToolsOn);
-            LogInfo("[arch] CmdArchToolsToggle: archToolsOn=%d", win->archToolsOn);
-            RelayoutFrame(win);
-            ScheduleRepaint(win, 0);
+
+        case CmdArchToolsToggle:
+            HandleCmdArchToolsToggle(win);
             break;
-        }
 
         case CmdScrollUpHalfPage: {
             if (win->IsCurrentTabAbout()) {
@@ -10619,27 +10443,19 @@ static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, L
             break;
 
         case CmdTogglePresentationMode:
-            if (ShouldToggle(cmd, win->presentation != PM_DISABLED)) {
-                TogglePresentationMode(win);
-            }
+            HandleCmdTogglePresentationMode(win);
             break;
 
         case CmdToggleFullscreen:
-            if (ShouldToggle(cmd, win->isFullScreen)) {
-                ToggleFullScreen(win);
-            }
+            HandleCmdToggleFullscreen(win);
             break;
 
         case CmdRotateLeft:
-            if (dm) {
-                dm->RotateBy(-90);
-            }
+            HandleCmdRotateLeft(win);
             break;
 
         case CmdRotateRight:
-            if (dm) {
-                dm->RotateBy(90);
-            }
+            HandleCmdRotateRight(win);
             break;
 
         case CmdFindFirst:
@@ -11171,24 +10987,18 @@ static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, L
                     struct WebviewWnd* wv = mm->GetWebviewWnd();
                     if (wv) {
                         if (win->contrastEnabled) {
-                            // Set dark background and gray text directly via inline styles
-                            // Using gray/dark shades based on contrast opacity (no invert filter)
-                            float cssOpacity = win->contrastOpacity / 100.0f;
-                            TempStr js = fmt(
-                                "document.body.style.backgroundColor = '#%02x%02x%02x';"
-                                "document.body.style.color = '#%02x%02x%02x';",
-                                (int)(255 * (1.0f - cssOpacity)),  // bright text on dark background
-                                (int)(255 * (1.0f - cssOpacity)),
-                                (int)(255 * (1.0f - cssOpacity)),
-                                (int)(255 * cssOpacity),
-                                (int)(255 * cssOpacity),
-                                (int)(255 * cssOpacity));
+                            bool invert = GetInvertPageColors();
+                            int gray = invert ? (int)(255.0 * (win->contrastOpacity / 100.0) + 0.5)
+                                              : (int)(255.0 * (1.0 - win->contrastOpacity / 100.0) + 0.5);
+                            TempStr js =
+                                fmt("document.body.style.backgroundColor = '%s';"
+                                    "document.body.style.color = 'rgb(%d,%d,%d)';",
+                                    invert ? StrL("#050505") : StrL("#FAFAFA"), gray, gray, gray);
                             wv->Eval(js);
                         } else {
-                            // Remove inline styles when contrast is toggled off
-                            TempStr js = fmt(
-                                "document.body.style.backgroundColor = '';"
-                                "document.body.style.color = '';");
+                            TempStr js =
+                                fmt("document.body.style.backgroundColor = '';"
+                                    "document.body.style.color = '';");
                             wv->Eval(js);
                         }
                     }
@@ -13225,7 +13035,8 @@ static void BuildReadAloudMenuItems(HMENU menu, MainWindow* win, bool includeCur
     WindowTab* currTab = win ? win->CurrentTab() : nullptr;
     bool isSpeaking = TtsIsSpeaking();
     bool canContinue = CanContinueReadAloud(currTab);
-    bool hasSelection = currTab && win->showSelection && currTab->selectionOnPage && len(*currTab->selectionOnPage) > 0;
+    bool hasSelection =
+        currTab && win->selection.showSelection && currTab->selectionOnPage && len(*currTab->selectionOnPage) > 0;
 
     if (isSpeaking) {
         AppendMenuW(menu, MF_STRING, CmdTtsMenuPauseReading, CWStrTemp(_TRA("Pause Reading")));
@@ -14116,61 +13927,61 @@ void MainWindow::ArchSaveMeasurementsForCurrentTab() {
         return;
     }
     // Find existing entry
-    for (int i = 0; i < archMeasurementsByDoc.len; ++i) {
-        if (str::Eq(archMeasurementsByDoc[i].path, path)) {
+    for (int i = 0; i < archTools.measurementsByDoc.len; ++i) {
+        if (str::Eq(archTools.measurementsByDoc[i].path, path)) {
             // Replace measurements
-            archMeasurementsByDoc[i].measurements.Reset();
-            for (int j = 0; j < archMeasurements.len; ++j) {
-                archMeasurementsByDoc[i].measurements.Append(archMeasurements[j]);
+            archTools.measurementsByDoc[i].measurements.Reset();
+            for (int j = 0; j < archTools.measurements.len; ++j) {
+                archTools.measurementsByDoc[i].measurements.Append(archTools.measurements[j]);
             }
             return;
         }
     }
     // Create new entry
-    ArchMeasurementsByDoc entry(path);
-    for (int j = 0; j < archMeasurements.len; ++j) {
-        entry.measurements.Append(archMeasurements[j]);
+    ArchToolsState::ArchMeasurementsByDoc entry(path);
+    for (int j = 0; j < archTools.measurements.len; ++j) {
+        entry.measurements.Append(archTools.measurements[j]);
     }
-    archMeasurementsByDoc.Append(entry);
+    archTools.measurementsByDoc.Append(entry);
 }
 
 void MainWindow::ArchRestoreMeasurementsForTab(WindowTab* tab) {
     if (!gGlobalPrefs->archToolsEnabled) {
-        archMeasurements.Reset();
+        archTools.measurements.Reset();
         return;
     }
     if (!tab || tab->IsNonDocumentTab()) {
-        archMeasurements.Reset();
+        archTools.measurements.Reset();
         return;
     }
     Str path = tab->filePath;
     if (!path) {
-        archMeasurements.Reset();
+        archTools.measurements.Reset();
         return;
     }
-    for (int i = 0; i < archMeasurementsByDoc.len; ++i) {
-        if (str::Eq(archMeasurementsByDoc[i].path, path)) {
-            archMeasurements.Reset();
-            for (int j = 0; j < archMeasurementsByDoc[i].measurements.len; ++j) {
-                archMeasurements.Append(archMeasurementsByDoc[i].measurements[j]);
+    for (int i = 0; i < archTools.measurementsByDoc.len; ++i) {
+        if (str::Eq(archTools.measurementsByDoc[i].path, path)) {
+            archTools.measurements.Reset();
+            for (int j = 0; j < archTools.measurementsByDoc[i].measurements.len; ++j) {
+                archTools.measurements.Append(archTools.measurementsByDoc[i].measurements[j]);
             }
             return;
         }
     }
     // No stored measurements for this document
-    archMeasurements.Reset();
+    archTools.measurements.Reset();
 }
 
 void MainWindow::ArchClearMeasurementsForPath(Str path) {
     if (!path) {
         return;
     }
-    for (int i = 0; i < archMeasurementsByDoc.len; ++i) {
-        if (str::Eq(archMeasurementsByDoc[i].path, path)) {
-            archMeasurementsByDoc[i].measurements.Reset();
+    for (int i = 0; i < archTools.measurementsByDoc.len; ++i) {
+        if (str::Eq(archTools.measurementsByDoc[i].path, path)) {
+            archTools.measurementsByDoc[i].measurements.Reset();
             // Remove the entry by swapping with last
-            archMeasurementsByDoc[i] = archMeasurementsByDoc[archMeasurementsByDoc.len - 1];
-            archMeasurementsByDoc.len--;
+            archTools.measurementsByDoc[i] = archTools.measurementsByDoc[archTools.measurementsByDoc.len - 1];
+            archTools.measurementsByDoc.len--;
             return;
         }
     }

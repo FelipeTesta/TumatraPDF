@@ -25,6 +25,7 @@ extern "C" {
 #include "Translations.h"
 #include "SumatraConfig.h"
 #include "DisplayModel.h"
+#include "Commands.h"
 #include "MainWindow.h"
 #include "Toolbar.h"
 #include "WindowTab.h"

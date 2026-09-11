@@ -28,6 +28,7 @@
 #include "MarkdownToc.h"
 #include "wingui/WebView.h"
 #include "SumatraLog.h"
+#include "Theme.h"
 
 constexpr const char* kMdVirtualHost = "https://sumatrapdf.markdown/";
 constexpr int kMdVirtualHostLen = sizeof("https://sumatrapdf.markdown/") - 1;
@@ -427,26 +428,22 @@ void MarkdownModel::RestoreContrastOverlay() {
     if (!wv) {
         return;
     }
-    float cssOpacity = opacity / 100.0f;
 
     if (enabled) {
-        // Set dark background and gray text directly on body via inline styles
-        // Using gray/dark shades based on contrast opacity (no invert filter)
-        TempStr js = fmt(
-            "document.body.style.backgroundColor = '#%02x%02x%02x';"
-            "document.body.style.color = '#%02x%02x%02x';",
-            (int)(255 * (1.0f - cssOpacity)),  // bright text on dark background
-            (int)(255 * (1.0f - cssOpacity)),
-            (int)(255 * (1.0f - cssOpacity)),
-            (int)(255 * cssOpacity),           // text color at full opacity
-            (int)(255 * cssOpacity),
-            (int)(255 * cssOpacity));
+        bool invert = GetInvertPageColors();
+        // Markdown contrast: light bg + dark text (normal) or dark bg + light text (invert)
+        // opacity=0 -> nearly invisible, opacity=100 -> full contrast
+        int gray = invert ? (int)(255.0 * (opacity / 100.0) + 0.5) : (int)(255.0 * (1.0 - opacity / 100.0) + 0.5);
+        TempStr js =
+            fmt("document.body.style.backgroundColor = '%s';"
+                "document.body.style.color = 'rgb(%d,%d,%d)';",
+                invert ? StrL("#050505") : StrL("#FAFAFA"), gray, gray, gray);
         wv->Eval(js);
     } else {
         // Remove inline styles when contrast is OFF
-        TempStr js = fmt(
-            "document.body.style.backgroundColor = '';"
-            "document.body.style.color = '';");
+        TempStr js =
+            fmt("document.body.style.backgroundColor = '';"
+                "document.body.style.color = '';");
         wv->Eval(js);
     }
     LogInfo("[md] contrast enabled=%d opacity=%d", enabled, opacity);
@@ -661,7 +658,8 @@ void MarkdownModel::SetZoomVirtual(float zoom, Point* /*fixPt*/) {
         zoom = limitValue(zoom, kZoomMin, kZoomMax);
     }
     // For fit modes in WebView2, use JavaScript to set zoom factor via CSS zoom property
-    if (docView && (kZoomFitPage == zoom || kZoomFitWidth == zoom || kZoomFitHeight == zoom || kZoomFitContent == zoom)) {
+    if (docView &&
+        (kZoomFitPage == zoom || kZoomFitWidth == zoom || kZoomFitHeight == zoom || kZoomFitContent == zoom)) {
         struct WebviewWnd* wv = GetWebviewWnd();
         if (wv) {
             float jsZoom = 100.0f;

@@ -10,6 +10,7 @@ extern Kind kNotifActionResponse;
 extern Kind kNotifPageInfo;
 extern Kind kNotifAdHoc;
 extern Kind kNotifLazyLayout;
+extern Kind kNotifZoomOrView;
 
 using NotificationWndRemoved = Func1<NotificationWnd*>;
 

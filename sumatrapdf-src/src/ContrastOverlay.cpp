@@ -12,6 +12,7 @@ License: GPLv3 */
 #include "wingui/WinGui.h"
 #include "wingui/WebView.h"
 #include "SumatraLog.h"
+#include "Theme.h"
 
 // Convert opacity percentage (0-100) to BYTE alpha (0-255)
 static BYTE AlphaFromOpacity(int opacity) {
@@ -24,6 +25,8 @@ static LRESULT CALLBACK WndProcContrastOverlay(HWND hwnd, UINT msg, WPARAM wp, L
         return DefWindowProcW(hwnd, msg, wp, lp);
     }
     switch (msg) {
+        case WM_NCHITTEST:
+            return HTTRANSPARENT;
         case WM_PAINT: {
             PAINTSTRUCT ps;
             HDC hdc = BeginPaint(hwnd, &ps);
@@ -72,10 +75,10 @@ void CreateContrastOverlay(MainWindow* win) {
         classRegistered = true;
     }
 
-    HWND hwndOverlay = CreateWindowExW(WS_EX_LAYERED | WS_EX_TRANSPARENT, clsName, L"", WS_CHILD | WS_VISIBLE,
-                                       rcCanvas.left, rcCanvas.top, rcCanvas.right - rcCanvas.left,
-                                       rcCanvas.bottom - rcCanvas.top, GetParent(win->hwndCanvas), nullptr,
-                                       GetModuleHandleW(nullptr), nullptr);
+    HWND hwndOverlay =
+        CreateWindowExW(WS_EX_LAYERED | WS_EX_TRANSPARENT, clsName, L"", WS_CHILD | WS_VISIBLE, rcCanvas.left,
+                        rcCanvas.top, rcCanvas.right - rcCanvas.left, rcCanvas.bottom - rcCanvas.top,
+                        GetParent(win->hwndCanvas), nullptr, GetModuleHandleW(nullptr), nullptr);
 
     if (!hwndOverlay) {
         return;
@@ -121,23 +124,19 @@ void UpdateContrastOverlayOpacity(MainWindow* win) {
             float cssOpacity = opacity / 100.0f;
 
             if (win->contrastEnabled) {
-                // Set dark background and gray text directly on body via inline styles
-                // Using gray/dark shades based on contrast opacity (no invert filter)
-                TempStr js = fmt(
-                    "document.body.style.backgroundColor = '#%02x%02x%02x';"
-                    "document.body.style.color = '#%02x%02x%02x';",
-                    (int)(255 * (1.0f - cssOpacity)),  // bright text on dark background
-                    (int)(255 * (1.0f - cssOpacity)),
-                    (int)(255 * (1.0f - cssOpacity)),
-                    (int)(255 * cssOpacity),           // text color at full opacity
-                    (int)(255 * cssOpacity),
-                    (int)(255 * cssOpacity));
+                bool invert = GetInvertPageColors();
+                int textGray = invert ? (int)(255 * cssOpacity) : (int)(255 * (1.0f - cssOpacity));
+                // Set background and text colors directly on body via inline styles
+                TempStr js =
+                    fmt("document.body.style.backgroundColor = '%s';"
+                        "document.body.style.color = 'rgb(%d,%d,%d)';",
+                        invert ? StrL("#050505") : StrL("#FAFAFA"), textGray, textGray, textGray);
                 wv->Eval(js);
             } else {
                 // Remove inline styles when contrast is OFF
-                TempStr js = fmt(
-                    "document.body.style.backgroundColor = '';"
-                    "document.body.style.color = '';");
+                TempStr js =
+                    fmt("document.body.style.backgroundColor = '';"
+                        "document.body.style.color = '';");
                 wv->Eval(js);
             }
         }

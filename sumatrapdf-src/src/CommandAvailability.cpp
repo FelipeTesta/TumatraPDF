@@ -260,6 +260,11 @@ static UINT_PTR removeIfMarkdown[] = {
     CmdViewportCropToggle,
     CmdMarginTrimToggle,
     CmdTrimConfig,
+    CmdArchToolsToggle,
+    CmdArchScale,
+    CmdArchMeasure,
+    CmdArchClear,
+    CmdArchResetScale,
     0,
 };
 
@@ -404,7 +409,7 @@ AppCommandCtx NewAppCommandCtx(MainWindow* win, Point cursorPos) {
         ctx.canContinueReadAloud = CanContinueReadAloud(ctx.tab);
     }
 
-    ctx.hasSelection = ctx.isDocLoaded && ctx.tab && win->showSelection && ctx.tab->selectionOnPage;
+    ctx.hasSelection = ctx.isDocLoaded && ctx.tab && win->selection.showSelection && ctx.tab->selectionOnPage;
 
     if (ctx.isDocLoaded && win->ctrl) {
         ctx.isSinglePage = IsSingle(win->ctrl->GetDisplayMode());

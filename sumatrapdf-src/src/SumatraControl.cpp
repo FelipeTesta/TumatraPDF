@@ -18,6 +18,7 @@
 #include "SelectionTranslate.h"
 #include "ImageSaveCropResize.h"
 #include "base/GuessFileType.h"
+#include "Commands.h"
 #include "FindWindow.h"
 #include "Toolbar.h"
 #include "LinkFollow.h"

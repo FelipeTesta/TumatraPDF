@@ -414,7 +414,7 @@ TempStr ContextMenuSelectionResultTemp(Str word1, Str word2, Str cursorWord, int
     WindowTab* tab = win->CurrentTab();
     DeleteOldSelectionInfo(win);
     tab->selectionOnPage = SelectionOnPage::FromTextSelect(&dm->textSelection->result);
-    win->showSelection = tab->selectionOnPage != nullptr;
+    win->selection.showSelection = tab->selectionOnPage != nullptr;
 
     bool isTextOnly = false;
     TempStr original = GetSelectedTextTemp(tab, " ", isTextOnly);
@@ -508,7 +508,7 @@ TempStr ClickClearsSelectionResultTemp(Str word, int* exitCodeOut) {
     dm->textSelection->SelectUpTo(pageNo, wx, wy);
     dm->textSelection->SelectWordAt(pageNo, wx, wy);
     tab->selectionOnPage = SelectionOnPage::FromTextSelect(&dm->textSelection->result);
-    win->showSelection = tab->selectionOnPage != nullptr;
+    win->selection.showSelection = tab->selectionOnPage != nullptr;
 
     bool isTextOnly = false;
     TempStr selected = str::DupTemp(GetSelectedTextTemp(tab, " ", isTextOnly));
@@ -527,11 +527,12 @@ TempStr ClickClearsSelectionResultTemp(Str word, int* exitCodeOut) {
     SendMessageW(win->hwndCanvas, WM_LBUTTONUP, 0, lp);
 
     TempStr after = GetSelectedTextTemp(tab, " ", isTextOnly);
-    bool cleared = (len(after) == 0) && !win->showSelection;
+    bool cleared = (len(after) == 0) && !win->selection.showSelection;
     if (cleared) {
         out.Append(fmt("OK selected=%s cleared at %d,%d\n", selected, pt.x, pt.y));
     } else {
-        out.Append(fmt("FAIL selected=%s still=%s showSelection=%d\n", selected, after, (int)win->showSelection));
+        out.Append(fmt("FAIL selected=%s still=%s selection.showSelection=%d\n", selected, after,
+                       (int)win->selection.showSelection));
     }
     if (exitCodeOut) {
         *exitCodeOut = cleared ? 0 : 1;
@@ -582,8 +583,8 @@ TempStr RectSelectionDragResultTemp(Str word, int* exitCodeOut) {
     int half = 40;
     Rect rc(center.x - half, center.y - (half / 2), half * 2, half);
     tab->selectionOnPage = SelectionOnPage::FromRectangle(dm, rc);
-    win->showSelection = tab->selectionOnPage != nullptr;
-    if (!win->showSelection) {
+    win->selection.showSelection = tab->selectionOnPage != nullptr;
+    if (!win->selection.showSelection) {
         return fail("ERROR no-rect-selection");
     }
     if (!IsRectangularSelection(win)) {
@@ -595,7 +596,7 @@ TempStr RectSelectionDragResultTemp(Str word, int* exitCodeOut) {
     }
 
     SendMessageW(win->hwndCanvas, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(center.x, center.y));
-    SelectionDragEdge edge = win->selectionDragEdge;
+    SelectionDragEdge edge = win->selection.selectionDragEdge;
     bool dragging = (win->mouseAction == MouseAction::Selecting) && (edge != SelectionDragEdge::None);
     bool textDrag = win->textDragPending;
     SendMessageW(win->hwndCanvas, WM_LBUTTONUP, 0, MAKELPARAM(center.x, center.y));

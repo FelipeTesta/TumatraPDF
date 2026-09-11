@@ -75,7 +75,7 @@ static void PositionDialog(HWND hwnd, HWND hwndRelative) {
 
 void ArchScaleDialogWnd::SyncUnitFromWin() {
     if (comboUnit) {
-        SendMessageW(comboUnit->hwnd, CB_SETCURSEL, win->archUnit, 0);
+        SendMessageW(comboUnit->hwnd, CB_SETCURSEL, win->archTools.unit, 0);
     }
 }
 
@@ -89,14 +89,14 @@ void ArchScaleDialogWnd::SetLength(float realLen) {
 void ArchScaleDialogWnd::OnDrawLine() {
     if (!win) return;
     // Clear any existing scale line so user can draw a new one
-    win->archScaleLineDefined = false;
-    win->archDragLine = 0;
-    win->archPoint1 = Point{0, 0};
-    win->archPoint2 = Point{0, 0};
-    win->archToolMode = 1; // scale mode
+    win->archTools.scaleLineDefined = false;
+    win->archTools.dragLine = 0;
+    win->archTools.point1 = Point{0, 0};
+    win->archTools.point2 = Point{0, 0};
+    win->archTools.toolMode = 1; // scale mode
     // Do NOT SetCapture or set mouseAction=Dragging here.
     // Capture is acquired on first canvas click in OnMouseLeftButtonDown.
-    LogInfo("[arch] OnDrawLine: archToolMode=%d archDragLine=%d", win->archToolMode, win->archDragLine);
+    LogInfo("[arch] OnDrawLine: archToolMode=%d archDragLine=%d", win->archTools.toolMode, win->archTools.dragLine);
     ScheduleRepaint(win, 0);
 }
 
@@ -105,7 +105,7 @@ void ArchScaleDialogWnd::OnOk() {
 
     // Require a valid scale line: either just drawn (archScaleLineDefined)
     // or an existing scale whose endpoints are still stored (archScaleSet)
-    if (!(win->archScaleLineDefined || win->archScaleSet)) {
+    if (!(win->archTools.scaleLineDefined || win->archTools.scaleSet)) {
         MessageBeep(MB_ICONWARNING);
         LogInfo("[arch] OnOk: no scale line defined");
         return;
@@ -145,8 +145,8 @@ void ArchScaleDialogWnd::OnOk() {
     }
 
     // Compute page length from the two endpoints (in page coords)
-    float dx = win->archScaleLineP2x - win->archScaleLineP1x;
-    float dy = win->archScaleLineP2y - win->archScaleLineP1y;
+    float dx = win->archTools.scaleLineP2x - win->archTools.scaleLineP1x;
+    float dy = win->archTools.scaleLineP2y - win->archTools.scaleLineP1y;
     float pageLenPt = sqrtf(dx * dx + dy * dy);
 
     if (pageLenPt <= 0.0f) {
@@ -158,17 +158,17 @@ void ArchScaleDialogWnd::OnOk() {
     float realLenM = realLen * kMeterPerUnit[selUnit];
 
     // Scale factor = page units per METER (canonical)
-    win->archScaleFactor = pageLenPt / realLenM;
-    win->archScaleSet = true;
-    win->archScaleAnchorX = win->archScaleLineP1x;
-    win->archScaleAnchorY = win->archScaleLineP1y;
+    win->archTools.scaleFactor = pageLenPt / realLenM;
+    win->archTools.scaleSet = true;
+    win->archTools.scaleAnchorX = win->archTools.scaleLineP1x;
+    win->archTools.scaleAnchorY = win->archTools.scaleLineP1y;
 
     // Persist the selected unit as global preference
     gGlobalPrefs->archUnit = selUnit;
 
     // Exit scale mode
-    win->archToolMode = 0;
-    win->archDragLine = 0;
+    win->archTools.toolMode = 0;
+    win->archTools.dragLine = 0;
     // Restore normal cursor
     if (win->hwndCanvas) {
         SetCursor(LoadCursor(nullptr, IDC_ARROW));
@@ -180,11 +180,11 @@ void ArchScaleDialogWnd::OnOk() {
 
 void ArchScaleDialogWnd::OnClose() {
     if (!win) return;
-    LogInfo("[arch] ArchScaleDialog close: archToolMode=%d", win->archToolMode);
-    win->hwndArchScaleDialog = nullptr;
-    win->archScaleDialog = nullptr;
-    if (win->archToolMode == 1) {
-        win->archToolMode = 0;
+    LogInfo("[arch] ArchScaleDialog close: archToolMode=%d", win->archTools.toolMode);
+    win->archTools.hwndArchScaleDialog = nullptr;
+    win->archTools.scaleDialog = nullptr;
+    if (win->archTools.toolMode == 1) {
+        win->archTools.toolMode = 0;
     }
     // Restore normal cursor
     if (win->hwndCanvas) {
@@ -240,7 +240,7 @@ static void OnDestroy(Wnd::DestroyEvent* /*ev*/) {
 
 bool ArchScaleDialogWnd::Create(MainWindow* mainWin) {
     win = mainWin;
-    win->hwndArchScaleDialog = hwnd;
+    win->archTools.hwndArchScaleDialog = hwnd;
 
     {
         CreateCustomArgs args;
@@ -321,7 +321,7 @@ bool ArchScaleDialogWnd::Create(MainWindow* mainWin) {
         for (int i = 0; i < 5; i++) {
             SendMessageW(comboUnit->hwnd, CB_ADDSTRING, 0, (LPARAM)unitNames[i]);
         }
-        SendMessageW(comboUnit->hwnd, CB_SETCURSEL, win->archUnit, 0);
+        SendMessageW(comboUnit->hwnd, CB_SETCURSEL, win->archTools.unit, 0);
 
         hbox->AddChild(new Padding(comboUnit, pad));
         vbox->AddChild(hbox);
@@ -347,11 +347,10 @@ bool ArchScaleDialogWnd::Create(MainWindow* mainWin) {
         auto pad = Insets{4, 8, 4, 8};
 
         btnDraw = CreateButton(hwnd, _TRA("Desenhar linha"),
-            MkMethod0<ArchScaleDialogWnd, &ArchScaleDialogWnd::OnDrawLine>(this), isRtl);
+                               MkMethod0<ArchScaleDialogWnd, &ArchScaleDialogWnd::OnDrawLine>(this), isRtl);
         hbox->AddChild(new Padding(btnDraw, pad));
 
-        btnOk = CreateButton(hwnd, _TRA("✅"),
-            MkMethod0<ArchScaleDialogWnd, &ArchScaleDialogWnd::OnOk>(this), isRtl);
+        btnOk = CreateButton(hwnd, _TRA("✅"), MkMethod0<ArchScaleDialogWnd, &ArchScaleDialogWnd::OnOk>(this), isRtl);
         btnOk->isDefault = true;
         hbox->AddChild(new Padding(btnOk, pad));
 
@@ -371,14 +370,14 @@ bool ArchScaleDialogWnd::Create(MainWindow* mainWin) {
     }
 
     // Pre-fill edit with current length if a scale line already exists
-    if (win->archScaleSet && win->archScaleFactor > 0.0f) {
-        float sdx = win->archScaleLineP2x - win->archScaleLineP1x;
-        float sdy = win->archScaleLineP2y - win->archScaleLineP1y;
+    if (win->archTools.scaleSet && win->archTools.scaleFactor > 0.0f) {
+        float sdx = win->archTools.scaleLineP2x - win->archTools.scaleLineP1x;
+        float sdy = win->archTools.scaleLineP2y - win->archTools.scaleLineP1y;
         float pageLenPt = sqrtf(sdx * sdx + sdy * sdy);
         // archScaleFactor is now page units per METER (canonical)
         // realLen in meters = pageLenPt / archScaleFactor
         // Convert to current display unit for the edit box
-        float realLenM = pageLenPt / win->archScaleFactor;
+        float realLenM = pageLenPt / win->archTools.scaleFactor;
         float realLenDisp = realLenM / kMeterPerUnit[gGlobalPrefs->archUnit];
         SetLength(realLenDisp);
     }
@@ -406,7 +405,7 @@ void ShowArchScaleDialog(MainWindow* win) {
         HwndSetFocus(gArchScaleDialog->hwnd);
         return;
     }
-    LogInfo("[arch] ShowArchScaleDialog: archToolMode=%d", win->archToolMode);
+    LogInfo("[arch] ShowArchScaleDialog: archToolMode=%d", win->archTools.toolMode);
     auto* wnd = new ArchScaleDialogWnd();
     wnd->onClose = MkFunc1Void<Wnd::CloseEvent*>(OnClose);
     wnd->onDestroy = MkFunc1Void<Wnd::DestroyEvent*>(OnDestroy);
@@ -417,7 +416,7 @@ void ShowArchScaleDialog(MainWindow* win) {
         return;
     }
     gArchScaleDialog = wnd;
-    win->archScaleDialog = wnd;
+    win->archTools.scaleDialog = wnd;
     // Set crosshair cursor when Scale dialog opens (drawing mode armed)
     if (win->hwndCanvas) {
         SetCursor(LoadCursor(nullptr, IDC_CROSS));

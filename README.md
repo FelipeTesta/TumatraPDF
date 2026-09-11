@@ -217,6 +217,12 @@ The script compares the version in `sumatrapdf-src/src/Version.h` with the pre-r
 - [x] Menu "New Tools" com comandos TumatraPDF
 - [x] Viewport crop + margin trim (zoom bug fixed)
 - [x] Arch Tools (Scale + Measure) — 2nd toolbar, scale/measure/erase, build-verified
+- [x] Modularização: design tokens (16A), structs (16B), command dispatch C2-C5 (16C)
+- [x] ToolbarIds.h: placeholder IDs extraction
+- [x] 16C-F6: window lifecycle extraction (MainWindowCreate.{h,cpp})
+- [x] Design system: text centering (buttons/inputs), ToolbarLayout
+- [x] Autoscroll round-step speed table (25–1600 px/min)
+- [x] Toolbar wrapping (TBSTYLE_WRAPABLE) — buttons wrap to 2nd row on narrow windows
 - [ ] Testes automatizados para novas funcionalidades
 
 ---
@@ -301,7 +307,7 @@ Based on SumatraPDF:
 
 ## Status
 
-🟢 Complete — All core features implemented (AutoScroll, Contrast Filter, Viewport Crop & Margin Trim, Dark Theme default, New Tools menu, Arch Tools Scale+Measure). Binary: `TumatraPDF.exe`. Arch Tools: build-verified, runtime validation in progress (Fase 12, 2026-08-29).
+🟢 Core features complete. Modularization in progress: 16A-16C ✅, 16C-F6 ✅, Design system ✅, Autoscroll ✅, Toolbar wrapping ✅, ToolbarLayout ✅. SumatraPDF.cpp: 14,212 → ~13,830 lines. Next: 16D (FileState struct) or Canvas.cpp extraction.
 
 ## 2026-08-17 - Trim Cache + ETA Option Visibility
 
