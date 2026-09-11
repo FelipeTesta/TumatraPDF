@@ -311,6 +311,17 @@ static SeqStrings gCommandNames =
     "CmdArchResetScale\0"
     "CmdAutoScrollTimerToggle\0"
     "CmdAutoScrollTimerEdit\0"
+    "CmdFlashcardToggle\0"
+    "CmdFlashcardStudy\0"
+    "CmdFlashcardAdd\0"
+    "CmdFlashcardBack\0"
+    "CmdFlashcardNext\0"
+    "CmdFlashcardReveal\0"
+    "CmdFlashcardRate1\0"
+    "CmdFlashcardRate2\0"
+    "CmdFlashcardRate3\0"
+    "CmdFlashcardRate4\0"
+    "CmdFlashcardLista\0"
     "CmdNone\0"
     "\0";
 
@@ -610,6 +621,17 @@ static i32 gCommandIds[] = {
     CmdArchResetScale,
     CmdAutoScrollTimerToggle,
     CmdAutoScrollTimerEdit,
+    CmdFlashcardToggle,
+    CmdFlashcardStudy,
+    CmdFlashcardAdd,
+    CmdFlashcardBack,
+    CmdFlashcardNext,
+    CmdFlashcardReveal,
+    CmdFlashcardRate1,
+    CmdFlashcardRate2,
+    CmdFlashcardRate3,
+    CmdFlashcardRate4,
+    CmdFlashcardLista,
     CmdNone,
 };
 
@@ -909,6 +931,17 @@ SeqStrings gCommandDescriptions =
     "Reset Arch Scale\0"
     "Toggle Auto-Scroll Timer\0"
     "Edit Auto-Scroll Timer Duration\0"
+    "Toggle Flashcard Mode\0"
+    "Start/Stop Flashcard Study\0"
+    "Add Flashcard From Selection\0"
+    "Go To Previous Card\0"
+    "Go To Next Card\0"
+    "Reveal Flashcard Answer\0"
+    "Rate Card: Again\0"
+    "Rate Card: Hard\0"
+    "Rate Card: Good\0"
+    "Rate Card: Easy\0"
+    "Toggle Flashcard List Sidebar\0"
     "Do nothing\0"
     "\0";
 // clang-format on

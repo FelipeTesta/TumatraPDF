@@ -143,6 +143,9 @@ static ACCEL gBuiltInAccelerators[] = {
     {FVIRTKEY, 'U', CmdCreateAnnotUnderline},
     {FVIRTKEY | FSHIFT, 'U', CmdCreateAnnotUnderline},
 
+    {FVIRTKEY, 'S', CmdFlashcardAdd},
+    {FVIRTKEY | FSHIFT, 'S', CmdFlashcardAdd},
+
     {FVIRTKEY | FSHIFT, 'I', CmdInvertColors},
     {FVIRTKEY, 'I', CmdTogglePageInfo},
 

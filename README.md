@@ -223,6 +223,7 @@ The script compares the version in `sumatrapdf-src/src/Version.h` with the pre-r
 - [x] Design system: text centering (buttons/inputs), ToolbarLayout
 - [x] Autoscroll round-step speed table (25–1600 px/min)
 - [x] Toolbar wrapping (TBSTYLE_WRAPABLE) — buttons wrap to 2nd row on narrow windows
+- [x] Flashcard MVP — core toggle, study mode, SM-2, card creation from selection
 - [ ] Testes automatizados para novas funcionalidades
 
 ---
@@ -307,7 +308,7 @@ Based on SumatraPDF:
 
 ## Status
 
-🟢 Core features complete. Modularization in progress: 16A-16C ✅, 16C-F6 ✅, Design system ✅, Autoscroll ✅, Toolbar wrapping ✅, ToolbarLayout ✅. SumatraPDF.cpp: 14,212 → ~13,830 lines. Next: 16D (FileState struct) or Canvas.cpp extraction.
+🟢 Core features complete. Modularization in progress: 16A-16C ✅, 16C-F6 ✅, Design system ✅, Autoscroll ✅, Toolbar wrapping ✅, ToolbarLayout ✅, Flashcard MVP ✅. SumatraPDF.cpp: 14,212 → ~13,830 lines. Next: 16D (FileState struct) or Canvas.cpp extraction.
 
 ## 2026-08-17 - Trim Cache + ETA Option Visibility
 

@@ -327,6 +327,7 @@ Example: `tests/ad-hoc-exif.ts` clones/updates `../exif-py` and compares `-dump-
 
 Guidelines for test scripts:
 
+- Register and use `Tree Sitter` tools for a better understanding of the structure.
 - build the app the same way cmd/build.ts does (via `buildApp`/`runStandalone` in tests/util.ts) and test the resulting out/dbg64/SumatraPDF.exe
 - if a needed external tool (e.g. MiKTeX) isn't installed, don't fail the test: print a clear message (with instructions to install it) and skip that part, returning normally so `tests/all.ts` continues
 - a good test fails when the fix is reverted (verify this) — not just passes with the fix present

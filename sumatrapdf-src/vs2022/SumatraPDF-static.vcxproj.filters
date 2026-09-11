@@ -611,6 +611,15 @@
     <ClCompile Include="..\src\MainWindowCreate.cpp">
       <Filter>src</Filter>
     </ClCompile>
+    <ClCompile Include="..\src\Flashcard.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\Commands_Flashcard.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\FlashcardToolbar.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
     <ClCompile Include="..\src\Commands_File.cpp">
       <Filter>src</Filter>
     </ClCompile>

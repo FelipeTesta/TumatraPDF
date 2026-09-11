@@ -54,7 +54,7 @@ struct SelectionToolbar {
     Rect lastPlaced;    // last screen rect we moved the window to (avoids redundant SetWindowPos)
     Rect lastSelBounds; // last canvas-space selection bounds used for placement
     DWORD lastPositionUpdateTick = 0;
-    SelectionToolbarButton buttons[9];
+    SelectionToolbarButton buttons[10];
     int nButtons = 0;
 };
 
@@ -69,6 +69,7 @@ static const SelectionToolbarButton gCandidateButtons[] = {
     {CmdCreateAnnotSquiggly, "Squiggly"},
     {CmdCreateAnnotStrikeOut, "Strike Out"},
     {CmdCreateAnnotText, "Text"},
+    {CmdFlashcardAdd, "Flashcard"},
 };
 
 static void InitButtons(SelectionToolbar* tb, MainWindow* win) {

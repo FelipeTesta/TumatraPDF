@@ -26,6 +26,9 @@ struct FindBarWnd;
 struct FindWindowWnd;
 struct ArchScaleDialogWnd;
 struct FileState;
+struct Flashcard;
+struct FlashcardStudyState;
+#include "Flashcard.h"
 
 // one link numbered by keyboard link following (CmdToggleKeyboardLinkFollowing).
 // stored in page coordinates so the badges stay glued to their links while
@@ -400,6 +403,25 @@ struct MainWindow {
         HWND hwndToolbar2 = nullptr; // second toolbar
     } archTools;
     // --- end arch tools state ---
+
+    // --- flashcard state ---
+    struct FlashcardState {
+        bool on = false;                    // flashcard mode active
+        bool studyMode = false;             // true when actively studying
+        bool revealMode = false;            // true when answer is revealed (Space pressed)
+        int currentCardIdx = -1;            // index in study order
+        Vec<int> studyOrder;                // shuffled/filtered card indices
+        int studyModeType = 0;              // 0 = In Order, 1 = Random
+        int filterPageFrom = -1;            // filter: start page (-1 = all)
+        int filterPageTo = -1;              // filter: end page (-1 = all)
+        Vec<FlashcardStudyState> history;   // stack for back/undo (cardIdx + previous state)
+        Vec<Flashcard> cards;               // loaded cards from document
+        FlashcardStudyDoc studyDoc;         // loaded study state
+        // Secondary toolbar
+        HWND hwndReBarFlashcard = nullptr;
+        HWND hwndToolbarFlashcard = nullptr;
+    } flashcard;
+    // --- end flashcard state ---
 
     // --- selection & touch input state ---
     struct SelectionState {

@@ -27,6 +27,7 @@
 #include "Settings.h"
 #include "DisplayMode.h"
 #include "Annotation.h"
+#include "Flashcard.h"
 #include "FormFields.h"
 #include "DocController.h"
 #include "EngineBase.h"
@@ -3387,6 +3388,25 @@ static bool DrawDocument(MainWindow* win, HDC hdc, Rect rcArea) {
     PaintAllFindMatches(win, hdc);
     if (win->selection.showSelection) {
         PaintSelection(win, hdc);
+    }
+    // Paint flashcard highlights
+    if (win->flashcard.on) {
+        for (auto& card : win->flashcard.cards) {
+            if (!dm->ValidPageNo(card.pageNo)) continue;
+            Rect rc = dm->CvtToScreen(card.pageNo, card.bounds);
+            Gdiplus::Graphics gs(hdc);
+            if (win->flashcard.studyMode) {
+                // Studying: solid highlight color
+                Gdiplus::Color col(200, 100, 100, 100);  // dark gray, opaque
+                Gdiplus::SolidBrush brush(col);
+                gs.FillRectangle(&brush, rc.x, rc.y, rc.dx, rc.dy);
+            } else {
+                // Reading mode: subtle transparent overlay
+                Gdiplus::Color col(30, 128, 128, 128);  // light gray, very transparent
+                Gdiplus::SolidBrush brush(col);
+                gs.FillRectangle(&brush, rc.x, rc.y, rc.dx, rc.dy);
+            }
+        }
     }
     // keep the floating selection toolbar aligned with the selection while
     // scrolling/zooming; hides itself when the selection is gone or off-screen

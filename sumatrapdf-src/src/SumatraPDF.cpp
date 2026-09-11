@@ -72,6 +72,7 @@
 #include "Commands_AutoScroll.h"
 #include "Commands_ArchTools.h"
 #include "Commands_View.h"
+#include "Commands_Flashcard.h"
 #include "MainWindowCreate.h"
 #include "Flags.h"
 #include "AppSettings.h"
@@ -9544,6 +9545,10 @@ static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, L
     }
 
     if (win && HandleReadAloudMenuCommand(win, cmdId)) {
+        return 0;
+    }
+
+    if (win && HandleCommandFlashcard(win, cmdId)) {
         return 0;
     }
 

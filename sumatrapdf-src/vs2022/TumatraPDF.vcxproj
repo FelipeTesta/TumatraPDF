@@ -1388,6 +1388,9 @@ cd ../out/rel64_prefast_asan &amp; if not exist InstallerData.dat ..\..\bin\Make
     <ClCompile Include="..\src\BasePch.cpp">
       <PrecompiledHeader>Create</PrecompiledHeader>
     </ClCompile>
+    <ClCompile Include="..\src\Flashcard.cpp" />
+    <ClCompile Include="..\src\Commands_Flashcard.cpp" />
+    <ClCompile Include="..\src\FlashcardToolbar.cpp" />
     <ClCompile Include="..\src\Canvas.cpp" />
     <ClCompile Include="..\src\CanvasAboutUI.cpp" />
     <ClCompile Include="..\src\CaptionGlyphs.cpp" />

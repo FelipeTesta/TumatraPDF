@@ -304,6 +304,17 @@ export const commands = [
     "CmdArchResetScale", "Reset Arch Scale",
     "CmdAutoScrollTimerToggle", "Toggle Auto-Scroll Timer",
     "CmdAutoScrollTimerEdit", "Edit Auto-Scroll Timer Duration",
+    "CmdFlashcardToggle", "Toggle Flashcard Mode",
+    "CmdFlashcardStudy", "Start/Stop Flashcard Study",
+    "CmdFlashcardAdd", "Add Flashcard From Selection",
+    "CmdFlashcardBack", "Go To Previous Card",
+    "CmdFlashcardNext", "Go To Next Card",
+    "CmdFlashcardReveal", "Reveal Flashcard Answer",
+    "CmdFlashcardRate1", "Rate Card: Again",
+    "CmdFlashcardRate2", "Rate Card: Hard",
+    "CmdFlashcardRate3", "Rate Card: Good",
+    "CmdFlashcardRate4", "Rate Card: Easy",
+    "CmdFlashcardLista", "Toggle Flashcard List Sidebar",
     "CmdNone", "Do nothing",
 ];
 

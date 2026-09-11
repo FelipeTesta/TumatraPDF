@@ -1,5 +1,37 @@
 # TumatraPDF — Development Log
 
+## 2026-09-11 — Flashcard MVP (BUILD OK)
+
+### What
+Implemented core flashcard system for Anki-like spaced repetition study directly within PDFs.
+
+### Changes
+- **gen-commands.ts**: 11 new command IDs (Toggle, Study, Add, Back, Next, Reveal, Rate1-4, Lista)
+- **Flashcard.h**: Data model (Flashcard, FlashcardStudyState, FlashcardStudyDoc structs)
+- **Flashcard.cpp**: Core logic — LoadFromDocument (reads FreeText annotations with "Q: " prefix), StudyPath (MD5→JSON), StudySave/Load (external JSON persistence), SM-2 algorithm
+- **Commands_Flashcard.h/cpp**: 11 command handlers (Toggle, Add, Study, Reveal, Rate1-4, Back, Lista, Next)
+- **FlashcardToolbar.cpp**: Secondary toolbar with Study/Back/Lista buttons (rebar pattern like Arch Tools)
+- **Canvas.cpp**: Flashcard highlight rendering (subtle gray reading mode, solid gray study mode)
+- **MainWindow.h**: FlashcardState struct (on, studyMode, revealMode, currentCardIdx, studyOrder, cards, studyDoc, toolbar HWNDs)
+- **SelectionToolbar.cpp**: Flashcard button added to selection popup
+- **Accelerators.cpp**: 'S' shortcut for CmdFlashcardAdd
+- **SumatraPDF.cpp**: Command dispatch wired to HandleCommandFlashcard
+- **vcxproj + filters**: All new files added to both TumatraPDF.vcxproj and SumatraPDF-static.vcxproj
+
+### Architecture
+- Cards stored INSIDE PDF as FreeText annotations (Author="TumatraPDF-Flashcard", content starts with "Q: ") — portable
+- Study state external JSON in %APPDATA%\SumatraPDF\FlashcardStudy\<MD5>.json — personal
+- Study flow: Toggle→Study→Space reveals→1-4 rates→auto-advance; Back goes back
+
+### Build
+`bun cmd/build-test.ts`: 0 errors, 0 warnings.
+
+### Files Created
+src/Flashcard.h, src/Flashcard.cpp, src/FlashcardToolbar.cpp, src/Commands_Flashcard.h, src/Commands_Flashcard.cpp
+
+### Files Modified
+cmd/gen-commands.ts, src/Commands.h, src/Commands.cpp, src/MainWindow.h, src/SelectionToolbar.cpp, src/Accelerators.cpp, src/SumatraPDF.cpp, src/Canvas.cpp, vs2022/*.vcxproj + .filters
+
 ## 2026-09-10 — ToolbarLayout Integration Complete (BUILD OK)
 
 ### What
