@@ -56,4 +56,10 @@ TempStr FlashcardStudyPath(const char* filePath);
 void FlashcardToolbarCreate(MainWindow* win);
 void FlashcardToolbarDestroy(MainWindow* win);
 
+// FlashcardSidebar (in FlashcardSidebar.cpp)
+void FlashcardSidebarCreate(MainWindow* win);
+void FlashcardSidebarDestroy(MainWindow* win);
+void FlashcardSidebarToggle(MainWindow* win);
+void FlashcardSidebarPopulate(MainWindow* win);
+
 #endif

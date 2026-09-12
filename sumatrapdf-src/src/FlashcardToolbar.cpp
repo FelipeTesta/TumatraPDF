@@ -22,6 +22,7 @@ void FlashcardToolbarCreate(MainWindow* win) {
     if (win->flashcard.hwndToolbarFlashcard) {
         return; // already created
     }
+    logf("FC: FlashcardToolbarCreate - creating secondary toolbar\n");
     HINSTANCE hinst = GetModuleHandle(nullptr);
     HWND hwndParent = win->hwndFrame;
 
@@ -103,13 +104,16 @@ void FlashcardToolbarCreate(MainWindow* win) {
     win->flashcard.hwndReBarFlashcard = hwndRebar;
     win->flashcard.hwndToolbarFlashcard = hwndToolbar;
 
+    logf("FC: FlashcardToolbarCreate - toolbar created with %d buttons\n", 3);
+
     // Reposition floating child windows (timer/speed/ETA) now that the secondary toolbar exists
     LayoutToolbarChildWindows(win);
 
-    logf("FlashcardToolbarCreate: created secondary toolbar\n");
+    logf("FC: FlashcardToolbarCreate: created secondary toolbar\n");
 }
 
 void FlashcardToolbarDestroy(MainWindow* win) {
+    logf("FC: FlashcardToolbarDestroy - destroying secondary toolbar\n");
     if (!win->flashcard.hwndToolbarFlashcard) {
         return;
     }
@@ -120,5 +124,6 @@ void FlashcardToolbarDestroy(MainWindow* win) {
 
     LayoutToolbarChildWindows(win);
 
-    logf("FlashcardToolbarDestroy: destroyed secondary toolbar\n");
+    logf("FC: FlashcardToolbarDestroy - done\n");
+    logf("FC: FlashcardToolbarDestroy: destroyed secondary toolbar\n");
 }

@@ -420,6 +420,10 @@ struct MainWindow {
         // Secondary toolbar
         HWND hwndReBarFlashcard = nullptr;
         HWND hwndToolbarFlashcard = nullptr;
+        // Lista sidebar
+        HWND hwndListaBox = nullptr;
+        ILayout* listaLayout = nullptr;
+        TreeView* listaTreeView = nullptr;
     } flashcard;
     // --- end flashcard state ---
 

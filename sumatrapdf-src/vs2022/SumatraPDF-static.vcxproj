@@ -1363,6 +1363,7 @@
     <ClCompile Include="..\src\Flashcard.cpp" />
     <ClCompile Include="..\src\Commands_Flashcard.cpp" />
     <ClCompile Include="..\src\FlashcardToolbar.cpp" />
+    <ClCompile Include="..\src\FlashcardSidebar.cpp" />
     <ClCompile Include="..\src\Canvas.cpp" />
     <ClCompile Include="..\src\CanvasAboutUI.cpp" />
     <ClCompile Include="..\src\CaptionGlyphs.cpp" />

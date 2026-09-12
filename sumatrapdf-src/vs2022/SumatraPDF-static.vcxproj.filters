@@ -620,6 +620,9 @@
     <ClCompile Include="..\src\FlashcardToolbar.cpp">
       <Filter>src</Filter>
     </ClCompile>
+    <ClCompile Include="..\src\FlashcardSidebar.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
     <ClCompile Include="..\src\Commands_File.cpp">
       <Filter>src</Filter>
     </ClCompile>

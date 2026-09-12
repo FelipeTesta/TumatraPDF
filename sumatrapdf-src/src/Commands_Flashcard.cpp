@@ -24,6 +24,7 @@ extern "C" {
 #include "Toolbar.h"
 #include "Selection.h"
 #include "Flashcard.h"
+#include "FlashcardSidebar.h"
 #include "Commands_Flashcard.h"
 
 static void AddUniquePageNo(Vec<int>& pageNos, int pageNo) {
@@ -33,10 +34,70 @@ static void AddUniquePageNo(Vec<int>& pageNos, int pageNo) {
     pageNos.Append(pageNo);
 }
 
+static void HandleFlashcardRate(MainWindow* win, int rating) {
+    int cardIdx = win->flashcard.studyOrder[win->flashcard.currentCardIdx];
+    Flashcard& card = win->flashcard.cards[cardIdx];
+
+    // Find or create study state for this card
+    FlashcardStudyState state = {};
+    for (int i = 0; i < len(win->flashcard.studyDoc.states); i++) {
+        if (win->flashcard.studyDoc.states[i].annotId == card.annotId) {
+            state = win->flashcard.studyDoc.states[i].state;
+            break;
+        }
+    }
+    FlashcardSm2Update(state, rating);
+
+    // Save/update study state
+    bool found = false;
+    for (int i = 0; i < len(win->flashcard.studyDoc.states); i++) {
+        if (win->flashcard.studyDoc.states[i].annotId == card.annotId) {
+            win->flashcard.studyDoc.states[i].state = state;
+            found = true;
+            break;
+        }
+    }
+    if (!found) {
+        FlashcardStudyDoc::StateEntry entry;
+        entry.annotId = card.annotId;
+        entry.state = state;
+        win->flashcard.studyDoc.states.Append(entry);
+    }
+
+    // Save to disk
+    WindowTab* tab = win->CurrentTab();
+    if (tab && tab->filePath) {
+        FlashcardStudySave(tab->filePath.s, win->flashcard.studyDoc);
+    }
+
+    // Advance to next card
+    win->flashcard.revealMode = false;
+    win->flashcard.currentCardIdx++;
+    if (win->flashcard.currentCardIdx >= len(win->flashcard.studyOrder)) {
+        win->flashcard.studyMode = false;
+        win->flashcard.currentCardIdx = -1;
+    } else {
+        // Navigate to next card position
+        int nextCardIdx = win->flashcard.studyOrder[win->flashcard.currentCardIdx];
+        Flashcard& nextCard = win->flashcard.cards[nextCardIdx];
+        WindowTab* tab2 = win->CurrentTab();
+        if (tab2) {
+            DisplayModel* dm2 = tab2->AsFixed();
+            if (dm2) {
+                Rect screenRect = dm2->CvtToScreen(nextCard.pageNo, nextCard.bounds);
+                dm2->ScrollScreenToRect(nextCard.pageNo, screenRect);
+            }
+        }
+    }
+    MainWindowRerender(win);
+}
+
 bool HandleCommandFlashcard(MainWindow* win, int cmd) {
     switch (cmd) {
     case CmdFlashcardToggle: {
+        logf("FC: CmdFlashcardToggle - toggling flashcard mode\n");
         win->flashcard.on = !win->flashcard.on;
+        logf("FC: CmdFlashcardToggle - mode %s\n", StrL(win->flashcard.on ? "ON" : "OFF"));
         if (win->flashcard.on) {
             FlashcardToolbarCreate(win);
             // Load flashcards from current document
@@ -65,13 +126,17 @@ bool HandleCommandFlashcard(MainWindow* win, int cmd) {
         return true;
     }
     case CmdFlashcardAdd: {
+        logf("FC: CmdFlashcardAdd - adding flashcard from selection\n");
         WindowTab* tab = win->CurrentTab();
         if (!tab) return true;
         DisplayModel* dm = tab->AsFixed();
         if (!dm) return true;
         EngineBase* engine = dm->GetEngine();
         if (!engine || !EngineSupportsAnnotations(engine)) return true;
-        if (!win->selection.showSelection || !tab->selectionOnPage) return true;
+        if (!win->selection.showSelection || !tab->selectionOnPage) {
+            logf("FC: CmdFlashcardAdd - ERROR: no text selected or no engine\n");
+            return true;
+        }
 
         // Get selected text
         bool isTextOnly = false;
@@ -114,10 +179,12 @@ bool HandleCommandFlashcard(MainWindow* win, int cmd) {
         return true;
     }
     case CmdFlashcardStudy: {
+        logf("FC: CmdFlashcardStudy - toggling study mode\n");
         win->flashcard.studyMode = !win->flashcard.studyMode;
         win->flashcard.revealMode = false;
         win->flashcard.currentCardIdx = -1;
         if (win->flashcard.studyMode) {
+            logf("FC: CmdFlashcardStudy - study ON, %d cards\n", len(win->flashcard.studyOrder));
             // Build study order: all card indices
             win->flashcard.studyOrder.Reset();
             for (int i = 0; i < len(win->flashcard.cards); i++) {
@@ -137,81 +204,46 @@ bool HandleCommandFlashcard(MainWindow* win, int cmd) {
                     }
                 }
             }
+        } else {
+            logf("FC: CmdFlashcardStudy - study OFF\n");
         }
         MainWindowRerender(win);
         return true;
     }
     case CmdFlashcardReveal: {
+        logf("FC: CmdFlashcardReveal - revealing answer for card %d\n", win->flashcard.currentCardIdx);
         if (win->flashcard.studyMode && !win->flashcard.revealMode) {
             win->flashcard.revealMode = true;
             MainWindowRerender(win);
         }
         return true;
     }
-    case CmdFlashcardRate1:
-    case CmdFlashcardRate2:
-    case CmdFlashcardRate3:
-    case CmdFlashcardRate4: {
+    case CmdFlashcardRate1: {
+        logf("FC: CmdFlashcardRate1 (Again) - card %d\n", win->flashcard.currentCardIdx);
         if (!win->flashcard.studyMode || win->flashcard.currentCardIdx < 0) return true;
-        int rating = cmd - CmdFlashcardRate1 + 1;
-        int cardIdx = win->flashcard.studyOrder[win->flashcard.currentCardIdx];
-        Flashcard& card = win->flashcard.cards[cardIdx];
-
-        // Find or create study state for this card
-        FlashcardStudyState state = {};
-        for (int i = 0; i < len(win->flashcard.studyDoc.states); i++) {
-            if (win->flashcard.studyDoc.states[i].annotId == card.annotId) {
-                state = win->flashcard.studyDoc.states[i].state;
-                break;
-            }
-        }
-        FlashcardSm2Update(state, rating);
-
-        // Save/update study state
-        bool found = false;
-        for (int i = 0; i < len(win->flashcard.studyDoc.states); i++) {
-            if (win->flashcard.studyDoc.states[i].annotId == card.annotId) {
-                win->flashcard.studyDoc.states[i].state = state;
-                found = true;
-                break;
-            }
-        }
-        if (!found) {
-            FlashcardStudyDoc::StateEntry entry;
-            entry.annotId = card.annotId;
-            entry.state = state;
-            win->flashcard.studyDoc.states.Append(entry);
-        }
-
-        // Save to disk
-        WindowTab* tab = win->CurrentTab();
-        if (tab && tab->filePath) {
-            FlashcardStudySave(tab->filePath.s, win->flashcard.studyDoc);
-        }
-
-        // Advance to next card
-        win->flashcard.revealMode = false;
-        win->flashcard.currentCardIdx++;
-        if (win->flashcard.currentCardIdx >= len(win->flashcard.studyOrder)) {
-            win->flashcard.studyMode = false;
-            win->flashcard.currentCardIdx = -1;
-        } else {
-            // Navigate to next card position
-            int nextCardIdx = win->flashcard.studyOrder[win->flashcard.currentCardIdx];
-            Flashcard& nextCard = win->flashcard.cards[nextCardIdx];
-            WindowTab* tab2 = win->CurrentTab();
-            if (tab2) {
-                DisplayModel* dm2 = tab2->AsFixed();
-                if (dm2) {
-                    Rect screenRect = dm2->CvtToScreen(nextCard.pageNo, nextCard.bounds);
-                    dm2->ScrollScreenToRect(nextCard.pageNo, screenRect);
-                }
-            }
-        }
-        MainWindowRerender(win);
+        HandleFlashcardRate(win, 1);
+        return true;
+    }
+    case CmdFlashcardRate2: {
+        logf("FC: CmdFlashcardRate2 (Hard) - card %d\n", win->flashcard.currentCardIdx);
+        if (!win->flashcard.studyMode || win->flashcard.currentCardIdx < 0) return true;
+        HandleFlashcardRate(win, 2);
+        return true;
+    }
+    case CmdFlashcardRate3: {
+        logf("FC: CmdFlashcardRate3 (Good) - card %d\n", win->flashcard.currentCardIdx);
+        if (!win->flashcard.studyMode || win->flashcard.currentCardIdx < 0) return true;
+        HandleFlashcardRate(win, 3);
+        return true;
+    }
+    case CmdFlashcardRate4: {
+        logf("FC: CmdFlashcardRate4 (Easy) - card %d\n", win->flashcard.currentCardIdx);
+        if (!win->flashcard.studyMode || win->flashcard.currentCardIdx < 0) return true;
+        HandleFlashcardRate(win, 4);
         return true;
     }
     case CmdFlashcardBack: {
+        logf("FC: CmdFlashcardBack - going back\n");
         if (win->flashcard.studyMode && win->flashcard.currentCardIdx > 0) {
             win->flashcard.revealMode = false;
             win->flashcard.currentCardIdx--;
@@ -227,14 +259,17 @@ bool HandleCommandFlashcard(MainWindow* win, int cmd) {
                 }
             }
             MainWindowRerender(win);
+        } else {
+            logf("FC: CmdFlashcardBack - no previous card\n");
         }
         return true;
     }
     case CmdFlashcardLista:
-        logf("Flashcard: Lista sidebar (v2)\n");
+        logf("FC: CmdFlashcardLista - toggling sidebar\n");
+        FlashcardSidebarToggle(win);
         return true;
     case CmdFlashcardNext:
-        // Not used in auto-advance study mode
+        logf("FC: CmdFlashcardNext - not used (auto-advance)\n");
         return true;
     default:
         return false;

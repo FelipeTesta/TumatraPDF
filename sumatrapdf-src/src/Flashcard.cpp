@@ -20,6 +20,7 @@ extern "C" {
 // Iterate all annotations on all pages and extract flashcards.
 // Flashcards are FreeText annotations whose contents start with "Q: "
 Vec<Flashcard> FlashcardLoadFromDocument(EngineMupdf* engine) {
+    logf("FC: FlashcardLoadFromDocument - scanning document annotations\n");
     Vec<Flashcard> result;
     if (!engine || !engine->pdfdoc) {
         return result;
@@ -64,11 +65,13 @@ Vec<Flashcard> FlashcardLoadFromDocument(EngineMupdf* engine) {
         fz_drop_page(ctx, page);
     }
 
+    logf("FC: FlashcardLoadFromDocument - found %d flashcards\n", len(result));
     return result;
 }
 
 // Compute MD5 hash of filePath and return %APPDATA%\SumatraPDF\FlashcardStudy\<md5>.json
 TempStr FlashcardStudyPath(const char* filePath) {
+    logf("FC: FlashcardStudyPath - computing for %s\n", Str(filePath));
     if (!filePath) {
         return {};
     }
@@ -98,6 +101,7 @@ static void WriteJsonValue(FILE* f, const FlashcardStudyState& state) {
 
 // Save flashcard study state to external JSON file
 void FlashcardStudySave(const char* filePath, const FlashcardStudyDoc& doc) {
+    logf("FC: FlashcardStudySave - saving to %s\n", Str(filePath));
     if (!filePath) {
         return;
     }
@@ -115,6 +119,7 @@ void FlashcardStudySave(const char* filePath, const FlashcardStudyDoc& doc) {
 
     FILE* f = fopen(path.s, "wb");
     if (!f) {
+        logf("FC: FlashcardStudySave - ERROR: failed to open file %s\n", Str(filePath));
         logf("FlashcardStudySave: failed to open '%s' for writing\n", path);
         return;
     }
@@ -139,6 +144,8 @@ void FlashcardStudySave(const char* filePath, const FlashcardStudyDoc& doc) {
     fprintf(f,
             "\n  }\n"
             "}\n");
+
+    logf("FC: FlashcardStudySave - saved %d entries\n", len(doc.states));
 
     fclose(f);
 }
@@ -275,6 +282,7 @@ static bool ParseJsonObject(Str json, Vec<FlashcardStudyDoc::StateEntry>* outSta
 
 // Load flashcard study state from external JSON file
 FlashcardStudyDoc FlashcardStudyLoad(const char* filePath) {
+    logf("FC: FlashcardStudyLoad - loading from %s\n", Str(filePath));
     FlashcardStudyDoc doc;
     doc.version = 1;
 
@@ -319,12 +327,15 @@ FlashcardStudyDoc FlashcardStudyLoad(const char* filePath) {
     }
 
     ParseJsonObject(json, &doc.states);
+
+    logf("FC: FlashcardStudyLoad - loaded %d entries\n", len(doc.states));
     return doc;
 }
 
 // SM-2 algorithm (lite version) for spaced repetition
 // rating: 1=Again, 2=Hard, 3=Good, 4=Easy
 void FlashcardSm2Update(FlashcardStudyState& state, int rating) {
+    logf("FC: FlashcardSm2Update - rating=%d interval=%d ease=%.2f\n", rating, state.interval, state.easeFactor);
     i64 now = (i64)time(nullptr) * 1000; // milliseconds since epoch
 
     state.rating = rating;
@@ -354,6 +365,8 @@ void FlashcardSm2Update(FlashcardStudyState& state, int rating) {
     }
 
     state.nextReviewAt = now + (i64)state.interval * 86400000LL; // interval days * 24*60*60*1000
+
+    logf("FC: FlashcardSm2Update - new interval=%d ease=%.2f\n", state.interval, state.easeFactor);
 }
 
 #include "Flashcard.h"
