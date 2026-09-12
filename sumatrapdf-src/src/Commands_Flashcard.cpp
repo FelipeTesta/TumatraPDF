@@ -126,7 +126,16 @@ bool HandleCommandFlashcard(MainWindow* win, int cmd) {
             // Navigate to first card
             if (len(win->flashcard.studyOrder) > 0) {
                 win->flashcard.currentCardIdx = 0;
-                // TODO: navigate to card position
+                int cardIdx = win->flashcard.studyOrder[0];
+                Flashcard& card = win->flashcard.cards[cardIdx];
+                WindowTab* tab = win->CurrentTab();
+                if (tab) {
+                    DisplayModel* dm = tab->AsFixed();
+                    if (dm) {
+                        Rect screenRect = dm->CvtToScreen(card.pageNo, card.bounds);
+                        dm->ScrollScreenToRect(card.pageNo, screenRect);
+                    }
+                }
             }
         }
         MainWindowRerender(win);
@@ -186,6 +195,18 @@ bool HandleCommandFlashcard(MainWindow* win, int cmd) {
         if (win->flashcard.currentCardIdx >= len(win->flashcard.studyOrder)) {
             win->flashcard.studyMode = false;
             win->flashcard.currentCardIdx = -1;
+        } else {
+            // Navigate to next card position
+            int nextCardIdx = win->flashcard.studyOrder[win->flashcard.currentCardIdx];
+            Flashcard& nextCard = win->flashcard.cards[nextCardIdx];
+            WindowTab* tab2 = win->CurrentTab();
+            if (tab2) {
+                DisplayModel* dm2 = tab2->AsFixed();
+                if (dm2) {
+                    Rect screenRect = dm2->CvtToScreen(nextCard.pageNo, nextCard.bounds);
+                    dm2->ScrollScreenToRect(nextCard.pageNo, screenRect);
+                }
+            }
         }
         MainWindowRerender(win);
         return true;
@@ -194,6 +215,17 @@ bool HandleCommandFlashcard(MainWindow* win, int cmd) {
         if (win->flashcard.studyMode && win->flashcard.currentCardIdx > 0) {
             win->flashcard.revealMode = false;
             win->flashcard.currentCardIdx--;
+            // Navigate to previous card position
+            int prevCardIdx = win->flashcard.studyOrder[win->flashcard.currentCardIdx];
+            Flashcard& prevCard = win->flashcard.cards[prevCardIdx];
+            WindowTab* tab3 = win->CurrentTab();
+            if (tab3) {
+                DisplayModel* dm3 = tab3->AsFixed();
+                if (dm3) {
+                    Rect screenRect = dm3->CvtToScreen(prevCard.pageNo, prevCard.bounds);
+                    dm3->ScrollScreenToRect(prevCard.pageNo, screenRect);
+                }
+            }
             MainWindowRerender(win);
         }
         return true;
