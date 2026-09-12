@@ -22,6 +22,8 @@ extern "C" {
 #include "MainWindow.h"
 #include "WindowTab.h"
 #include "Toolbar.h"
+#include "SumatraDialogs.h"
+#include "AppSettings.h"
 #include "Selection.h"
 #include "Flashcard.h"
 #include "FlashcardSidebar.h"
@@ -32,6 +34,23 @@ static void AddUniquePageNo(Vec<int>& pageNos, int pageNo) {
         if (pageNos[i] == pageNo) return;
     }
     pageNos.Append(pageNo);
+}
+
+static void BuildFilteredStudyOrder(MainWindow* win) {
+    win->flashcard.studyOrder.Reset();
+    for (int i = 0; i < len(win->flashcard.cards); i++) {
+        Flashcard& card = win->flashcard.cards[i];
+        int from = win->flashcard.filterPageFrom;
+        int to = win->flashcard.filterPageTo;
+        bool passFilter = true;
+        if (from > 0 && card.pageNo < from) passFilter = false;
+        if (to > 0 && card.pageNo > to) passFilter = false;
+        if (passFilter) {
+            win->flashcard.studyOrder.Append(i);
+        }
+    }
+    logf("FC: BuildFilteredStudyOrder - %d cards in filter range (from=%d, to=%d)\n",
+         len(win->flashcard.studyOrder), win->flashcard.filterPageFrom, win->flashcard.filterPageTo);
 }
 
 static void HandleFlashcardRate(MainWindow* win, int rating) {
@@ -120,6 +139,8 @@ bool HandleCommandFlashcard(MainWindow* win, int cmd) {
             win->flashcard.cards.Reset();
             win->flashcard.studyDoc.states.Reset();
             win->flashcard.studyOrder.Reset();
+            win->flashcard.filterPageFrom = -1;
+            win->flashcard.filterPageTo = -1;
         }
         MainWindowRerender(win);
         ToolbarUpdateStateForWindow(win, true);
@@ -185,11 +206,8 @@ bool HandleCommandFlashcard(MainWindow* win, int cmd) {
         win->flashcard.currentCardIdx = -1;
         if (win->flashcard.studyMode) {
             logf("FC: CmdFlashcardStudy - study ON, %d cards\n", len(win->flashcard.studyOrder));
-            // Build study order: all card indices
-            win->flashcard.studyOrder.Reset();
-            for (int i = 0; i < len(win->flashcard.cards); i++) {
-                win->flashcard.studyOrder.Append(i);
-            }
+            // Build filtered study order
+            BuildFilteredStudyOrder(win);
             // Navigate to first card
             if (len(win->flashcard.studyOrder) > 0) {
                 win->flashcard.currentCardIdx = 0;
@@ -271,6 +289,55 @@ bool HandleCommandFlashcard(MainWindow* win, int cmd) {
     case CmdFlashcardNext:
         logf("FC: CmdFlashcardNext - not used (auto-advance)\n");
         return true;
+    case CmdFlashcardFilter: {
+        logf("FC: CmdFlashcardFilter - opening page filter dialog\n");
+        // Get current page count
+        int pageCount = 0;
+        WindowTab* tab = win->CurrentTab();
+        if (tab) {
+            DisplayModel* dm = tab->AsFixed();
+            if (dm) {
+                pageCount = dm->PageCount();
+            }
+        }
+        if (pageCount <= 0) {
+            logf("FC: CmdFlashcardFilter - ERROR: no document loaded\n");
+            return true;
+        }
+        // Show simple filter dialog using GoToPage pattern
+        TempStr fromStr = nullptr;
+        TempStr toStr = nullptr;
+        if (win->flashcard.filterPageFrom > 0) {
+            fromStr = fmt("%d", win->flashcard.filterPageFrom);
+        }
+        if (win->flashcard.filterPageTo > 0) {
+            toStr = fmt("%d", win->flashcard.filterPageTo);
+        }
+        // Use two sequential GoToPage dialogs
+        TempStr result1 = Dialog_GoToPage(win->hwndFrame, fromStr ? fromStr : StrL(""), pageCount, true);
+        if (result1 && len(result1) > 0) {
+            int from = ParseInt(result1);
+            if (from >= 1 && from <= pageCount) {
+                win->flashcard.filterPageFrom = from;
+            }
+        } else if (result1 && len(result1) == 0) {
+            // Empty = clear filter from
+            win->flashcard.filterPageFrom = -1;
+        }
+        TempStr result2 = Dialog_GoToPage(win->hwndFrame, toStr ? toStr : StrL(""), pageCount, true);
+        if (result2 && len(result2) > 0) {
+            int to = ParseInt(result2);
+            if (to >= 1 && to <= pageCount) {
+                win->flashcard.filterPageTo = to;
+            }
+        } else if (result2 && len(result2) == 0) {
+            // Empty = clear filter to
+            win->flashcard.filterPageTo = -1;
+        }
+        logf("FC: CmdFlashcardFilter - filter set: from=%d, to=%d\n",
+             win->flashcard.filterPageFrom, win->flashcard.filterPageTo);
+        return true;
+    }
     default:
         return false;
     }

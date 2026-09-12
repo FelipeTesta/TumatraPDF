@@ -334,3 +334,36 @@ Correct include order in `.cpp` files:
 - Never commit automatically — wait for explicit command
 - Use `bun cmd/build-test.ts` for test builds, `bun cmd/build.ts` for production
 - Always pass `-for-testing` flag when launching for ad-hoc testing
+
+## Development Log (LOG.md) Conventions
+
+LOG.md uses [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) format with additional categories.
+
+### Format rules
+
+- **Header**: `## [YYYY-MM-DD] — Short Title` (one entry per session/day)
+- **Categories** (use only those that apply):
+  - `### Added` — new features, files, commands
+  - `### Changed` — modifications to existing behavior
+  - `### Fixed` — bug fixes
+  - `### Removed` — deleted features/files
+  - `### Deprecated` — soon-to-be-removed features
+  - `### Decisions` — technical rationale (lightweight ADR)
+  - `### Notes` — deferred tasks, warnings, context
+- **[Unreleased]** section at top — tracks work in progress on current branch
+- **Concise bullets** — one change per line, no paragraphs
+- **Describe WHY**, not just WHAT — avoid git log dump
+- **Reference commits** in body when relevant: `- d4786a4 feat(flashcard): study navigation`
+
+### When to update
+
+- At end of each development session
+- Before git checkpoints
+- When starting/stopping work on a feature branch
+
+### Anti-patterns to avoid
+
+- ❌ Listing every file changed (that's git diff's job)
+- ❌ Long paragraphs describing implementation details
+- ❌ Mixing user-facing changes with internal refactoring
+- ❌ Forgetting to update [Unreleased] when work completes

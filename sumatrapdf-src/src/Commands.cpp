@@ -316,6 +316,7 @@ static SeqStrings gCommandNames =
     "CmdFlashcardAdd\0"
     "CmdFlashcardBack\0"
     "CmdFlashcardNext\0"
+    "CmdFlashcardFilter\0"
     "CmdFlashcardReveal\0"
     "CmdFlashcardRate1\0"
     "CmdFlashcardRate2\0"
@@ -626,6 +627,7 @@ static i32 gCommandIds[] = {
     CmdFlashcardAdd,
     CmdFlashcardBack,
     CmdFlashcardNext,
+    CmdFlashcardFilter,
     CmdFlashcardReveal,
     CmdFlashcardRate1,
     CmdFlashcardRate2,
@@ -936,6 +938,7 @@ SeqStrings gCommandDescriptions =
     "Add Flashcard From Selection\0"
     "Go To Previous Card\0"
     "Go To Next Card\0"
+    "Filter Flashcards By Page Range\0"
     "Reveal Flashcard Answer\0"
     "Rate Card: Again\0"
     "Rate Card: Hard\0"

@@ -1,9 +1,13 @@
 [![Build](https://github.com/sumatrapdfreader/sumatrapdf/actions/workflows/build.yml/badge.svg?branch=master)](https://github.com/sumatrapdfreader/sumatrapdf/actions/workflows/build.yml)
-## SumatraPDF Reader
+
+## TumatraPDF Reader (Fork with Flashcard MVP ✅, Page Filter ✅, Structured Logging ✅)
 
 SumatraPDF is a multi-format (PDF, EPUB, MOBI, CBZ, CBR, FB2, CHM, XPS, DjVu) reader
 for Windows under (A)GPLv3 license, with some code under BSD license (see
 AUTHORS).
+
+### Roadmap / Features
+- [x] Flashcard MVP — core toggle, study mode, SM-2, card creation, sidebar, filter, logging
 
 More Information:
 * [Website](https://www.sumatrapdfreader.org/free-pdf-reader)

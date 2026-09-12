@@ -60,6 +60,7 @@ void FlashcardToolbarCreate(MainWindow* win) {
         {CmdFlashcardStudy, _TRN("Study")},
         {CmdFlashcardBack, _TRN("Back")},
         {CmdFlashcardLista, _TRN("Lista")},
+        {CmdFlashcardFilter, _TRN("Filter")},
     };
     constexpr int kFlashcardToolbarButtonsCount = dimof(gFlashcardToolbarButtons);
 
@@ -104,7 +105,7 @@ void FlashcardToolbarCreate(MainWindow* win) {
     win->flashcard.hwndReBarFlashcard = hwndRebar;
     win->flashcard.hwndToolbarFlashcard = hwndToolbar;
 
-    logf("FC: FlashcardToolbarCreate - toolbar created with %d buttons\n", 3);
+    logf("FC: FlashcardToolbarCreate - toolbar created with %d buttons\n", kFlashcardToolbarButtonsCount);
 
     // Reposition floating child windows (timer/speed/ETA) now that the secondary toolbar exists
     LayoutToolbarChildWindows(win);

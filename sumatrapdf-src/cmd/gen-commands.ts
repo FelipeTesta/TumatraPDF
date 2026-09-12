@@ -309,6 +309,7 @@ export const commands = [
     "CmdFlashcardAdd", "Add Flashcard From Selection",
     "CmdFlashcardBack", "Go To Previous Card",
     "CmdFlashcardNext", "Go To Next Card",
+    "CmdFlashcardFilter", "Filter Flashcards By Page Range",
     "CmdFlashcardReveal", "Reveal Flashcard Answer",
     "CmdFlashcardRate1", "Rate Card: Again",
     "CmdFlashcardRate2", "Rate Card: Hard",
