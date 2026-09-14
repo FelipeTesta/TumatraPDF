@@ -9,6 +9,7 @@ struct Static;
 
 struct ArchScaleDialogWnd : Wnd {
     MainWindow* win = nullptr;
+    int pageNo = 0; // page this dialog is for
     HFONT font = nullptr;
     Edit* editLen = nullptr;
     DropDown* comboUnit = nullptr;

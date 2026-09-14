@@ -12,5 +12,6 @@ void HandleCmdArchMeasure(MainWindow* win);
 void HandleCmdArchClear(MainWindow* win);
 void HandleCmdArchResetScale(MainWindow* win);
 void HandleCmdArchToolsToggle(MainWindow* win);
+void HandleCmdArchCleanAll(MainWindow* win);
 
 #endif

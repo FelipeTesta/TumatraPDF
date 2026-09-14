@@ -105,6 +105,8 @@ static ToolbarButtonInfo gToolbarButtons[] = {
     {TbIcon::Text, CmdViewportCropToggle, _TRN("Two Column")},
     {TbIcon::Text, CmdMarginTrimToggle, _TRN("Trim")},
     {TbIcon::Text, CmdTrimConfig, _TRN("Trim Config")},
+    {TbIcon::None, 0, nullptr}, // separator
+    {TbIcon::Text, CmdFlashcardToggle, _TRN("Flashcard")},
     {TbIcon::None, 0, nullptr}, // separator before Arch Tools toggle
     {TbIcon::Text, CmdArchToolsToggle, _TRN("Arch Tools")},
 };
@@ -169,14 +171,29 @@ int GetToolbarButtonsByID(int cmdId, int (&buttons)[4]) {
 }
 
 void SetToolbarButtonCheckedState(MainWindow* win, int cmdId, bool isChecked) {
+    // Search main toolbar
     int buttons[4];
     int n = GetToolbarButtonsByID(cmdId, buttons);
-    if (n == 0) return;
     for (int i = 0; i < n; i++) {
         int idx = buttons[i];
         UpdateToolbarButtonStateByIdx(win->hwndToolbar, idx, isChecked, TBSTATE_CHECKED);
     }
-    // update gAnyToggleChecked: scan all toggle buttons (BTNS_CHECK)
+    // Also search toolbar2 (arch tools) if it exists
+    if (win->archTools.hwndToolbar2) {
+        int count2 = (int)SendMessageW(win->archTools.hwndToolbar2, TB_BUTTONCOUNT, 0, 0);
+        for (int idx = 0; idx < count2; idx++) {
+            TBBUTTONINFOW bi{};
+            bi.cbSize = sizeof(bi);
+            bi.dwMask = TBIF_BYINDEX | TBIF_COMMAND;
+            if (SendMessageW(win->archTools.hwndToolbar2, TB_GETBUTTONINFO, idx, (LPARAM)&bi)) {
+                if (bi.idCommand == cmdId) {
+                    UpdateToolbarButtonStateByIdx(win->archTools.hwndToolbar2, idx, isChecked, TBSTATE_CHECKED);
+                    break;
+                }
+            }
+        }
+    }
+    // update gAnyToggleChecked: scan main toolbar for toggle buttons (BTNS_CHECK)
     gAnyToggleChecked = false;
     int count = (int)SendMessageW(win->hwndToolbar, TB_BUTTONCOUNT, 0, 0);
     for (int i = 0; i < count; i++) {
@@ -187,6 +204,21 @@ void SetToolbarButtonCheckedState(MainWindow* win, int cmdId, bool isChecked) {
             if ((bi.fsStyle & BTNS_CHECK) && (bi.fsState & TBSTATE_CHECKED)) {
                 gAnyToggleChecked = true;
                 break;
+            }
+        }
+    }
+    // Also check toolbar2 for any toggles
+    if (!gAnyToggleChecked && win->archTools.hwndToolbar2) {
+        int count2 = (int)SendMessageW(win->archTools.hwndToolbar2, TB_BUTTONCOUNT, 0, 0);
+        for (int i = 0; i < count2; i++) {
+            TBBUTTONINFOW bi{};
+            bi.cbSize = sizeof(bi);
+            bi.dwMask = TBIF_BYINDEX | TBIF_STATE | TBIF_STYLE;
+            if (SendMessageW(win->archTools.hwndToolbar2, TB_GETBUTTONINFO, i, (LPARAM)&bi)) {
+                if ((bi.fsStyle & BTNS_CHECK) && (bi.fsState & TBSTATE_CHECKED)) {
+                    gAnyToggleChecked = true;
+                    break;
+                }
             }
         }
     }
@@ -1007,7 +1039,8 @@ static LRESULT CALLBACK WndProcToolbar(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp
     if (WM_SIZE == msg) {
         MainWindow* win = FindMainWindowByHwnd(hwnd);
         if (win) {
-            // LayoutToolbarChildWindows is the single entry point for positioning all toolbar child windows (timer/speed/page/ETA)
+            // LayoutToolbarChildWindows is the single entry point for positioning all toolbar child windows
+            // (timer/speed/page/ETA)
             LayoutToolbarChildWindows(win);
         }
     }
@@ -1994,17 +2027,16 @@ void CreateToolbar2(MainWindow* win) {
         DarkMode::setWindowNotifyCustomDrawSubclass(win->archTools.hwndReBar2);
     }
 
-    // Add 4 buttons: Scale, Measure, Clean lines, Reset Scale
+    // Add 5 buttons: Scale, Measure, Clean lines, Reset Scale, Clean All
     struct ToolbarButtonInfo2 {
         TbIcon bmpIndex;
         int cmdId;
         Str toolTip;
     };
     static ToolbarButtonInfo2 gToolbar2Buttons[] = {
-        {TbIcon::Text, CmdArchScale, _TRN("Scale")},
-        {TbIcon::Text, CmdArchMeasure, _TRN("Measure")},
-        {TbIcon::Text, CmdArchClear, _TRN("Clean lines")},
-        {TbIcon::Text, CmdArchResetScale, _TRN("Reset Scale")},
+        {TbIcon::Text, CmdArchScale, _TRN("Scale")},        {TbIcon::Text, CmdArchMeasure, _TRN("Measure")},
+        {TbIcon::Text, CmdArchClear, _TRN("Clean lines")},  {TbIcon::Text, CmdArchResetScale, _TRN("Reset Scale")},
+        {TbIcon::Text, CmdArchCleanAll, _TRN("Clean All")},
     };
     constexpr int kToolbar2ButtonsCount = dimof(gToolbar2Buttons);
 
@@ -2016,6 +2048,10 @@ void CreateToolbar2(MainWindow* win) {
         b.iBitmap = (int)bi.bmpIndex;
         b.fsState = TBSTATE_ENABLED;
         b.fsStyle = BTNS_BUTTON;
+        // Measure button is a toggle — needs BTNS_CHECK for visual checked state
+        if (bi.cmdId == CmdArchMeasure) {
+            b.fsStyle |= BTNS_CHECK;
+        }
         if (bi.bmpIndex == TbIcon::Text) {
             b.fsStyle |= BTNS_SHOWTEXT;
             b.fsStyle |= BTNS_AUTOSIZE;
@@ -2061,6 +2097,18 @@ void CreateToolbar2(MainWindow* win) {
         DefWndProcToolbar = (WNDPROC)GetWindowLongPtr(win->hwndToolbar, GWLP_WNDPROC);
     }
     SetWindowLongPtr(win->archTools.hwndToolbar2, GWLP_WNDPROC, (LONG_PTR)WndProcToolbar);
+}
+
+void ToolbarApplyThemeToRebar(HWND hwndRebar, HWND hwndToolbar) {
+    SetWindowSubclass(hwndRebar, ReBarWndProc, 0, 0);
+    SetWindowTheme(hwndToolbar, L"", L"");
+    if (UseDarkModeLib()) {
+        DarkMode::setWindowNotifyCustomDrawSubclass(hwndRebar);
+    }
+    SetWindowLongPtr(hwndToolbar, GWLP_WNDPROC, (LONG_PTR)WndProcToolbar);
+    if (!IsCurrentThemeDefault()) {
+        SendMessageW(hwndRebar, RB_SETBKCOLOR, 0, ThemeControlBackgroundColor());
+    }
 }
 
 void DestroyToolbar2(MainWindow* win) {

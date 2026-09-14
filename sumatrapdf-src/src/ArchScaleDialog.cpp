@@ -88,26 +88,32 @@ void ArchScaleDialogWnd::SetLength(float realLen) {
 
 void ArchScaleDialogWnd::OnDrawLine() {
     if (!win) return;
+    // Get per-page scale state
+    auto& ps = win->archTools.GetScaleForPage(pageNo);
     // Clear any existing scale line so user can draw a new one
-    win->archTools.scaleLineDefined = false;
+    ps.scaleLineDefined = false;
     win->archTools.dragLine = 0;
     win->archTools.point1 = Point{0, 0};
     win->archTools.point2 = Point{0, 0};
     win->archTools.toolMode = 1; // scale mode
     // Do NOT SetCapture or set mouseAction=Dragging here.
     // Capture is acquired on first canvas click in OnMouseLeftButtonDown.
-    LogInfo("[arch] OnDrawLine: archToolMode=%d archDragLine=%d", win->archTools.toolMode, win->archTools.dragLine);
+    LogInfo("[arch] OnDrawLine: page %d archToolMode=%d archDragLine=%d", pageNo, win->archTools.toolMode,
+            win->archTools.dragLine);
     ScheduleRepaint(win, 0);
 }
 
 void ArchScaleDialogWnd::OnOk() {
     if (!win) return;
 
-    // Require a valid scale line: either just drawn (archScaleLineDefined)
-    // or an existing scale whose endpoints are still stored (archScaleSet)
-    if (!(win->archTools.scaleLineDefined || win->archTools.scaleSet)) {
+    // Get per-page scale state
+    auto& ps = win->archTools.GetScaleForPage(pageNo);
+
+    // Require a valid scale line: either just drawn (scaleLineDefined)
+    // or an existing scale whose endpoints are still stored (scaleSet)
+    if (!(ps.scaleLineDefined || ps.scaleSet)) {
         MessageBeep(MB_ICONWARNING);
-        LogInfo("[arch] OnOk: no scale line defined");
+        LogInfo("[arch] OnOk: page %d no scale line defined", pageNo);
         return;
     }
 
@@ -145,8 +151,8 @@ void ArchScaleDialogWnd::OnOk() {
     }
 
     // Compute page length from the two endpoints (in page coords)
-    float dx = win->archTools.scaleLineP2x - win->archTools.scaleLineP1x;
-    float dy = win->archTools.scaleLineP2y - win->archTools.scaleLineP1y;
+    float dx = ps.scaleLineP2x - ps.scaleLineP1x;
+    float dy = ps.scaleLineP2y - ps.scaleLineP1y;
     float pageLenPt = sqrtf(dx * dx + dy * dy);
 
     if (pageLenPt <= 0.0f) {
@@ -158,10 +164,11 @@ void ArchScaleDialogWnd::OnOk() {
     float realLenM = realLen * kMeterPerUnit[selUnit];
 
     // Scale factor = page units per METER (canonical)
-    win->archTools.scaleFactor = pageLenPt / realLenM;
-    win->archTools.scaleSet = true;
-    win->archTools.scaleAnchorX = win->archTools.scaleLineP1x;
-    win->archTools.scaleAnchorY = win->archTools.scaleLineP1y;
+    ps.scaleFactor = pageLenPt / realLenM;
+    ps.scaleSet = true;
+    ps.scaleAnchorX = ps.scaleLineP1x;
+    ps.scaleAnchorY = ps.scaleLineP1y;
+    ps.unit = selUnit;
 
     // Persist the selected unit as global preference
     gGlobalPrefs->archUnit = selUnit;
@@ -370,14 +377,15 @@ bool ArchScaleDialogWnd::Create(MainWindow* mainWin) {
     }
 
     // Pre-fill edit with current length if a scale line already exists
-    if (win->archTools.scaleSet && win->archTools.scaleFactor > 0.0f) {
-        float sdx = win->archTools.scaleLineP2x - win->archTools.scaleLineP1x;
-        float sdy = win->archTools.scaleLineP2y - win->archTools.scaleLineP1y;
+    auto& ps = win->archTools.GetScaleForPage(pageNo);
+    if (ps.scaleSet && ps.scaleFactor > 0.0f) {
+        float sdx = ps.scaleLineP2x - ps.scaleLineP1x;
+        float sdy = ps.scaleLineP2y - ps.scaleLineP1y;
         float pageLenPt = sqrtf(sdx * sdx + sdy * sdy);
         // archScaleFactor is now page units per METER (canonical)
         // realLen in meters = pageLenPt / archScaleFactor
         // Convert to current display unit for the edit box
-        float realLenM = pageLenPt / win->archTools.scaleFactor;
+        float realLenM = pageLenPt / ps.scaleFactor;
         float realLenDisp = realLenM / kMeterPerUnit[gGlobalPrefs->archUnit];
         SetLength(realLenDisp);
     }
@@ -405,8 +413,11 @@ void ShowArchScaleDialog(MainWindow* win) {
         HwndSetFocus(gArchScaleDialog->hwnd);
         return;
     }
-    LogInfo("[arch] ShowArchScaleDialog: archToolMode=%d", win->archTools.toolMode);
+    auto* dm = win->AsFixed();
+    int pageNo = dm ? dm->CurrentPageNo() : 1;
+    LogInfo("[arch] ShowArchScaleDialog: page %d, archToolMode=%d", pageNo, win->archTools.toolMode);
     auto* wnd = new ArchScaleDialogWnd();
+    wnd->pageNo = pageNo;
     wnd->onClose = MkFunc1Void<Wnd::CloseEvent*>(OnClose);
     wnd->onDestroy = MkFunc1Void<Wnd::DestroyEvent*>(OnDestroy);
     wnd->font = GetAppFont(win->hwndFrame);

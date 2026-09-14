@@ -29,6 +29,8 @@ extern "C" {
 #include "FlashcardSidebar.h"
 #include "Commands_Flashcard.h"
 
+bool RelayoutFrame(MainWindow* win, bool updateToolbars = true, int sidebarDx = -1);
+
 static void AddUniquePageNo(Vec<int>& pageNos, int pageNo) {
     for (int i = 0; i < len(pageNos); i++) {
         if (pageNos[i] == pageNo) return;
@@ -89,6 +91,8 @@ static void HandleFlashcardRate(MainWindow* win, int rating) {
         FlashcardStudySave(tab->filePath.s, win->flashcard.studyDoc);
     }
 
+    FlashcardToolbarUpdateCount(win);
+
     // Advance to next card
     win->flashcard.revealMode = false;
     win->flashcard.currentCardIdx++;
@@ -119,6 +123,15 @@ bool HandleCommandFlashcard(MainWindow* win, int cmd) {
         logf("FC: CmdFlashcardToggle - mode %s\n", StrL(win->flashcard.on ? "ON" : "OFF"));
         if (win->flashcard.on) {
             FlashcardToolbarCreate(win);
+            RelayoutFrame(win, true, -1);
+            // Close arch tools if open (mutually exclusive toolbars)
+            if (win->archTools.on) {
+                win->archTools.on = false;
+                if (win->archTools.hwndReBar2) {
+                    ShowWindow(win->archTools.hwndReBar2, SW_HIDE);
+                }
+                SetToolbarButtonCheckedState(win, CmdArchToolsToggle, false);
+            }
             // Load flashcards from current document
             WindowTab* tab = win->CurrentTab();
             if (tab) {
@@ -128,11 +141,13 @@ bool HandleCommandFlashcard(MainWindow* win, int cmd) {
                     if (engine) {
                         win->flashcard.cards = FlashcardLoadFromDocument(engine);
                         logf("Flashcard: loaded %d cards\n", len(win->flashcard.cards));
+                        FlashcardToolbarUpdateCount(win);
                     }
                 }
             }
         } else {
             FlashcardToolbarDestroy(win);
+            RelayoutFrame(win, true, -1);
             win->flashcard.studyMode = false;
             win->flashcard.revealMode = false;
             win->flashcard.currentCardIdx = -1;
@@ -164,9 +179,9 @@ bool HandleCommandFlashcard(MainWindow* win, int cmd) {
         TempStr selText = GetSelectedTextTemp(tab, StrL("\r\n"), isTextOnly);
         Str content = fmt("Q: %s", selText ? Str(selText.s) : StrL(""));
 
-        // Create FreeText annotation
+        // Create Highlight annotation that covers the selected text
         AnnotCreateArgs args{};
-        args.annotType = AnnotationType::FreeText;
+        args.annotType = AnnotationType::Highlight;
         args.content = content;
         args.setContentToSelection = false;
 
@@ -196,6 +211,8 @@ bool HandleCommandFlashcard(MainWindow* win, int cmd) {
             DeleteOldSelectionInfo(win, true);
             MainWindowRerender(win);
             ToolbarUpdateStateForWindow(win, true);
+            FlashcardToolbarUpdateCount(win);
+            logf("[FC] Card added. Use CmdFlashcardAddTip to add a hint.\n");
         }
         return true;
     }
@@ -286,6 +303,74 @@ bool HandleCommandFlashcard(MainWindow* win, int cmd) {
         logf("FC: CmdFlashcardLista - toggling sidebar\n");
         FlashcardSidebarToggle(win);
         return true;
+    case CmdFlashcardAddTip: {
+        logf("FC: CmdFlashcardAddTip - adding tip to current flashcard\n");
+        if (!win->flashcard.on || len(win->flashcard.cards) == 0) {
+            logf("[FC] AddTip: no flashcards\n");
+            return true;
+        }
+        // Get the current study card or last created card
+        int idx = win->flashcard.studyMode ? win->flashcard.studyOrder[win->flashcard.currentCardIdx] : len(win->flashcard.cards) - 1;
+        if (idx < 0 || idx >= len(win->flashcard.cards)) return true;
+        Flashcard& card = win->flashcard.cards[idx];
+
+        // Show simple message box asking for tip (placeholder for now)
+        int result = MessageBoxW(win->hwndFrame, L"Enter a hint for this flashcard?\n(Feature in development)", L"Flashcard Tip", MB_OKCANCEL | MB_ICONINFORMATION);
+        if (result == IDOK) {
+            // For now, set a placeholder tip
+            str::Free(card.tip);
+            card.tip = str::Dup(StrL("(hint)"));
+
+            // Update annotation in PDF
+            WindowTab* tab = win->CurrentTab();
+            if (tab) {
+                DisplayModel* dm = tab->AsFixed();
+                if (dm) {
+                    EngineMupdf* engine = AsEngineMupdf(dm->GetEngine());
+                    if (engine) {
+                        fz_context* ctx = engine->Ctx();
+                        ScopedRecursiveMutex cs(&engine->docLock);
+                        // Find annotation by iterating through annotations on the page
+                        fz_page* page = fz_load_page(ctx, engine->_doc, card.pageNo - 1); // 0-based
+                        pdf_annot* annot = nullptr;
+                        if (page) {
+                            pdf_page* pdfpage = pdf_page_from_fz_page(ctx, page);
+                            if (pdfpage) {
+                                for (pdf_annot* a = pdf_first_annot(ctx, pdfpage); a; a = pdf_next_annot(ctx, a)) {
+                                    int aId = pdf_to_num(ctx, pdf_annot_obj(ctx, a));
+                                    if (aId == card.annotId) {
+                                        annot = a;
+                                        break;
+                                    }
+                                }
+                            }
+                            fz_drop_page(ctx, page);
+                        }
+                        if (annot) {
+                            // card.text is "Q: ...", skip "Q: " prefix (3 chars including space)
+                            Str question = Str(card.text.s + 3, card.text.len - 3);
+                            Str tipStr = card.tip;
+                            TempStr newContent = fmt("Q: %s\nT: %s", question, tipStr);
+                            pdf_set_annot_contents(ctx, annot, newContent.s);
+                            pdf_update_annot(ctx, annot);
+
+                            // Save the document to persist annotation changes
+                            WindowTab* tab2 = win->CurrentTab();
+                            if (tab2) {
+                                Str path = tab2->filePath;
+                                if (path) {
+                                    EngineMupdfSaveUpdated(dm->GetEngine(), path, ShowErrorCb());
+                                }
+                            }
+                            logf("[FC] Tip added to card %d\n", card.annotId);
+                        }
+                    }
+                }
+            }
+            MainWindowRerender(win);
+        }
+        return true;
+    }
     case CmdFlashcardNext:
         logf("FC: CmdFlashcardNext - not used (auto-advance)\n");
         return true;

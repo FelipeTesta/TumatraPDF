@@ -79,6 +79,8 @@ static SeqStrings gCommandNames =
     "CmdGoToFirstPage\0"
     "CmdGoToLastPage\0"
     "CmdGoToPage\0"
+    "CmdGoToPageNextKeepScroll\0"
+    "CmdGoToPagePrevKeepScroll\0"
     "CmdFindFirst\0"
     "CmdFindNext\0"
     "CmdFindPrev\0"
@@ -309,6 +311,7 @@ static SeqStrings gCommandNames =
     "CmdArchClear\0"
     "CmdArchToolsToggle\0"
     "CmdArchResetScale\0"
+    "CmdArchCleanAll\0"
     "CmdAutoScrollTimerToggle\0"
     "CmdAutoScrollTimerEdit\0"
     "CmdFlashcardToggle\0"
@@ -323,6 +326,7 @@ static SeqStrings gCommandNames =
     "CmdFlashcardRate3\0"
     "CmdFlashcardRate4\0"
     "CmdFlashcardLista\0"
+    "CmdFlashcardAddTip\0"
     "CmdNone\0"
     "\0";
 
@@ -390,6 +394,8 @@ static i32 gCommandIds[] = {
     CmdGoToFirstPage,
     CmdGoToLastPage,
     CmdGoToPage,
+    CmdGoToPageNextKeepScroll,
+    CmdGoToPagePrevKeepScroll,
     CmdFindFirst,
     CmdFindNext,
     CmdFindPrev,
@@ -620,6 +626,7 @@ static i32 gCommandIds[] = {
     CmdArchClear,
     CmdArchToolsToggle,
     CmdArchResetScale,
+    CmdArchCleanAll,
     CmdAutoScrollTimerToggle,
     CmdAutoScrollTimerEdit,
     CmdFlashcardToggle,
@@ -634,6 +641,7 @@ static i32 gCommandIds[] = {
     CmdFlashcardRate3,
     CmdFlashcardRate4,
     CmdFlashcardLista,
+    CmdFlashcardAddTip,
     CmdNone,
 };
 
@@ -701,6 +709,8 @@ SeqStrings gCommandDescriptions =
     "First Page\0"
     "Last Page\0"
     "Go to Page...\0"
+    "Next Page (Keep Scroll)\0"
+    "Previous Page (Keep Scroll)\0"
     "Find...\0"
     "Find Next\0"
     "Find Previous\0"
@@ -931,6 +941,7 @@ SeqStrings gCommandDescriptions =
     "Clear Arch Measurements\0"
     "Toggle Arch Tools Toolbar\0"
     "Reset Arch Scale\0"
+    "Clean All (Lines + Scale)\0"
     "Toggle Auto-Scroll Timer\0"
     "Edit Auto-Scroll Timer Duration\0"
     "Toggle Flashcard Mode\0"
@@ -945,6 +956,7 @@ SeqStrings gCommandDescriptions =
     "Rate Card: Good\0"
     "Rate Card: Easy\0"
     "Toggle Flashcard List Sidebar\0"
+    "Add Tip To Current Flashcard\0"
     "Do nothing\0"
     "\0";
 // clang-format on

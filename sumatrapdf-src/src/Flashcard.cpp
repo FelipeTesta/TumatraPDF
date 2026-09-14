@@ -58,6 +58,16 @@ Vec<Flashcard> FlashcardLoadFromDocument(EngineMupdf* engine) {
             fz_rect rect = pdf_annot_rect(ctx, annot);
             card.bounds = RectF(PointF(rect.x0, rect.y0), PointF(rect.x1, rect.y1));
             card.text = str::DupTemp(Str(contents));
+            card.tip = {};
+
+            // Parse optional tip from annotation content: "Q: question\nT: tip"
+            Str fullText = card.text;
+            Str tipMarker = StrL("\nT: ");
+            int tipPos = str::IndexOf(fullText, tipMarker);
+            if (tipPos >= 0) {
+                card.tip = str::Dup(fullText.s + tipPos + 4); // skip "\nT: "
+                card.text = str::DupTemp(Str(fullText.s, tipPos)); // trim to just "Q: ..."
+            }
 
             result.Append(card);
         }

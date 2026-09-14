@@ -200,12 +200,139 @@ Fase 13b: escala e medi��es independentes por documento (HashMap archMeasure
 - **Descricao**: Menu contexto botao direito em imagens: apenas Copy to clipboard funciona; outras opcoes (Save as, Copy link, etc.) nao funcionam
 - **Nota**: Pode nao ter sido implementado no SumatraPDF original - investigar antes de corrigir
 
-## Sistema de Flashcards
-Tasks:
-1. Pesquisar sistemas de flashcard opensource: `Anki` (Temos baixado em ...\Documents); `supermemo`, etc.
+## Sistema de Flashcards (Cloze)
 
-### Funcionamento
-Vamos usar algo similar ao Annotations atual (criar um novo painel similar, nao usar o mesmo); selecionar o texto e marcar como "Flashcard" vai incluir um highlight bem SUTIL de cinza (responsivo ao {Invert=on/off}) atrás do texto selecionado; essa marcação terá um id;
-Criar um Botão {Flashcard}, similar ao {Arch Tools}, vai abrir uma nova barra de ferramentas: |Tipo de Estudo: `In order`/`Random`| Min Time: {num input} |Return | Next |
+### Conceito
+Sistema Cloze no PDF — similar ao cloze do Anki mas usando highlights para cobrir texto.
+- **Cloze**: highlight CINZA atrás do texto; em study mode, desenha retângulo sólido por cima (esconde o texto); em reveal mode, remove o retângulo (texto visível)
+- **Image Occlusion** (futuro): retângulo cobrindo imagem — sistema separado
 
-Quando Flashcard=on, a ideia é o app saltar de marcação em marcação (card a card), usando a ordem definida pelo usuário; o highlight que antes era sutil, agora vai ser sólido, preto (quando invert=off) ou gray (quando invert=on) e cobrir o texto selecionado, quando usuário apertar `enter`/`space`, revela o texto e o usuário da uma nota de 1 a 4 (numpads), muito similar ao sistema do ANKI; Não queremos criar algo tão complexo quanto o Anki já que não temos como armazenar tanto histórico nem otimizar, mas vamos tentar criar algo similar de forma leve; estude uma forma que seja praticável usando essas referências; preveja como armazenar o estudo do usuário em arquivos temporários sem pesar demais o cache, talvez salvar em um arquivo de texto local;
+### Status: EM DESENVOLVIMENTO (MVP parcial)
+- Comandos: 11 command IDs (CmdFlashcardToggle 496..CmdFlashcardAddTip 508) via gen-commands.ts
+- Flashcard.h/cpp: LoadFromDocument (só FREE_TEXT — BUG), SM-2, study save/load
+- FlashcardToolbar.cpp: toolbar secundária (Study/Back/Lista/Filter + contador)
+- Commands_Flashcard.cpp: handlers de todos comandos
+- FlashcardSidebar.cpp: sidebar Lista flutuante
+- Canvas.cpp: rendering overlay (cinza study/reading)
+
+### BUGS Críticos a Corrigir
+
+#### BUG-FC1: FlashcardLoadFromDocument só aceita FREE_TEXT
+- `Flashcard.cpp` filtra `PDF_ANNOT_FREE_TEXT` (line 46)
+- `CmdFlashcardAdd` agora cria `AnnotationType::Highlight` (line 184 Commands_Flashcard.cpp)
+- **Resultado**: cards criados são PERDIDOS no reload — nunca encontrados
+- **Fix**: aceitar tanto FREE_TEXT quanto HIGHLIGHT; para HIGHLIGHT, usar quad points para bounds; contents deve começar com "Q: "
+
+#### BUG-FC2: FlashcardToolbar — card count flutuando
+- `hwndCardCount` é child de `hwndRebar` mas NÃO está em nenhuma rebar band
+- Fica flutuando em (4,0) cobrindo botões
+- **Fix**: usar BTNS_SEP como primeiro botão no toolbar com texto, ou criar band 0 dedicada
+
+#### BUG-FC3: FlashcardToolbar — cores do tema não respeitadas
+- Rebar style faltando: `WS_BORDER | RBS_BANDBORDERS` (quando IsCurrentThemeDefault)
+- Band style faltando: `RBBS_CHILDEDGE`
+- RTL não suportado (falta check isRtl)
+- `DefWndProcToolbar` pode não estar inicializado antes do subclass
+- Comparar com CreateToolbar2 (Toolbar.cpp:1953-2066) que funciona
+- **Fix**: alinhar criação da rebar+band com padrão arch tools
+
+#### BUG-FC4: Seleção de texto desalinhada com trim=on
+- `Selection.cpp:53` usa `+=` mas deveria usar `-=` para `gGlobalPrefs->trim.top`
+- RenderCache desloca rendering para baixo por trim.top, mas Selection não compensa
+- **Fix**: mudar `+=` para `-=` na linha 53
+
+### Separação Paralela: Flashcards ≠ Anotações
+Sistema paralelo usando author "TumatraPDF-Flashcard" para isolar flashcards das anotações regulares:
+- `EditAnnotations.cpp`: `UpdateAnnotationsList()` pula anotações com `author == "TumatraPDF-Flashcard"`
+- `Flashcard.cpp`: `FlashcardLoadFromDocument()` filtra por author "TumatraPDF-Flashcard" (além de contents "Q: ")
+- `Commands_Flashcard.cpp`: `CmdFlashcardAdd` garante `Author="TumatraPDF-Flashcard"` no Highlight
+- Resultado: flashcards NÃO aparecem na lista de anotações; anotações NÃO aparecem na lista de flashcards
+- Portabilidade: qualquer leitor PDF mostra os highlights normais — só TumatraPDF sabe que são flashcards
+
+### Plano de Correção (amanhã)
+
+#### Passo 1: FlashcardLoadFromDocument (Flashcard.cpp)
+Aceitar HIGHLIGHT além de FREE_TEXT:
+```
+if (annotType != PDF_ANNOT_FREE_TEXT && annotType != PDF_ANNOT_HIGHLIGHT) continue;
+// Para HIGHLIGHT: extrair bounds de quad points em vez de rect
+// contents deve começar com "Q: "
+```
+
+#### Passo 2: CmdFlashcardAdd (Commands_Flashcard.cpp)
+Criar Highlight com cor CINZA (RGB 128,128,128), opacity 40%:
+- Cor: cinza (já definido no Canvas.cpp como cinza para reading/study)
+- Opacity: 40% (visível mas texto legível através dele)
+- Contents: "Q: {selected text}"
+- Author: "TumatraPDF-Flashcard" (para identificar como nosso)
+
+#### Passo 3: Canvas.cpp — rendering Cloze
+Lê do código atual (já correto):
+- **Study mode** (L3398-3412): retângulo sólido cinza opaco `Color(200, 100, 100, 100)` — cobre texto
+- **Reading mode** (L3413-3418): overlay sutil transparente `Color(30, 128, 128, 128)` — texto visível
+- **Reveal mode**: o código atual não distingue reveal de study — precisa de fix
+
+#### Passo 4: Reveal mode (Canvas.cpp)
+Quando `revealMode == true`, NÃO desenhar o retângulo opaco — deixar o highlight do PDF (cinza 40% atrás do texto) mostrar o texto
+
+#### Passo 5: Separação Paralela (EditAnnotations.cpp)
+Em `UpdateAnnotationsList()` (L1300-1305), antes de popular a lista, filtrar:
+```cpp
+void UpdateAnnotationsList(EditAnnotationsWindow* ew) {
+    ...
+    EngineMupdfGetAnnotations(engine, ew->annotations);
+    // Filter out flashcard annotations
+    for (int i = ew->annotations.Size() - 1; i >= 0; i--) {
+        Str author = Author(ew->annotations[i]);
+        if (str::Eq(author, StrL("TumatraPDF-Flashcard"))) {
+            ew->annotations.RemoveAt(i);
+        }
+    }
+    ...
+}
+```
+
+#### Passo 6: FlashcardToolbar — card count
+Usar BTNS_SEP como primeiro item do toolbar com texto formatado:
+```cpp
+{0, _TRN("Cards: 0/0/0 | ")},  // separator text (index 0)
+```
+Atualizar via TB_SETBUTTONINFOW + TBIF_TEXT quando count muda.
+
+#### Passo 7: FlashcardToolbar — tema
+Comparar com CreateToolbar2 (Toolbar.cpp:1953-2066):
+- Rebar: adicionar `WS_BORDER | RBS_BANDBORDERS` quando `IsCurrentThemeDefault()`
+- Band: adicionar `RBBS_CHILDEDGE`
+- RTL: check `IsRTL()`, adicionar `WS_EX_LAYOUTRTL`
+- Chamar `ToolbarApplyThemeToRebar()` após criação
+
+#### Passo 8: Selection trim fix
+- `Selection.cpp:53`: mudar `+=` para `-=`
+
+#### Passo 9: Build + deploy
+- `bun cmd/build.ts` → `Compiled/TumatraPDF.exe`
+
+### Arquivos a Modificar
+| Arquivo | Mudança |
+|---------|---------|
+| `src/Flashcard.cpp` | LoadFromDocument: aceitar HIGHLIGHT, filtrar por Author |
+| `src/Flashcard.h` | Atualizar comentário (Highlight, não só FreeText) |
+| `src/Commands_Flashcard.cpp` | CmdFlashcardAdd: Highlight cinza 40%, Author="TumatraPDF-Flashcard" |
+| `src/EditAnnotations.cpp` | UpdateAnnotationsList: filtrar Author="TumatraPDF-Flashcard" |
+| `src/Canvas.cpp` | Reveal mode: não desenhar overlay opaco |
+| `src/FlashcardToolbar.cpp` | Card count como BTNS_SEP + tema rebar/band |
+| `src/Selection.cpp` | Trim fix: += → -= |
+
+### Referências
+- NoteAnki Cloze system: `D:\1 Principal\4 Trabalhos\1 Projetos\00 EXECUTANDO\APPS\NoteAnki\CLOZE.md`
+- Toolbar theme pattern: `src/Toolbar.cpp:1953-2066` (CreateToolbar2)
+- AnnotCreateArgs: `src/Annotation.h:72-93` (opacity 0-100, col, bgColor)
+
+### Funcionamento Original (MVP atual)
+- Botão "Flashcard" na toolbar principal (já adicionado)
+- Flashcard toolbar secundária: Study/Back/Lista/Filter + contador
+- Study: navega card a card, overlay cinza cobre texto
+- Reveal: enter/space revela texto, nota 1-4 (numpad)
+- SM-2: intervalo/ease factor baseado em rating
+- Persistência: %APPDATA%\SumatraPDF\FlashcardStudy\<MD5>.json
+- Sidebar Lista: TreeView com todos os cards

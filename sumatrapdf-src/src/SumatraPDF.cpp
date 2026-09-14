@@ -823,8 +823,8 @@ static Str SerializeMeasurements(const Vec<ArchMeasurement>& measurements) {
     for (int i = 0; i < len(measurements); i++) {
         const ArchMeasurement& m = measurements[i];
         if (i > 0) sb.Append(StrL(";"));
-        TempStr item = fmt("%g,%g,%g,%g,%g,%g,%g,%d,%d", m.p1x, m.p1y, m.p2x, m.p2y, m.len, m.x, m.y, (int)m.unit,
-                           m.scaled ? 1 : 0);
+        TempStr item = fmt("%d,%g,%g,%g,%g,%g,%g,%g,%d,%d", m.pageNo, m.p1x, m.p1y, m.p2x, m.p2y, m.len, m.x, m.y,
+                           (int)m.unit, m.scaled ? 1 : 0);
         sb.Append(item);
     }
     return sb.TakeStr();
@@ -836,9 +836,9 @@ static Vec<ArchMeasurement> DeserializeMeasurements(const char* s) {
     while (*s) {
         ArchMeasurement m = {};
         int scaledInt = 0;
-        int n = sscanf(s, "%g,%g,%g,%g,%g,%g,%g,%d,%d", &m.p1x, &m.p1y, &m.p2x, &m.p2y, &m.len, &m.x, &m.y,
-                       (int*)&m.unit, &scaledInt);
-        if (n == 9) {
+        int n = sscanf(s, "%d,%g,%g,%g,%g,%g,%g,%g,%d,%d", &m.pageNo, &m.p1x, &m.p1y, &m.p2x, &m.p2y, &m.len, &m.x,
+                       &m.y, (int*)&m.unit, &scaledInt);
+        if (n == 10) {
             m.scaled = (scaledInt != 0);
             result.Append(m);
         }
@@ -874,16 +874,30 @@ void UpdateTabFileDisplayStateForTab(WindowTab* tab) {
     fs->contrastOpacity = win->contrastOpacity;
     // Persist arch tools state (per-document)
     if (gGlobalPrefs->archToolsEnabled) {
-        fs->archScaleFactor = win->archTools.scaleFactor;
-        fs->archScaleAnchorX = win->archTools.scaleAnchorX;
-        fs->archScaleAnchorY = win->archTools.scaleAnchorY;
-        fs->archScaleLineP2x = win->archTools.scaleLineP2x;
-        fs->archScaleLineP2y = win->archTools.scaleLineP2y;
-        fs->archScaleLineDefined = win->archTools.scaleLineDefined;
-        fs->archScaleLineP1x = win->archTools.scaleLineP1x;
-        fs->archScaleLineP1y = win->archTools.scaleLineP1y;
-        fs->archUnit = win->archTools.unit;
-        fs->archScaleSet = win->archTools.scaleSet;
+        // Serialize per-page scale states as
+        // "pageNo:scaleFactor:scaleAnchorX:scaleAnchorY:scaleSet:p1x:p1y:p2x:p2y:unit;..."
+        str::Builder sb;
+        for (int i = 0; i < len(win->archTools.scaleStates); i++) {
+            auto& s = win->archTools.scaleStates[i];
+            if (i > 0) sb.AppendChar(';');
+            sb.Append(fmt("%d:%.6f:%.6f:%.6f:%d:%.6f:%.6f:%.6f:%.6f:%d", s.pageNo, s.scaleFactor, s.scaleAnchorX,
+                          s.scaleAnchorY, s.scaleSet ? 1 : 0, s.scaleLineP1x, s.scaleLineP1y, s.scaleLineP2x,
+                          s.scaleLineP2y, s.unit));
+        }
+        fs->archScaleStates = str::Dup(sb.TakeStr());
+        // Legacy fields: use current page or first entry
+        auto& ps0 =
+            len(win->archTools.scaleStates) > 0 ? win->archTools.scaleStates[0] : win->archTools.GetScaleForPage(1);
+        fs->archScaleFactor = ps0.scaleFactor;
+        fs->archScaleAnchorX = ps0.scaleAnchorX;
+        fs->archScaleAnchorY = ps0.scaleAnchorY;
+        fs->archScaleLineP2x = ps0.scaleLineP2x;
+        fs->archScaleLineP2y = ps0.scaleLineP2y;
+        fs->archScaleLineDefined = ps0.scaleLineDefined;
+        fs->archScaleLineP1x = ps0.scaleLineP1x;
+        fs->archScaleLineP1y = ps0.scaleLineP1y;
+        fs->archUnit = ps0.unit;
+        fs->archScaleSet = ps0.scaleSet;
         fs->archMeasurements = SerializeMeasurements(win->archTools.measurements);
     }
 }
@@ -2118,24 +2132,51 @@ static void ReplaceDocumentInCurrentTab(LoadArgs* args, DocController* ctrl, Fil
     }
     // Restore per-document autoscroll speed multiplier
     if (fs) {
-        win->autoScroll.speedMultiplier =
-            fs->autoScrollSpeedMultiplier < 0.008f ? gGlobalPrefs->autoScrollSpeedMultiplier : fs->autoScrollSpeedMultiplier;
+        win->autoScroll.speedMultiplier = fs->autoScrollSpeedMultiplier < 0.008f
+                                              ? gGlobalPrefs->autoScrollSpeedMultiplier
+                                              : fs->autoScrollSpeedMultiplier;
         // Restore per-document invert colors and contrast overlay state
         SetInvertPageColors(fs->invertColors);
         win->contrastEnabled = fs->contrastEnabled;
         win->contrastOpacity = fs->contrastOpacity;
-        // Restore arch tools state (per-document)
+        // Restore arch tools state (per-document) — per-page scale states
         if (gGlobalPrefs->archToolsEnabled) {
-            win->archTools.scaleFactor = fs->archScaleFactor;
-            win->archTools.scaleAnchorX = fs->archScaleAnchorX;
-            win->archTools.scaleAnchorY = fs->archScaleAnchorY;
-            win->archTools.scaleLineP2x = fs->archScaleLineP2x;
-            win->archTools.scaleLineP2y = fs->archScaleLineP2y;
-            win->archTools.unit = fs->archUnit;
-            win->archTools.scaleSet = fs->archScaleSet;
-            // Restore scale line endpoints in MainWindow for drawing
-            win->archTools.scaleLineP1x = fs->archScaleAnchorX;
-            win->archTools.scaleLineP1y = fs->archScaleAnchorY;
+            Str fp = tab->filePath;
+            FileState* fs2 = gFileHistory.FindByPath(fp);
+            if (fs2) {
+                win->archTools.scaleStates.Reset();
+                if (fs2->archScaleStates.s && fs2->archScaleStates.len > 0) {
+                    char* ctx = nullptr;
+                    char* token = strtok_s(fs2->archScaleStates.s, ";", &ctx);
+                    while (token) {
+                        MainWindow::ArchToolsState::ArchScaleState ps;
+                        int scaleSetInt = 0;
+                        if (sscanf_s(token, "%d:%f:%f:%f:%d:%f:%f:%f:%f:%d", &ps.pageNo, &ps.scaleFactor,
+                                     &ps.scaleAnchorX, &ps.scaleAnchorY, &scaleSetInt, &ps.scaleLineP1x,
+                                     &ps.scaleLineP1y, &ps.scaleLineP2x, &ps.scaleLineP2y, &ps.unit) == 10) {
+                            ps.scaleSet = (scaleSetInt != 0);
+                            ps.scaleLineDefined = ps.scaleSet;
+                            win->archTools.scaleStates.Append(ps);
+                        }
+                        token = strtok_s(nullptr, ";", &ctx);
+                    }
+                }
+                if (len(win->archTools.scaleStates) == 0) {
+                    auto& ps = win->archTools.GetScaleForPage(1);
+                    ps.scaleFactor = fs2->archScaleFactor;
+                    ps.scaleAnchorX = fs2->archScaleAnchorX;
+                    ps.scaleAnchorY = fs2->archScaleAnchorY;
+                    ps.scaleLineP2x = fs2->archScaleLineP2x;
+                    ps.scaleLineP2y = fs2->archScaleLineP2y;
+                    ps.scaleLineDefined = fs2->archScaleLineDefined;
+                    ps.scaleLineP1x = fs2->archScaleLineP1x;
+                    ps.scaleLineP1y = fs2->archScaleLineP1y;
+                    ps.unit = fs2->archUnit;
+                    ps.scaleSet = fs2->archScaleSet;
+                }
+            } else {
+                win->archTools.scaleStates.Reset();
+            }
         }
         // Restore arch measurements
         win->archTools.measurements = DeserializeMeasurements(fs->archMeasurements.s);
@@ -2146,15 +2187,18 @@ static void ReplaceDocumentInCurrentTab(LoadArgs* args, DocController* ctrl, Fil
         win->contrastOpacity = 50;
         // Reset arch tools state
         if (gGlobalPrefs->archToolsEnabled) {
-            win->archTools.scaleFactor = 0.0f;
-            win->archTools.scaleAnchorX = 0.0f;
-            win->archTools.scaleAnchorY = 0.0f;
-            win->archTools.scaleLineP1x = 0.0f;
-            win->archTools.scaleLineP1y = 0.0f;
-            win->archTools.scaleLineP2x = 0.0f;
-            win->archTools.scaleLineP2y = 0.0f;
-            win->archTools.unit = 2; // meters default
-            win->archTools.scaleSet = false;
+            win->archTools.scaleStates.Reset();
+            auto& ps = win->archTools.GetScaleForPage(1);
+            ps.scaleFactor = 0.0f;
+            ps.scaleAnchorX = 0.0f;
+            ps.scaleAnchorY = 0.0f;
+            ps.scaleLineP1x = 0.0f;
+            ps.scaleLineP1y = 0.0f;
+            ps.scaleLineP2x = 0.0f;
+            ps.scaleLineP2y = 0.0f;
+            ps.unit = 2; // meters default
+            ps.scaleSet = false;
+            ps.scaleLineDefined = false;
             win->archTools.measurements.Reset();
         }
     }
@@ -4044,22 +4088,43 @@ void LoadModelIntoTab(WindowTab* tab) {
         Str fp = tab->filePath;
         FileState* fs = gFileHistory.FindByPath(fp);
         if (fs) {
-            win->archTools.scaleFactor = fs->archScaleFactor;
-            win->archTools.scaleAnchorX = fs->archScaleAnchorX;
-            win->archTools.scaleAnchorY = fs->archScaleAnchorY;
-            win->archTools.scaleLineP2x = fs->archScaleLineP2x;
-            win->archTools.scaleLineP2y = fs->archScaleLineP2y;
-            win->archTools.scaleLineDefined = fs->archScaleLineDefined;
-            win->archTools.scaleLineP1x = fs->archScaleLineP1x;
-            win->archTools.scaleLineP1y = fs->archScaleLineP1y;
-            win->archTools.unit = fs->archUnit;
-            win->archTools.scaleSet = fs->archScaleSet;
+            // Restore per-page scale states from serialized string
+            win->archTools.scaleStates.Reset();
+            if (fs->archScaleStates.s && fs->archScaleStates.len > 0) {
+                // Parse "pageNo:scaleFactor:anchorX:anchorY:scaleSet:p1x:p1y:p2x:p2y:unit;..."
+                char* ctx = nullptr;
+                char* token = strtok_s(fs->archScaleStates.s, ";", &ctx);
+                while (token) {
+                    MainWindow::ArchToolsState::ArchScaleState ps;
+                    int scaleSetInt = 0;
+                    if (sscanf_s(token, "%d:%f:%f:%f:%d:%f:%f:%f:%f:%d", &ps.pageNo, &ps.scaleFactor, &ps.scaleAnchorX,
+                                 &ps.scaleAnchorY, &scaleSetInt, &ps.scaleLineP1x, &ps.scaleLineP1y, &ps.scaleLineP2x,
+                                 &ps.scaleLineP2y, &ps.unit) == 10) {
+                        ps.scaleSet = (scaleSetInt != 0);
+                        ps.scaleLineDefined = ps.scaleSet;
+                        win->archTools.scaleStates.Append(ps);
+                    }
+                    token = strtok_s(nullptr, ";", &ctx);
+                }
+            }
+            // Fallback: if no per-page states, use legacy fields
+            if (len(win->archTools.scaleStates) == 0) {
+                auto& ps = win->archTools.GetScaleForPage(1);
+                ps.scaleFactor = fs->archScaleFactor;
+                ps.scaleAnchorX = fs->archScaleAnchorX;
+                ps.scaleAnchorY = fs->archScaleAnchorY;
+                ps.scaleLineP2x = fs->archScaleLineP2x;
+                ps.scaleLineP2y = fs->archScaleLineP2y;
+                ps.scaleLineDefined = fs->archScaleLineDefined;
+                ps.scaleLineP1x = fs->archScaleLineP1x;
+                ps.scaleLineP1y = fs->archScaleLineP1y;
+                ps.unit = fs->archUnit;
+                ps.scaleSet = fs->archScaleSet;
+            }
         } else {
-            // Fresh document: reset arch scale line state
-            win->archTools.scaleLineDefined = false;
-            win->archTools.scaleLineP1x = 0.0f;
-            win->archTools.scaleLineP1y = 0.0f;
+            win->archTools.scaleStates.Reset();
         }
+        win->ArchRestoreMeasurementsForTab(tab);
     }
 
     win->selection.showSelection = tab->selectionOnPage != nullptr;
@@ -6162,7 +6227,7 @@ static bool IsUiLayoutEq(UILayout* s1, UILayout* s2) {
            s1->isToolbarVisible == s2->isToolbarVisible && s1->tocVisible == s2->tocVisible &&
            s1->showFavorites == s2->showFavorites && s1->favoritesAsTab == s2->favoritesAsTab &&
            s1->showMenuBarRebar == s2->showMenuBarRebar && s1->aiChatVisible == s2->aiChatVisible &&
-           s1->aiChatDx == s2->aiChatDx && s1->archToolsOn == s2->archToolsOn;
+           s1->aiChatDx == s2->aiChatDx && s1->archToolsOn == s2->archToolsOn && s1->flashcardOn == s2->flashcardOn;
 }
 
 bool RelayoutFrame(MainWindow* win, bool updateToolbars, int sidebarDx) {
@@ -6190,8 +6255,11 @@ bool RelayoutFrame(MainWindow* win, bool updateToolbars, int sidebarDx) {
     curState.aiChatVisible = win->uiState.aiChatVisible;
     curState.aiChatDx = win->aiChatDx;
     curState.archToolsOn = win->archTools.on;
+    curState.flashcardOn = win->flashcard.on;
 
     if (IsCurrentDocMarkdown(win) && win->archTools.hwndReBar2) ShowWindow(win->archTools.hwndReBar2, SW_HIDE);
+    if (IsCurrentDocMarkdown(win) && win->flashcard.hwndReBarFlashcard)
+        ShowWindow(win->flashcard.hwndReBarFlashcard, SW_HIDE);
 
     // skip redundant relayouts when all layout-affecting state is unchanged
     if (IsUiLayoutEq(&curState, &win->uiState.layout) && updateToolbars && sidebarDx == -1) {
@@ -6355,6 +6423,21 @@ bool RelayoutFrame(MainWindow* win, bool updateToolbars, int sidebarDx) {
         rc.dy -= rebar2Dy;
         if (!atBottom) {
             rc.y += rebar2Dy;
+        }
+    }
+    // Flashcard toolbar - positioned below arch tools when visible
+    if (win->flashcard.on && win->flashcard.hwndReBarFlashcard) {
+        Rect rcRebarFC = HwndWindowRect(win->flashcard.hwndReBarFlashcard);
+        int rebarFCDy = rcRebarFC.dy;
+        bool atBottom = ToolbarAtBottom();
+        int rebarFCY = atBottom ? (rc.y + rc.dy - rebarFCDy) : rc.y;
+        if (updateToolbars) {
+            dh.SetWindowPos(win->flashcard.hwndReBarFlashcard, nullptr, rc.x, rebarFCY, rc.dx, rebarFCDy, SWP_NOZORDER);
+        }
+        // reserve the flashcard toolbar's space
+        rc.dy -= rebarFCDy;
+        if (!atBottom) {
+            rc.y += rebarFCDy;
         }
     }
     // in overlay mode the toolbar floats over the canvas and is positioned
@@ -10326,6 +10409,46 @@ static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, L
                 }
             }
             OnDocumentVerticalScrollIntent(win, cmdId == CmdGoToNextPage);
+            ReadAloudOnUserViewChanged(win);
+            break;
+        }
+
+        case CmdGoToPageNextKeepScroll:
+        case CmdGoToPagePrevKeepScroll: {
+            if (!win->IsDocLoaded()) {
+                return 0;
+            }
+            auto* dm2 = win->AsFixed();
+            if (!dm2) {
+                return 0;
+            }
+            // Get current scroll position relative to current page
+            ScrollState ss = dm2->GetScrollState();
+            PageInfo* pi = dm2->GetPageInfo(ss.page);
+            float pageHeight = pi ? (float)pi->pos.dy : 1.0f;
+            if (pageHeight < 1.0f) pageHeight = 1.0f;
+            float fraction = (float)ss.y / pageHeight;
+            fraction = limitValue(fraction, 0.0f, 1.0f);
+            // Navigate to next/prev page (goes to top)
+            bool ok;
+            if (cmdId == CmdGoToPageNextKeepScroll) {
+                ok = ctrl->GoToNextPage();
+            } else {
+                ok = ctrl->GoToPrevPage();
+            }
+            if (!ok) {
+                break; // at first/last page, no change
+            }
+            // Restore relative scroll position on new page
+            int newPage = dm2->CurrentPageNo();
+            PageInfo* newPi = dm2->GetPageInfo(newPage);
+            float newHeight = newPi ? (float)newPi->pos.dy : 1.0f;
+            if (newHeight < 1.0f) newHeight = 1.0f;
+            ScrollState newSs;
+            newSs.page = newPage;
+            newSs.x = ss.x;
+            newSs.y = fraction * newHeight;
+            dm2->SetScrollState(newSs);
             ReadAloudOnUserViewChanged(win);
             break;
         }

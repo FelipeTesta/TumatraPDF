@@ -14,7 +14,8 @@ struct Flashcard {
     int annotId = -1;       // MuPDF annotation ID (unique per document)
     int pageNo = -1;        // 1-based page number
     RectF bounds;           // selection rect in PAGE coordinates (PDF points)
-    Str text;               // extracted text content
+    Str text;               // "Q: ..."
+    Str tip;                // optional hint text (from "T: " in annotation)
 };
 
 // FlashcardStudyState — per-card study progress (stored in external JSON)
@@ -55,6 +56,7 @@ TempStr FlashcardStudyPath(const char* filePath);
 // FlashcardToolbar (in FlashcardToolbar.cpp)
 void FlashcardToolbarCreate(MainWindow* win);
 void FlashcardToolbarDestroy(MainWindow* win);
+void FlashcardToolbarUpdateCount(MainWindow* win);
 
 // FlashcardSidebar (in FlashcardSidebar.cpp)
 void FlashcardSidebarCreate(MainWindow* win);

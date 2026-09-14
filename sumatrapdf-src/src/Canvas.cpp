@@ -2130,16 +2130,17 @@ static void OnMouseLeftButtonDown(MainWindow* win, int x, int y, WPARAM key) {
             }
 
             // Check scale line
-            if (!removed && win->archTools.scaleSet) {
-                if (ArchPointSegDist(pagePt.x, pagePt.y, win->archTools.scaleLineP1x, win->archTools.scaleLineP1y,
-                                     win->archTools.scaleLineP2x, win->archTools.scaleLineP2y) < thresholdPage) {
-                    win->archTools.scaleSet = false;
-                    win->archTools.scaleLineDefined = false;
-                    win->archTools.scaleFactor = 0.0f;
-                    win->archTools.scaleLineP1x = win->archTools.scaleLineP1y = 0.0f;
-                    win->archTools.scaleLineP2x = win->archTools.scaleLineP2y = 0.0f;
+            if (!removed) {
+                auto& ps = win->archTools.GetScaleForPage(pageNo);
+                if (ps.scaleSet && ArchPointSegDist(pagePt.x, pagePt.y, ps.scaleLineP1x, ps.scaleLineP1y,
+                                                    ps.scaleLineP2x, ps.scaleLineP2y) < thresholdPage) {
+                    ps.scaleSet = false;
+                    ps.scaleLineDefined = false;
+                    ps.scaleFactor = 0.0f;
+                    ps.scaleLineP1x = ps.scaleLineP1y = 0.0f;
+                    ps.scaleLineP2x = ps.scaleLineP2y = 0.0f;
                     removed = true;
-                    LogInfo("[arch] erase: removed scale line");
+                    LogInfo("[arch] erase: removed scale line on page %d", pageNo);
                 }
             }
 
@@ -2189,10 +2190,11 @@ static void OnMouseLeftButtonDown(MainWindow* win, int x, int y, WPARAM key) {
                     // Store in page coords
                     PointF p1page = dm->CvtFromScreen(win->archTools.point1, pageNo);
                     PointF p2page = dm->CvtFromScreen(win->archTools.point2, pageNo);
-                    win->archTools.scaleLineP1x = p1page.x;
-                    win->archTools.scaleLineP1y = p1page.y;
-                    win->archTools.scaleLineP2x = p2page.x;
-                    win->archTools.scaleLineP2y = p2page.y;
+                    auto& ps = win->archTools.GetScaleForPage(pageNo);
+                    ps.scaleLineP1x = p1page.x;
+                    ps.scaleLineP1y = p1page.y;
+                    ps.scaleLineP2x = p2page.x;
+                    ps.scaleLineP2y = p2page.y;
                     ReleaseCapture();
                     win->mouseAction = MouseAction::None;
                     LogInfo("[arch] Scale: line finalized by 2nd click p1=(%.2f,%.2f) p2=(%.2f,%.2f)", p1page.x,
@@ -2440,18 +2442,20 @@ static void FinalizeArchMeasurement(MainWindow* win, DisplayModel* dm, int pageN
     float lenPage = sqrtf(dxPage * dxPage + dyPage * dyPage);
 
     ArchMeasurement meas;
+    meas.pageNo = pageNo;
     meas.p1x = pagePt1.x;
     meas.p1y = pagePt1.y;
     meas.p2x = pagePt2.x;
     meas.p2y = pagePt2.y;
     meas.unit = win->archTools.unit; // stored but not used for display anymore
 
-    if (win->archTools.scaleSet && win->archTools.scaleFactor > 0.0f) {
+    auto& ps = win->archTools.GetScaleForPage(pageNo);
+    if (ps.scaleSet && ps.scaleFactor > 0.0f) {
         // archScaleFactor is now page units per METER (canonical)
         // Result is in METERS
-        meas.x = dxPage / win->archTools.scaleFactor;
-        meas.y = dyPage / win->archTools.scaleFactor;
-        meas.len = lenPage / win->archTools.scaleFactor;
+        meas.x = dxPage / ps.scaleFactor;
+        meas.y = dyPage / ps.scaleFactor;
+        meas.len = lenPage / ps.scaleFactor;
         meas.scaled = true;
     } else {
         // No scale defined: store page units, mark as unscaled
@@ -2467,8 +2471,8 @@ static void FinalizeArchMeasurement(MainWindow* win, DisplayModel* dm, int pageN
     LogInfo(
         "[arch] FinalizeArchMeasurement: idx=%d p1=(%.2f,%.2f) p2=(%.2f,%.2f) dx=%.2f dy=%.2f len=%.2f scaled=%d "
         "factor=%.4f unit=%s",
-        idx, pagePt1.x, pagePt1.y, pagePt2.x, pagePt2.y, meas.x, meas.y, meas.len, meas.scaled,
-        win->archTools.scaleFactor, unitNames[win->archTools.unit]);
+        idx, pagePt1.x, pagePt1.y, pagePt2.x, pagePt2.y, meas.x, meas.y, meas.len, meas.scaled, ps.scaleFactor,
+        unitNames[win->archTools.unit]);
 
     win->archTools.dragLine = 0; // ready for next measurement
     ScheduleRepaint(win, 0);
@@ -2513,10 +2517,11 @@ static void OnMouseLeftButtonUp(MainWindow* win, int x, int y, WPARAM key) {
                     // Store in page coords
                     PointF p1page = dm->CvtFromScreen(win->archTools.point1, pageNo);
                     PointF p2page = dm->CvtFromScreen(win->archTools.point2, pageNo);
-                    win->archTools.scaleLineP1x = p1page.x;
-                    win->archTools.scaleLineP1y = p1page.y;
-                    win->archTools.scaleLineP2x = p2page.x;
-                    win->archTools.scaleLineP2y = p2page.y;
+                    auto& ps = win->archTools.GetScaleForPage(pageNo);
+                    ps.scaleLineP1x = p1page.x;
+                    ps.scaleLineP1y = p1page.y;
+                    ps.scaleLineP2x = p2page.x;
+                    ps.scaleLineP2y = p2page.y;
                     LogInfo("[arch] OnMouseLeftButtonUp: drag finalized mode=scale p1=(%.2f,%.2f) p2=(%.2f,%.2f)",
                             p1page.x, p1page.y, p2page.x, p2page.y);
                     ScheduleRepaint(win, 0);
@@ -3397,12 +3402,22 @@ static bool DrawDocument(MainWindow* win, HDC hdc, Rect rcArea) {
             Gdiplus::Graphics gs(hdc);
             if (win->flashcard.studyMode) {
                 // Studying: solid highlight color
-                Gdiplus::Color col(200, 100, 100, 100);  // dark gray, opaque
+                Gdiplus::Color col(200, 100, 100, 100); // dark gray, opaque
                 Gdiplus::SolidBrush brush(col);
                 gs.FillRectangle(&brush, rc.x, rc.y, rc.dx, rc.dy);
+                // Render tip text on top of overlay (before reveal)
+                if (!win->flashcard.revealMode && len(card.tip) > 0) {
+                    Gdiplus::Font tipFont(L"Segoe UI", 10.0f, Gdiplus::FontStyleItalic);
+                    Gdiplus::SolidBrush tipBrush(Gdiplus::Color(200, 255, 255, 255)); // white, semi-transparent
+                    Gdiplus::StringFormat fmt2;
+                    fmt2.SetAlignment(Gdiplus::StringAlignmentCenter);
+                    fmt2.SetLineAlignment(Gdiplus::StringAlignmentCenter);
+                    Gdiplus::RectF tipRect = ToGdipRectF(rc);
+                    gs.DrawString(CWStrTemp(ToWStr(card.tip.s)), -1, &tipFont, tipRect, &fmt2, &tipBrush);
+                }
             } else {
                 // Reading mode: subtle transparent overlay
-                Gdiplus::Color col(30, 128, 128, 128);  // light gray, very transparent
+                Gdiplus::Color col(30, 128, 128, 128); // light gray, very transparent
                 Gdiplus::SolidBrush brush(col);
                 gs.FillRectangle(&brush, rc.x, rc.y, rc.dx, rc.dy);
             }
@@ -3495,14 +3510,14 @@ static void OnPaintDocument(MainWindow* win) {
                 HDC bufHdc = win->buffer->GetDC();
                 Gdiplus::Graphics gs(bufHdc);
 
+                int curPageNo = dm->CurrentPageNo();
+                auto& scaleState = win->archTools.GetScaleForPage(curPageNo);
+
                 // Draw persistent scale line (green)
-                if (win->archTools.scaleSet) {
-                    int pageNo = dm->CurrentPageNo();
-                    if (dm->ValidPageNo(pageNo)) {
-                        Point p1 =
-                            dm->CvtToScreen(pageNo, PointF{win->archTools.scaleLineP1x, win->archTools.scaleLineP1y});
-                        Point p2 =
-                            dm->CvtToScreen(pageNo, PointF{win->archTools.scaleLineP2x, win->archTools.scaleLineP2y});
+                if (scaleState.scaleSet) {
+                    if (dm->ValidPageNo(curPageNo)) {
+                        Point p1 = dm->CvtToScreen(curPageNo, PointF{scaleState.scaleLineP1x, scaleState.scaleLineP1y});
+                        Point p2 = dm->CvtToScreen(curPageNo, PointF{scaleState.scaleLineP2x, scaleState.scaleLineP2y});
                         Gdiplus::Pen pen(Gdiplus::Color(255, 0, 200, 0), 2); // green
                         gs.DrawLine(&pen, p1.x, p1.y, p2.x, p2.y);
                         // Endpoint circles
@@ -3512,17 +3527,16 @@ static void OnPaintDocument(MainWindow* win) {
                         gs.FillEllipse(&brush, p2.x - r, p2.y - r, 2 * r, 2 * r);
                         // Label at midpoint showing real measure - theme-aware bg (semi-transparent dark)
                         const WCHAR* unitNames[] = {L"mm", L"cm", L"m", L"in", L"ft"};
-                        float dx = win->archTools.scaleLineP2x - win->archTools.scaleLineP1x;
-                        float dy = win->archTools.scaleLineP2y - win->archTools.scaleLineP1y;
+                        float dx = scaleState.scaleLineP2x - scaleState.scaleLineP1x;
+                        float dy = scaleState.scaleLineP2y - scaleState.scaleLineP1y;
                         float pageLenPt = sqrtf(dx * dx + dy * dy);
                         // archScaleFactor is now page units per METER (canonical)
                         // realLen in meters = pageLenPt / archScaleFactor
                         // Convert to current display unit
-                        float realLenM =
-                            (win->archTools.scaleFactor > 0) ? (pageLenPt / win->archTools.scaleFactor) : 0.0f;
-                        float displayLen = realLenM / kMeterPerUnit[win->archTools.unit];
+                        float realLenM = (scaleState.scaleFactor > 0) ? (pageLenPt / scaleState.scaleFactor) : 0.0f;
+                        float displayLen = realLenM / kMeterPerUnit[scaleState.unit];
                         WCHAR label[128];
-                        swprintf_s(label, L"%.2f %s", displayLen, unitNames[win->archTools.unit]);
+                        swprintf_s(label, L"%.2f %s", displayLen, unitNames[scaleState.unit]);
                         // Apply decimal separator preference
                         if (gGlobalPrefs->archDecimalSeparator == 1) {
                             for (WCHAR* p = label; *p; ++p) {
@@ -3546,10 +3560,10 @@ static void OnPaintDocument(MainWindow* win) {
 
                 // Draw saved measurements (blue)
                 for (const ArchMeasurement& meas : win->archTools.measurements) {
-                    int pageNo = dm->CurrentPageNo(); // measurements are on current page
-                    if (dm->ValidPageNo(pageNo)) {
-                        Point p1 = dm->CvtToScreen(pageNo, PointF{meas.p1x, meas.p1y});
-                        Point p2 = dm->CvtToScreen(pageNo, PointF{meas.p2x, meas.p2y});
+                    if (meas.pageNo != curPageNo) continue;
+                    if (dm->ValidPageNo(curPageNo)) {
+                        Point p1 = dm->CvtToScreen(curPageNo, PointF{meas.p1x, meas.p1y});
+                        Point p2 = dm->CvtToScreen(curPageNo, PointF{meas.p2x, meas.p2y});
                         Gdiplus::Pen pen(Gdiplus::Color(255, 0, 100, 255), 2); // blue
                         gs.DrawLine(&pen, p1.x, p1.y, p2.x, p2.y);
                         // Endpoint circles
@@ -3561,11 +3575,11 @@ static void OnPaintDocument(MainWindow* win) {
                         const WCHAR* unitNames[] = {L"mm", L"cm", L"m", L"in", L"ft"};
                         WCHAR label[128];
                         // meas.x/y/len are now in METERS (canonical). Convert to current display unit.
-                        float dispX = meas.x / kMeterPerUnit[win->archTools.unit];
-                        float dispY = meas.y / kMeterPerUnit[win->archTools.unit];
-                        float dispLen = meas.len / kMeterPerUnit[win->archTools.unit];
+                        float dispX = meas.x / kMeterPerUnit[scaleState.unit];
+                        float dispY = meas.y / kMeterPerUnit[scaleState.unit];
+                        float dispLen = meas.len / kMeterPerUnit[scaleState.unit];
                         swprintf_s(label, L"x=%.2f y=%.2f L=%.2f %s", dispX, dispY, dispLen,
-                                   unitNames[win->archTools.unit]);
+                                   unitNames[scaleState.unit]);
                         // Apply decimal separator preference
                         if (gGlobalPrefs->archDecimalSeparator == 1) {
                             for (WCHAR* p = label; *p; ++p) {

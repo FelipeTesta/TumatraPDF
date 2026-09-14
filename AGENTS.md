@@ -290,6 +290,7 @@ The Bash tool runs under Git Bash (MSYS2), **not** cmd.exe. This causes critical
 - **NEVER use `rmdir /s /q`** — Bash `rmdir` does not understand cmd.exe flags. Use `rm -rf` instead.
 - **NEVER use `del`** — Not available in Bash. Use `rm` instead.
 - **NEVER use `dir`** — Use `ls` instead.
+- **NEVER use `&&` to chain commands** — The shell is PowerShell 5.1, which does NOT support `&&`. Use `;` instead (runs commands sequentially, continues even if one fails). For conditional chaining (run next only if previous succeeds), use `cmd1; if ($?) { cmd2 }`.
 - **For Windows-native commands**, wrap in `cmd /c "..."` explicitly.
 - In general, always use Unix-style commands and paths in the Bash tool.
 

@@ -50,7 +50,7 @@ Rect SelectionOnPage::GetRect(DisplayModel* dm) const {
 
     RectF adjustedRect = rect;
     if (dm->marginTrimEnabled) {
-        adjustedRect.y += (float)gGlobalPrefs->trim.top;
+        adjustedRect.y -= (float)gGlobalPrefs->trim.top;  // FIXED: was +=
     }
     return dm->CvtToScreen(pageNo, adjustedRect);
 }

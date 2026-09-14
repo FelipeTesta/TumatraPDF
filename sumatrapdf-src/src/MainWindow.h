@@ -49,6 +49,7 @@ struct FindMatch {
 
 // Arch Tools measurement record
 struct ArchMeasurement {
+    int pageNo;               // page number this measurement belongs to
     float p1x, p1y, p2x, p2y; // PAGE coords of the two points
     float x, y, len;          // measured values in real units (or page units if no scale)
     int unit;                 // 0=mm,1=cm,2=m,3=in,4=ft
@@ -365,7 +366,35 @@ struct MainWindow {
     struct ArchToolsState {
         int toolMode = 0;         // 0=off, 1=scale, 2=measure
         int unit = 2;             // 0=mm,1=cm,2=m,3=in,4=ft
-        float scaleFactor = 0.0f; // page units per real unit
+        
+        // Per-page scale state
+        struct ArchScaleState {
+            int pageNo = 0;
+            float scaleFactor = 0.0f;
+            float scaleAnchorX = 0.0f;
+            float scaleAnchorY = 0.0f;
+            bool scaleSet = false;
+            bool scaleLineDefined = false;
+            float scaleLineP1x = 0.0f;
+            float scaleLineP1y = 0.0f;
+            float scaleLineP2x = 0.0f;
+            float scaleLineP2y = 0.0f;
+            int unit = 2;
+        };
+        Vec<ArchScaleState> scaleStates;
+        
+        ArchScaleState& GetScaleForPage(int pn) {
+            for (int i = 0; i < len(scaleStates); i++) {
+                if (scaleStates[i].pageNo == pn) return scaleStates[i];
+            }
+            ArchScaleState def;
+            def.pageNo = pn;
+            def.unit = unit;
+            scaleStates.Append(def);
+            return scaleStates[len(scaleStates) - 1];
+        }
+        
+        float scaleFactor = 0.0f; // page units per real unit (legacy, for current page)
         float scaleAnchorX = 0.0f;
         float scaleAnchorY = 0.0f;
         bool scaleSet = false;
@@ -384,7 +413,7 @@ struct MainWindow {
             ~ArchMeasurementsByDoc() { str::Free(path); }
         };
         Vec<ArchMeasurementsByDoc> measurementsByDoc;
-        // Persistent scale line endpoints in PAGE coordinates
+        // Persistent scale line endpoints in PAGE coordinates (legacy, for current page)
         float scaleLineP1x = 0.0f;
         float scaleLineP1y = 0.0f;
         float scaleLineP2x = 0.0f;
@@ -417,9 +446,10 @@ struct MainWindow {
         Vec<FlashcardStudyState> history;   // stack for back/undo (cardIdx + previous state)
         Vec<Flashcard> cards;               // loaded cards from document
         FlashcardStudyDoc studyDoc;         // loaded study state
-        // Secondary toolbar
-        HWND hwndReBarFlashcard = nullptr;
-        HWND hwndToolbarFlashcard = nullptr;
+// Secondary toolbar
+         HWND hwndReBarFlashcard = nullptr;
+         HWND hwndToolbarFlashcard = nullptr;
+         HWND hwndCardCount = nullptr;
         // Lista sidebar
         HWND hwndListaBox = nullptr;
         ILayout* listaLayout = nullptr;
@@ -534,6 +564,7 @@ struct MainWindow {
             bool aiChatVisible = false;
             int aiChatDx = 0;
             bool archToolsOn = false;
+            bool flashcardOn = false;
         };
         Layout layout; // last applied layout state
         // desired visibility of the sidebar / AI chat panels; applied

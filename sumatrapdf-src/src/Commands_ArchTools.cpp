@@ -5,11 +5,13 @@
 #include "SumatraLog.h"
 #include "Commands_ArchTools.h"
 
+#include "Flashcard.h"
 #include "Settings.h"
 #include "GlobalPrefs.h"
 #include "Commands.h"
 #include "MainWindow.h"
 #include "Toolbar.h"
+#include "DocController.h"
 
 // Forward declarations — these are defined in other translation units
 void ShowArchScaleDialog(MainWindow* win);
@@ -22,9 +24,11 @@ bool IsCurrentDocMarkdown(MainWindow* win);
 // HandleCmdArchScale — open floating scale dialog
 void HandleCmdArchScale(MainWindow* win) {
     if (!gGlobalPrefs->archToolsEnabled) return;
-    LogInfo("[arch] CmdArchScale: opening scale dialog");
-    if (!win->archTools.scaleLineDefined) {
-        win->archTools.toolMode = 1; // scale drawing mode
+    int pageNo = win->ctrl ? win->ctrl->CurrentPageNo() : 1;
+    auto& ps = win->archTools.GetScaleForPage(pageNo);
+    LogInfo("[arch] CmdArchScale: page %d, opening scale dialog", pageNo);
+    if (!ps.scaleLineDefined) {
+        win->archTools.toolMode = 1;
         if (win->hwndCanvas) {
             SetCursor(LoadCursor(nullptr, IDC_CROSS));
         }
@@ -51,24 +55,35 @@ void HandleCmdArchMeasure(MainWindow* win) {
     UpdateToolbar2State(win);
 }
 
-// HandleCmdArchClear — clear measurements only, keep scale calibration intact
+// HandleCmdArchClear — clear only current page's measurements
 void HandleCmdArchClear(MainWindow* win) {
     if (!gGlobalPrefs->archToolsEnabled) return;
-    int count = (int)len(win->archTools.measurements);
-    win->archTools.measurements.Reset();
-    LogInfo("[arch] CmdArchClear: cleared %d measurements (scale kept)", count);
+    int pageNo = win->ctrl ? win->ctrl->CurrentPageNo() : 1;
+    int count = 0;
+    Vec<ArchMeasurement> remaining;
+    for (int i = 0; i < len(win->archTools.measurements); i++) {
+        if (win->archTools.measurements[i].pageNo == pageNo) {
+            count++;
+        } else {
+            remaining.Append(win->archTools.measurements[i]);
+        }
+    }
+    win->archTools.measurements = remaining;
+    LogInfo("[arch] CmdArchClear: cleared %d measurements on page %d", count, pageNo);
     ScheduleRepaint(win, 0);
 }
 
-// HandleCmdArchResetScale — reset only the scale calibration (keep measurements)
+// HandleCmdArchResetScale — reset only current page's scale
 void HandleCmdArchResetScale(MainWindow* win) {
     if (!gGlobalPrefs->archToolsEnabled) return;
-    win->archTools.scaleSet = false;
-    win->archTools.scaleLineDefined = false;
-    win->archTools.scaleFactor = 0.0f;
-    win->archTools.scaleLineP1x = win->archTools.scaleLineP1y = 0.0f;
-    win->archTools.scaleLineP2x = win->archTools.scaleLineP2y = 0.0f;
-    LogInfo("[arch] CmdArchResetScale: reset scale only");
+    int pageNo = win->ctrl ? win->ctrl->CurrentPageNo() : 1;
+    auto& ps = win->archTools.GetScaleForPage(pageNo);
+    ps.scaleSet = false;
+    ps.scaleLineDefined = false;
+    ps.scaleFactor = 0.0f;
+    ps.scaleLineP1x = ps.scaleLineP1y = 0.0f;
+    ps.scaleLineP2x = ps.scaleLineP2y = 0.0f;
+    LogInfo("[arch] CmdArchResetScale: reset scale for page %d only", pageNo);
     ScheduleRepaint(win, 0);
 }
 
@@ -80,6 +95,15 @@ void HandleCmdArchToolsToggle(MainWindow* win) {
     if (win->archTools.on) {
         if (win->archTools.hwndReBar2) {
             ShowWindow(win->archTools.hwndReBar2, SW_SHOW);
+        }
+        // Close flashcard if open (mutually exclusive toolbars)
+        if (win->flashcard.on) {
+            win->flashcard.on = false;
+            FlashcardToolbarDestroy(win);
+            win->flashcard.studyMode = false;
+            win->flashcard.revealMode = false;
+            win->flashcard.currentCardIdx = -1;
+            win->flashcard.cards.Reset();
         }
         UpdateToolbar2State(win);
     } else {
@@ -100,5 +124,20 @@ void HandleCmdArchToolsToggle(MainWindow* win) {
     SetToolbarButtonCheckedState(win, CmdArchToolsToggle, win->archTools.on);
     LogInfo("[arch] CmdArchToolsToggle: archToolsOn=%d", win->archTools.on);
     RelayoutFrame(win, true, -1);
+    ScheduleRepaint(win, 0);
+}
+
+// HandleCmdArchCleanAll — clear ALL pages
+void HandleCmdArchCleanAll(MainWindow* win) {
+    if (!gGlobalPrefs->archToolsEnabled) return;
+    int count = (int)len(win->archTools.measurements);
+    win->archTools.measurements.Reset();
+    win->archTools.scaleStates.Reset();
+    win->archTools.toolMode = 0;
+    if (win->hwndCanvas) {
+        SetCursor(LoadCursor(nullptr, IDC_ARROW));
+    }
+    LogInfo("[arch] CmdArchCleanAll: cleared %d measurements + all page scales", count);
+    UpdateToolbar2State(win);
     ScheduleRepaint(win, 0);
 }

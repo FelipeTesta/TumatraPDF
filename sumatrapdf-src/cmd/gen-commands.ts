@@ -71,6 +71,8 @@ export const commands = [
     "CmdGoToFirstPage", "First Page",
     "CmdGoToLastPage", "Last Page",
     "CmdGoToPage", "Go to Page...",
+    "CmdGoToPageNextKeepScroll", "Next Page (Keep Scroll)",
+    "CmdGoToPagePrevKeepScroll", "Previous Page (Keep Scroll)",
     "CmdFindFirst", "Find...",
     "CmdFindNext", "Find Next",
     "CmdFindPrev", "Find Previous",
@@ -302,6 +304,7 @@ export const commands = [
     "CmdArchClear", "Clear Arch Measurements",
     "CmdArchToolsToggle", "Toggle Arch Tools Toolbar",
     "CmdArchResetScale", "Reset Arch Scale",
+    "CmdArchCleanAll", "Clean All (Lines + Scale)",
     "CmdAutoScrollTimerToggle", "Toggle Auto-Scroll Timer",
     "CmdAutoScrollTimerEdit", "Edit Auto-Scroll Timer Duration",
     "CmdFlashcardToggle", "Toggle Flashcard Mode",
@@ -316,6 +319,7 @@ export const commands = [
     "CmdFlashcardRate3", "Rate Card: Good",
     "CmdFlashcardRate4", "Rate Card: Easy",
     "CmdFlashcardLista", "Toggle Flashcard List Sidebar",
+    "CmdFlashcardAddTip", "Add Tip To Current Flashcard",
     "CmdNone", "Do nothing",
 ];
 

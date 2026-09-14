@@ -23,6 +23,8 @@ static ACCEL gBuiltInAccelerators[] = {
     {FVIRTKEY, VK_DOWN, CmdScrollDown},
     {FVIRTKEY, VK_LEFT, CmdScrollLeft},
     {FVIRTKEY, VK_RIGHT, CmdScrollRight},
+    {FCONTROL | FVIRTKEY, VK_LEFT, CmdGoToPagePrevKeepScroll},
+    {FCONTROL | FVIRTKEY, VK_RIGHT, CmdGoToPageNextKeepScroll},
 
     {FSHIFT | FVIRTKEY, VK_UP, CmdScrollUpHalfPage},
     {FSHIFT | FVIRTKEY, VK_DOWN, CmdScrollDownHalfPage},
