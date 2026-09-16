@@ -1,5 +1,7 @@
 This is a C++ program for Windows, using mostly win32 windows API functions. The full Windows GUI app remains Windows-only for now; we are porting **non-UI** code so it also compiles on macOS and Linux, starting with `src/base/`. There is also an early Cocoa macOS app under `src/mac/` that can open a command-line document, render the first page through the existing engines, and display it.
 
+Always use `tree sitter` tools to understand the project structure
+
 We don't use STL but our own string / helper / container functions implemented in src\base directory
 
 Assume that Visual Studio command-line tools are available in the PATH environment variable (cl.exe, msbuild.exe etc.)

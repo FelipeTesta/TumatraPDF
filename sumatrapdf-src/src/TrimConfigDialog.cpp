@@ -23,6 +23,7 @@
 #include "Translations.h"
 #include "TrimConfigDialog.h"
 #include "Theme.h"
+#include "Canvas.h"
 
 static TrimConfigWnd* gTrimConfigWnd = nullptr;
 
@@ -140,6 +141,10 @@ void TrimConfigWnd::OnSave() {
         gRenderCache->FreeForDisplayModel(trimDm);
     }
     HwndRepaintNow(win->hwndCanvas);
+    // Ensure contrast overlay stays positioned correctly after trim changes
+    if (win->hwndContrastOverlay) {
+        UpdateContrastOverlay(win);
+    }
     // Clear modeless dialog registration
     if (GetCurrentModelessDialog() == hwnd) {
         SetCurrentModelessDialog(nullptr);
@@ -156,6 +161,10 @@ void TrimConfigWnd::OnCancel() {
         trimDm->RelayoutKeepingView();
     }
     HwndRepaintNow(win->hwndCanvas);
+    // Ensure contrast overlay stays positioned correctly after cancel
+    if (win->hwndContrastOverlay) {
+        UpdateContrastOverlay(win);
+    }
     // Clear modeless dialog registration
     if (GetCurrentModelessDialog() == hwnd) {
         SetCurrentModelessDialog(nullptr);

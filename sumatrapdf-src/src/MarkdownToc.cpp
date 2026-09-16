@@ -405,7 +405,7 @@ void ParseMarkdownTocsParallel(StrVec& files, bool htmlMode, Vec<MarkdownFileToc
 static const char* kMarkdownPageCssFmt = R"(
 :root { %s }
 body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; font-size: 16px;
-  line-height: 1.5; color: var(--fg); background: var(--bg); margin: 0; padding: 2rem 3rem; max-width: 980px; }
+  line-height: 1.5; color: var(--fg); background: var(--bg); margin: 0; padding: 1.5rem 2rem; }
 a { color: var(--link); text-decoration: none; }
 a:hover { text-decoration: underline; }
 h1,h2,h3,h4,h5,h6 { margin-top: 1.5rem; margin-bottom: 1rem; font-weight: 600; line-height: 1.25; }

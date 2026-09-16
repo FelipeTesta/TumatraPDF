@@ -204,6 +204,21 @@ bool HandleCommandFlashcard(MainWindow* win, int cmd) {
             if (annot) {
                 SetQuadPointsAsRect(annot, rects);
                 annot->bounds = GetBounds(annot);
+
+                // Set flashcard-specific properties: author, gray color, opacity
+                {
+                    EngineMupdf* epdf = AsEngineMupdf(engine);
+                    fz_context* ctx = epdf->Ctx();
+                    ScopedRecursiveMutex cs(&epdf->docLock);
+                    fz_try(ctx) {
+                        pdf_set_annot_author(ctx, annot->pdfannot, CStrTemp(StrL("TumatraPDF-Flashcard")));
+                        float gray[3] = {0.5f, 0.5f, 0.5f};
+                        pdf_set_annot_color(ctx, annot->pdfannot, 3, gray);
+                        pdf_set_annot_opacity(ctx, annot->pdfannot, 0.4f);
+                    } fz_catch(ctx) {
+                        fz_report_error(ctx);
+                    }
+                }
             }
         }
 

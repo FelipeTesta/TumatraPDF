@@ -18,7 +18,8 @@ extern "C" {
 #include "Flashcard.h"
 
 // Iterate all annotations on all pages and extract flashcards.
-// Flashcards are FreeText annotations whose contents start with "Q: "
+// Flashcards are Highlight annotations with author "TumatraPDF-Flashcard"
+// whose contents start with "Q: "
 Vec<Flashcard> FlashcardLoadFromDocument(EngineMupdf* engine) {
     logf("FC: FlashcardLoadFromDocument - scanning document annotations\n");
     Vec<Flashcard> result;
@@ -43,12 +44,18 @@ Vec<Flashcard> FlashcardLoadFromDocument(EngineMupdf* engine) {
 
         for (pdf_annot* annot = pdf_first_annot(ctx, pdfpage); annot; annot = pdf_next_annot(ctx, annot)) {
             int annotType = pdf_annot_type(ctx, annot);
-            if (annotType != PDF_ANNOT_FREE_TEXT) {
+            if (annotType != PDF_ANNOT_HIGHLIGHT) {
                 continue;
             }
 
             const char* contents = pdf_annot_contents(ctx, annot);
             if (!contents || !str::StartsWith(Str(contents), StrL("Q: "))) {
+                continue;
+            }
+
+            // Only load annotations authored by our flashcard system
+            const char* author = pdf_annot_author(ctx, annot);
+            if (!author || !str::StartsWith(Str(author), StrL("TumatraPDF-Flashcard"))) {
                 continue;
             }
 

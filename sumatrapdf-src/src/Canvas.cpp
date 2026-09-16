@@ -3324,6 +3324,7 @@ static bool DrawDocument(MainWindow* win, HDC hdc, Rect rcArea) {
                 curTab->everPaintedPage = true;
             }
         }
+
         if (renderDelay != 0) {
             HFONT fontRightTxt = HdcCreateSimpleFont(hdc, "MS Shell Dlg", 14);
             HGDIOBJ hPrevFont = SelectObject(hdc, fontRightTxt);
@@ -3353,24 +3354,16 @@ static bool DrawDocument(MainWindow* win, HDC hdc, Rect rcArea) {
             continue;
         }
 
-        if (!renderOutOfDateCue) {
-            continue;
+        // Draw subtle trim separator line between pages
+        if (dm->marginTrimEnabled) {
+            int sepY = pi->pageOnScreen.y + pi->pageOnScreen.dy;
+            HPEN hPen = CreatePen(PS_SOLID, 1, RGB(200, 200, 200));
+            HPEN hOld = (HPEN)SelectObject(hdc, hPen);
+            MoveToEx(hdc, pi->pageOnScreen.x, sepY, nullptr);
+            LineTo(hdc, pi->pageOnScreen.x + pi->pageOnScreen.dx, sepY);
+            SelectObject(hdc, hOld);
+            DeleteObject(hPen);
         }
-
-        HDC bmpDC = CreateCompatibleDC(hdc);
-        if (!bmpDC) {
-            continue;
-        }
-        SelectObject(bmpDC, gBitmapReloadingCue);
-        int size = DpiScale(win->hwndFrame, 16);
-        int cx = std::min(bounds.dx, 2 * size);
-        int cy = std::min(bounds.dy, 2 * size);
-        int x = bounds.x + bounds.dx - std::min((cx + size) / 2, cx);
-        int y = bounds.y + std::max((cy - size) / 2, 0);
-        int dxDest = std::min(cx, size);
-        int dyDest = std::min(cy, size);
-        StretchBlt(hdc, x, y, dxDest, dyDest, bmpDC, 0, 0, 16, 16, SRCCOPY);
-        DeleteDC(bmpDC);
     }
 
     WindowTab* tab = win->CurrentTab();

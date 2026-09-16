@@ -1,5 +1,24 @@
 # TumatraPDF — Development Log
 
+## 2026-09-16 — Markdown Full-Width + Flashcard/Trim Fixes Batch (BUILD OK)
+
+### Markdown full-width reading
+- `MarkdownToc.cpp` `kMarkdownPageCssFmt`: removed `max-width: 980px` + reduced padding (`2rem 3rem` → `1.5rem 2rem`) on body. Text now fills the whole window width and wraps word-by-word dynamically on resize (WebView2 native reflow) — Notepad-style space usage. MuPDF fallback path unchanged.
+
+### Flashcard highlight system (from prior session, now committed)
+- `Flashcard.cpp`: load `PDF_ANNOT_HIGHLIGHT` (was FREE_TEXT) + author filter `TumatraPDF-Flashcard`
+- `Commands_Flashcard.cpp`: set annot author `TumatraPDF-Flashcard`, gray color, 40% opacity
+- `EditAnnotations.cpp`: filter out flashcard annotations from the annotations panel (parallel separation)
+- `FlashcardToolbar.cpp`: card count as toolbar button index 0 (was floating label), theme support (`WS_BORDER|RBS_BANDBORDERS`, `RBBS_CHILDEDGE`, RTL), `TB_SETBUTTONINFOW` update
+
+### Trim / canvas
+- `Canvas.cpp`: subtle gray 1px separator line between pages when `marginTrimEnabled`; removed stale reloading-cue block
+- `TrimConfigDialog.cpp`: refresh contrast overlay on save/cancel
+- `AutoScroll.cpp`: uniform 100 px/min speed steps (300→4000)
+
+### Build
+`bun cmd/build.ts` → `Compiled\TumatraPDF.exe`, 0 errors / 0 warnings (69s).
+
 ## 2026-09-11 — Flashcard MVP (BUILD OK)
 
 ### What

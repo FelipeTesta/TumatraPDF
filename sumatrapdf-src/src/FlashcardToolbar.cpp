@@ -12,6 +12,7 @@
 #include "MainWindow.h"
 #include "Toolbar.h"
 #include "ToolbarLayout.h"
+#include "Theme.h"
 #include "Flashcard.h"
 
 // Flashcard secondary toolbar (study controls).
@@ -28,6 +29,9 @@ void FlashcardToolbarCreate(MainWindow* win) {
 
     // Create the rebar that hosts the flashcard toolbar below the main toolbar
     DWORD style = WS_CHILD | WS_CLIPCHILDREN | RBS_VARHEIGHT | CCS_NODIVIDER | CCS_NOPARENTALIGN;
+    if (IsCurrentThemeDefault()) {
+        style |= WS_BORDER | RBS_BANDBORDERS;
+    }
     DWORD exStyle = WS_EX_TOOLWINDOW;
     HWND hwndRebar = CreateWindowExW(exStyle, REBARCLASSNAME, nullptr, style, 0, 0, 0, 0, hwndParent,
                                      (HMENU)IDC_REBAR, hinst, nullptr);
@@ -38,20 +42,12 @@ void FlashcardToolbarCreate(MainWindow* win) {
     rbi.himl = (HIMAGELIST)nullptr;
     SendMessageW(hwndRebar, RB_SETBARINFO, 0, (LPARAM)&rbi);
 
-    // Get main toolbar rebar height for card count label sizing
-    Rect rcMainRebar = HwndWindowRect(win->hwndReBar);
-
-    // Card counter label as child of the flashcard rebar (positioned at left edge)
-    HWND hwndCount = CreateWindowExW(0, L"STATIC", L"Cards: 0/0/0 | ",
-        WS_CHILD | WS_VISIBLE | SS_LEFT,
-        DpiScale(hwndParent, 4), 0, DpiScale(hwndParent, 120), rcMainRebar.dy,
-        hwndRebar, nullptr, hinst, nullptr);
-    win->flashcard.hwndCardCount = hwndCount;
-
     // Create the flashcard toolbar inside the rebar
     style = WS_CHILD | WS_CLIPSIBLINGS | TBSTYLE_TOOLTIPS | TBSTYLE_FLAT | TBSTYLE_LIST | CCS_NODIVIDER |
             CCS_NOPARENTALIGN | TBSTYLE_WRAPABLE;
     exStyle = 0;
+    bool isRtl = (GetWindowLong(hwndParent, GWL_EXSTYLE) & WS_EX_LAYOUTRTL) != 0;
+    if (isRtl) exStyle |= WS_EX_LAYOUTRTL;
     HWND hwndToolbar = CreateWindowExW(exStyle, TOOLBARCLASSNAME, nullptr, style, 0, 0, 0, 0, hwndRebar,
                                        (HMENU)IDC_TOOLBAR, hinst, nullptr);
     TbSetButtonStructSize(hwndToolbar, sizeofi(TBBUTTON));
@@ -62,6 +58,7 @@ void FlashcardToolbarCreate(MainWindow* win) {
         Str toolTip;
     };
     static ToolbarButtonInfo2 gFlashcardToolbarButtons[] = {
+        {0, StrL("Cards: 0/0/0 | ")},  // card count display (button index 0, idCommand=0 = no action)
         {CmdFlashcardStudy, _TRN("Study")},
         {CmdFlashcardBack, _TRN("Back")},
         {CmdFlashcardLista, _TRN("Lista")},
@@ -92,9 +89,6 @@ void FlashcardToolbarCreate(MainWindow* win) {
     // Apply theme settings (dark mode, custom draw, etc.) to match arch tools toolbar
     ToolbarApplyThemeToRebar(hwndRebar, hwndToolbar);
 
-    // Set font for card count label to match toolbar font
-    SendMessageW(win->flashcard.hwndCardCount, WM_SETFONT, (WPARAM)SendMessageW(hwndToolbar, WM_GETFONT, 0, 0), TRUE);
-
     Rect rc = TbGetItemRect(hwndToolbar, 0);
 
     ShowWindow(hwndToolbar, SW_SHOW);
@@ -103,6 +97,9 @@ void FlashcardToolbarCreate(MainWindow* win) {
     rbBand.cbSize = sizeof(REBARBANDINFOW);
     rbBand.fMask = RBBIM_STYLE | RBBIM_CHILD | RBBIM_CHILDSIZE;
     rbBand.fStyle = RBBS_FIXEDSIZE;
+    if (IsAppThemed() && IsCurrentThemeDefault()) {
+        rbBand.fStyle |= RBBS_CHILDEDGE;
+    }
     rbBand.hbmBack = nullptr;
     rbBand.lpText = (WCHAR*)L"Flashcard Toolbar"; // NOLINT
     rbBand.hwndChild = hwndToolbar;
@@ -132,10 +129,6 @@ void FlashcardToolbarDestroy(MainWindow* win) {
     }
     DestroyWindow(win->flashcard.hwndToolbarFlashcard);
     win->flashcard.hwndToolbarFlashcard = nullptr;
-    if (win->flashcard.hwndCardCount) {
-        DestroyWindow(win->flashcard.hwndCardCount);
-        win->flashcard.hwndCardCount = nullptr;
-    }
     DestroyWindow(win->flashcard.hwndReBarFlashcard);
     win->flashcard.hwndReBarFlashcard = nullptr;
 
@@ -145,16 +138,15 @@ void FlashcardToolbarDestroy(MainWindow* win) {
 
 // Update the flashcard toolbar card count label: "Cards: {total}/{new}/{due} | "
 void FlashcardToolbarUpdateCount(MainWindow* win) {
-    if (!win->flashcard.hwndCardCount) {
+    if (!win->flashcard.hwndToolbarFlashcard) {
         return;
     }
     int total = len(win->flashcard.cards);
     int newCount = 0;
     int dueCount = 0;
-    i64 now = (i64)time(nullptr) * 1000; // milliseconds since epoch
+    i64 now = (i64)time(nullptr) * 1000;
     for (int i = 0; i < total; i++) {
         const Flashcard& card = win->flashcard.cards[i];
-        // Find study state
         bool found = false;
         for (int j = 0; j < len(win->flashcard.studyDoc.states); j++) {
             if (win->flashcard.studyDoc.states.els[j].annotId == card.annotId) {
@@ -168,5 +160,9 @@ void FlashcardToolbarUpdateCount(MainWindow* win) {
         if (!found) newCount++;
     }
     TempStr text = fmt("Cards: %d/%d/%d | ", total, newCount, dueCount);
-    SetWindowTextW(win->flashcard.hwndCardCount, CWStrTemp(ToWStrTemp(Str(text))));
+    TBBUTTONINFOW bi{};
+    bi.cbSize = sizeof(TBBUTTONINFOW);
+    bi.dwMask = TBIF_TEXT;
+    bi.pszText = (WCHAR*)CWStrTemp(ToWStrTemp(Str(text)));
+    SendMessageW(win->flashcard.hwndToolbarFlashcard, TB_SETBUTTONINFOW, 0, (LPARAM)&bi);
 }

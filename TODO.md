@@ -1,5 +1,5 @@
 ﻿# TODO
-## Crop View
+## Two Columns (Crop View)
 o bot�o deve se comportar dessa forma:
 cropview off:
 | ? largura total da tela ou zoom usu�rio ? |
@@ -22,6 +22,10 @@ cropview on:
 
 |        p�gina 2           |
 |       colunadireita       |
+
+O estado atual gera um problema: ao "tocar" o limite inferior da página, o app pula automaticamente para o topo direito, não dando tempo de ler o texto de forma fluida como continuidade.
+
+A ideia é que a próxima página renderizada seja (1) a mesma página novamente porém focada na metade direita, depois (2) a página seguinte focada na metade esquerda. Assim quando autoscroll=on o texto vai fluir de forma contínua sem saltos, como se fosse um texto de uma única coluna. 
 
 ## Margin
 margin config:
