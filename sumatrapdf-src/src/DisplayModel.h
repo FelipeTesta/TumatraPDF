@@ -216,6 +216,13 @@ struct DisplayModel : DocController {
     void ApplyViewportCrop();
     void QuickToggleViewportCrop();
 
+    // two column v2 (stacked virtual columns, independent of v1)
+    void ApplyViewportCropV2();
+    void QuickToggleViewportCropV2();
+    int VirtualToPhysical(int virtualPageNo) const;
+    int ColumnOfVirtual(int virtualPageNo) const;
+    int VirtualPageCount() const;
+
     bool InPresentation() const;
 
     void BuildPagesInfo();
@@ -311,6 +318,10 @@ struct DisplayModel : DocController {
     Rect viewportCropSaved;
     float viewportCropSavedZoom = 1.0f;
     bool viewportCropQuickToggled = false; // currently showing full page
+
+    // two column v2 (independent of v1): stacked virtual columns, 2N pages
+    bool viewportCropV2Enabled = false;
+    bool viewportCropV2QuickToggled = false; // currently showing full page
 
     // margin trim (independent of viewport crop)
     bool marginTrimEnabled = false;

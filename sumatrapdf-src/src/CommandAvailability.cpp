@@ -229,6 +229,7 @@ static UINT_PTR removeIfChm[] = {
     CmdToggleContinuousView,
     CmdContrastToggle,
     CmdViewportCropToggle,
+    CmdViewportCropV2Toggle,
     CmdMarginTrimToggle,
     CmdTrimConfig,
     CmdArchScale,
@@ -258,6 +259,7 @@ static UINT_PTR removeIfChm[] = {
 
 static UINT_PTR removeIfMarkdown[] = {
     CmdViewportCropToggle,
+    CmdViewportCropV2Toggle,
     CmdMarginTrimToggle,
     CmdTrimConfig,
     CmdArchToolsToggle,

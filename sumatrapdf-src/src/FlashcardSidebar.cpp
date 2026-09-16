@@ -25,13 +25,9 @@
 #include "FlashcardSidebar.h"
 
 struct ListaTreeModel : TreeModel {
-    ~ListaTreeModel() override {
-        DeleteVecMembers(items);
-    }
+    ~ListaTreeModel() override { DeleteVecMembers(items); }
 
-    TreeItem Root() override {
-        return (TreeItem)rootItem;
-    }
+    TreeItem Root() override { return (TreeItem)rootItem; }
 
     Str Text(TreeItem ti) override {
         auto* item = (ListaTreeItem*)ti;
@@ -59,9 +55,7 @@ struct ListaTreeModel : TreeModel {
         return item->isExpanded;
     }
 
-    bool IsChecked(TreeItem /*ti*/) override {
-        return false;
-    }
+    bool IsChecked(TreeItem /*ti*/) override { return false; }
 
     void SetHandle(TreeItem ti, HTREEITEM hItem) override {
         ReportIf(ti < 0);
@@ -160,14 +154,15 @@ static void ListaTreeSelectionChanged(TreeView::SelectionChangedEvent* args) {
 
 void FlashcardSidebarCreate(MainWindow* win) {
     if (win->flashcard.hwndListaBox) return;
-    logf("FC: FlashcardSidebarCreate - creating sidebar popup\n");
+    logf("[fc] FlashcardSidebarCreate - creating sidebar popup\n");
 
     HMODULE h = GetModuleHandleW(nullptr);
     DWORD dwStyle = WS_POPUP | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE;
     int dx = DpiScale(win->hwndFrame, 280);
     int dy = DpiScale(win->hwndFrame, 400);
 
-    win->flashcard.hwndListaBox = CreateWindowExW(WS_EX_TOOLWINDOW, WC_STATIC, L"Flashcards", dwStyle, 0, 0, dx, dy, win->hwndFrame, nullptr, h, nullptr);
+    win->flashcard.hwndListaBox = CreateWindowExW(WS_EX_TOOLWINDOW, WC_STATIC, L"Flashcards", dwStyle, 0, 0, dx, dy,
+                                                  win->hwndFrame, nullptr, h, nullptr);
     if (!win->flashcard.hwndListaBox) return;
 
     auto* l = new LabelWithCloseWnd();
@@ -221,7 +216,7 @@ void FlashcardSidebarCreate(MainWindow* win) {
 void FlashcardSidebarDestroy(MainWindow* win) {
     if (!win->flashcard.hwndListaBox) return;
 
-    logf("FC: FlashcardSidebarDestroy - destroying sidebar popup\n");
+    logf("[fc] FlashcardSidebarDestroy - destroying sidebar popup\n");
 
     if (win->flashcard.listaTreeView) {
         delete win->flashcard.listaTreeView->treeModel;
@@ -239,7 +234,7 @@ void FlashcardSidebarDestroy(MainWindow* win) {
 }
 
 void FlashcardSidebarToggle(MainWindow* win) {
-    logf("FC: FlashcardSidebarToggle\n");
+    logf("[fc] FlashcardSidebarToggle\n");
     if (win->flashcard.hwndListaBox) {
         bool visible = IsWindowVisible(win->flashcard.hwndListaBox);
         if (visible) {
@@ -247,7 +242,8 @@ void FlashcardSidebarToggle(MainWindow* win) {
         } else {
             RECT rcFrame;
             GetWindowRect(win->hwndFrame, &rcFrame);
-            SetWindowPos(win->flashcard.hwndListaBox, HWND_TOP, rcFrame.left, rcFrame.top + 100, 0, 0, SWP_NOACTIVATE | SWP_NOSIZE);
+            SetWindowPos(win->flashcard.hwndListaBox, HWND_TOP, rcFrame.left, rcFrame.top + 100, 0, 0,
+                         SWP_NOACTIVATE | SWP_NOSIZE);
             ShowWindow(win->flashcard.hwndListaBox, SW_SHOWNOACTIVATE);
             FlashcardSidebarPopulate(win);
         }
@@ -260,7 +256,7 @@ void FlashcardSidebarToggle(MainWindow* win) {
 void FlashcardSidebarPopulate(MainWindow* win) {
     if (!win->flashcard.hwndListaBox || !win->flashcard.listaTreeView) return;
 
-    logf("FC: FlashcardSidebarPopulate - adding %d cards to list\n", len(win->flashcard.cards));
+    logf("[fc] FlashcardSidebarPopulate - adding %d cards to list\n", len(win->flashcard.cards));
 
     TreeView* treeView = win->flashcard.listaTreeView;
     auto* model = (ListaTreeModel*)treeView->treeModel;
@@ -273,7 +269,7 @@ void FlashcardSidebarPopulate(MainWindow* win) {
     for (int i = 0; i < len(win->flashcard.cards); i++) {
         Flashcard& card = win->flashcard.cards[i];
         auto* item = new ListaTreeModel::ListaTreeItem();
-        item->text = fmt("Card %d — Page %d", i + 1, card.pageNo);
+        item->text = fmt("Card %d â€” Page %d", i + 1, card.pageNo);
         item->cardIdx = i;
         item->parent = model->rootItem;
         model->rootItem->children.Append(item);

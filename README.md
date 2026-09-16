@@ -224,6 +224,7 @@ The script compares the version in `sumatrapdf-src/src/Version.h` with the pre-r
 - [x] Autoscroll round-step speed table (25–1600 px/min)
 - [x] Toolbar wrapping (TBSTYLE_WRAPABLE) — buttons wrap to 2nd row on narrow windows
 - [x] Flashcard MVP — core toggle, study mode, SM-2, card creation from selection
+- [x] Flashcard cloze (positional) — highlight = mask over existing text, no duplication; reveal, SRS by due, stable key, 1-4 shortcuts
 - [ ] Testes automatizados para novas funcionalidades
 
 ---

@@ -8,31 +8,31 @@
 class EngineMupdf;
 struct MainWindow;
 
-// Flashcard — represents a card saved as a PDF FreeText annotation
-// Cards are stored INSIDE the PDF (portable), study state is external
+// Flashcard — represents a card saved as a PDF Highlight annotation.
+// Cards are occlusion masks over existing PDF text (cloze): the highlight rect
+// hides the text underneath in study mode. No content is duplicated in the PDF.
 struct Flashcard {
-    int annotId = -1;       // MuPDF annotation ID (unique per document)
-    int pageNo = -1;        // 1-based page number
-    RectF bounds;           // selection rect in PAGE coordinates (PDF points)
-    Str text;               // "Q: ..."
-    Str tip;                // optional hint text (from "T: " in annotation)
+    u64 key = 0;      // stable id: hash(pageNo + bounds) — survives PDF save (annotId is not stable)
+    int annotId = -1; // MuPDF annotation object number (unstable across save; display only)
+    int pageNo = -1;  // 1-based page number
+    RectF bounds;     // selection rect in PAGE coordinates (PDF points) = the cloze mask
 };
 
 // FlashcardStudyState — per-card study progress (stored in external JSON)
 struct FlashcardStudyState {
-    int rating = 0;         // last rating 1-4 (0 = new/unseen)
-    int interval = 0;       // days until next review
+    int rating = 0;          // last rating 1-4 (0 = new/unseen)
+    int interval = 0;        // days until next review
     float easeFactor = 2.5f; // SM-2 ease factor
-    i64 lastReviewedAt = 0; // timestamp (ms since epoch)
-    i64 nextReviewAt = 0;   // timestamp
-    int reviewCount = 0;    // total reviews
+    i64 lastReviewedAt = 0;  // timestamp (ms since epoch)
+    i64 nextReviewAt = 0;    // timestamp
+    int reviewCount = 0;     // total reviews
 };
 
 // FlashcardStudyDoc — study states for all cards in a document
 struct FlashcardStudyDoc {
     int version = 1;
     struct StateEntry {
-        int annotId;
+        u64 key; // matches Flashcard::key
         FlashcardStudyState state;
     };
     Vec<StateEntry> states;

@@ -311,7 +311,6 @@ export const commands = [
     "CmdFlashcardStudy", "Start/Stop Flashcard Study",
     "CmdFlashcardAdd", "Add Flashcard From Selection",
     "CmdFlashcardBack", "Go To Previous Card",
-    "CmdFlashcardNext", "Go To Next Card",
     "CmdFlashcardFilter", "Filter Flashcards By Page Range",
     "CmdFlashcardReveal", "Reveal Flashcard Answer",
     "CmdFlashcardRate1", "Rate Card: Again",
@@ -319,7 +318,7 @@ export const commands = [
     "CmdFlashcardRate3", "Rate Card: Good",
     "CmdFlashcardRate4", "Rate Card: Easy",
     "CmdFlashcardLista", "Toggle Flashcard List Sidebar",
-    "CmdFlashcardAddTip", "Add Tip To Current Flashcard",
+    "CmdViewportCropV2Toggle", "Toggle Two Column (v2, stacked columns)",
     "CmdNone", "Do nothing",
 ];
 

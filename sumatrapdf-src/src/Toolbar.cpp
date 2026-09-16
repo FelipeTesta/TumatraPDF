@@ -103,6 +103,7 @@ static ToolbarButtonInfo gToolbarButtons[] = {
     {TbIcon::Text, CmdContrastToggle, _TRN("Contrast")},
     {TbIcon::Text, CmdInvertColors, _TRN("Invert")},
     {TbIcon::Text, CmdViewportCropToggle, _TRN("Two Column")},
+    {TbIcon::Text, CmdViewportCropV2Toggle, _TRN("Two Column 2")},
     {TbIcon::Text, CmdMarginTrimToggle, _TRN("Trim")},
     {TbIcon::Text, CmdTrimConfig, _TRN("Trim Config")},
     {TbIcon::None, 0, nullptr}, // separator
@@ -391,7 +392,7 @@ static TBBUTTON TbButtonFromButtonInfo(const ToolbarButtonInfo& bi, bool noTrans
 
     if (bi.cmdId == CmdFindToggleMatchCase || bi.cmdId == CmdFindToggleMatchWholeWord ||
         bi.cmdId == CmdContrastToggle || bi.cmdId == CmdAutoScrollToggle || bi.cmdId == CmdViewportCropToggle ||
-        bi.cmdId == CmdMarginTrimToggle || bi.cmdId == CmdArchToolsToggle) {
+        bi.cmdId == CmdViewportCropV2Toggle || bi.cmdId == CmdMarginTrimToggle || bi.cmdId == CmdArchToolsToggle) {
         b.fsStyle = BTNS_CHECK;
     }
     if (bi.bmpIndex == TbIcon::Text) {

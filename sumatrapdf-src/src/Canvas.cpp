@@ -3387,29 +3387,31 @@ static bool DrawDocument(MainWindow* win, HDC hdc, Rect rcArea) {
     if (win->selection.showSelection) {
         PaintSelection(win, hdc);
     }
-    // Paint flashcard highlights
+    // Paint flashcard highlights (cloze occlusion masks over existing PDF text)
+    // Render matrix (never cover text at the wrong moment):
+    //   reading            (on, !study)              -> translucent marker, all cards
+    //   studying           (on, study, !reveal)      -> opaque mask ONLY on current card
+    //   studying + reveal  (on, study,  reveal)      -> no opaque mask (original text shows)
     if (win->flashcard.on) {
-        for (auto& card : win->flashcard.cards) {
+        // Index (into cards) of the card currently being studied, -1 if none.
+        int studyCardIdx = -1;
+        if (win->flashcard.studyMode && win->flashcard.currentCardIdx >= 0 &&
+            len(win->flashcard.studyOrder) > 0) {
+            studyCardIdx = win->flashcard.studyOrder[win->flashcard.currentCardIdx];
+        }
+        for (int i = 0; i < len(win->flashcard.cards); i++) {
+            const Flashcard& card = win->flashcard.cards[i];
             if (!dm->ValidPageNo(card.pageNo)) continue;
             Rect rc = dm->CvtToScreen(card.pageNo, card.bounds);
             Gdiplus::Graphics gs(hdc);
-            if (win->flashcard.studyMode) {
-                // Studying: solid highlight color
+            if (i == studyCardIdx && !win->flashcard.revealMode) {
+                // Studying this card: opaque mask hides the cloze text ([_____])
                 Gdiplus::Color col(200, 100, 100, 100); // dark gray, opaque
                 Gdiplus::SolidBrush brush(col);
                 gs.FillRectangle(&brush, rc.x, rc.y, rc.dx, rc.dy);
-                // Render tip text on top of overlay (before reveal)
-                if (!win->flashcard.revealMode && len(card.tip) > 0) {
-                    Gdiplus::Font tipFont(L"Segoe UI", 10.0f, Gdiplus::FontStyleItalic);
-                    Gdiplus::SolidBrush tipBrush(Gdiplus::Color(200, 255, 255, 255)); // white, semi-transparent
-                    Gdiplus::StringFormat fmt2;
-                    fmt2.SetAlignment(Gdiplus::StringAlignmentCenter);
-                    fmt2.SetLineAlignment(Gdiplus::StringAlignmentCenter);
-                    Gdiplus::RectF tipRect = ToGdipRectF(rc);
-                    gs.DrawString(CWStrTemp(ToWStr(card.tip.s)), -1, &tipFont, tipRect, &fmt2, &tipBrush);
-                }
             } else {
-                // Reading mode: subtle transparent overlay
+                // Reading / reveal / non-current card: subtle translucent marker
+                // (text stays visible; on reveal the current card shows its original text)
                 Gdiplus::Color col(30, 128, 128, 128); // light gray, very transparent
                 Gdiplus::SolidBrush brush(col);
                 gs.FillRectangle(&brush, rc.x, rc.y, rc.dx, rc.dy);

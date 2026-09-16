@@ -23,7 +23,7 @@ void FlashcardToolbarCreate(MainWindow* win) {
     if (win->flashcard.hwndToolbarFlashcard) {
         return; // already created
     }
-    logf("FC: FlashcardToolbarCreate - creating secondary toolbar\n");
+    logf("[fc] FlashcardToolbarCreate - creating secondary toolbar\n");
     HINSTANCE hinst = GetModuleHandle(nullptr);
     HWND hwndParent = win->hwndFrame;
 
@@ -33,13 +33,13 @@ void FlashcardToolbarCreate(MainWindow* win) {
         style |= WS_BORDER | RBS_BANDBORDERS;
     }
     DWORD exStyle = WS_EX_TOOLWINDOW;
-    HWND hwndRebar = CreateWindowExW(exStyle, REBARCLASSNAME, nullptr, style, 0, 0, 0, 0, hwndParent,
-                                     (HMENU)IDC_REBAR, hinst, nullptr);
+    HWND hwndRebar = CreateWindowExW(exStyle, REBARCLASSNAME, nullptr, style, 0, 0, 0, 0, hwndParent, (HMENU)IDC_REBAR,
+                                     hinst, nullptr);
 
     REBARINFO rbi{};
     rbi.cbSize = sizeof(REBARINFO);
     rbi.fMask = 0;
-    rbi.himl = (HIMAGELIST)nullptr;
+    rbi.himl = (HIMAGELIST) nullptr;
     SendMessageW(hwndRebar, RB_SETBARINFO, 0, (LPARAM)&rbi);
 
     // Create the flashcard toolbar inside the rebar
@@ -58,11 +58,9 @@ void FlashcardToolbarCreate(MainWindow* win) {
         Str toolTip;
     };
     static ToolbarButtonInfo2 gFlashcardToolbarButtons[] = {
-        {0, StrL("Cards: 0/0/0 | ")},  // card count display (button index 0, idCommand=0 = no action)
-        {CmdFlashcardStudy, _TRN("Study")},
-        {CmdFlashcardBack, _TRN("Back")},
-        {CmdFlashcardLista, _TRN("Lista")},
-        {CmdFlashcardFilter, _TRN("Filter")},
+        {0, StrL("Cards: 0/0/0 | ")}, // card count display (button index 0, idCommand=0 = no action)
+        {CmdFlashcardStudy, _TRN("Study")}, {CmdFlashcardReveal, _TRN("Reveal")}, {CmdFlashcardBack, _TRN("Back")},
+        {CmdFlashcardLista, _TRN("Lista")}, {CmdFlashcardFilter, _TRN("Filter")},
     };
     constexpr int kFlashcardToolbarButtonsCount = dimof(gFlashcardToolbarButtons);
 
@@ -114,16 +112,16 @@ void FlashcardToolbarCreate(MainWindow* win) {
     win->flashcard.hwndReBarFlashcard = hwndRebar;
     win->flashcard.hwndToolbarFlashcard = hwndToolbar;
 
-    logf("FC: FlashcardToolbarCreate - toolbar created with %d buttons\n", kFlashcardToolbarButtonsCount);
+    logf("[fc] FlashcardToolbarCreate - toolbar created with %d buttons\n", kFlashcardToolbarButtonsCount);
 
     // Update the card count label
     FlashcardToolbarUpdateCount(win);
 
-    logf("FC: FlashcardToolbarCreate: created secondary toolbar\n");
+    logf("[fc] FlashcardToolbarCreate: created secondary toolbar\n");
 }
 
 void FlashcardToolbarDestroy(MainWindow* win) {
-    logf("FC: FlashcardToolbarDestroy - destroying secondary toolbar\n");
+    logf("[fc] FlashcardToolbarDestroy - destroying secondary toolbar\n");
     if (!win->flashcard.hwndToolbarFlashcard) {
         return;
     }
@@ -132,8 +130,8 @@ void FlashcardToolbarDestroy(MainWindow* win) {
     DestroyWindow(win->flashcard.hwndReBarFlashcard);
     win->flashcard.hwndReBarFlashcard = nullptr;
 
-    logf("FC: FlashcardToolbarDestroy - done\n");
-    logf("FC: FlashcardToolbarDestroy: destroyed secondary toolbar\n");
+    logf("[fc] FlashcardToolbarDestroy - done\n");
+    logf("[fc] FlashcardToolbarDestroy: destroyed secondary toolbar\n");
 }
 
 // Update the flashcard toolbar card count label: "Cards: {total}/{new}/{due} | "
@@ -149,11 +147,13 @@ void FlashcardToolbarUpdateCount(MainWindow* win) {
         const Flashcard& card = win->flashcard.cards[i];
         bool found = false;
         for (int j = 0; j < len(win->flashcard.studyDoc.states); j++) {
-            if (win->flashcard.studyDoc.states.els[j].annotId == card.annotId) {
+            if (win->flashcard.studyDoc.states.els[j].key == card.key) {
                 found = true;
                 const FlashcardStudyState& s = win->flashcard.studyDoc.states.els[j].state;
-                if (s.rating == 0) newCount++;
-                else if (s.nextReviewAt <= now) dueCount++;
+                if (s.rating == 0)
+                    newCount++;
+                else if (s.nextReviewAt <= now)
+                    dueCount++;
                 break;
             }
         }

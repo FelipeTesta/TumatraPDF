@@ -148,6 +148,13 @@ static ACCEL gBuiltInAccelerators[] = {
     {FVIRTKEY, 'S', CmdFlashcardAdd},
     {FVIRTKEY | FSHIFT, 'S', CmdFlashcardAdd},
 
+    // Flashcard study: rate the current card (1=Again, 2=Hard, 3=Good, 4=Easy).
+    // Bare 1-4 are free (Ctrl+1-4 are zoom); handlers are no-ops outside study mode.
+    {FVIRTKEY, '1', CmdFlashcardRate1},
+    {FVIRTKEY, '2', CmdFlashcardRate2},
+    {FVIRTKEY, '3', CmdFlashcardRate3},
+    {FVIRTKEY, '4', CmdFlashcardRate4},
+
     {FVIRTKEY | FSHIFT, 'I', CmdInvertColors},
     {FVIRTKEY, 'I', CmdTogglePageInfo},
 

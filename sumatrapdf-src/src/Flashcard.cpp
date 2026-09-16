@@ -17,11 +17,29 @@ extern "C" {
 #include "AppTools.h"
 #include "Flashcard.h"
 
+// Stable card key: FNV-1a hash of page + quantized bounds. MuPDF can renumber
+// annotation objects on save (pdf_to_num is not stable), so we key study state
+// by position instead. Bounds are quantized to 0.01 page units so the key does
+// not change across zoom levels.
+static u64 FlashcardKey(int pageNo, const RectF& b) {
+    u64 h = 14695981039346656037ULL; // FNV-1a offset basis
+    auto mix = [&](u64 v) {
+        h ^= v;
+        h *= 1099511628211ULL;
+    };
+    mix((u64)(u32)pageNo);
+    mix((u64)(i32)(int)(b.x * 100.0f));
+    mix((u64)(i32)(int)(b.y * 100.0f));
+    mix((u64)(i32)(int)(b.dx * 100.0f));
+    mix((u64)(i32)(int)(b.dy * 100.0f));
+    return h;
+}
+
 // Iterate all annotations on all pages and extract flashcards.
 // Flashcards are Highlight annotations with author "TumatraPDF-Flashcard"
 // whose contents start with "Q: "
 Vec<Flashcard> FlashcardLoadFromDocument(EngineMupdf* engine) {
-    logf("FC: FlashcardLoadFromDocument - scanning document annotations\n");
+    logf("[fc] FlashcardLoadFromDocument - scanning document annotations\n");
     Vec<Flashcard> result;
     if (!engine || !engine->pdfdoc) {
         return result;
@@ -48,11 +66,6 @@ Vec<Flashcard> FlashcardLoadFromDocument(EngineMupdf* engine) {
                 continue;
             }
 
-            const char* contents = pdf_annot_contents(ctx, annot);
-            if (!contents || !str::StartsWith(Str(contents), StrL("Q: "))) {
-                continue;
-            }
-
             // Only load annotations authored by our flashcard system
             const char* author = pdf_annot_author(ctx, annot);
             if (!author || !str::StartsWith(Str(author), StrL("TumatraPDF-Flashcard"))) {
@@ -64,17 +77,9 @@ Vec<Flashcard> FlashcardLoadFromDocument(EngineMupdf* engine) {
             card.pageNo = pageIdx + 1; // 1-based
             fz_rect rect = pdf_annot_rect(ctx, annot);
             card.bounds = RectF(PointF(rect.x0, rect.y0), PointF(rect.x1, rect.y1));
-            card.text = str::DupTemp(Str(contents));
-            card.tip = {};
-
-            // Parse optional tip from annotation content: "Q: question\nT: tip"
-            Str fullText = card.text;
-            Str tipMarker = StrL("\nT: ");
-            int tipPos = str::IndexOf(fullText, tipMarker);
-            if (tipPos >= 0) {
-                card.tip = str::Dup(fullText.s + tipPos + 4); // skip "\nT: "
-                card.text = str::DupTemp(Str(fullText.s, tipPos)); // trim to just "Q: ..."
-            }
+            // Cloze is positional: the highlight rect is the mask over existing PDF
+            // text, so no content is stored (no duplicated text in the document).
+            card.key = FlashcardKey(card.pageNo, card.bounds);
 
             result.Append(card);
         }
@@ -82,13 +87,13 @@ Vec<Flashcard> FlashcardLoadFromDocument(EngineMupdf* engine) {
         fz_drop_page(ctx, page);
     }
 
-    logf("FC: FlashcardLoadFromDocument - found %d flashcards\n", len(result));
+    logf("[fc] FlashcardLoadFromDocument - found %d flashcards\n", len(result));
     return result;
 }
 
 // Compute MD5 hash of filePath and return %APPDATA%\SumatraPDF\FlashcardStudy\<md5>.json
 TempStr FlashcardStudyPath(const char* filePath) {
-    logf("FC: FlashcardStudyPath - computing for %s\n", Str(filePath));
+    logf("[fc] FlashcardStudyPath - computing for %s\n", Str(filePath));
     if (!filePath) {
         return {};
     }
@@ -118,7 +123,7 @@ static void WriteJsonValue(FILE* f, const FlashcardStudyState& state) {
 
 // Save flashcard study state to external JSON file
 void FlashcardStudySave(const char* filePath, const FlashcardStudyDoc& doc) {
-    logf("FC: FlashcardStudySave - saving to %s\n", Str(filePath));
+    logf("[fc] FlashcardStudySave - saving to %s\n", Str(filePath));
     if (!filePath) {
         return;
     }
@@ -136,7 +141,7 @@ void FlashcardStudySave(const char* filePath, const FlashcardStudyDoc& doc) {
 
     FILE* f = fopen(path.s, "wb");
     if (!f) {
-        logf("FC: FlashcardStudySave - ERROR: failed to open file %s\n", Str(filePath));
+        logf("[fc] FlashcardStudySave - ERROR: failed to open file %s\n", Str(filePath));
         logf("FlashcardStudySave: failed to open '%s' for writing\n", path);
         return;
     }
@@ -154,7 +159,7 @@ void FlashcardStudySave(const char* filePath, const FlashcardStudyDoc& doc) {
             fprintf(f, ",\n");
         }
         first = false;
-        fprintf(f, "    \"%d\": ", entry.annotId);
+        fprintf(f, "    \"%llu\": ", (unsigned long long)entry.key);
         WriteJsonValue(f, entry.state);
     }
 
@@ -162,7 +167,7 @@ void FlashcardStudySave(const char* filePath, const FlashcardStudyDoc& doc) {
             "\n  }\n"
             "}\n");
 
-    logf("FC: FlashcardStudySave - saved %d entries\n", len(doc.states));
+    logf("[fc] FlashcardStudySave - saved %d entries\n", len(doc.states));
 
     fclose(f);
 }
@@ -213,7 +218,7 @@ static bool ParseJsonObject(Str json, Vec<FlashcardStudyDoc::StateEntry>* outSta
             break;
         }
         Str keyStr = Str(keyStart.s, keyEndIdx);
-        int annotId = ParseInt(keyStr);
+        u64 key = (u64)ParseInt64(keyStr);
 
         // Find the value object
         Str afterKey = Str(keyStart.s + keyEndIdx + 1);
@@ -263,27 +268,19 @@ static bool ParseJsonObject(Str json, Vec<FlashcardStudyDoc::StateEntry>* outSta
             out = parser(valStr);
         };
 
-        getField(StrL("rating"), state.rating, [](Str s) {
-            return ParseInt(s);
-        });
-        getField(StrL("interval"), state.interval, [](Str s) {
-            return ParseInt(s);
-        });
+        getField(StrL("rating"), state.rating, [](Str s) { return ParseInt(s); });
+        getField(StrL("interval"), state.interval, [](Str s) { return ParseInt(s); });
         getField(StrL("easeFactor"), state.easeFactor, [](Str s) {
-            char* end; float val = strtof(s.s, &end); return val;
+            char* end;
+            float val = strtof(s.s, &end);
+            return val;
         });
-        getField(StrL("lastReviewedAt"), state.lastReviewedAt, [](Str s) {
-            return ParseInt64(s);
-        });
-        getField(StrL("nextReviewAt"), state.nextReviewAt, [](Str s) {
-            return ParseInt64(s);
-        });
-        getField(StrL("reviewCount"), state.reviewCount, [](Str s) {
-            return ParseInt(s);
-        });
+        getField(StrL("lastReviewedAt"), state.lastReviewedAt, [](Str s) { return ParseInt64(s); });
+        getField(StrL("nextReviewAt"), state.nextReviewAt, [](Str s) { return ParseInt64(s); });
+        getField(StrL("reviewCount"), state.reviewCount, [](Str s) { return ParseInt(s); });
 
         FlashcardStudyDoc::StateEntry entry;
-        entry.annotId = annotId;
+        entry.key = key;
         entry.state = state;
         outStates->Append(entry);
 
@@ -299,7 +296,7 @@ static bool ParseJsonObject(Str json, Vec<FlashcardStudyDoc::StateEntry>* outSta
 
 // Load flashcard study state from external JSON file
 FlashcardStudyDoc FlashcardStudyLoad(const char* filePath) {
-    logf("FC: FlashcardStudyLoad - loading from %s\n", Str(filePath));
+    logf("[fc] FlashcardStudyLoad - loading from %s\n", Str(filePath));
     FlashcardStudyDoc doc;
     doc.version = 1;
 
@@ -345,14 +342,14 @@ FlashcardStudyDoc FlashcardStudyLoad(const char* filePath) {
 
     ParseJsonObject(json, &doc.states);
 
-    logf("FC: FlashcardStudyLoad - loaded %d entries\n", len(doc.states));
+    logf("[fc] FlashcardStudyLoad - loaded %d entries\n", len(doc.states));
     return doc;
 }
 
 // SM-2 algorithm (lite version) for spaced repetition
 // rating: 1=Again, 2=Hard, 3=Good, 4=Easy
 void FlashcardSm2Update(FlashcardStudyState& state, int rating) {
-    logf("FC: FlashcardSm2Update - rating=%d interval=%d ease=%.2f\n", rating, state.interval, state.easeFactor);
+    logf("[fc] FlashcardSm2Update - rating=%d interval=%d ease=%.2f\n", rating, state.interval, state.easeFactor);
     i64 now = (i64)time(nullptr) * 1000; // milliseconds since epoch
 
     state.rating = rating;
@@ -381,9 +378,12 @@ void FlashcardSm2Update(FlashcardStudyState& state, int rating) {
         state.easeFactor += 0.15f;
     }
 
+    // Clamp ease factor to the SM-2 range [1.3, 2.5]
+    state.easeFactor = std::max(1.3f, std::min(2.5f, state.easeFactor));
+
     state.nextReviewAt = now + (i64)state.interval * 86400000LL; // interval days * 24*60*60*1000
 
-    logf("FC: FlashcardSm2Update - new interval=%d ease=%.2f\n", state.interval, state.easeFactor);
+    logf("[fc] FlashcardSm2Update - new interval=%d ease=%.2f\n", state.interval, state.easeFactor);
 }
 
 #include "Flashcard.h"

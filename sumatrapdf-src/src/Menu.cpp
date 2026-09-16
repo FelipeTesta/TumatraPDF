@@ -627,6 +627,10 @@ static MenuDef menuDefNewTools[] = {
         CmdViewportCropToggle,
     },
     {
+        _TRN("Two Column &2"),
+        CmdViewportCropV2Toggle,
+    },
+    {
         _TRN("Margin &Trim"),
         CmdMarginTrimToggle,
     },

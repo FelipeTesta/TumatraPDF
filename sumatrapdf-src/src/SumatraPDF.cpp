@@ -11152,6 +11152,11 @@ static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, L
                     cropDm->viewportCropColumn = 0;
                     cropDm->viewportCropQuickToggled = false;
                     if (cropDm->viewportCropEnabled) {
+                        // mutual exclusion with v2: turning v1 on turns v2 off
+                        if (cropDm->viewportCropV2Enabled) {
+                            cropDm->viewportCropV2Enabled = false;
+                            SetToolbarButtonCheckedState(win, CmdViewportCropV2Toggle, false);
+                        }
                         cropDm->viewportCropSaved = Rect(); // fresh base capture inside ApplyViewportCrop
                         cropDm->ApplyViewportCrop();
                     } else {
@@ -11166,6 +11171,38 @@ static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, L
                     HwndRepaintNow(win->hwndCanvas);
                 }
                 SetToolbarButtonCheckedState(win, CmdViewportCropToggle, gGlobalPrefs->viewportCrop.enabled);
+            }
+            break;
+
+        case CmdViewportCropV2Toggle:
+            if (ShouldToggle(cmd, win->AsFixed() ? win->AsFixed()->viewportCropV2Enabled : false)) {
+                auto v2Dm = win->AsFixed();
+                if (v2Dm) {
+                    bool wasEnabled = v2Dm->viewportCropV2Enabled;
+                    v2Dm->viewportCropV2Enabled = !wasEnabled;
+                    if (v2Dm->viewportCropV2Enabled) {
+                        // mutual exclusion with v1: turning v2 on turns v1 off
+                        if (v2Dm->viewportCropEnabled) {
+                            v2Dm->viewportCropEnabled = false;
+                            gGlobalPrefs->viewportCrop.enabled = false;
+                            if (!v2Dm->viewportCropSaved.IsEmpty()) {
+                                v2Dm->viewPort = v2Dm->viewportCropSaved;
+                                v2Dm->SetZoomVirtual(v2Dm->viewportCropSavedZoom, nullptr);
+                                v2Dm->viewportCropSaved = Rect();
+                            }
+                            SetToolbarButtonCheckedState(win, CmdViewportCropToggle, false);
+                        }
+                        v2Dm->viewportCropV2QuickToggled = false;
+                        v2Dm->ApplyViewportCropV2();
+                    } else {
+                        // restore full layout (PageCount() drops back to N)
+                        v2Dm->Relayout(v2Dm->GetZoomVirtual(), v2Dm->GetRotation());
+                    }
+                    v2Dm->RecalcVisibleParts();
+                    HwndRepaintNow(win->hwndCanvas);
+                }
+                SetToolbarButtonCheckedState(win, CmdViewportCropV2Toggle,
+                                             win->AsFixed() ? win->AsFixed()->viewportCropV2Enabled : false);
             }
             break;
 

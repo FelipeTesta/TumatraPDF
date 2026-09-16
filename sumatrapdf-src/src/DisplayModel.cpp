@@ -106,6 +106,30 @@ int DisplayModel::PageCount() const {
     return engine->PageCount();
 }
 
+// two column v2: virtual pages are physical pages duplicated per column.
+// When v2 is active in continuous mode there are 2N virtual pages (1L,1R,2L,2R,...);
+// otherwise virtual == physical.
+int DisplayModel::VirtualPageCount() const {
+    if (viewportCropV2Enabled && IsContinuous(GetDisplayMode())) {
+        return 2 * engine->PageCount();
+    }
+    return engine->PageCount();
+}
+
+int DisplayModel::VirtualToPhysical(int virtualPageNo) const {
+    if (viewportCropV2Enabled && IsContinuous(GetDisplayMode())) {
+        return (virtualPageNo + 1) / 2;
+    }
+    return virtualPageNo;
+}
+
+int DisplayModel::ColumnOfVirtual(int virtualPageNo) const {
+    if (viewportCropV2Enabled && IsContinuous(GetDisplayMode())) {
+        return (virtualPageNo - 1) % 2; // 0 = left, 1 = right
+    }
+    return -1; // no column split
+}
+
 TempStr DisplayModel::GetPropertyTemp(DocProp prop) {
     return engine->GetPropertyTemp(prop);
 }
@@ -285,6 +309,24 @@ void DisplayModel::QuickToggleViewportCrop() {
     } else {
         ApplyViewportCrop();
     }
+}
+
+// two column v2: no viewport manipulation needed. The layout itself is
+// duplicated into 2N virtual pages (one per column); Relayout handles the
+// stacking and the render pipeline crops each virtual page to its column via
+// pageRect. ApplyViewportCropV2 only forces a re-layout so the duplication
+// takes effect (and restores the full layout when disabled).
+void DisplayModel::ApplyViewportCropV2() {
+    if (viewportCropV2Enabled) {
+        Relayout(GetZoomVirtual(), rotation);
+    }
+}
+
+void DisplayModel::QuickToggleViewportCropV2() {
+    if (!viewportCropV2Enabled) return;
+    // note: page+column restore is implemented in FASE 5; for now toggling the
+    // quick view simply re-applies (keeps the current virtual page).
+    ApplyViewportCropV2();
 }
 
 static bool IsDisplayModelValid(DisplayModel* dm) {

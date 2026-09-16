@@ -318,7 +318,6 @@ static SeqStrings gCommandNames =
     "CmdFlashcardStudy\0"
     "CmdFlashcardAdd\0"
     "CmdFlashcardBack\0"
-    "CmdFlashcardNext\0"
     "CmdFlashcardFilter\0"
     "CmdFlashcardReveal\0"
     "CmdFlashcardRate1\0"
@@ -326,7 +325,7 @@ static SeqStrings gCommandNames =
     "CmdFlashcardRate3\0"
     "CmdFlashcardRate4\0"
     "CmdFlashcardLista\0"
-    "CmdFlashcardAddTip\0"
+    "CmdViewportCropV2Toggle\0"
     "CmdNone\0"
     "\0";
 
@@ -633,7 +632,6 @@ static i32 gCommandIds[] = {
     CmdFlashcardStudy,
     CmdFlashcardAdd,
     CmdFlashcardBack,
-    CmdFlashcardNext,
     CmdFlashcardFilter,
     CmdFlashcardReveal,
     CmdFlashcardRate1,
@@ -641,7 +639,7 @@ static i32 gCommandIds[] = {
     CmdFlashcardRate3,
     CmdFlashcardRate4,
     CmdFlashcardLista,
-    CmdFlashcardAddTip,
+    CmdViewportCropV2Toggle,
     CmdNone,
 };
 
@@ -948,7 +946,6 @@ SeqStrings gCommandDescriptions =
     "Start/Stop Flashcard Study\0"
     "Add Flashcard From Selection\0"
     "Go To Previous Card\0"
-    "Go To Next Card\0"
     "Filter Flashcards By Page Range\0"
     "Reveal Flashcard Answer\0"
     "Rate Card: Again\0"
@@ -956,7 +953,7 @@ SeqStrings gCommandDescriptions =
     "Rate Card: Good\0"
     "Rate Card: Easy\0"
     "Toggle Flashcard List Sidebar\0"
-    "Add Tip To Current Flashcard\0"
+    "Toggle Two Column (v2, stacked columns)\0"
     "Do nothing\0"
     "\0";
 // clang-format on

@@ -19,6 +19,26 @@
 ### Build
 `bun cmd/build.ts` → `Compiled\TumatraPDF.exe`, 0 errors / 0 warnings (69s).
 
+### Flashcard cloze refactor — positional occlusion mask (2026-09-16)
+Reconceived the flashcard system as a **cloze over existing PDF text** (model shared with NoteAnki): each Highlight annotation is a positional occlusion mask over the original text — **no content duplication** (annotation content now empty; the old `"Q: "` duplication was removed).
+
+- **Render matrix (Canvas.cpp):** opaque mask only on the *current* card in study mode; reveal removes it (shows the original text); reading / non-current cards show a subtle translucent marker. Fixes reveal doing nothing (it was always masking).
+- **Stable card key:** `Flashcard::key` = FNV-1a hash of `pageNo + bounds` (quantized), replacing the unstable `pdf_to_num` for study-state matching (survives PDF-save renumbering).
+- **Study state now loads:** `CmdFlashcardToggle` ON calls `FlashcardStudyLoad` (new/due counts were always 0 before).
+- **SRS:** `BuildFilteredStudyOrder` includes only new (`rating==0`) or due (`nextReviewAt<=now`) cards; rating 1 (Again) reinserts the card into the session queue (Anki relearn); ease factor clamped to `[1.3, 2.5]`.
+- **Toolbar/keys:** added **Reveal** button; added bare `1`-`4` → Rate1-4 accelerators (Space/Enter kept as page-scroll to avoid breaking navigation).
+- **Pruned dead code:** removed `hwndCardCount`, `studyModeType`, `history` from `FlashcardState`.
+
+Build `bun cmd/build.ts` → `Compiled\TumatraPDF.exe`, 0 errors / 0 warnings. Deployed 2026-09-16.
+
+### Flashcard logging + tree-sitter analysis (2026-09-16)
+- **Standardized log tag** to `[fc]` across `Flashcard.cpp`, `Commands_Flashcard.cpp`, `FlashcardToolbar.cpp`, `FlashcardSidebar.cpp` (matches `[arch]`/`[autoscroll]`/`[md]` convention; was inconsistent `FC:`/`[FC]`).
+- **Added outcome logs** for debugging: session progress (`advancing to card N/M`), session end (`all cards rated`), annotation count on add (`%d page(s) covered`), and toggle-off cleanup.
+- **tree-sitter findings:** the C++ `get_symbols` tool fails on these files (heavy `logf`/`fmt` macros, PCH, lambdas); targeted `run_query` works. Functions found in `Flashcard.cpp`: `FlashcardKey`, `FlashcardLoadFromDocument`, `FlashcardStudyPath/Save/Load`, `FlashcardSm2Update`, `WriteJsonValue`(static), `ParseJsonObject`(static). `Commands_Flashcard.cpp`: `AddUniquePageNo`(static), `BuildFilteredStudyOrder`(static), `HandleFlashcardRate`(static), `HandleCommandFlashcard`.
+- **Dead/stub commands** confirmed (candidates to remove): `CmdFlashcardNext` (no-op) and `CmdFlashcardAddTip` (placeholder `MessageBoxW` setting `"(hint)"`) — leftover from the pre-cloze Q/A model.
+- **Note (process):** do not edit file bytes with PowerShell `Set-Content` (adds UTF-8 BOM to `.cpp`); use the Edit tool or Python `utf-8-sig` round-trip to strip a BOM if introduced.
+- **Removed dead commands** from the pre-cloze Q/A model: `CmdFlashcardNext` (no-op) and `CmdFlashcardAddTip` (placeholder tip) — removed from `cmd/gen-commands.ts`, regenerated `Commands.h/.cpp`, handlers removed from `Commands_Flashcard.cpp`. Also removed now-write-only `Flashcard::text` / `Flashcard::tip` fields (positional model stores no content). Flashcard commands renumbered to `499..509`.
+
 ## 2026-09-11 — Flashcard MVP (BUILD OK)
 
 ### What
