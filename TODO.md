@@ -38,23 +38,27 @@ Criar um **segundo modo** "Two Column v2" (`CmdViewportCropV2Toggle`) **totalmen
 - [x] `cmd/gen-commands.ts`: adicionado `CmdViewportCropV2Toggle` (antes de `CmdNone`). → `Commands.h: CmdViewportCropV2Toggle = 512`.
 - [x] `bun cmd/gen-code.ts`: Commands.h/Commands.cpp regenerados. _(Erro `cl` não achado no final é só da parte virt-keys; ignorar, ver Accelerators na FASE 5)_.
 - [x] `DisplayModel.h`: adicionados campos `viewportCropV2Enabled`, `viewportCropV2QuickToggled` + métodos `ApplyViewportCropV2()`, `QuickToggleViewportCropV2()`, `VirtualToPhysical()`, `ColumnOfVirtual()`, `VirtualPageCount()`.
-- [ ] `DisplayModel.cpp`: implementar `VirtualPageCount()` (2N se v2 on & contínuo, senão N) e helpers `VirtualToPhysical`/`ColumnOfVirtual`.
-- [ ] `SumatraPDF.cpp`: handler `case CmdViewportCropV2Toggle:` (clonar `:11146`, usar campos v2; excluir mutualmente com v1).
-- [ ] `Toolbar.cpp`: botão novo `{TbIcon::Text, CmdViewportCropV2Toggle, _TRN("Two Column 2")}` + `BTNS_CHECK` (`:393`).
-- [ ] `Menu.cpp`: item de menu novo.
-- [ ] `CommandAvailability.cpp`: gating (PDF fixed, etc.) — ver `:231`,`:260`.
-- [ ] Build + teste: toggle liga/desliga **sem mudança visual** (v2 ainda no-off).
+- [x] `DisplayModel.cpp`: implementar `VirtualPageCount()` (2N se v2 on & contínuo, senão N) e helpers `VirtualToPhysical`/`ColumnOfVirtual` (`:112-131`).
+- [x] `SumatraPDF.cpp`: handler `case CmdViewportCropV2Toggle:` (`:11177`, clonado de v1, exclusão mútua, commitado).
+- [x] `Toolbar.cpp`: botão novo `{TbIcon::Text, CmdViewportCropV2Toggle, _TRN("Two Column 2")}` (`:106`) + `BTNS_CHECK` (`:395`).
+- [x] `Menu.cpp`: item de menu novo (`:631`).
+- [x] `CommandAvailability.cpp`: gating (`:232`,`:262`).
+- [x] Build + teste: toggle liga/desliga **sem mudança visual** (v2 ainda no-off). ✅ FASE 0 completa (commitada em fc50439).
 
 #### FASE 1 — Duplicar layout para 2N
 
-- [ ] `DisplayModel::PageCount()` (`:102`): quando `viewportCropV2Enabled && IsContinuous()` retornar `2N`; senão `engine->PageCount()`.
-- [ ] `ValidPageNo` (`:150`): aceitar virtual (1..VirtualPageCount()).
-- [ ] `Relayout()` (`:1235`): quando v2, `layout.Reset(2N)`, iterar 2N preenchendo `physicalPageNo=(v+1)/2`, `cropColumn=(v-1)%2`. Manter `zoomReal` da página física.
-- [ ] `BuildPagesInfo()` (`:738`): alocar `pagesInfo` com `VirtualPageCount()`.
-- [ ] `CopyDocumentLayoutToPageInfo` (`:685`): copiar `physicalPageNo`+`cropColumn` do `DocumentLayoutPage` para `PageInfo` (adicionar campos nos 2 structs).
-- [ ] `DocumentLayoutPage` (`DocumentLayout.h:13`): adicionar `int physicalPageNo` + `int cropColumn = -1`.
-- [ ] `PageInfo` (`DisplayModel.h:22`): adicionar `int physicalPageNo` (default=virtual) + `int cropColumn = -1`.
-- [ ] Build + teste: 2N "linhas" no scroll (páginas duplicadas, ainda sem corte).
+- [x] `DisplayModel::PageCount()` (`:102`): retorna `VirtualPageCount()` (2N se v2 on & contínuo; senão N). `ValidPageNo` aceita 1..VirtualPageCount.
+- [x] `ValidPageNo` (`:150`): aceitar virtual (1..VirtualPageCount()). ✅
+- [x] `Relayout()` (`:1277`): `layout.Reset(VirtualPageCount())`, iterar 2N preenchendo `physicalPageNo=VirtualToPhysical(v)`, `cropColumn=ColumnOfVirtual(v)`, mediaBox/zoomReal da página física.
+- [x] `BuildPagesInfo()` (`:738`): aloca `VirtualPageCount()` e agora é re-callable (libera array existente) — necessário quando v2 alterna N↔2N.
+- [x] `CopyDocumentLayoutToPageInfo` (`:685`): copia `physicalPageNo`+`cropColumn`.
+- [x] `DocumentLayoutPage` (`DocumentLayout.h:13`): + `int physicalPageNo` + `int cropColumn = -1`.
+- [x] `PageInfo` (`DisplayModel.h:22`): + `int physicalPageNo` + `int cropColumn = -1`.
+- [x] Roteamento engine: `PageMediaBox`, `PageSizeAfterRotation`, `GetContentBox`, `CvtToScreen`/`CvtFromScreen`, `ZoomRealFromVirtualForPage` (contentBox loop), `ScrollTo` → `VirtualToPhysical(pageNo)`.
+- [x] Render: `ShouldCacheRendering` = false quando v2 (força não-cache, igual trim); `RenderCache::Paint` mapeia `renderPageNo = dm->VirtualToPhysical(pageNo)`.
+- [x] `ApplyViewportCropV2` agora chama `BuildPagesInfo()` + `Relayout()` (toggle liga/desliga rebuilda pagesInfo 2N/N). Handler OFF em SumatraPDF.cpp usa `ApplyViewportCropV2`.
+- [x] `Canvas.cpp`: `PageMediabox` em trim-drag/erase/full-image → `VirtualToPhysical(pageNo)`.
+- [x] Build 0 err/0 warn (75s) + clang-format + smoke estável (zlib.3.pdf 3 páginas, sem crash). ✅ FASE 1 completa — 2N linhas empilhadas, ainda sem corte de coluna.
 
 #### FASE 2 — Corte de coluna no render
 

@@ -17,6 +17,10 @@ struct DocumentLayoutPage {
     float visibleRatio = 0;
     float zoomReal = 1;
     bool isShown = false;
+    // two column v2: physical page this virtual page belongs to and which
+    // column (0=left, 1=right) it crops. -1 when not split (v2 off).
+    int physicalPageNo = 0;
+    int cropColumn = -1;
 };
 
 struct DocumentLayoutParams {

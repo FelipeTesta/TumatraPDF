@@ -1,5 +1,25 @@
 # TumatraPDF — Development Log
 
+## 2026-09-16 — Two Columns v2 FASE 0 concluída + FASE 1 (duplicar layout 2N) (BUILD OK)
+
+### Contexto
+Retomada do plano Two Columns v2 (TODO.md). A sessão anterior deixou a FASE 0 implementada e commitada (`fc50439`) sem atualizar o TODO — verificado e atualizado.
+
+### FASE 0 (já commitada, agora documentada)
+- `CmdViewportCropV2Toggle` (id 510), campos v2 em DisplayModel, handler com exclusão mútua v1/v2, botão toolbar "Two Column 2" + BTNS_CHECK, item menu, gating CommandAvailability.
+
+### FASE 1 — Duplicar layout para 2N (2N linhas empilhadas, sem corte ainda)
+- `PageCount()` retorna `VirtualPageCount()` (2N se v2 on & contínuo); `ValidPageNo` aceita 1..VirtualPageCount.
+- `DocumentLayoutPage` e `PageInfo` ganharam `physicalPageNo` + `cropColumn` (=-1 sem split).
+- `Relayout()` itera `VirtualPageCount()`, setando `physicalPageNo=VirtualToPhysical(v)` e `cropColumn=ColumnOfVirtual(v)`.
+- `BuildPagesInfo()` agora é re-callable (libera array existente) — necessário porque o toggle alterna N↔2N. `ApplyViewportCropV2` agora chama `BuildPagesInfo()` + `Relayout()` (liga e desliga).
+- Roteamento engine virtual→físico: `PageMediaBox`, `PageSizeAfterRotation`, `GetContentBox`, `CvtToScreen`/`CvtFromScreen`, `ZoomRealFromVirtualForPage` (contentBox loop), `ScrollTo`, e `Canvas.cpp` trim-drag/erase/full-image → `VirtualToPhysical(pageNo)`.
+- Render: `ShouldCacheRendering` = false quando v2 (força caminho não-cache, igual trim); `RenderCache::Paint` mapeia `renderPageNo = dm->VirtualToPhysical(pageNo)`. Logs `[v2]` no Paint e ApplyViewportCropV2 para debug.
+- Build `bun cmd/build.ts` → 0 err / 0 warn (75s) + clang-format + smoke estável (zlib.3.pdf, sem crash).
+
+### Próximo (amanhã)
+- FASE 2: corte de coluna no render (esq/dir via cropColumn, largura total da tela).
+
 ## 2026-09-16 — Markdown Full-Width + Flashcard/Trim Fixes Batch (BUILD OK)
 
 ### Markdown full-width reading

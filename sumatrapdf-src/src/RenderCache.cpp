@@ -1157,7 +1157,14 @@ int RenderCache::Paint(HDC hdc, Rect bounds, DisplayModel* dm, int pageNo, PageI
         RectF area = ToRectF(bounds);
         area.Offset((float)-pi->pageOnScreen.x, (float)-pi->pageOnScreen.y);
 
-        int renderPageNo = pageNo;
+        // two column v2: the layout is duplicated into virtual pages, each
+        // stacking one physical page per column. The engine renders physical
+        // page numbers, so route the virtual pageNo back to its physical page.
+        int renderPageNo = dm->VirtualToPhysical(pageNo);
+        if (dm->viewportCropV2Enabled) {
+            logfa("[v2] Paint pageNo=%d -> renderPageNo=%d cropColumn=%d\n", pageNo, renderPageNo,
+                  dm->ColumnOfVirtual(pageNo));
+        }
 
         area = dm->GetEngine()->Transform(area, renderPageNo, zoom, rotation, true);
 

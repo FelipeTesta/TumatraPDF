@@ -103,7 +103,7 @@ int DisplayModel::PageCount() const {
     if (!engine) {
         return 0;
     }
-    return engine->PageCount();
+    return VirtualPageCount();
 }
 
 // two column v2: virtual pages are physical pages duplicated per column.
@@ -175,7 +175,7 @@ bool DisplayModel::ValidPageNo(int pageNo) const {
     if (!engine) {
         return false;
     }
-    return 1 <= pageNo && pageNo <= engine->PageCount();
+    return 1 <= pageNo && pageNo <= VirtualPageCount();
 }
 
 bool DisplayModel::GoToPrevPage(bool toBottom) {
@@ -314,12 +314,13 @@ void DisplayModel::QuickToggleViewportCrop() {
 // two column v2: no viewport manipulation needed. The layout itself is
 // duplicated into 2N virtual pages (one per column); Relayout handles the
 // stacking and the render pipeline crops each virtual page to its column via
-// pageRect. ApplyViewportCropV2 only forces a re-layout so the duplication
-// takes effect (and restores the full layout when disabled).
+// pageRect. ApplyViewportCropV2 rebuilds the per-page info (the page count
+// changes between N and 2N) and forces a re-layout so the duplication takes
+// effect (and restores the full layout when disabled).
 void DisplayModel::ApplyViewportCropV2() {
-    if (viewportCropV2Enabled) {
-        Relayout(GetZoomVirtual(), rotation);
-    }
+    logfa("[v2] ApplyViewportCropV2 enabled=%d\n", (int)viewportCropV2Enabled);
+    BuildPagesInfo();
+    Relayout(GetZoomVirtual(), rotation);
 }
 
 void DisplayModel::QuickToggleViewportCropV2() {
@@ -409,7 +410,7 @@ SizeF DisplayModel::PageSizeAfterRotation(int pageNo, bool fitToContent) const {
     ReportIf(!pageInfo);
 
     if (fitToContent && pageInfo->contentBox.IsEmpty()) {
-        pageInfo->contentBox = engine->PageContentBox(pageNo);
+        pageInfo->contentBox = engine->PageContentBox(VirtualToPhysical(pageNo));
         if (pageInfo->contentBox.IsEmpty()) {
             return PageSizeAfterRotation(pageNo);
         }
@@ -417,7 +418,7 @@ SizeF DisplayModel::PageSizeAfterRotation(int pageNo, bool fitToContent) const {
 
     RectF pageBox = PageMediaBoxForLayout(pageNo);
     RectF box = fitToContent ? pageInfo->contentBox : pageBox;
-    return engine->Transform(box, pageNo, 1.0, rotation).Size();
+    return engine->Transform(box, VirtualToPhysical(pageNo), 1.0, rotation).Size();
 }
 
 /* given 'columns' and an absolute 'pageNo', return the number of the first
@@ -611,7 +612,7 @@ RectF DisplayModel::PageMediaBox(int pageNo) const {
     if (pi->state == PageInfoState::Error) {
         return {};
     }
-    pi->mediaBox = engine->PageMediabox(pageNo);
+    pi->mediaBox = engine->PageMediabox(VirtualToPhysical(pageNo));
     if (pi->mediaBox.IsEmpty()) {
         pi->mediaBox = DefaultMediaBox(engine);
         pi->state = PageInfoState::Error;
@@ -736,6 +737,8 @@ static void CopyDocumentLayoutToPageInfo(const DisplayModel* dm, const DocumentL
         pageInfo->pageOnScreen = page->pageOnScreen;
         pageInfo->zoomReal = page->zoomReal;
         pageInfo->isShown = page->isShown;
+        pageInfo->physicalPageNo = page->physicalPageNo;
+        pageInfo->cropColumn = page->cropColumn;
     }
 }
 
@@ -778,7 +781,10 @@ void DisplayModel::SetInitialViewSettings(DisplayMode newDisplayMode, int newSta
 }
 
 void DisplayModel::BuildPagesInfo() {
-    ReportIf(pagesInfo);
+    // may be called again when two column v2 toggles (page count changes
+    // between N and 2N), so free any existing array instead of asserting
+    free(pagesInfo);
+    pagesInfo = nullptr;
     int pageCount = PageCount();
     pagesInfo = AllocArray<PageInfo>(pageCount);
     // +1 so we can index by pageNo (1-based)
@@ -1048,12 +1054,12 @@ float DisplayModel::ZoomRealFromVirtualForPage(float zoomVirtual, int pageNo) co
         for (int i = first; i <= last; i++) {
             PageInfo* pageInfo = GetPageInfo(i);
             if (pageInfo->contentBox.IsEmpty()) {
-                pageInfo->contentBox = engine->PageContentBox(i);
+                pageInfo->contentBox = engine->PageContentBox(VirtualToPhysical(i));
             }
 
             RectF mbox = PageMediaBoxForLayout(i);
-            RectF pageBox = engine->Transform(mbox, i, 1.0, rotation);
-            RectF contentBox = engine->Transform(pageInfo->contentBox, i, 1.0, rotation);
+            RectF pageBox = engine->Transform(mbox, VirtualToPhysical(i), 1.0, rotation);
+            RectF contentBox = engine->Transform(pageInfo->contentBox, VirtualToPhysical(i), 1.0, rotation);
             if (contentBox.IsEmpty()) {
                 contentBox = pageBox;
             }
@@ -1303,14 +1309,16 @@ void DisplayModel::Relayout(float newZoomVirtual, int newRotation) {
         }
         viewPort.x = newViewPortOffsetX;
 
-        layout.Reset(engine->PageCount());
-        for (int pageNo = 1; pageNo <= engine->PageCount(); pageNo++) {
+        layout.Reset(VirtualPageCount());
+        for (int pageNo = 1; pageNo <= VirtualPageCount(); pageNo++) {
             PageInfo* pi = GetPageInfo(pageNo);
             pi->usedEstimatedMediaBox = false;
             DocumentLayoutPage* layoutPage = layout.GetPage(pageNo);
             if (!layoutPage || !PageShown(pageNo)) {
                 continue;
             }
+            layoutPage->physicalPageNo = VirtualToPhysical(pageNo);
+            layoutPage->cropColumn = ColumnOfVirtual(pageNo);
             layoutPage->mediaBox = PageMediaBoxForLayout(pageNo);
             // remember that this page's position is only a guess, so that
             // EnsureMediaBoxesForVisiblePages() fixes it up once it's on screen
@@ -1599,7 +1607,7 @@ Point DisplayModel::CvtToScreen(int pageNo, PointF pt) {
 
     float zoom = getZoomSafe(this, pageNo, pageInfo);
 
-    PointF p = engine->Transform(pt, pageNo, zoom, rotation);
+    PointF p = engine->Transform(pt, VirtualToPhysical(pageNo), zoom, rotation);
     // don't add the full 0.5 for rounding to account for precision errors
     Rect r = pageInfo->pageOnScreen;
     p.x += 0.499f + (float)r.x;
@@ -1630,7 +1638,7 @@ PointF DisplayModel::CvtFromScreen(Point pt, int pageNo) {
     PointF p = PointF((float)pt.x - 0.499f - (float)r.x, (float)pt.y - 0.499f - (float)r.y);
 
     float zoom = getZoomSafe(this, pageNo, pageInfo);
-    return engine->Transform(p, pageNo, zoom, rotation, true);
+    return engine->Transform(p, VirtualToPhysical(pageNo), zoom, rotation, true);
 }
 
 RectF DisplayModel::CvtFromScreen(Rect r, int pageNo) {
@@ -1818,7 +1826,7 @@ RectF DisplayModel::GetContentBox(int pageNo) const {
         return cbox;
     }
     if (pageInfo->contentBox.IsEmpty()) {
-        pageInfo->contentBox = engine->PageContentBox(pageNo);
+        pageInfo->contentBox = engine->PageContentBox(VirtualToPhysical(pageNo));
     }
     cbox = pageInfo->contentBox;
     float zoom = pageInfo->zoomReal;
@@ -1826,7 +1834,7 @@ RectF DisplayModel::GetContentBox(int pageNo) const {
     if (zoom == 0) {
         zoom = zoomReal;
     }
-    return engine->Transform(cbox, pageNo, zoom, rotation);
+    return engine->Transform(cbox, VirtualToPhysical(pageNo), zoom, rotation);
 }
 
 /* get the (screen) coordinates of the point where a page's actual
@@ -2737,6 +2745,13 @@ bool DisplayModel::ShouldCacheRendering(int /*pageNo*/) const {
     // always cache: the render cache is trim-aware (GetTileRectDevice/User
     // shrink the tile rect by the trim strips), so cached tiles stay valid
     // even with margin trim enabled
+    if (viewportCropV2Enabled) {
+        // two column v2 renders column crops via the non-cached path
+        // (same premise as trim) so the per-column rect/offset stays in sync
+        // with the duplicated layout. Cache keying by virtual page (FASE 2)
+        // may enable caching later; for the MVP force the non-cache path.
+        return false;
+    }
     return true;
 }
 
@@ -2778,7 +2793,7 @@ void DisplayModel::ScrollTo(int pageNo, RectF rect, float zoom) {
 
     if (rect.IsEmpty() || (rect.dx == kDestUseDefault && rect.dy == kDestUseDefault)) {
         // PDF: /XYZ, /Fit, /FitB — scroll to rect.TL() (defaults = page top)
-        PointF scrollD = engine->Transform(rect.TL(), pageNo, pageZoom, rotation);
+        PointF scrollD = engine->Transform(rect.TL(), VirtualToPhysical(pageNo), pageZoom, rotation);
         scroll = ToPoint(scrollD);
 
         // Unspecified X: keep horizontal scroll.
@@ -2799,11 +2814,11 @@ void DisplayModel::ScrollTo(int pageNo, RectF rect, float zoom) {
         }
     } else if (rect.dx != kDestUseDefault && rect.dy != kDestUseDefault) {
         // PDF: /FitR left bottom right top
-        RectF rectD = engine->Transform(rect, pageNo, pageZoom, rotation);
+        RectF rectD = engine->Transform(rect, VirtualToPhysical(pageNo), pageZoom, rotation);
         scroll = ToPoint(rectD.TL());
     } else if (rect.y != kDestUseDefault) {
         // PDF: /FitH top  or  /FitBH top
-        PointF scrollD = engine->Transform(rect.TL(), pageNo, pageZoom, rotation);
+        PointF scrollD = engine->Transform(rect.TL(), VirtualToPhysical(pageNo), pageZoom, rotation);
         scroll.y = (int)scrollD.y;
     }
     // TODO: prevent scroll.y from getting too large?

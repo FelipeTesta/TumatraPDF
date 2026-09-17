@@ -1642,7 +1642,7 @@ static void OnMouseMove(MainWindow* win, int x, int y, WPARAM /*key*/) {
         auto* dm = win->AsFixed();
         if (dm) {
             int pageNo = dm->CurrentPageNo();
-            RectF mb = dm->GetEngine()->PageMediabox(pageNo);
+            RectF mb = dm->GetEngine()->PageMediabox(dm->VirtualToPhysical(pageNo));
             float zoom = dm->GetZoomReal(pageNo);
             Point tl = dm->CvtToScreen(pageNo, PointF(0, 0));
             int tRef = dm->marginTrimEnabled ? gGlobalPrefs->trim.top : 0;
@@ -2057,7 +2057,7 @@ static bool IsFullPageImage(DisplayModel* dm, IPageElement* el, int pageNo) {
     if (!dm->ValidPageNo(pageNo)) {
         return false;
     }
-    RectF pageRc = dm->GetEngine()->PageMediabox(pageNo);
+    RectF pageRc = dm->GetEngine()->PageMediabox(dm->VirtualToPhysical(pageNo));
     float pageArea = pageRc.dx * pageRc.dy;
     if (pageArea <= 0) {
         return false;
@@ -2085,7 +2085,7 @@ static void OnMouseLeftButtonDown(MainWindow* win, int x, int y, WPARAM key) {
         auto* dm = win->AsFixed();
         if (dm) {
             int pageNo = dm->CurrentPageNo();
-            RectF mb = dm->GetEngine()->PageMediabox(pageNo);
+            RectF mb = dm->GetEngine()->PageMediabox(dm->VirtualToPhysical(pageNo));
             float zoom = dm->GetZoomReal(pageNo);
             Point tl = dm->CvtToScreen(pageNo, PointF(0, 0));
             int tRef = dm->marginTrimEnabled ? gGlobalPrefs->trim.top : 0;
@@ -3395,8 +3395,7 @@ static bool DrawDocument(MainWindow* win, HDC hdc, Rect rcArea) {
     if (win->flashcard.on) {
         // Index (into cards) of the card currently being studied, -1 if none.
         int studyCardIdx = -1;
-        if (win->flashcard.studyMode && win->flashcard.currentCardIdx >= 0 &&
-            len(win->flashcard.studyOrder) > 0) {
+        if (win->flashcard.studyMode && win->flashcard.currentCardIdx >= 0 && len(win->flashcard.studyOrder) > 0) {
             studyCardIdx = win->flashcard.studyOrder[win->flashcard.currentCardIdx];
         }
         for (int i = 0; i < len(win->flashcard.cards); i++) {
@@ -3628,7 +3627,7 @@ static void OnPaintDocument(MainWindow* win) {
         auto* dm = win->AsFixed();
         if (dm) {
             int pageNo = dm->CurrentPageNo();
-            RectF mb = dm->GetEngine()->PageMediabox(pageNo);
+            RectF mb = dm->GetEngine()->PageMediabox(dm->VirtualToPhysical(pageNo));
             float zoom = dm->GetZoomReal(pageNo);
             Point tl = dm->CvtToScreen(pageNo, PointF(0, 0));
             int tRef = dm->marginTrimEnabled ? gGlobalPrefs->trim.top : 0;

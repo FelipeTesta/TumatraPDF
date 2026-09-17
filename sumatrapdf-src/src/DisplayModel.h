@@ -50,6 +50,11 @@ struct PageInfo {
 
     // set to true if rendering this page failed (e.g. corrupt image data)
     bool failedToRender = false;
+
+    // two column v2: physical page (1..N) this virtual page renders and which
+    // column (0=left, 1=right) is cropped. cropColumn -1 = no split (v2 off).
+    int physicalPageNo = 0;
+    int cropColumn = -1;
 };
 
 /* The current scroll state (needed for saving/restoring the scroll position) */

@@ -11195,8 +11195,9 @@ static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, L
                         v2Dm->viewportCropV2QuickToggled = false;
                         v2Dm->ApplyViewportCropV2();
                     } else {
-                        // restore full layout (PageCount() drops back to N)
-                        v2Dm->Relayout(v2Dm->GetZoomVirtual(), v2Dm->GetRotation());
+                        // restore full layout (PageCount() drops back to N);
+                        // ApplyViewportCropV2 rebuilds pagesInfo + relayouts
+                        v2Dm->ApplyViewportCropV2();
                     }
                     v2Dm->RecalcVisibleParts();
                     HwndRepaintNow(win->hwndCanvas);
