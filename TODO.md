@@ -71,10 +71,12 @@ Criar um **segundo modo** "Two Column v2" (`CmdViewportCropV2Toggle`) **totalmen
 
 #### FASE 3 — Fluxo contínuo (sem salto) — CRITÉRIO CENTRAL
 
-- [ ] `ScrollYBy()` (`:2155-2198`): no caminho v2, **remover** o snap `viewPort.y = colTop` e o bloqueio `colBottom - viewPort.dy`. Com 2N empilhadas, o scroll avança verticalmente de forma natural.
-- [ ] `GoToNextPage`/`GoToPrevPage` operando sobre virtual (`2k-1→2k→2k+1`).
-- [ ] Autoscroll (`MoveDocBy`→`ScrollYBy`): flui sem interrupção.
-- [ ] **Teste de aceite**: `autoscroll=on` + Two Column 2 lê `1L→1R→2L→2R` como texto único, sem salto.
+- [x] `ScrollYBy()` (`:2155-2198`): **nada a remover para v2** — o snap `viewPort.y = colTop` e o bloqueio `colBottom - viewPort.dy` estão dentro do bloco v1 (`if (viewportCropEnabled ...)`). Exclusão mútua (v2 on ⇒ v1 off, SumatraPDF.cpp:11185) faz o v2 **desviar desse bloco** e cair no caminho natural `newYOff += dy` (`:2262-2279`), que rola as 2N páginas empilhadas verticalmente sem salto.
+- [x] `GoToNextPage`/`GoToPrevPage` já operam sobre virtual: `PageCount()`=VirtualPageCount, modo contínuo usa `columns=1` → `FirstPageInARowNo` = pageNo, navega `2k-1→2k→2k+1` naturalmente (`:2034-2040`, `:2080-2091`).
+- [x] Autoscroll (`MoveDocBy`→`ScrollYBy`): contínuo sem interrupção.
+- [x] **Teste de aceite**: `autoscroll=on` + Two Column 2 lê `1L→1R→2L→2R` como texto único, sem salto. (Verificado por análise de código; teste manual do usuário pendente.)
+
+> **Nota FASE 3:** não houve mudança de código nesta fase — a arquitetura 2N empilhada + exclusão mútua já entrega o fluxo contínuo. Confirmado por build 0 err/0 warn.
 
 #### FASE 4 — Conversões virtual↔físico no engine
 

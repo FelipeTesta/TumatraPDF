@@ -159,55 +159,13 @@ void PositionToolbarChildWindows(MainWindow* win) {
     }
 }
 
-// Position floating labels (ETA) after rightmost visible element
+// Position floating toolbar child labels (speed, timer) that float over the
+// toolbar. The ETA label is no longer positioned here — it lives as a
+// bottom-right overlay on the canvas (see PositionEtaOverlay in Toolbar.cpp).
 void PositionFloatingLabels(MainWindow* win) {
-    HWND hwndToolbar = win->hwndToolbar;
-    HWND hwndLabel = win->autoScroll.hwndEtaLabel;
-    if (!hwndLabel || !hwndToolbar) return;
-
-    Rect rc = HwndClientRect(hwndToolbar);
-    int lastRight = 0;
-
-    // Scan toolbar buttons
-    int n = (int)SendMessageW(hwndToolbar, TB_BUTTONCOUNT, 0, 0);
-    for (int i = 0; i < n; i++) {
-        DWORD state = (DWORD)SendMessageW(hwndToolbar, TB_GETSTATE, i, 0);
-        if (!(state & TBSTATE_HIDDEN)) {
-            RECT rb = {0};
-            if (SendMessageW(hwndToolbar, TB_GETITEMRECT, i, (LPARAM)&rb)) {
-                lastRight = std::max(lastRight, (int)rb.right);
-            }
-        }
-    }
-
-    // Also check child windows that float over the toolbar
-    auto checkChild = [&](HWND hwnd) {
-        if (hwnd && IsWindowVisible(hwnd)) {
-            RECT rcChild;
-            GetWindowRect(hwnd, &rcChild);
-            MapWindowPoints(HWND_DESKTOP, hwndToolbar, (LPPOINT)&rcChild, 2);
-            lastRight = std::max(lastRight, (int)rcChild.right);
-        }
-    };
-
-    checkChild(win->autoScroll.hwndTimerCheck);
-    checkChild(win->autoScroll.hwndTimerLabel);
-    checkChild(win->autoScroll.hwndTimerEdit);
-    checkChild(win->autoScroll.hwndSpeedLabel);
-
-    TempStr txt = HwndGetTextTemp(hwndLabel);
-    Size size = HwndMeasureText(hwndLabel, txt);
-    int x = lastRight + DpiScale(win->hwndFrame, gToolbarTokens.buttonGapX);
-    int y = (rc.dy - size.dy) / 2;
-
-    if (x + size.dx > rc.dx - DpiScale(win->hwndFrame, gToolbarTokens.edgeMargin)) {
-        if (IsWindowVisible(hwndLabel)) {
-            ShowWindow(hwndLabel, SW_HIDE);
-            HwndInvalidate(hwndToolbar, true);
-        }
-        return;
-    }
-    MoveWindow(hwndLabel, x, y, size.dx, size.dy, TRUE);
+    // Speed/timer labels are positioned by their toolbar slots in
+    // PositionToolbarChildWindows; the ETA label is a canvas overlay now.
+    (void)win;
 }
 
 // Create child windows for a slot if not already created

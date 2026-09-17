@@ -337,11 +337,10 @@ struct MainWindow {
         float speed = 2.0f; // pixels per tick
         float speedMultiplier = 0.008f;
         float accum = 0.0f;
-        int etaMinutes = 0;      // ETA in minutes, computed on demand
-        DWORD etaStartTick = 0;  // countdown base (reset on each recalc)
-        int etaLastShown = -1;   // last minute value displayed (avoid redundant updates)
-        int etaPageNo = 0;       // page ETA was computed for
-        int etaToolbarWidth = 0; // cached toolbar width (reposition only on resize)
+        int etaMinutes = 0;     // ETA in minutes, computed on demand
+        DWORD etaStartTick = 0; // countdown base (reset on each recalc)
+        int etaLastShown = -1;  // last minute value displayed (avoid redundant updates)
+        int etaPageNo = 0;      // page ETA was computed for
         HWND hwndEtaLabel = nullptr;
         HWND hwndSpeedLabel = nullptr;
         DWORD timerMinutes = 0;         // 0 = no timer (effective value used by tick)
@@ -351,6 +350,8 @@ struct MainWindow {
         HWND hwndTimerCheck = nullptr;
         HWND hwndTimerLabel = nullptr;
         HWND hwndTimerEdit = nullptr;
+        float webviewPxPerSec = 0;    // px/sec fed to the JS rAF autoscroll loop (markdown)
+        bool webviewCtrlDown = false; // last Ctrl state seen by the webview guardian tick
     } autoScroll;
     // --- end auto-scroll feature ---
 
@@ -364,9 +365,9 @@ struct MainWindow {
 
     // --- arch tools state ---
     struct ArchToolsState {
-        int toolMode = 0;         // 0=off, 1=scale, 2=measure
-        int unit = 2;             // 0=mm,1=cm,2=m,3=in,4=ft
-        
+        int toolMode = 0; // 0=off, 1=scale, 2=measure
+        int unit = 2;     // 0=mm,1=cm,2=m,3=in,4=ft
+
         // Per-page scale state
         struct ArchScaleState {
             int pageNo = 0;
@@ -382,7 +383,7 @@ struct MainWindow {
             int unit = 2;
         };
         Vec<ArchScaleState> scaleStates;
-        
+
         ArchScaleState& GetScaleForPage(int pn) {
             for (int i = 0; i < len(scaleStates); i++) {
                 if (scaleStates[i].pageNo == pn) return scaleStates[i];
@@ -393,7 +394,7 @@ struct MainWindow {
             scaleStates.Append(def);
             return scaleStates[len(scaleStates) - 1];
         }
-        
+
         float scaleFactor = 0.0f; // page units per real unit (legacy, for current page)
         float scaleAnchorX = 0.0f;
         float scaleAnchorY = 0.0f;
@@ -435,18 +436,18 @@ struct MainWindow {
 
     // --- flashcard state ---
     struct FlashcardState {
-        bool on = false;                    // flashcard mode active
-        bool studyMode = false;             // true when actively studying
-        bool revealMode = false;            // true when answer is revealed (Space pressed)
-        int currentCardIdx = -1;            // index in study order
-        Vec<int> studyOrder;                // filtered/due card indices (session queue)
-        int filterPageFrom = -1;            // filter: start page (-1 = all)
-        int filterPageTo = -1;              // filter: end page (-1 = all)
-        Vec<Flashcard> cards;               // loaded cards from document
-        FlashcardStudyDoc studyDoc;         // loaded study state
-// Secondary toolbar
-         HWND hwndReBarFlashcard = nullptr;
-         HWND hwndToolbarFlashcard = nullptr;
+        bool on = false;            // flashcard mode active
+        bool studyMode = false;     // true when actively studying
+        bool revealMode = false;    // true when answer is revealed (Space pressed)
+        int currentCardIdx = -1;    // index in study order
+        Vec<int> studyOrder;        // filtered/due card indices (session queue)
+        int filterPageFrom = -1;    // filter: start page (-1 = all)
+        int filterPageTo = -1;      // filter: end page (-1 = all)
+        Vec<Flashcard> cards;       // loaded cards from document
+        FlashcardStudyDoc studyDoc; // loaded study state
+                                    // Secondary toolbar
+        HWND hwndReBarFlashcard = nullptr;
+        HWND hwndToolbarFlashcard = nullptr;
         // Lista sidebar
         HWND hwndListaBox = nullptr;
         ILayout* listaLayout = nullptr;

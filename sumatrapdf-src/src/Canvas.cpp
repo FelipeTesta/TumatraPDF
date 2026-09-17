@@ -5602,6 +5602,9 @@ LRESULT CALLBACK WndProcCanvas(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 if (win && win->hwndContrastOverlay) {
                     UpdateContrastOverlay(win);
                 }
+                if (win && win->autoScroll.hwndEtaLabel) {
+                    PositionEtaOverlay(win);
+                }
             }
             return 0;
 

@@ -1,5 +1,47 @@
 # TumatraPDF — Development Log
 
+## 2026-09-17 — Autoscroll Markdown suave (rAF) + ETA/velocidade em overlay bottom-right (BUILD OK)
+
+### Contexto
+Otimização do autoscroll em arquivos .md (WebView2): antes cada tick WM_TIMER (~100×/s) fazia `wv->Eval("window.scrollBy(...)")` — chamada COM cross-process por tick → jank + gargalo de perf. Migrou o scroll do caminho webview para uma loop `requestAnimationFrame` no renderer.
+
+### Autoscroll webview → rAF JS
+- Novo `SetWebviewAutoScroll(win, pxPerSec)` (AutoScroll.cpp): injeta via `Eval` um objeto `window.__tumatraAS` com loop rAF (60fps) que scrolla no renderer, sem Eval por tick. Detecção de fim via notify `autoscrollBottom` (reusa bridge existente).
+- `AutoScrollContinuousTick` caminho webview virou guardião: só Ctrl-pause (toggle em mudança de estado) + verificação de timer. **Zero Eval de scroll por tick** (~2-3 Eval por evento de estado).
+- `AutoScrollToggle` / `AutoScrollSpeedAdjust`: iniciam/param/atualizam a loop rAF (pxPerSec), mantendo `webviewPxPerSec` + `webviewCtrlDown` no estado.
+- **Bug de velocidade corrigido**: rAF fazia `dy=pxPerSec*dt` → em velocidades baixas <1px/frame, `scrollBy` arredonda a 0 e **não acumula** → velocidade não respeitada. Fix: acumulador no objeto JS (`accum += pxPerSec*dt; dy=floor(accum); accum-=dy`), mesmo padrão de carry do C++. (Verificado: fixed-page e middle-click já usavam acumulador correto — sem o bug.)
+
+### ETA + Velocidade em overlay bottom-right
+- Problema: `hwndEtaLabel` era child da toolbar e flutuava sobre ela → cobria Contrast/Invert/Two Column/Trim (grupo autoscroll no meio da toolbar).
+- Solução (padrão ContrastOverlay): ETA agora é overlay `WS_EX_LAYERED | WS_EX_TRANSPARENT` (child do parent do canvas), ancorado no **canto bottom-right** via `PositionEtaOverlay` (reposicionado no WM_SIZE do canvas).
+- Combinou velocidade + ETA num bloco único: `"%d px/min  |  ETA %dmin"` (`UpdateEtaOverlayText`), refrescado por `UpdateToolbarEtaText` e `UpdateToolbarSpeedLabel`.
+- `PositionFloatingLabels` (ToolbarLayout.cpp) esvaziado (não posiciona mais o ETA); removido campo obsoleto `etaToolbarWidth`.
+
+### Arquivos
+- AutoScroll.cpp, Toolbar.cpp, Toolbar.h, ToolbarLayout.cpp, Canvas.cpp, MainWindow.h.
+
+### Verificação
+- Build `bun cmd/build.ts` → 0 err / 0 warn (84s) + clang-format.
+- Smoke test: abre .md e PDF sem crash.
+- Teste manual do usuário: autoscroll suave no .md; velocidade regulável respeita o painel; ETA/velocidade no canto inferior direito sem cobrir ferramentas.
+
+## 2026-09-17 — Two Columns v2 FASE 3 (fluxo contínuo) (BUILD OK)
+
+### Contexto
+Continuação do plano Two Columns v2. FASE 2 commitada (`ca60840`). Esta sessão verificou a FASE 3 (fluxo contínuo sem salto — critério central do usuário). **Nenhuma mudança de código foi necessária**: a arquitetura 2N empilhada + exclusão mútua v1/v2 já entrega o fluxo natural.
+
+### FASE 3 — Verificação por análise de código
+- `ScrollYBy()` (`:2155-2198`): o snap `viewPort.y = colTop` e o bloqueio `colBottom - viewPort.dy` vivem no bloco v1 (`if (viewportCropEnabled ...)`, `:2217`). Como v2 on força v1 off (exclusão mútua, SumatraPDF.cpp:11185), o v2 desvia desse bloco e usa o caminho natural `newYOff += dy` (`:2262-2279`) — rola as 2N páginas empilhadas verticalmente sem salto.
+- `GoToNextPage`/`GoToPrevPage`: já operam sobre virtual. `PageCount()`=VirtualPageCount, contínuo usa `columns=1` → `FirstPageInARowNo`=pageNo, navega `2k-1→2k→2k+1` naturalmente.
+- Autoscroll (`MoveDocBy`→`ScrollYBy`): flui sem interrupção.
+
+### Verificação
+- Build `bun cmd/build.ts` → 0 err / 0 warn (85s).
+- Teste de aceite manual pendente do usuário: `autoscroll=on` + Two Column 2 lê `1L→1R→2L→2R` como texto único, sem salto.
+
+### Próximo
+- FASE 4 (conversões virtual↔físico no engine: CurrentPageNo, GetPageNoByPoint, Cvt, GoToPage, ScrollState, tile math, Search/Selection/DDE/uia).
+
 ## 2026-09-17 — Two Columns v2 FASE 2 (corte de coluna no render) (BUILD OK)
 
 ### Contexto

@@ -72,7 +72,9 @@
 static constexpr float kBaseIntervalMs = 20.0f;
 
 // Round-step speed lookup table in px/min
-static constexpr int kSpeedSteps[] = {300, 400, 500, 600, 700, 800, 900, 1000, 1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800, 1900, 2000, 2100, 2200, 2300, 2400, 2500, 2600, 2700, 2800, 2900, 3000, 3100, 3200, 3300, 3400, 3500, 3600, 3700, 3800, 3900, 4000};
+static constexpr int kSpeedSteps[] = {300,  400,  500,  600,  700,  800,  900,  1000, 1100, 1200, 1300, 1400, 1500,
+                                      1600, 1700, 1800, 1900, 2000, 2100, 2200, 2300, 2400, 2500, 2600, 2700, 2800,
+                                      2900, 3000, 3100, 3200, 3300, 3400, 3500, 3600, 3700, 3800, 3900, 4000};
 static constexpr int kSpeedStepCount = sizeof(kSpeedSteps) / sizeof(kSpeedSteps[0]);
 
 // Find nearest speed step index from current speedMultiplier
@@ -144,6 +146,37 @@ void RecalcAutoScrollEta(MainWindow* win) {
     }
 }
 
+// Install a requestAnimationFrame-driven autoscroll loop in the markdown page and
+// start/update it at the given speed in px/sec (0 stops it). The JS loop scrolls
+// smoothly in the renderer at ~60fps without a cross-process Eval per WM_TIMER tick,
+// and notifies __sumatra__ 'autoscrollBottom' when it reaches the end.
+static void SetWebviewAutoScroll(MainWindow* win, float pxPerSec) {
+    auto mm = win->AsMarkdown();
+    struct WebviewWnd* wv = mm ? mm->GetWebviewWnd() : nullptr;
+    if (!wv) {
+        return;
+    }
+    if (pxPerSec <= 0) {
+        wv->Eval("if(window.__tumatraAS)window.__tumatraAS.stop();");
+        return;
+    }
+    TempStr js =
+        fmt("if(!window.__tumatraAS){window.__tumatraAS={raf:0,pxPerSec:0,last:0,accum:0,"
+            "start:function(p){this.stop();this.pxPerSec=p;this.accum=0;this.last=performance.now();"
+            "this.raf=requestAnimationFrame(this.tick.bind(this));},"
+            "stop:function(){if(this.raf){cancelAnimationFrame(this.raf);this.raf=0;}this.pxPerSec=0;this.accum=0;},"
+            "tick:function(t){var dt=(t-this.last)/1000;this.last=t;if(this.pxPerSec<=0)return;"
+            "this.accum+=this.pxPerSec*dt;var dy=Math.floor(this.accum);"
+            "if(dy>0){this.accum-=dy;window.scrollBy(0,dy);}"
+            "var y=window.scrollY||window.pageYOffset,h=window.innerHeight,"
+            "sh=document.documentElement.scrollHeight;"
+            "if((y+h)>=sh-2){this.stop();window.__sumatra__.notify('autoscrollBottom',1);return;}"
+            "this.raf=requestAnimationFrame(this.tick.bind(this));}};}"
+            "window.__tumatraAS.start(%f);",
+            (double)pxPerSec);
+    wv->Eval(js);
+}
+
 // Toggle continuous auto-scroll on/off
 void AutoScrollToggle(MainWindow* win) {
     if (!win) {
@@ -173,8 +206,17 @@ void AutoScrollToggle(MainWindow* win) {
         const char* mode = dm ? "fixed" : "webview";
         LogInfo("[autoscroll] start mode=%s speed=%d px/min timerMinutes=%u", mode, pxPerMin,
                 win->autoScroll.timerMinutes);
+        if (mm) {
+            win->autoScroll.webviewPxPerSec = AutoScrollPxPerSec(win);
+            win->autoScroll.webviewCtrlDown = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+            SetWebviewAutoScroll(win, win->autoScroll.webviewCtrlDown ? 0 : win->autoScroll.webviewPxPerSec);
+        }
     } else {
         KillTimer(win->hwndCanvas, kContinuousAutoScrollTimerID);
+        if (mm) {
+            SetWebviewAutoScroll(win, 0);
+            win->autoScroll.webviewCtrlDown = false;
+        }
         UpdateToolbarEtaText(win, -1);
         LogInfo("[autoscroll] stop");
     }
@@ -208,6 +250,10 @@ void AutoScrollSpeedAdjust(MainWindow* win, int direction) {
     gGlobalPrefs->autoScrollSpeedMultiplier = win->autoScroll.speedMultiplier;
     if (win->autoScroll.active) {
         RecalcAutoScrollEta(win);
+        if (win->AsMarkdown() && !(GetKeyState(VK_CONTROL) & 0x8000)) {
+            win->autoScroll.webviewPxPerSec = AutoScrollPxPerSec(win);
+            SetWebviewAutoScroll(win, win->autoScroll.webviewPxPerSec);
+        }
     }
     UpdateToolbarSpeedLabel(win);
 }
@@ -219,38 +265,37 @@ static constexpr wchar_t kTimerDoneOverlayClass[] = L"TumatraTimerDoneOverlay";
 
 static LRESULT CALLBACK TimerDoneOverlayProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
-    case WM_PAINT: {
-        PAINTSTRUCT ps;
-        HDC hdc = BeginPaint(hwnd, &ps);
-        RECT rc;
-        GetClientRect(hwnd, &rc);
-        SetBkMode(hdc, TRANSPARENT);
-        SetTextColor(hdc, RGB(255, 165, 0));
-        HFONT hFont = CreateFontW(52, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
-            DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-            CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
-        HFONT hOld = (HFONT)SelectObject(hdc, hFont);
-        DrawTextW(hdc, L"\u2234", -1, &rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-        SelectObject(hdc, hOld);
-        DeleteObject(hFont);
-        EndPaint(hwnd, &ps);
-        return 0;
-    }
-    case WM_TIMER:
-        if (wp == kTimerDoneOverlayTimerId) {
+        case WM_PAINT: {
+            PAINTSTRUCT ps;
+            HDC hdc = BeginPaint(hwnd, &ps);
+            RECT rc;
+            GetClientRect(hwnd, &rc);
+            SetBkMode(hdc, TRANSPARENT);
+            SetTextColor(hdc, RGB(255, 165, 0));
+            HFONT hFont = CreateFontW(52, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
+                                      CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
+            HFONT hOld = (HFONT)SelectObject(hdc, hFont);
+            DrawTextW(hdc, L"\u2234", -1, &rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+            SelectObject(hdc, hOld);
+            DeleteObject(hFont);
+            EndPaint(hwnd, &ps);
+            return 0;
+        }
+        case WM_TIMER:
+            if (wp == kTimerDoneOverlayTimerId) {
+                KillTimer(hwnd, kTimerDoneOverlayTimerId);
+                DestroyWindow(hwnd);
+                gTimerDoneHwnd = nullptr;
+            }
+            return 0;
+        case WM_LBUTTONDOWN:
             KillTimer(hwnd, kTimerDoneOverlayTimerId);
             DestroyWindow(hwnd);
             gTimerDoneHwnd = nullptr;
-        }
-        return 0;
-    case WM_LBUTTONDOWN:
-        KillTimer(hwnd, kTimerDoneOverlayTimerId);
-        DestroyWindow(hwnd);
-        gTimerDoneHwnd = nullptr;
-        return 0;
-    case WM_DESTROY:
-        gTimerDoneHwnd = nullptr;
-        return 0;
+            return 0;
+        case WM_DESTROY:
+            gTimerDoneHwnd = nullptr;
+            return 0;
     }
     return DefWindowProcW(hwnd, msg, wp, lp);
 }
@@ -281,12 +326,9 @@ static void ShowTimerDoneOverlay(MainWindow* win) {
     int overlayH = 80;
     int x = (screenW - overlayW) / 2;
     int y = screenH - overlayH - 40;
-    HWND hwndPopup = CreateWindowExW(
-        WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
-        kTimerDoneOverlayClass, L"",
-        WS_POPUP | WS_VISIBLE,
-        x, y, overlayW, overlayH,
-        nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+    HWND hwndPopup = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, kTimerDoneOverlayClass, L"",
+                                     WS_POPUP | WS_VISIBLE, x, y, overlayW, overlayH, nullptr, nullptr,
+                                     GetModuleHandleW(nullptr), nullptr);
     if (!hwndPopup) return;
     gTimerDoneHwnd = hwndPopup;
     ShowWindow(hwndPopup, SW_SHOW);
@@ -365,48 +407,18 @@ void AutoScrollContinuousTick(MainWindow* win, HWND hwnd) {
             UpdateToolbarEtaText(win, remaining);
         }
     } else {
-        // WebView2 path (markdown)
+        // WebView2 path (markdown). The actual scrolling is driven by a
+        // requestAnimationFrame loop in the page (SetWebviewAutoScroll); this
+        // WM_TIMER tick only guards it: Ctrl-pause and the timer expiry check.
         auto mm = win->AsMarkdown();
         if (!mm) {
             return;
         }
-        struct WebviewWnd* wv = mm->GetWebviewWnd();
-        if (!wv) {
-            return;
-        }
-        static bool sLoggedWebviewTickStart = false;
-        if (!sLoggedWebviewTickStart) {
-            sLoggedWebviewTickStart = true;
-            LogInfo("[autoscroll] webview tick start");
-        }
-        // Scroll by the same pixel delta used for fixed pages
-        float speed = win->autoScroll.speed * win->autoScroll.speedMultiplier;
-        win->autoScroll.accum += speed;
-        int dy = (int)win->autoScroll.accum;
-        if (dy != 0) {
-            win->autoScroll.accum -= dy;
-            TempStr js = fmt("window.scrollBy(0, %d);", dy);
-            wv->Eval(js);
-        }
-        // Stop-at-bottom detection: one-shot Eval to check scroll position
-        // We piggyback on the existing scroll notification bridge (__sumatra__.notify)
-        // by sending a one-shot check. The result comes async via jsNotify.
-        // For simplicity, we also check synchronously via a one-shot eval that
-        // posts a notify we can handle. But since jsNotify is async, we use a
-        // simpler approach: check if scrollY + innerHeight >= scrollHeight - 2px.
-        // We'll do this check periodically (every few ticks) to avoid overhead.
-        static int sBottomCheckCounter = 0;
-        if (++sBottomCheckCounter >= 5) { // check every ~5 ticks (~100ms)
-            sBottomCheckCounter = 0;
-            TempStr js =
-                fmt("(function(){var y=window.scrollY||window.pageYOffset||0;"
-                    "var h=window.innerHeight;"
-                    "var sh=document.documentElement.scrollHeight;"
-                    "var rem=sh-(y+h);"
-                    "if(rem<0) rem=0;"
-                    "window.__sumatra__.notify('autoscrollProgress',rem);"
-                    "if((y+h)>=sh-2){window.__sumatra__.notify('autoscrollBottom',1);}}())");
-            wv->Eval(js);
+        // Ctrl held = pause the rAF loop (toggle only on state change)
+        bool ctrlDown = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+        if (ctrlDown != win->autoScroll.webviewCtrlDown) {
+            win->autoScroll.webviewCtrlDown = ctrlDown;
+            SetWebviewAutoScroll(win, ctrlDown ? 0 : win->autoScroll.webviewPxPerSec);
         }
         // Timer check (same as fixed-page)
         if (win->autoScroll.timerMinutes > 0 && win->autoScroll.startTick > 0) {
@@ -414,6 +426,8 @@ void AutoScrollContinuousTick(MainWindow* win, HWND hwnd) {
             if (elapsedMs >= (DWORD)win->autoScroll.timerMinutes * 60 * 1000) {
                 win->autoScroll.active = false;
                 KillTimer(hwnd, kContinuousAutoScrollTimerID);
+                SetWebviewAutoScroll(win, 0);
+                win->autoScroll.webviewCtrlDown = false;
                 UpdateToolbarEtaText(win, -1);
                 SetToolbarButtonCheckedState(win, CmdAutoScrollToggle, false);
                 MessageBeep(MB_OK);

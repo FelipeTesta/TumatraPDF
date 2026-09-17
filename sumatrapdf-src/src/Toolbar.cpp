@@ -1267,21 +1267,94 @@ void UpdateToolbarPageText(MainWindow* win, int pageCount, bool updateOnly) {
     HwndInvalidate(win->hwndToolbar, true);
 }
 
-// Creates the ETA label for autoscroll, placed after the autoscroll button
-// group: [sep] [Autoscroll] [ÔêÆ] [+] [sep] -> ETA label
+// ETA label as a bottom-right overlay anchored to the canvas (not the toolbar),
+// so it never covers toolbar buttons. Modeled on ContrastOverlay: a layered,
+// transparent child of the canvas parent that ignores mouse input.
+static constexpr wchar_t kEtaOverlayClass[] = L"TumatraPDFEtaOverlay";
+
+static LRESULT CALLBACK WndProcEtaOverlay(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    switch (msg) {
+        case WM_NCHITTEST:
+            return HTTRANSPARENT;
+        case WM_PAINT: {
+            PAINTSTRUCT ps;
+            HDC hdc = BeginPaint(hwnd, &ps);
+            RECT rc;
+            GetClientRect(hwnd, &rc);
+            SetBkMode(hdc, TRANSPARENT);
+            SetTextColor(hdc, RGB(120, 120, 120));
+            wchar_t text[64] = {};
+            GetWindowTextW(hwnd, text, dimof(text));
+            DrawTextW(hdc, text, -1, &rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+            EndPaint(hwnd, &ps);
+            return 0;
+        }
+    }
+    return DefWindowProcW(hwnd, msg, wp, lp);
+}
+
+// Creates the ETA label for autoscroll as a bottom-right canvas overlay.
 static void CreateEtaLabel(MainWindow* win) {
     if (win->autoScroll.hwndEtaLabel != nullptr) {
         return; // already created
     }
-    Rect r = TbGetRect(win->hwndToolbar, CmdAutoScrollSpeedUp); // last button of autoscroll group after -/+ swap
-    int x = r.x + r.dx + DpiScale(win->hwndFrame, 8);
-    int y = r.y;
-    int dx = DpiScale(win->hwndFrame, 50); // width for ETA text
-    int dy = r.dy;
-
-    HWND h = CreateWindowExW(0, WC_STATICW, L"ETA: --", SS_CENTER | WS_CHILD, x, y, dx, dy, win->hwndToolbar,
-                             (HMENU) nullptr, GetModuleHandle(nullptr), nullptr);
+    if (!win->hwndCanvas) {
+        return;
+    }
+    static bool classRegistered = false;
+    if (!classRegistered) {
+        WNDCLASSW wc = {};
+        wc.lpfnWndProc = WndProcEtaOverlay;
+        wc.hInstance = GetModuleHandleW(nullptr);
+        wc.lpszClassName = kEtaOverlayClass;
+        wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+        RegisterClassW(&wc);
+        classRegistered = true;
+    }
+    RECT rcCanvas;
+    GetWindowRect(win->hwndCanvas, &rcCanvas);
+    MapWindowPoints(HWND_DESKTOP, GetParent(win->hwndCanvas), (LPPOINT)&rcCanvas, 2);
+    int dx = DpiScale(win->hwndFrame, 200); // width for "VEL px/min | ETA Nmin"
+    int dy = DpiScale(win->hwndFrame, 22);
+    HWND h = CreateWindowExW(WS_EX_LAYERED | WS_EX_TRANSPARENT, kEtaOverlayClass, L"", WS_CHILD | WS_VISIBLE,
+                             rcCanvas.left, rcCanvas.top, dx, dy, GetParent(win->hwndCanvas), (HMENU) nullptr,
+                             GetModuleHandleW(nullptr), nullptr);
     win->autoScroll.hwndEtaLabel = h;
+    PositionEtaOverlay(win);
+}
+
+// Positions the ETA overlay at the bottom-right corner of the canvas.
+void PositionEtaOverlay(MainWindow* win) {
+    HWND hwndLabel = win->autoScroll.hwndEtaLabel;
+    if (!hwndLabel || !win->hwndCanvas) {
+        return;
+    }
+    RECT rcCanvas;
+    GetWindowRect(win->hwndCanvas, &rcCanvas);
+    MapWindowPoints(HWND_DESKTOP, GetParent(win->hwndCanvas), (LPPOINT)&rcCanvas, 2);
+    int dx = DpiScale(win->hwndFrame, 200); // width for "VEL px/min | ETA Nmin"
+    int dy = DpiScale(win->hwndFrame, 22);
+    int margin = DpiScale(win->hwndFrame, 8);
+    int x = (rcCanvas.right - rcCanvas.left) - dx - margin;
+    int y = (rcCanvas.bottom - rcCanvas.top) - dy - margin;
+    SetWindowPos(hwndLabel, HWND_TOP, rcCanvas.left + x, rcCanvas.top + y, dx, dy, SWP_NOACTIVATE);
+}
+
+// Refreshes the combined "speed | ETA" text of the bottom-right overlay.
+void UpdateEtaOverlayText(MainWindow* win) {
+    HWND hwndLabel = win->autoScroll.hwndEtaLabel;
+    if (!hwndLabel) {
+        return;
+    }
+    if (!win->autoScroll.active) {
+        ShowWindow(hwndLabel, SW_HIDE);
+        return;
+    }
+    float pxPerSec = AutoScrollPxPerSec(win);
+    int pxPerMin = (int)(pxPerSec * 60.0f + 0.5f);
+    HwndSetText(hwndLabel, fmt("%d px/min  |  ETA %dmin", pxPerMin, win->autoScroll.etaMinutes));
+    ShowWindow(hwndLabel, SW_SHOW);
+    HwndInvalidateRect(hwndLabel, HwndClientRect(hwndLabel), false);
 }
 
 // Positions the ETA label anchored after the last visible toolbar button
@@ -1291,10 +1364,10 @@ void UpdateToolbarEtaText(MainWindow* win, int minutes) {
     if (win->autoScroll.hwndEtaLabel == nullptr) {
         return;
     }
+    win->autoScroll.etaMinutes = minutes < 0 ? 0 : minutes;
     if (!gGlobalPrefs->autoScrollShowEta) {
         if (IsWindowVisible(win->autoScroll.hwndEtaLabel)) {
             ShowWindow(win->autoScroll.hwndEtaLabel, SW_HIDE);
-            HwndInvalidate(win->hwndToolbar, true);
         }
         return;
     }
@@ -1302,16 +1375,7 @@ void UpdateToolbarEtaText(MainWindow* win, int minutes) {
         ShowWindow(win->autoScroll.hwndEtaLabel, SW_HIDE);
         return;
     }
-    ShowWindow(win->autoScroll.hwndEtaLabel, SW_SHOW);
-    HwndSetText(win->autoScroll.hwndEtaLabel, fmt("ETA: %dmin", minutes));
-    // reposition only when toolbar width changed (anchored after last button)
-    Rect rc = HwndClientRect(win->hwndToolbar);
-    if (rc.dx != win->autoScroll.etaToolbarWidth) {
-        win->autoScroll.etaToolbarWidth = rc.dx;
-        PositionFloatingLabels(win);
-    }
-    // invalidate only the label, not the whole toolbar
-    HwndInvalidateRect(win->autoScroll.hwndEtaLabel, HwndClientRect(win->autoScroll.hwndEtaLabel), false);
+    UpdateEtaOverlayText(win);
 }
 
 // Creates the speed label for autoscroll, placed between Autoscroll toggle and [-] button
@@ -1332,6 +1396,9 @@ static void CreateSpeedLabel(MainWindow* win) {
 }
 
 void UpdateToolbarSpeedLabel(MainWindow* win) {
+    if (win->autoScroll.active && win->autoScroll.hwndEtaLabel) {
+        UpdateEtaOverlayText(win);
+    }
     if (win->autoScroll.hwndSpeedLabel == nullptr) {
         return;
     }
