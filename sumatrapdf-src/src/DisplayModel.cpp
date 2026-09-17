@@ -619,6 +619,18 @@ RectF DisplayModel::PageMediaBox(int pageNo) const {
     } else {
         pi->state = PageInfoState::Known;
     }
+    // two column v2: each half of a physical page becomes its own virtual page,
+    // so the virtual page's media box is the left/right column (half the width)
+    // laid out at the full page height. Giving the virtual page the half-width
+    // box makes Fit Width fill the whole screen with one column and the render
+    // path shift the area by the column offset.
+    int cropColumn = ColumnOfVirtual(pageNo);
+    if (cropColumn >= 0) {
+        pi->mediaBox.dx /= 2.0f;
+        if (cropColumn == 1) {
+            pi->mediaBox.x += pi->mediaBox.dx;
+        }
+    }
     return pi->mediaBox;
 }
 
@@ -1667,7 +1679,7 @@ IPageElement* DisplayModel::GetElementAtPos(Point pt, int* pageNoOut) {
         *pageNoOut = pageNo;
     }
     PointF pos = CvtFromScreen(pt, pageNo);
-    return engine->GetElementAtPos(pageNo, pos);
+    return engine->GetElementAtPos(VirtualToPhysical(pageNo), pos);
 }
 
 Annotation* DisplayModel::GetAnnotationAtPos(Point pt, Annotation* annot) {
@@ -1684,7 +1696,7 @@ Annotation* DisplayModel::GetAnnotationAtPos(Point pt, Annotation* annot) {
     }
 
     PointF pos = CvtFromScreen(pt, pageNo);
-    return EngineGetAnnotationAtPos(engine, pageNo, pos, annot);
+    return EngineGetAnnotationAtPos(engine, VirtualToPhysical(pageNo), pos, annot);
 }
 
 // form fields (widgets) are hit-tested separately from annotations
@@ -1700,7 +1712,7 @@ Annotation* DisplayModel::GetWidgetAtPos(Point pt) {
         return nullptr;
     }
     PointF pos = CvtFromScreen(pt, pageNo);
-    return EngineGetWidgetAtPos(engine, pageNo, pos);
+    return EngineGetWidgetAtPos(engine, VirtualToPhysical(pageNo), pos);
 }
 
 // note: returns false for pages that haven't been rendered yet
@@ -1713,7 +1725,7 @@ bool DisplayModel::IsOverText(Point pt) {
     if (!Rect(Point(), viewPort.Size()).Contains(pt)) {
         return false;
     }
-    if (!engine->HasTextForPage(pageNo)) {
+    if (!engine->HasTextForPage(VirtualToPhysical(pageNo))) {
         return false;
     }
 
@@ -2479,7 +2491,7 @@ static bool GlyphInRegion(const Rect* coords, int textLen, int i, Rect regionI) 
 Str DisplayModel::GetTextInRegion(int pageNo, RectF region) const {
     Rect* coords;
     int textLen = 0;
-    Str pageText = engine->GetTextForPage(pageNo, &textLen, &coords);
+    Str pageText = engine->GetTextForPage(VirtualToPhysical(pageNo), &textLen, &coords);
     if (!pageText) {
         return {};
     }

@@ -60,13 +60,14 @@ Criar um **segundo modo** "Two Column v2" (`CmdViewportCropV2Toggle`) **totalmen
 - [x] `Canvas.cpp`: `PageMediabox` em trim-drag/erase/full-image → `VirtualToPhysical(pageNo)`.
 - [x] Build 0 err/0 warn (75s) + clang-format + smoke estável (zlib.3.pdf 3 páginas, sem crash). ✅ FASE 1 completa — 2N linhas empilhadas, ainda sem corte de coluna.
 
-#### FASE 2 — Corte de coluna no render
+#### FASE 2 — Corte de coluna no render ✅ COMPLETA
 
-- [ ] Caminho não-cache `RenderCache.cpp:1162`: quando `pi->cropColumn>=0`, computar rect da coluna sobre mediabox físico (`esq={0,0,w/2,h}`, `dir={w/2,0,w/2,h}`), deslocar `area` por `colX`, clampar largura, render com `physicalPageNo`.
-- [ ] Caminho cacheado (tile): aplicar offset de coluna em `GetTileRectUser`/`pageRect` OU forçar não-cache no v2 (como trim já faz, `RenderCache.cpp:1169`). **Decidir no build**: MVP = forçar não-cache.
-- [ ] Cache: usar **virtual pageNo** como chave (já funciona; esq/dir não colidem).
-- [ ] `Canvas.cpp` loop `DrawDocument` (`:3288`): iterar virtual; largura da "página" = largura da coluna.
-- [ ] Build + teste: cada linha mostra só metade (esq/dir), largura total da tela.
+- [x] `DisplayModel::PageMediaBox` (`:604`): quando `ColumnOfVirtual(pageNo)>=0`, cortar mediabox para metade (`dx/=2`, `x+=dx` se dir). A página virtual ganha mediabox de meia-largura → Fit Width preenche a tela com a coluna (criterio central do usuário: sem metade preta).
+- [x] Caminho não-cache `RenderCache.cpp:1162`: quando `viewportCropV2Enabled && cropColumn>=0`, deslocar `area` por `colX = mb.x + (cropColumn==1 ? mb.dx/2 : 0)` (mesmo padrao do trim shift vertical) e render com `physicalPageNo`.
+- [x] Caminho cacheado: MVP = forçar não-cache (já feito na FASE 1 via `ShouldCacheRendering`=false). Avaliar perf na FASE 7.
+- [x] Cache: virtual pageNo como chave já funciona (esq/dir não colidem).
+- [x] **Fix crash ao desligar** (`EngineMupdf.cpp:4110` `pageNo>pageCount`): hit-test passava pageNo **virtual** (até 2N) ao engine (que tem N). Roteados via `VirtualToPhysical` em `DisplayModel.cpp`: `GetElementAtPos` (:1682), `GetAnnotationAtPos` (:1699), `GetWidgetAtPos` (:1715), `IsOverText`/`HasTextForPage` (:1728), `GetTextInRegion` (:2494).
+- [x] Build 0 err/0 warn (76s) + clang-format + teste manual: liga/desliga v2 **sem crash**, volta ao estado original. Log `[v2] Paint pageNo=4 -> renderPageNo=2 cropColumn=1` confirma render de coluna esq/dir correto. ✅ FASE 2 completa — corte de coluna com largura total da tela. (Pendências de polish: ver na próxima sessão.)
 
 #### FASE 3 — Fluxo contínuo (sem salto) — CRITÉRIO CENTRAL
 

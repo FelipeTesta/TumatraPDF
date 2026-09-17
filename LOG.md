@@ -1,5 +1,29 @@
 # TumatraPDF — Development Log
 
+## 2026-09-17 — Two Columns v2 FASE 2 (corte de coluna no render) (BUILD OK)
+
+### Contexto
+Continuação do plano Two Columns v2. FASE 1 (duplicar layout 2N) foi commitada (`ef85d17`). Esta sessão implementou a FASE 2: cada página virtual (1L/1R/2L/2R...) renderiza só metade da página física, com a coluna preenchendo a largura total da tela.
+
+### FASE 2 — Corte de coluna no render
+- `DisplayModel::PageMediaBox` (`:604`): quando `ColumnOfVirtual(pageNo)>=0`, corta mediabox pela metade (`dx/=2`, `x+=dx` se dir). Página virtual ganha mediabox de meia-largura → Fit Width enche a tela com a coluna (criterio do usuário: NUNCA deixar metade da tela preta; permitir zoom).
+- `RenderCache.cpp` caminho não-cache: quando `viewportCropV2Enabled && cropColumn>=0`, desloca `area` por `colX = mb.x + (cropColumn==1 ? mb.dx/2 : 0)` antes do render (mesmo padrão do trim shift vertical), render com `physicalPageNo`. Logs `[v2]` já presentes na FASE 1.
+- Cache: MVP força não-cache via `ShouldCacheRendering`=false (já feito na FASE 1); virtual pageNo como chave resolve esq/dir sem colisão.
+
+### Fix crash ao desligar o v2 (`EngineMupdf.cpp:4110` `pageNo > pageCount`)
+- **Sintoma:** toggle liga OK; ao desligar, crash `GetFzPageInfoLocked` (`pageNo > e->pageCount`), stack `OnSetCursorMouseNone → GetWidgetAtPos → EngineGetWidgetAtPos`.
+- **Causa:** call-sites de hit-test passavam `pageNo` **virtual** (até 2N) ao engine, que tem N páginas físicas. Quando o layout voltava a N, um pageNo residual > N estourava o ReportIf.
+- **Fix:** roteados via `VirtualToPhysical(pageNo)` em `DisplayModel.cpp`: `GetElementAtPos` (:1682), `GetAnnotationAtPos` (:1699), `GetWidgetAtPos` (:1715), `IsOverText`/`HasTextForPage` (:1728), `GetTextInRegion` (:2494).
+
+### Verificação
+- Build `bun cmd/build.ts` → 0 err / 0 warn (76s) + clang-format.
+- Teste manual do usuário: toggle v2 liga/desliga **sem crash**, volta ao estado original.
+- Log `[v2] Paint pageNo=4 -> renderPageNo=2 cropColumn=1` confirma render de coluna esq/dir correto (virtual 4 = física 2, coluna direita).
+
+### Pendências (polish, próxima sessão)
+- Ajustes visuais/zoom apontados pelo usuário após teste.
+- FASE 3 (fluxo contínuo sem salto) é o próximo passo estrutural.
+
 ## 2026-09-16 — Two Columns v2 FASE 0 concluída + FASE 1 (duplicar layout 2N) (BUILD OK)
 
 ### Contexto

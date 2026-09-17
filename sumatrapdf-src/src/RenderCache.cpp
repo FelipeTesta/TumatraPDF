@@ -1168,6 +1168,20 @@ int RenderCache::Paint(HDC hdc, Rect bounds, DisplayModel* dm, int pageNo, PageI
 
         area = dm->GetEngine()->Transform(area, renderPageNo, zoom, rotation, true);
 
+        // two column v2: the virtual page is one half of a physical page. After
+        // the (inverse) transform area is in physical mediabox units; shift it
+        // right by the column offset so only the left/right half renders, at
+        // full screen width (the layout already gave the virtual page a half-
+        // width media box, so Fit Width fills the viewport).
+        if (dm->viewportCropV2Enabled) {
+            int cropColumn = dm->ColumnOfVirtual(pageNo);
+            if (cropColumn >= 0) {
+                RectF mb = dm->GetEngine()->PageMediabox(renderPageNo);
+                float colX = mb.x + (cropColumn == 1 ? mb.dx / 2.0f : 0.0f);
+                area.x += colX;
+            }
+        }
+
         // margin trim: the layout already uses the reduced page height, so
         // pageOnScreen is the trimmed rect and bounds is 1:1 with it. Just
         // shift the render area (page coords) down by the top strip and render
