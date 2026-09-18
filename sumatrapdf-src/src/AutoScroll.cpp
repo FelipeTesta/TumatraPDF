@@ -71,25 +71,16 @@
 
 static constexpr float kBaseIntervalMs = 20.0f;
 
-// Round-step speed lookup table in px/min
-static constexpr int kSpeedSteps[] = {300,  400,  500,  600,  700,  800,  900,  1000, 1100, 1200, 1300, 1400, 1500,
-                                      1600, 1700, 1800, 1900, 2000, 2100, 2200, 2300, 2400, 2500, 2600, 2700, 2800,
-                                      2900, 3000, 3100, 3200, 3300, 3400, 3500, 3600, 3700, 3800, 3900, 4000};
-static constexpr int kSpeedStepCount = sizeof(kSpeedSteps) / sizeof(kSpeedSteps[0]);
+// Speed multiplier range and step, exposed directly (no px/min conversion).
+static constexpr float kMinSpeedMultiplier = 0.03f;
+static constexpr float kMaxSpeedMultiplier = 0.4f;
+static constexpr float kSpeedStepSize = 0.01f;
 
-// Find nearest speed step index from current speedMultiplier
-static int FindCurrentSpeedStep(float speedMultiplier, float baseSpeed) {
-    float pxPerMin = baseSpeed * speedMultiplier * 100.0f * 60.0f;
-    int best = 0;
-    int bestDist = abs((int)pxPerMin - kSpeedSteps[0]);
-    for (int i = 1; i < kSpeedStepCount; i++) {
-        int dist = abs((int)pxPerMin - kSpeedSteps[i]);
-        if (dist < bestDist) {
-            best = i;
-            bestDist = dist;
-        }
-    }
-    return best;
+// Snap a multiplier to the allowed range and the fixed 0.01 step.
+static float SnapSpeedMultiplier(float mlt) {
+    mlt = std::max(mlt, kMinSpeedMultiplier);
+    mlt = std::min(mlt, kMaxSpeedMultiplier);
+    return (float)((int)(mlt * 100.0f + 0.5f)) / 100.0f;
 }
 
 // Calculate effective scroll speed in pixels per second
@@ -194,17 +185,15 @@ void AutoScrollToggle(MainWindow* win) {
         win->autoScroll.startTick = GetTickCount();
         // Feed the timer stop-logic: use configured minutes if timer enabled, else 0 (no limit)
         win->autoScroll.timerMinutes = win->autoScroll.timerEnabled ? win->autoScroll.timerMinutesSetting : 0;
-        // Snap to nearest round step on start
-        int step = FindCurrentSpeedStep(win->autoScroll.speedMultiplier, win->autoScroll.speed);
-        int pxPerMin = kSpeedSteps[step];
-        win->autoScroll.speedMultiplier = (float)pxPerMin / (win->autoScroll.speed * 100.0f * 60.0f);
+        // Snap to the multiplier range/step on start
+        win->autoScroll.speedMultiplier = SnapSpeedMultiplier(win->autoScroll.speedMultiplier);
         // persist snapped speed to global prefs
         gGlobalPrefs->autoScrollSpeedMultiplier = win->autoScroll.speedMultiplier;
         RecalcAutoScrollEta(win);
         UpdateToolbarEtaText(win, win->autoScroll.etaMinutes);
         SetTimer(win->hwndCanvas, kContinuousAutoScrollTimerID, USER_TIMER_MINIMUM, nullptr);
         const char* mode = dm ? "fixed" : "webview";
-        LogInfo("[autoscroll] start mode=%s speed=%d px/min timerMinutes=%u", mode, pxPerMin,
+        LogInfo("[autoscroll] start mode=%s speed=%.2f mlt timerMinutes=%u", mode, win->autoScroll.speedMultiplier,
                 win->autoScroll.timerMinutes);
         if (mm) {
             win->autoScroll.webviewPxPerSec = AutoScrollPxPerSec(win);
@@ -224,20 +213,13 @@ void AutoScrollToggle(MainWindow* win) {
     UpdateToolbarSpeedLabel(win);
 }
 
-// Adjust continuous auto-scroll speed multiplier
+// Adjust continuous auto-scroll speed multiplier (step of 0.01)
 void AutoScrollSpeedAdjust(MainWindow* win, int direction) {
     if (!win) {
         return;
     }
-    int step = FindCurrentSpeedStep(win->autoScroll.speedMultiplier, win->autoScroll.speed);
-    if (direction > 0) {
-        step = std::min(step + 1, kSpeedStepCount - 1);
-    } else {
-        step = std::max(step - 1, 0);
-    }
-    int pxPerMin = kSpeedSteps[step];
-    // Convert back to multiplier: multiplier = pxPerMin / (speed * 100 * 60)
-    win->autoScroll.speedMultiplier = (float)pxPerMin / (win->autoScroll.speed * 100.0f * 60.0f);
+    float mlt = win->autoScroll.speedMultiplier + (direction > 0 ? kSpeedStepSize : -kSpeedStepSize);
+    win->autoScroll.speedMultiplier = SnapSpeedMultiplier(mlt);
     // persist to in-memory FileState; written to disk on next settings save (app exit)
     WindowTab* tab = win->CurrentTab();
     if (tab && tab->filePath) {

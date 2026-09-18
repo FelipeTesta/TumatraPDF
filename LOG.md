@@ -1,5 +1,26 @@
 # TumatraPDF — Development Log
 
+## 2026-09-17 — Autoscroll: velocidade por multiplicador direto (x0.03..x0.40) + fix limite ~2200px/min (BUILD OK)
+
+### Contexto
+Após a otimização rAF + overlay (commit `e7b0108`), o autoscroll de PDF parava de aumentar por volta de 2200 px/min. Causa: conversão px/min↔multiplicador com float32 em `FindCurrentSpeedStep`/`kSpeedSteps` (tabela de 300..4000). Decidido expor o multiplicador diretamente, sem passo de conversão.
+
+### Alterações
+- `AutoScroll.cpp`: removidos `kSpeedSteps`, `kSpeedStepCount`, `FindCurrentSpeedStep`. Novos `kMinSpeedMultiplier=0.03f`, `kMaxSpeedMultiplier=0.4f`, `kSpeedStepSize=0.01f`, e `SnapSpeedMultiplier()` (clamp na faixa + arredonda p/ passo 0.01).
+- `AutoScrollSpeedAdjust`: agora `mlt ± 0.01` direto (sem tabela/conversão) — vale p/ PDF e markdown.
+- `AutoScrollToggle`: snap no start para a faixa/passo; log `speed=%.2f mlt`.
+- Display: toolbar mostra `x0.15`; overlay bottom-right mostra `x0.15 | ETA Nmin`.
+- Markdown: mlt convertido p/ `pxPerSec` uma vez no ajuste de velocidade (`webviewPxPerSec = AutoScrollPxPerSec` → `SetWebviewAutoScroll`), não por frame — o rAF não sofre do bug float32.
+- Comentários/strings "px/min" atualizados p/ formato `xMLT`.
+
+### Verificação
+- Build `bun cmd/build.ts` → 0 err / 0 warn (60s) + clang-format.
+- Smoke test PDF sem crash.
+- Teste manual do usuário: velocidade sobe de 0.03 a 0.40 sem travar.
+
+### Arquivos
+- AutoScroll.cpp, Toolbar.cpp, ToolbarLayout.cpp.
+
 ## 2026-09-17 — Autoscroll Markdown suave (rAF) + ETA/velocidade em overlay bottom-right (BUILD OK)
 
 ### Contexto

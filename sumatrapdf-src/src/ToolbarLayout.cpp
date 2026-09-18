@@ -31,7 +31,7 @@ const ToolbarSlotSpec gToolbarSlots[] = {
     {SpeedInfoId,
      "speed",
      {
-         {0, "Static", SS_CENTER | WS_CHILD | WS_VISIBLE, "0 px/min", 70, true, 8},
+         {0, "Static", SS_CENTER | WS_CHILD | WS_VISIBLE, "x0.03", 60, true, 8},
      },
      1,
      4,

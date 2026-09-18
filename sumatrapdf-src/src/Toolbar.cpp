@@ -1314,7 +1314,7 @@ static void CreateEtaLabel(MainWindow* win) {
     RECT rcCanvas;
     GetWindowRect(win->hwndCanvas, &rcCanvas);
     MapWindowPoints(HWND_DESKTOP, GetParent(win->hwndCanvas), (LPPOINT)&rcCanvas, 2);
-    int dx = DpiScale(win->hwndFrame, 200); // width for "VEL px/min | ETA Nmin"
+    int dx = DpiScale(win->hwndFrame, 200); // width for "xMLT | ETA Nmin"
     int dy = DpiScale(win->hwndFrame, 22);
     HWND h = CreateWindowExW(WS_EX_LAYERED | WS_EX_TRANSPARENT, kEtaOverlayClass, L"", WS_CHILD | WS_VISIBLE,
                              rcCanvas.left, rcCanvas.top, dx, dy, GetParent(win->hwndCanvas), (HMENU) nullptr,
@@ -1332,7 +1332,7 @@ void PositionEtaOverlay(MainWindow* win) {
     RECT rcCanvas;
     GetWindowRect(win->hwndCanvas, &rcCanvas);
     MapWindowPoints(HWND_DESKTOP, GetParent(win->hwndCanvas), (LPPOINT)&rcCanvas, 2);
-    int dx = DpiScale(win->hwndFrame, 200); // width for "VEL px/min | ETA Nmin"
+    int dx = DpiScale(win->hwndFrame, 200); // width for "xMLT | ETA Nmin"
     int dy = DpiScale(win->hwndFrame, 22);
     int margin = DpiScale(win->hwndFrame, 8);
     int x = (rcCanvas.right - rcCanvas.left) - dx - margin;
@@ -1350,9 +1350,8 @@ void UpdateEtaOverlayText(MainWindow* win) {
         ShowWindow(hwndLabel, SW_HIDE);
         return;
     }
-    float pxPerSec = AutoScrollPxPerSec(win);
-    int pxPerMin = (int)(pxPerSec * 60.0f + 0.5f);
-    HwndSetText(hwndLabel, fmt("%d px/min  |  ETA %dmin", pxPerMin, win->autoScroll.etaMinutes));
+    float mlt = win->autoScroll.speedMultiplier;
+    HwndSetText(hwndLabel, fmt("x%.2f  |  ETA %dmin", mlt, win->autoScroll.etaMinutes));
     ShowWindow(hwndLabel, SW_SHOW);
     HwndInvalidateRect(hwndLabel, HwndClientRect(hwndLabel), false);
 }
@@ -1387,10 +1386,10 @@ static void CreateSpeedLabel(MainWindow* win) {
     Rect r = TbGetRect(win->hwndToolbar, CmdAutoScrollSpeedDown); // "-" button
     int x = r.x - DpiScale(win->hwndFrame, 8);                    // left of "-" button
     int y = r.y;
-    int dx = DpiScale(win->hwndFrame, 70); // width for speed text (e.g., "120 px/min")
+    int dx = DpiScale(win->hwndFrame, 60); // width for speed text (e.g., "x0.15")
     int dy = r.dy;
 
-    HWND h = CreateWindowExW(0, WC_STATICW, L"0 px/min", SS_CENTER | WS_CHILD, x, y, dx, dy, win->hwndToolbar,
+    HWND h = CreateWindowExW(0, WC_STATICW, L"x0.03", SS_CENTER | WS_CHILD, x, y, dx, dy, win->hwndToolbar,
                              (HMENU) nullptr, GetModuleHandle(nullptr), nullptr);
     win->autoScroll.hwndSpeedLabel = h;
 }
@@ -1406,10 +1405,8 @@ void UpdateToolbarSpeedLabel(MainWindow* win) {
         ShowWindow(win->autoScroll.hwndSpeedLabel, SW_HIDE);
         return;
     }
-    float pxPerSec = AutoScrollPxPerSec(win);
-    int pxPerMin = (int)(pxPerSec * 60.0f + 0.5f);
     ShowWindow(win->autoScroll.hwndSpeedLabel, SW_SHOW);
-    HwndSetText(win->autoScroll.hwndSpeedLabel, fmt("%d px/min", pxPerMin));
+    HwndSetText(win->autoScroll.hwndSpeedLabel, fmt("x%.2f", win->autoScroll.speedMultiplier));
     PositionToolbarChildWindows(win);
     HwndInvalidateRect(win->autoScroll.hwndSpeedLabel, HwndClientRect(win->autoScroll.hwndSpeedLabel), false);
 }

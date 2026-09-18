@@ -1588,11 +1588,16 @@ static void AppendTextSelScreenRects(DisplayModel* dm, const Rect& clipRc, TextS
         return;
     }
     for (int i = 0; i < sel->len; i++) {
+        // TextSel pages are PHYSICAL; map each rect to its virtual page and
+        // convert to screen (CvtToScreen is virtual + column-aware).
         int pageNo = sel->pages[i];
-        if (!dm->PageVisible(pageNo)) {
+        RectF physRect = ToRectF(sel->rects[i]);
+        RectF vrect;
+        int virtualPageNo = dm->PhysicalToVirtualForRect(pageNo, physRect, &vrect);
+        if (!dm->PageVisible(virtualPageNo)) {
             continue;
         }
-        Rect rc = dm->CvtToScreen(pageNo, ToRectF(sel->rects[i]));
+        Rect rc = dm->CvtToScreen(virtualPageNo, vrect);
         rc = rc.Intersect(clipRc);
         if (!rc.IsEmpty()) {
             out.Append(rc);

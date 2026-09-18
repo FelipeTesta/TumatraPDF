@@ -130,6 +130,22 @@ int DisplayModel::ColumnOfVirtual(int virtualPageNo) const {
     return -1; // no column split
 }
 
+int DisplayModel::PhysicalToVirtualForRect(int physicalPageNo, RectF rect, RectF* rectOut) const {
+    if (!(viewportCropV2Enabled && IsContinuous(GetDisplayMode()))) {
+        *rectOut = rect;
+        return physicalPageNo;
+    }
+    RectF mb = engine->PageMediabox(physicalPageNo);
+    float halfW = mb.dx / 2.0f;
+    // which column contains the rect's horizontal center?
+    int col = (rect.x + rect.dx / 2.0f) >= (mb.x + halfW) ? 1 : 0;
+    int virtualPageNo = 2 * physicalPageNo - 1 + col;
+    // keep the rect in PHYSICAL full-width coords; CvtToScreen/CvtFromScreen
+    // apply the column shift internally (mirrors the render-time colX shift)
+    *rectOut = rect;
+    return virtualPageNo;
+}
+
 TempStr DisplayModel::GetPropertyTemp(DocProp prop) {
     return engine->GetPropertyTemp(prop);
 }
@@ -1619,6 +1635,17 @@ Point DisplayModel::CvtToScreen(int pageNo, PointF pt) {
 
     float zoom = getZoomSafe(this, pageNo, pageInfo);
 
+    // two column v2: pt is in PHYSICAL full-width page coords; shift it by the
+    // column offset so the right column lands on its (half-width) virtual page.
+    // Mirrors the render-time colX shift (RenderCache::Paint). Non-v2: no-op.
+    int cropColumn = ColumnOfVirtual(pageNo);
+    if (cropColumn >= 0) {
+        int renderPageNo = VirtualToPhysical(pageNo);
+        RectF mb = engine->PageMediabox(renderPageNo);
+        float colX = mb.x + (cropColumn == 1 ? mb.dx / 2.0f : 0.0f);
+        pt.x -= colX;
+    }
+
     PointF p = engine->Transform(pt, VirtualToPhysical(pageNo), zoom, rotation);
     // don't add the full 0.5 for rounding to account for precision errors
     Rect r = pageInfo->pageOnScreen;
@@ -1650,7 +1677,17 @@ PointF DisplayModel::CvtFromScreen(Point pt, int pageNo) {
     PointF p = PointF((float)pt.x - 0.499f - (float)r.x, (float)pt.y - 0.499f - (float)r.y);
 
     float zoom = getZoomSafe(this, pageNo, pageInfo);
-    return engine->Transform(p, VirtualToPhysical(pageNo), zoom, rotation, true);
+    PointF res = engine->Transform(p, VirtualToPhysical(pageNo), zoom, rotation, true);
+    // two column v2: result is in column-local coords (right column already
+    // shifted -colX); shift it back into PHYSICAL full-width page coords.
+    int cropColumn = ColumnOfVirtual(pageNo);
+    if (cropColumn >= 0) {
+        int renderPageNo = VirtualToPhysical(pageNo);
+        RectF mb = engine->PageMediabox(renderPageNo);
+        float colX = mb.x + (cropColumn == 1 ? mb.dx / 2.0f : 0.0f);
+        res.x += colX;
+    }
+    return res;
 }
 
 RectF DisplayModel::CvtFromScreen(Rect r, int pageNo) {
@@ -2544,11 +2581,19 @@ bool DisplayModel::ShowResultRectToScreen(TextSel* res) {
     }
 
     Rect extremes;
+    int virtualFirstPage = 0;
     for (int i = 0; i < res->len; i++) {
-        Rect rc = CvtToScreen(res->pages[i], ToRectF(res->rects[i]));
+        // TextSel pages are PHYSICAL; map each rect to its virtual page before
+        // converting to screen (CvtToScreen is virtual + column-aware).
+        RectF vrect;
+        int virtualPageNo = PhysicalToVirtualForRect(res->pages[i], ToRectF(res->rects[i]), &vrect);
+        Rect rc = CvtToScreen(virtualPageNo, vrect);
         extremes = extremes.Union(rc);
+        if (i == 0) {
+            virtualFirstPage = virtualPageNo;
+        }
     }
-    return ScrollScreenToRect(res->pages[0], extremes);
+    return ScrollScreenToRect(virtualFirstPage, extremes);
 }
 
 bool DisplayModel::ScrollScreenToRect(int pageNo, Rect rec) {

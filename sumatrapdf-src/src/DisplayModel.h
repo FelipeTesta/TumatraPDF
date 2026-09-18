@@ -227,6 +227,10 @@ struct DisplayModel : DocController {
     int VirtualToPhysical(int virtualPageNo) const;
     int ColumnOfVirtual(int virtualPageNo) const;
     int VirtualPageCount() const;
+    // maps a PHYSICAL page + rect (physical page coords, full width) to the
+    // correct VIRTUAL page + column-local rect (right column shifted -halfW).
+    // Non-v2: identity. v2: physical k -> virtual 2k-1 (left) / 2k (right).
+    int PhysicalToVirtualForRect(int physicalPageNo, RectF rect, RectF* rectOut) const;
 
     bool InPresentation() const;
 

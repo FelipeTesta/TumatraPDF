@@ -43,22 +43,25 @@ SelectionOnPage::SelectionOnPage(int pageNo, const RectF* const rect) {
 
 Rect SelectionOnPage::GetRect(DisplayModel* dm) const {
     // if the page is not visible, we return an empty rectangle
-    PageInfo* pageInfo = dm->GetPageInfo(pageNo);
-    if (!pageInfo || pageInfo->visibleRatio <= 0.0) {
-        return Rect();
-    }
-
     RectF adjustedRect = rect;
     if (dm->marginTrimEnabled) {
         adjustedRect.y -= (float)gGlobalPrefs->trim.top;  // FIXED: was +=
     }
-    return dm->CvtToScreen(pageNo, adjustedRect);
+    // pageNo is PHYSICAL (comes from TextSel); map to the virtual page that
+    // owns this rect (left/right column) before CvtToScreen (which is virtual
+    // and column-aware). Non-v2: identity.
+    int virtualPageNo = dm->PhysicalToVirtualForRect(pageNo, adjustedRect, &adjustedRect);
+    PageInfo* pageInfo = dm->GetPageInfo(virtualPageNo);
+    if (!pageInfo || pageInfo->visibleRatio <= 0.0) {
+        return Rect();
+    }
+    return dm->CvtToScreen(virtualPageNo, adjustedRect);
 }
 
 Vec<SelectionOnPage>* SelectionOnPage::FromRectangle(DisplayModel* dm, Rect rect) {
     Vec<SelectionOnPage>* sel = new Vec<SelectionOnPage>();
 
-    for (int pageNo = dm->GetEngine()->PageCount(); pageNo >= 1; --pageNo) {
+    for (int pageNo = dm->PageCount(); pageNo >= 1; --pageNo) {
         PageInfo* pi = dm->GetPageInfo(pageNo);
         ReportIf(!(!pi || 0.0 == pi->visibleRatio || pi->isShown));
         if (!pi || !pi->isShown) {
@@ -694,11 +697,13 @@ static int LimitTextSelectionAutoscrollDx(MainWindow* win, int dx) {
     int selLeft = INT_MAX;
     int selRight = INT_MIN;
     for (int i = 0; i < sel->len; i++) {
-        int pageNo = sel->pages[i];
-        if (!dm->PageVisible(pageNo)) {
+        int pageNo = sel->pages[i]; // physical
+        RectF vrect;
+        int virtualPageNo = dm->PhysicalToVirtualForRect(pageNo, ToRectF(sel->rects[i]), &vrect);
+        if (!dm->PageVisible(virtualPageNo)) {
             continue;
         }
-        Rect rc = dm->CvtToScreen(pageNo, ToRectF(sel->rects[i]));
+        Rect rc = dm->CvtToScreen(virtualPageNo, vrect);
         selLeft = std::min(selLeft, rc.x);
         selRight = std::max(selRight, rc.x + rc.dx);
     }
