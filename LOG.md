@@ -1,5 +1,53 @@
 # TumatraPDF — Development Log
 
+## 2026-09-18 — Autoscroll: overlay ETA/velocidade bottom-right (fundos/fix) (BUILD OK)
+
+### Contexto
+Após o commit `ef19739` (velocidade por multiplicador direto x0.03..0.40), o usuário reportou que o overlay de ETA/velocidade no bottom-right não aparecia; depois que apareceu, tinha caracteres sobrepostos, velocidade duplicada na toolbar e texto ilegível sem fundo.
+
+### Alterações
+- **Overlay invisível**: `CreateEtaLabel` criava `WS_EX_LAYERED` mas nunca chamava `SetLayeredWindowAttributes` — child layered não desenha conteúdo sem alpha (o `ContrastOverlay` modelo chama na linha 92). Corrigido.
+- **Caracteres sobrepostos**: `WM_PAINT` do overlay usava `SetBkMode(TRANSPARENT)` sem limpar o retângulo, empilhando texto a cada frame. Corrigido preenchendo o rect com a cor-chave magenta + `SetLayeredWindowAttributes(LWA_COLORKEY)`: fundo transparente e texto apagado entre frames.
+- **Velocidade duplicada**: removido o speed label da toolbar (slot `SpeedInfoId`), mantendo a velocidade só no overlay. Removidos `CreateSpeedLabel`, placeholder do botão, reserva de largura `kSpeedSlotW`/`speedSlotW`, `SpeedInfoId` de `ToolbarIds.h`, campo `hwndSpeedLabel` de `MainWindow.h`, bloco de posicionamento/destruição no ToolbarLayout.
+- **Fundo preto legível**: overlay agora desenha o texto branco sobre um fundo preto (rect inflado `-4,-2`), acima da cor-chave transparente.
+
+### Verificação
+- Build `bun cmd/build.ts` → 0 err / 0 warn (~47s) + clang-format.
+- Smoke `-for-testing` zlib.3.pdf → estável.
+- Teste manual do usuário: overlay `x0.15 | ETA Nmin` no bottom-right, legível, sem sobreposição, sem duplicação na toolbar.
+
+### Arquivos
+- Toolbar.cpp, ToolbarLayout.cpp/.h, MainWindow.h, ToolbarIds.h, LOG.md.
+
+## 2026-09-18 — Two Columns v2 FASE 4 (conversões virtual↔físico no engine) (BUILD OK)
+
+### Contexto
+Continuação do plano Two Columns v2. FASE 3 verificada sem código. Esta sessão completou a FASE 4: auditar e rotear todos os call-sites que cruzam a fronteira virtual↔físico (layout/UI usam **virtual** 2N; engine usa **físico** N).
+
+### Decisão de arquitetura
+- `PageCount()` retorna **virtual** (layout, navegação, UI, labels). Engine é **físico**. Todo ponto que cruza a fronteira roteia explicitamente.
+
+### Mudanças-chave
+- **`DisplayModel::PhysicalToVirtualForRect(phys, rect, &out)`** (DisplayModel.cpp:133): física k + rect → virtual `2k-1` (esq) / `2k` (dir), decidido pela metade horizontal do centro do rect; não-v2 = identidade. Mantém rect em coords físicas (shift colX aplicado no CvtToScreen).
+- **`CvtToScreen`/`CvtFromScreen` column-aware**: aplicam o mesmo shift colX do render (`pt.x -= colX` no CvtToScreen, `+= colX` no CvtFromScreen, espelhando `RenderCache::Paint`). Assim qualquer par (virtual, rect físico) converte certo automaticamente.
+- **`GetPageLabeTemp`**: `engine->GetPageLabeTemp(VirtualToPhysical(pageNo))` — evita overrun 2N→N e devolve o label físico correto.
+
+### Roteamento físico→virtual (TextSel.pages[] é físico)
+- `SearchAndDDE`: `AppendTextSelScreenRects`, `AppendPageRectsToScreen`, `ShowSearchResult` (GoToPage virtual), `FindTextOnThread` (converte `CurrentPageNo()` virtual→físico p/ `FindFirst`; checa visibilidade das 2 colunas da página física), `FindMatchTouchesVisiblePages` (span virtual `[2*start-1, 2*end]` com param `bool v2`), `RebuildFindMatchPaintCache`.
+- `Selection`: `SelectionOnPage::GetRect` (mapeia físico→virtual), `FromRectangle` (itera `PageCount()` virtual), `UpdateTextSelection`/`OnSelectAll`/`OnSelectionStart` (`VirtualToPhysical` p/ textSelection engine-bound), `SelectionToolbar::GetSelectionEndPoint`.
+- `uia/TextRange`, `ReadAloudHighlight` (3 pontos: GetViewportStart, word-paint, pageUnion-paint), `FormFields` (widget), `SumatraPDF` zoom-to-selection (`PhysicalToVirtualForRect`).
+
+### textSelection/textSearch (engine-bound) recebem físico
+- Call-sites de entrada (`StartAt`/`SelectUpTo`/`SelectWordAt`) em Canvas.cpp e Selection.cpp usam `VirtualToPhysical(pageNo)`.
+
+### Verificação
+- Build `bun cmd/build.ts` → 0 err / 0 warn (~50s) + clang-format em 9 arquivos.
+- Smoke `-for-testing` zlib.3.pdf → estável (respondendo).
+- Teste manual pendente do usuário: seleção de texto, busca, links e cliques corretos na 2L/2R.
+
+### Pendências (FASE 4)
+- uia `PageProvider` e tile-math legado: caminho não-cache já desvia; aceitável para MVP.
+
 ## 2026-09-17 — Autoscroll: velocidade por multiplicador direto (x0.03..x0.40) + fix limite ~2200px/min (BUILD OK)
 
 ### Contexto

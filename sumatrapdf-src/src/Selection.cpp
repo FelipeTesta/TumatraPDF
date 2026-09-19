@@ -45,7 +45,7 @@ Rect SelectionOnPage::GetRect(DisplayModel* dm) const {
     // if the page is not visible, we return an empty rectangle
     RectF adjustedRect = rect;
     if (dm->marginTrimEnabled) {
-        adjustedRect.y -= (float)gGlobalPrefs->trim.top;  // FIXED: was +=
+        adjustedRect.y -= (float)gGlobalPrefs->trim.top; // FIXED: was +=
     }
     // pageNo is PHYSICAL (comes from TextSel); map to the virtual page that
     // owns this rect (left/right column) before CvtToScreen (which is virtual
@@ -506,11 +506,13 @@ void UpdateTextSelection(MainWindow* win, bool select) {
         int pageNo = dm->GetPageNoByPoint(win->selection.selectionRect.BR());
         if (win->ctrl->ValidPageNo(pageNo)) {
             PointF pt = dm->CvtFromScreen(win->selection.selectionRect.BR(), pageNo);
+            // textSelection is engine-bound: pass the PHYSICAL pageNo
+            int physPageNo = dm->VirtualToPhysical(pageNo);
             if (win->selection.selectingByWord) {
                 // double-click-drag: extend a whole word at a time (issue #4761)
-                dm->textSelection->SelectWordsUpTo(pageNo, pt.x, pt.y);
+                dm->textSelection->SelectWordsUpTo(physPageNo, pt.x, pt.y);
             } else {
-                dm->textSelection->SelectUpTo(pageNo, pt.x, pt.y);
+                dm->textSelection->SelectUpTo(physPageNo, pt.x, pt.y);
             }
         }
     }
@@ -653,11 +655,11 @@ void OnSelectAll(MainWindow* win, bool textOnly) {
         for (pageNo = 1; !dm->PageShown(pageNo); pageNo++) {
             ;
         }
-        dm->textSelection->StartAt(pageNo, 0);
+        dm->textSelection->StartAt(dm->VirtualToPhysical(pageNo), 0);
         for (pageNo = win->ctrl->PageCount(); !dm->PageShown(pageNo); pageNo--) {
             ;
         }
-        dm->textSelection->SelectUpTo(pageNo, -1);
+        dm->textSelection->SelectUpTo(dm->VirtualToPhysical(pageNo), -1);
         win->selection.selectionRect = Rect::FromXY(INT_MIN / 2, INT_MIN / 2, INT_MAX, INT_MAX);
         UpdateTextSelection(win);
     } else {
@@ -787,7 +789,8 @@ void OnSelectionStart(MainWindow* win, int x, int y, WPARAM /*key*/) {
         int pageNo = dm->GetPageNoByPoint(Point(x, y));
         if (dm->ValidPageNo(pageNo)) {
             PointF pt = dm->CvtFromScreen(Point(x, y), pageNo);
-            dm->textSelection->StartAt(pageNo, pt.x, pt.y);
+            // textSelection is engine-bound: pass the PHYSICAL pageNo
+            dm->textSelection->StartAt(dm->VirtualToPhysical(pageNo), pt.x, pt.y);
             win->mouseAction = MouseAction::SelectingText;
         }
     }

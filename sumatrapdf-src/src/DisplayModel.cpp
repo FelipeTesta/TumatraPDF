@@ -179,7 +179,9 @@ bool DisplayModel::HasPageLabels() const {
 }
 
 TempStr DisplayModel::GetPageLabeTemp(int pageNo) const {
-    return engine->GetPageLabeTemp(pageNo);
+    // engine is bound to PHYSICAL pages; two column v2 callers pass virtual
+    // page numbers (up to 2N) which would overrun the engine's N pages
+    return engine->GetPageLabeTemp(VirtualToPhysical(pageNo));
 }
 
 int DisplayModel::GetPageByLabel(Str label) const {
@@ -337,6 +339,26 @@ void DisplayModel::ApplyViewportCropV2() {
     logfa("[v2] ApplyViewportCropV2 enabled=%d\n", (int)viewportCropV2Enabled);
     BuildPagesInfo();
     Relayout(GetZoomVirtual(), rotation);
+}
+
+void DisplayModel::RestoreViewportAfterV2Toggle(int physAnchor, int dyInPage) {
+    // Called AFTER the N<->2N relayout. physAnchor is the PHYSICAL page the user
+    // was looking at before the toggle. If v2 is now ON, that page shows as
+    // virtual page 2*physAnchor-1 (left column); if OFF it's the physical page
+    // itself. Restore the same in-page vertical offset.
+    if (!ValidPageNo(physAnchor)) {
+        return;
+    }
+    int restorePage = viewportCropV2Enabled ? physAnchor * 2 - 1 : physAnchor;
+    if (!ValidPageNo(restorePage)) {
+        return;
+    }
+    PageInfo* pi = GetPageInfo(restorePage);
+    if (!pi) {
+        return;
+    }
+    int newY = pi->pos.y + dyInPage;
+    viewPort.y = limitValue(newY, 0, std::max(0, canvasSize.dy - viewPort.dy));
 }
 
 void DisplayModel::QuickToggleViewportCropV2() {

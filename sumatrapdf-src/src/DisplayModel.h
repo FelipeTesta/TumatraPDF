@@ -224,6 +224,9 @@ struct DisplayModel : DocController {
     // two column v2 (stacked virtual columns, independent of v1)
     void ApplyViewportCropV2();
     void QuickToggleViewportCropV2();
+    // restore the vertical scroll position after the N<->2N relayout so toggling
+    // v2 doesn't jump the view. physAnchor + dyInPage captured BEFORE the toggle.
+    void RestoreViewportAfterV2Toggle(int physAnchor, int dyInPage);
     int VirtualToPhysical(int virtualPageNo) const;
     int ColumnOfVirtual(int virtualPageNo) const;
     int VirtualPageCount() const;

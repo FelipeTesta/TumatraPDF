@@ -304,7 +304,7 @@ bool ReadAloudGetViewportStart(DisplayModel* dm, int* startPageOut, int* startGl
 
         Rect* coords = nullptr;
         int textLen = 0;
-        Str text = engine->GetTextForPage(pageNo, &textLen, &coords);
+        Str text = engine->GetTextForPage(dm->VirtualToPhysical(pageNo), &textLen, &coords);
         if (!text) {
             continue;
         }
@@ -634,7 +634,9 @@ static bool ReadAloudGetCurrentWordScreenRect(MainWindow* win, Rect* rectOut) {
         if (!ReadAloudByteLocHasRect(loc)) {
             continue;
         }
-        Rect sr = dm->CvtToScreen(loc.pageNo, ToRectF(ReadAloudByteLocToRect(loc)));
+        RectF vrect;
+        int virtualPageNo = dm->PhysicalToVirtualForRect(loc.pageNo, ToRectF(ReadAloudByteLocToRect(loc)), &vrect);
+        Rect sr = dm->CvtToScreen(virtualPageNo, vrect);
         if (!hasRect) {
             unionRect = sr;
             hasRect = true;
@@ -804,12 +806,14 @@ void PaintReadAloudHighlight(MainWindow* win, HDC hdc) {
         if (!ReadAloudByteLocHasRect(loc)) {
             continue;
         }
-        PageInfo* pi = dm->GetPageInfo(loc.pageNo);
+        RectF rf = ToRectF(ReadAloudByteLocToRect(loc));
+        RectF vr;
+        int virtualPageNo = dm->PhysicalToVirtualForRect(loc.pageNo, rf, &vr);
+        PageInfo* pi = dm->GetPageInfo(virtualPageNo);
         if (!pi || pi->visibleRatio <= 0.0) {
             continue;
         }
         RectF& u = pageUnions[loc.pageNo];
-        RectF rf = ToRectF(ReadAloudByteLocToRect(loc));
         u = u.IsEmpty() ? rf : u.Union(rf);
     }
 
@@ -819,7 +823,11 @@ void PaintReadAloudHighlight(MainWindow* win, HDC hdc) {
         if (u.IsEmpty()) {
             continue;
         }
-        Rect sr = dm->CvtToScreen(pageNo, u);
+        // pageNo is PHYSICAL; map the union rect to its virtual page (column)
+        // before CvtToScreen (virtual + column-aware).
+        RectF vrect;
+        int virtualPageNo = dm->PhysicalToVirtualForRect(pageNo, u, &vrect);
+        Rect sr = dm->CvtToScreen(virtualPageNo, vrect);
         sr = sr.Intersect(win->canvasRc);
         if (!sr.IsEmpty()) {
             screenRects.Append(sr);

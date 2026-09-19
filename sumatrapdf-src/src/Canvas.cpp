@@ -1551,7 +1551,7 @@ static void DragTouchSelHandle(MainWindow* win, int x, int y) {
         dm->textSelection->StartAt(fromPage, fromGlyph);
     }
     PointF ptf = dm->CvtFromScreen(pt, pageNo);
-    dm->textSelection->SelectUpTo(pageNo, ptf.x, ptf.y);
+    dm->textSelection->SelectUpTo(dm->VirtualToPhysical(pageNo), ptf.x, ptf.y);
 
     DeleteOldSelectionInfo(win, false);
     WindowTab* tab = win->CurrentTab();
@@ -1588,7 +1588,7 @@ static bool OnTouchLongPress(MainWindow* win, int x, int y) {
     }
 
     PointF ptf = dm->CvtFromScreen(pt, pageNo);
-    dm->textSelection->SelectWordAt(pageNo, ptf.x, ptf.y);
+    dm->textSelection->SelectWordAt(dm->VirtualToPhysical(pageNo), ptf.x, ptf.y);
 
     DeleteOldSelectionInfo(win, false);
     WindowTab* tab = win->CurrentTab();
@@ -2761,7 +2761,7 @@ static void OnMouseLeftButtonDblClk(MainWindow* win, int x, int y, WPARAM key) {
         int pageNo = dm->GetPageNoByPoint(mousePos);
         if (win->ctrl->ValidPageNo(pageNo)) {
             PointF pt = dm->CvtFromScreen(mousePos, pageNo);
-            dm->textSelection->SelectWordAt(pageNo, pt.x, pt.y);
+            dm->textSelection->SelectWordAt(dm->VirtualToPhysical(pageNo), pt.x, pt.y);
             UpdateTextSelection(win, false);
             // remember this double-click so a quick 3rd click nearby is detected
             // as a triple-click (line selection, issue #694)

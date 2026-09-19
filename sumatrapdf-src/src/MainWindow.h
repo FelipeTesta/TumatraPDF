@@ -342,7 +342,6 @@ struct MainWindow {
         int etaLastShown = -1;  // last minute value displayed (avoid redundant updates)
         int etaPageNo = 0;      // page ETA was computed for
         HWND hwndEtaLabel = nullptr;
-        HWND hwndSpeedLabel = nullptr;
         DWORD timerMinutes = 0;         // 0 = no timer (effective value used by tick)
         DWORD timerMinutesSetting = 30; // configured minutes from UI input (default 30)
         bool timerEnabled = false;      // timer checkbox state

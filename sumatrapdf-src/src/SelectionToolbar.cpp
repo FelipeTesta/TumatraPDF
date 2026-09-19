@@ -257,7 +257,10 @@ static bool GetSelectionEndPoint(MainWindow* win, Point& out) {
     }
     TextSel& result = dm->textSelection->result;
     int i = result.len - 1;
-    Rect r = dm->CvtToScreen(result.pages[i], ToRectF(result.rects[i]));
+    // TextSel pages are PHYSICAL; map to virtual before CvtToScreen (virtual).
+    RectF vrect;
+    int virtualPageNo = dm->PhysicalToVirtualForRect(result.pages[i], ToRectF(result.rects[i]), &vrect);
+    Rect r = dm->CvtToScreen(virtualPageNo, vrect);
     if (r.IsEmpty()) {
         return false;
     }

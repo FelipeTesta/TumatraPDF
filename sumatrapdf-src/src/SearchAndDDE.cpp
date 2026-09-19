@@ -521,9 +521,13 @@ static void ShowSearchResult(MainWindow* win, TextSel* result, bool addNavPt) {
     }
 
     DisplayModel* dm = win->AsFixed();
-    if (addNavPt || !dm->PageShown(result->pages[0]) ||
+    // TextSel pages are PHYSICAL; map the first match to its virtual page so
+    // GoToPage/PageShown operate in virtual space (two column v2).
+    RectF vrect;
+    int virtualPageNo = dm->PhysicalToVirtualForRect(result->pages[0], ToRectF(result->rects[0]), &vrect);
+    if (addNavPt || !dm->PageShown(virtualPageNo) ||
         (dm->GetZoomVirtual() == kZoomFitPage || dm->GetZoomVirtual() == kZoomFitContent)) {
-        win->ctrl->GoToPage(result->pages[0], addNavPt);
+        win->ctrl->GoToPage(virtualPageNo, addNavPt);
     }
 
     // Find never changes the text selection: all matches (including the active
@@ -1338,9 +1342,21 @@ static void FindThread(FindThreadData* ftd) {
     TextSel* rect;
     textSearch->progressCb = MkFunc1<FindThreadData, ProgressUpdateData*>(UpdateSearchProgress, ftd);
     textSearch->SetDirection(ftd->direction);
-    if (ftd->wasModified || !ctrl->ValidPageNo(textSearch->GetCurrentPageNo()) ||
-        !(bool)dm->GetPageInfo(textSearch->GetCurrentPageNo())->visibleRatio) {
-        rect = textSearch->FindFirst(ctrl->CurrentPageNo(), ftd->text);
+    // textSearch is engine-bound: its pageNo is PHYSICAL. A physical page p
+    // shows as virtual pages 2p-1 and 2p; the search's current page is
+    // "visible" if either column is on screen. Map ctrl->CurrentPageNo()
+    // (virtual) to physical before FindFirst.
+    int searchPhys = textSearch->GetCurrentPageNo();
+    bool searchVisible = false;
+    if (ctrl->ValidPageNo(searchPhys)) {
+        int v0 = dm->PhysicalToVirtualForRect(searchPhys, RectF(), nullptr);
+        int v1 = v0 + 1;
+        searchVisible = dm->GetPageInfo(v0)->visibleRatio > 0.0f || dm->GetPageInfo(v1)->visibleRatio > 0.0f;
+    }
+    int curVirtual = ctrl->CurrentPageNo();
+    int curPhysical = dm->VirtualToPhysical(curVirtual);
+    if (ftd->wasModified || !ctrl->ValidPageNo(curPhysical) || !searchVisible) {
+        rect = textSearch->FindFirst(curPhysical, ftd->text);
     } else {
         rect = textSearch->FindNext();
     }
@@ -1499,8 +1515,16 @@ void FindTextOnThread(MainWindow* win, TextSearch::Direction direction, bool sho
     FindTextOnThread(win, direction, s, wasModified, showProgress);
 }
 
-static bool FindMatchTouchesVisiblePages(const FindMatch& fm, int firstPage, int lastPage) {
-    return fm.endPage >= firstPage && fm.startPage <= lastPage;
+// perf filter for the find-match paint cache: does the (physical) match span
+// overlap the visible (virtual) page range? In two column v2 a physical page p
+// shows as virtual pages 2p-1 and 2p, so the match's virtual span is
+// [2*startPage-1, 2*endPage]. Being slightly over-inclusive is fine: the
+// actual paint (AppendPageRectsToScreen) validates with PageVisible.
+static bool FindMatchTouchesVisiblePages(const FindMatch& fm, int firstPage, int lastPage, bool v2) {
+    if (!v2) {
+        return fm.endPage >= firstPage && fm.startPage <= lastPage;
+    }
+    return (2 * fm.endPage) >= firstPage && (2 * fm.startPage - 1) <= lastPage;
 }
 
 static void GetVisiblePageRange(DisplayModel* dm, int& firstOut, int& lastOut) {
@@ -1542,10 +1566,13 @@ static void AppendPageRectsToScreen(DisplayModel* dm, const Rect& clipRc, const 
                                     int nRects, Vec<Rect>& out) {
     for (int i = 0; i < nRects; i++) {
         const FindMatchPaintPageRect& pr = pageRects[i];
-        if (!dm->ValidPageNo(pr.pageNo) || !dm->PageVisible(pr.pageNo)) {
+        // pr.pageNo is PHYSICAL (from TextSel); map to virtual + column-aware
+        RectF vrect;
+        int virtualPageNo = dm->PhysicalToVirtualForRect(pr.pageNo, ToRectF(pr.rect), &vrect);
+        if (!dm->ValidPageNo(virtualPageNo) || !dm->PageVisible(virtualPageNo)) {
             continue;
         }
-        Rect rc = dm->CvtToScreen(pr.pageNo, ToRectF(pr.rect));
+        Rect rc = dm->CvtToScreen(virtualPageNo, vrect);
         rc = rc.Intersect(clipRc);
         if (!rc.IsEmpty()) {
             out.Append(rc);
@@ -1564,9 +1591,10 @@ static void RebuildFindMatchPaintCache(MainWindow* win, DisplayModel* dm, int fi
         return;
     }
     Vec<FindMatchPaintPageRect>& positions = gFindMatchPaintCache.positions;
+    bool v2 = dm->viewportCropV2Enabled && IsContinuous(dm->GetDisplayMode());
     for (int i = 0; i < len(win->findMatches); i++) {
         const FindMatch& fm = win->findMatches[i];
-        if (!FindMatchTouchesVisiblePages(fm, firstPage, lastPage)) {
+        if (!FindMatchTouchesVisiblePages(fm, firstPage, lastPage, v2)) {
             continue;
         }
         int firstPos = len(positions);

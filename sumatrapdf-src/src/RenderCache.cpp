@@ -1161,10 +1161,6 @@ int RenderCache::Paint(HDC hdc, Rect bounds, DisplayModel* dm, int pageNo, PageI
         // stacking one physical page per column. The engine renders physical
         // page numbers, so route the virtual pageNo back to its physical page.
         int renderPageNo = dm->VirtualToPhysical(pageNo);
-        if (dm->viewportCropV2Enabled) {
-            logfa("[v2] Paint pageNo=%d -> renderPageNo=%d cropColumn=%d\n", pageNo, renderPageNo,
-                  dm->ColumnOfVirtual(pageNo));
-        }
 
         area = dm->GetEngine()->Transform(area, renderPageNo, zoom, rotation, true);
 

@@ -19,7 +19,6 @@ struct ToolbarTokens {
     int ctrlH = 18;       // standard height for checkbox / edit controls
     int labelW = 40;      // "Timer:" label fallback width
     int timerSlotW = 130; // timer controls slot fallback width
-    int speedSlotW = 70;  // speed label slot fallback width
     int etaW = 50;        // ETA label fallback width
     int pagePadX = 12;    // page box padding
     int buttonGapX = 8;   // gap between button and floating label
@@ -39,7 +38,7 @@ struct ToolbarChildSpec {
 
 // Specification for a toolbar slot (placeholder button that reserves space for child windows)
 struct ToolbarSlotSpec {
-    int placeholderId;            // e.g., TimerInfoId, SpeedInfoId, PageInfoId
+    int placeholderId;            // e.g., TimerInfoId, PageInfoId
     const char* name;             // Debug name: "timer", "speed", "page"
     ToolbarChildSpec children[4]; // Max 4 children per slot
     int childCount = 0;

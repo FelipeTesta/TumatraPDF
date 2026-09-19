@@ -11,6 +11,23 @@
 - ALWAYS run `clang-format` on `.cpp`/`.c`/`.h` files after edits (before build).
 - ALWAYS pass `-for-testing` when launching for ad-hoc testing.
 
+# 0b. USE tree-sitter for exploration & debugging (MANDATORY)
+
+The **tree-sitter MCP** tools (`tree-sitter_register_project_tool`, `find_usage`,
+`find_text`, `run_query`, `get_symbols`, `analyze_project`) are the project's
+primary way to explore code, trace symbol references, and debug. **ALWAYS reach
+for tree-sitter BEFORE grep/read-walking.** It indexes the whole tree once
+(`name "tumatrapdf"`, root = repo) and answers symbol/call-site questions in one
+call, saving huge context and avoiding manual greps.
+
+Rules:
+- Register the project once per session: `tree-sitter_register_project_tool(name="tumatrapdf", path="<repo>")`. If `find_usage`/`find_text` return empty or stale, `tree-sitter_clear_cache` + re-`register_project_tool` (scans may be cached from a prior session).
+- To map who calls a function / what a symbol reaches: `tree-sitter_find_usage(symbol, language="cpp")`.
+- To find a code pattern with context: `tree-sitter_find_text(pattern, context_lines=N)`.
+- **Trace call-sites of shared/ambiguous types (page numbers, coordinates, engine handles) with tree-sitter, not manual greps** — this repo has pervasive dual namespaces (virtual vs physical pageNo, screen vs page coords) that silently break features when mixed (see Two Columns v2).
+- The user has repeatedly had to insist that agents use tree-sitter — **do not skip it**. If a task involves "map", "trace", "where is X called", "audit call-sites", use tree-sitter FIRST.
+- Project must be registered before use; the server forgets the project between sessions (empty `list_projects_tool`).
+
 # 1. Overview
 
 TumatraPDF is a fork of SumatraPDF — a Windows C++ PDF reader using Win32 API. Own string/container types in `src/base/` (no STL). Early macOS app in `src/mac/` (not in scope). External deps in `ext/` and `mupdf/`.

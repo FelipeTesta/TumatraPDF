@@ -7363,8 +7363,11 @@ void ZoomToSelection(MainWindow* win) {
             continue;
         }
         if (isFirst) {
-            pageNo = sel.pageNo;
-            selPage = sel.rect;
+            // sel.pageNo is PHYSICAL; CvtToScreen/ScrollYBy are virtual, so map
+            // the selection's rect to its virtual page (column-aware).
+            RectF vrect;
+            pageNo = dm->PhysicalToVirtualForRect(sel.pageNo, sel.rect, &vrect);
+            selPage = vrect;
             selScreen = rc;
             isFirst = false;
             continue;
@@ -11178,6 +11181,17 @@ static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, L
             if (ShouldToggle(cmd, win->AsFixed() ? win->AsFixed()->viewportCropV2Enabled : false)) {
                 auto v2Dm = win->AsFixed();
                 if (v2Dm) {
+                    // capture the view anchor BEFORE flipping the flag (state is
+                    // consistent here): physical page + in-page vertical offset,
+                    // so toggling v2 doesn't jump the page the user is reading.
+                    int physAnchor = v2Dm->VirtualToPhysical(v2Dm->CurrentPageNo());
+                    int dyInPage = 0;
+                    if (v2Dm->ValidPageNo(v2Dm->CurrentPageNo())) {
+                        dyInPage = v2Dm->viewPort.y - v2Dm->GetPageInfo(v2Dm->CurrentPageNo())->pos.y;
+                    }
+                    logfa("[v2] toggle pre: enabled=%d curPageNo(virtual)=%d physAnchor=%d dyInPage=%d viewPortY=%d\n",
+                          (int)v2Dm->viewportCropV2Enabled, v2Dm->CurrentPageNo(), physAnchor, dyInPage,
+                          v2Dm->viewPort.y);
                     bool wasEnabled = v2Dm->viewportCropV2Enabled;
                     v2Dm->viewportCropV2Enabled = !wasEnabled;
                     if (v2Dm->viewportCropV2Enabled) {
@@ -11199,6 +11213,9 @@ static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, L
                         // ApplyViewportCropV2 rebuilds pagesInfo + relayouts
                         v2Dm->ApplyViewportCropV2();
                     }
+                    v2Dm->RestoreViewportAfterV2Toggle(physAnchor, dyInPage);
+                    logfa("[v2] toggle post: enabled=%d curPageNo(virtual)=%d viewPortY=%d\n",
+                          (int)v2Dm->viewportCropV2Enabled, v2Dm->CurrentPageNo(), v2Dm->viewPort.y);
                     v2Dm->RecalcVisibleParts();
                     HwndRepaintNow(win->hwndCanvas);
                 }

@@ -28,14 +28,6 @@ const ToolbarSlotSpec gToolbarSlots[] = {
      3,
      4,
      18},
-    {SpeedInfoId,
-     "speed",
-     {
-         {0, "Static", SS_CENTER | WS_CHILD | WS_VISIBLE, "x0.03", 60, true, 8},
-     },
-     1,
-     4,
-     18},
     {PageInfoId,
      "page",
      {
@@ -103,8 +95,6 @@ void UpdateToolbarSlotWidths(MainWindow* win) {
         int fallbackWidth = 0;
         if (slot.placeholderId == TimerInfoId)
             fallbackWidth = DpiScale(win->hwndFrame, gToolbarTokens.timerSlotW);
-        else if (slot.placeholderId == SpeedInfoId)
-            fallbackWidth = DpiScale(win->hwndFrame, gToolbarTokens.speedSlotW);
         else if (slot.placeholderId == PageInfoId)
             fallbackWidth = DpiScale(win->hwndFrame, 150); // page box wider
 
@@ -141,8 +131,6 @@ void PositionToolbarChildWindows(MainWindow* win) {
                 hwndChild = win->autoScroll.hwndTimerEdit;
             } else if (slot.placeholderId == TimerInfoId && j == 1) { // Timer label
                 hwndChild = win->autoScroll.hwndTimerLabel;
-            } else if (slot.placeholderId == SpeedInfoId && j == 0) { // Speed label
-                hwndChild = win->autoScroll.hwndSpeedLabel;
             }
 
             if (!hwndChild) continue;

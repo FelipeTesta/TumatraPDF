@@ -57,7 +57,6 @@ constexpr int kCtrlGapX = 4;     // horizontal gap between adjacent custom contr
 constexpr int kCtrlH = 18;       // standard height for checkbox / edit controls
 constexpr int kLabelW = 40;      // "Timer:" label fallback width
 constexpr int kTimerSlotW = 130; // timer controls slot fallback width
-constexpr int kSpeedSlotW = 70;  // speed label slot fallback width
 constexpr int kEtaW = 50;        // ETA label fallback width
 
 // true if any toolbar toggle button (BTNS_CHECK) is currently checked;
@@ -96,7 +95,6 @@ static ToolbarButtonInfo gToolbarButtons[] = {
     {TbIcon::None, 0, nullptr},           // separator before autoscroll group
     {TbIcon::None, TimerInfoId, nullptr}, // timer control placeholder reserving space
     {TbIcon::Text, CmdAutoScrollToggle, _TRN("Autoscroll")},
-    {TbIcon::None, SpeedInfoId, nullptr}, // speed label placeholder reserving space
     {TbIcon::Text, CmdAutoScrollSpeedDown, _TRN("-")},
     {TbIcon::Text, CmdAutoScrollSpeedUp, _TRN("+")},
     {TbIcon::None, 0, nullptr}, // separator after autoscroll group
@@ -266,8 +264,6 @@ static bool IsCmdAvailable(MainWindow* win, int cmdId) {
         case CmdArchToolsToggle:
             return gGlobalPrefs->archToolsEnabled;
         case PageInfoId:
-            return true;
-        case SpeedInfoId:
             return true;
     }
     auto* ctx = NewBuildMenuCtx(win->CurrentTab(), Point{0, 0});
@@ -1244,16 +1240,6 @@ void UpdateToolbarPageText(MainWindow* win, int pageCount, bool updateOnly) {
     if (bi.cx != size2.dx || !updateOnly) {
         TbSetButtonDx(win->hwndToolbar, PageInfoId, size2.dx);
     }
-    // Reserve dynamic width for speed label slot — measure actual text when available
-    int speedSlotW = DpiScale(win->hwndFrame, kSpeedSlotW);
-    if (win->autoScroll.hwndSpeedLabel) {
-        TempStr speedTxt = HwndGetTextTemp(win->autoScroll.hwndSpeedLabel);
-        if (speedTxt) {
-            Size spdSz = HwndMeasureText(win->autoScroll.hwndSpeedLabel, speedTxt);
-            speedSlotW = std::max(spdSz.dx + DpiScale(win->hwndFrame, 8), speedSlotW);
-        }
-    }
-    TbSetButtonDx(win->hwndToolbar, SpeedInfoId, speedSlotW);
     // Reserve dynamic width for timer controls slot — measure "Timer:" label when available
     int timerSlotW = DpiScale(win->hwndFrame, kTimerSlotW);
     if (win->autoScroll.hwndTimerLabel) {
@@ -1271,6 +1257,8 @@ void UpdateToolbarPageText(MainWindow* win, int pageCount, bool updateOnly) {
 // so it never covers toolbar buttons. Modeled on ContrastOverlay: a layered,
 // transparent child of the canvas parent that ignores mouse input.
 static constexpr wchar_t kEtaOverlayClass[] = L"TumatraPDFEtaOverlay";
+// Color-key used to make the overlay background transparent (magenta).
+static constexpr COLORREF kEtaOverlayKeyColor = RGB(255, 0, 255);
 
 static LRESULT CALLBACK WndProcEtaOverlay(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
@@ -1281,8 +1269,19 @@ static LRESULT CALLBACK WndProcEtaOverlay(HWND hwnd, UINT msg, WPARAM wp, LPARAM
             HDC hdc = BeginPaint(hwnd, &ps);
             RECT rc;
             GetClientRect(hwnd, &rc);
+            // Fill the whole rect with the color-key (magenta) so any previous
+            // frame's text is erased; it's made transparent via LWA_COLORKEY.
+            HBRUSH hBrush = CreateSolidBrush(kEtaOverlayKeyColor);
+            FillRect(hdc, &rc, hBrush);
+            DeleteObject(hBrush);
+            // Draw the text on a black rounded background so it's readable over
+            // any page content.
+            InflateRect(&rc, -4, -2);
+            HBRUSH bg = CreateSolidBrush(RGB(0, 0, 0));
+            FillRect(hdc, &rc, bg);
+            DeleteObject(bg);
             SetBkMode(hdc, TRANSPARENT);
-            SetTextColor(hdc, RGB(120, 120, 120));
+            SetTextColor(hdc, RGB(255, 255, 255));
             wchar_t text[64] = {};
             GetWindowTextW(hwnd, text, dimof(text));
             DrawTextW(hdc, text, -1, &rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
@@ -1320,6 +1319,11 @@ static void CreateEtaLabel(MainWindow* win) {
                              rcCanvas.left, rcCanvas.top, dx, dy, GetParent(win->hwndCanvas), (HMENU) nullptr,
                              GetModuleHandleW(nullptr), nullptr);
     win->autoScroll.hwndEtaLabel = h;
+    // WS_EX_LAYERED child windows don't draw their content until given an
+    // alpha via SetLayeredWindowAttributes (same as ContrastOverlay). Use a
+    // color-key so the background is transparent while text stays visible and
+    // erased between frames (no overlapping glyphs).
+    SetLayeredWindowAttributes(h, kEtaOverlayKeyColor, 0, LWA_COLORKEY);
     PositionEtaOverlay(win);
 }
 
@@ -1377,38 +1381,12 @@ void UpdateToolbarEtaText(MainWindow* win, int minutes) {
     UpdateEtaOverlayText(win);
 }
 
-// Creates the speed label for autoscroll, placed between Autoscroll toggle and [-] button
-// Layout: [sep] [Autoscroll] [Speed] [ÔêÆ] [+] [sep] -> ETA label
-static void CreateSpeedLabel(MainWindow* win) {
-    if (win->autoScroll.hwndSpeedLabel != nullptr) {
-        return; // already created
-    }
-    Rect r = TbGetRect(win->hwndToolbar, CmdAutoScrollSpeedDown); // "-" button
-    int x = r.x - DpiScale(win->hwndFrame, 8);                    // left of "-" button
-    int y = r.y;
-    int dx = DpiScale(win->hwndFrame, 60); // width for speed text (e.g., "x0.15")
-    int dy = r.dy;
-
-    HWND h = CreateWindowExW(0, WC_STATICW, L"x0.03", SS_CENTER | WS_CHILD, x, y, dx, dy, win->hwndToolbar,
-                             (HMENU) nullptr, GetModuleHandle(nullptr), nullptr);
-    win->autoScroll.hwndSpeedLabel = h;
-}
-
 void UpdateToolbarSpeedLabel(MainWindow* win) {
+    // Speed is shown only in the bottom-right overlay (with ETA); the toolbar
+    // speed label was removed to avoid duplication.
     if (win->autoScroll.active && win->autoScroll.hwndEtaLabel) {
         UpdateEtaOverlayText(win);
     }
-    if (win->autoScroll.hwndSpeedLabel == nullptr) {
-        return;
-    }
-    if (!win->ctrl) {
-        ShowWindow(win->autoScroll.hwndSpeedLabel, SW_HIDE);
-        return;
-    }
-    ShowWindow(win->autoScroll.hwndSpeedLabel, SW_SHOW);
-    HwndSetText(win->autoScroll.hwndSpeedLabel, fmt("x%.2f", win->autoScroll.speedMultiplier));
-    PositionToolbarChildWindows(win);
-    HwndInvalidateRect(win->autoScroll.hwndSpeedLabel, HwndClientRect(win->autoScroll.hwndSpeedLabel), false);
 }
 
 // Creates the timer controls for autoscroll: [checkbox] [static "Timer:"] [numeric edit]
@@ -1517,8 +1495,6 @@ static void CreatePageBox(MainWindow* win, HFONT font, int iconDy) {
 
     // Create ETA label for autoscroll
     CreateEtaLabel(win);
-    // Create speed label for autoscroll
-    CreateSpeedLabel(win);
     // Create timer controls for autoscroll
     CreateTimerControls(win);
 }
@@ -2027,7 +2003,6 @@ void ReCreateToolbar(MainWindow* win) {
         HwndDestroyWindowSafe(&win->hwndPageBg);
         HwndDestroyWindowSafe(&win->hwndPageTotal);
         HwndDestroyWindowSafe(&win->autoScroll.hwndEtaLabel);
-        HwndDestroyWindowSafe(&win->autoScroll.hwndSpeedLabel);
         HwndDestroyWindowSafe(&win->autoScroll.hwndTimerCheck);
         HwndDestroyWindowSafe(&win->autoScroll.hwndTimerLabel);
         HwndDestroyWindowSafe(&win->autoScroll.hwndTimerEdit);

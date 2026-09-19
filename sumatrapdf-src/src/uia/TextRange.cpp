@@ -506,12 +506,14 @@ HRESULT STDMETHODCALLTYPE SumatraUIAutomationTextRange::GetBoundingRectangles(SA
         selection.SelectUpTo(endPage, endGlyph);
         TextSel* sel = &selection.result;
         for (int i = 0; i < sel->len; i++) {
-            int pageNo = sel->pages[i];
-            PageInfo* pi = dm->GetPageInfo(pageNo);
+            int pageNo = sel->pages[i]; // physical
+            RectF vrect;
+            int virtualPageNo = dm->PhysicalToVirtualForRect(pageNo, ToRectF(sel->rects[i]), &vrect);
+            PageInfo* pi = dm->GetPageInfo(virtualPageNo);
             if (!pi || !pi->isShown || pi->visibleRatio <= 0.f) {
                 continue;
             }
-            Rect rc = dm->CvtToScreen(pageNo, ToRectF(sel->rects[i]));
+            Rect rc = dm->CvtToScreen(virtualPageNo, vrect);
             if (rc.IsEmpty()) {
                 continue;
             }

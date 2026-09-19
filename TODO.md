@@ -78,13 +78,19 @@ Criar um **segundo modo** "Two Column v2" (`CmdViewportCropV2Toggle`) **totalmen
 
 > **Nota FASE 3:** não houve mudança de código nesta fase — a arquitetura 2N empilhada + exclusão mútua já entrega o fluxo contínuo. Confirmado por build 0 err/0 warn.
 
-#### FASE 4 — Conversões virtual↔físico no engine
+#### FASE 4 — Conversões virtual↔físico no engine ✅ COMPLETA
 
-- [ ] Auditar call-sites de `PageCount()` e engine calls; rotear por `physicalPageNo`:
-  - `CurrentPageNo()`, `GetPageNoByPoint`, `CvtToScreen`/`CvtScreenToPage`, `GetContentBox`, `GoToPage`, `GetScrollState`/`SetScrollState`, tile math (`GetTileRectUser/Device`), `PageMediabox`, `ShouldCacheRendering`.
-  - Search/Selection/DDE/uia `PageProvider`.
-- [ ] Decidir definitivamente `PageCount()` (virtual p/ layout) vs `VirtualPageCount()` (engine usa físico) e corrigir consumidores engine-bound.
-- [ ] Build + teste: seleção de texto, busca, links e cliques corretos na 2L/2R.
+- [x] Decidido: `PageCount()` retorna **virtual** (layout/nav/UI), engine usa **físico**. Todo call-site que cruza a fronteira roteia.
+- [x] `DisplayModel::PhysicalToVirtualForRect(physPageNo, rect, &rectOut)` (DisplayModel.cpp:133): mapa física k + rect → virtual 2k-1 (esq) / 2k (dir); não-v2 = identidade. rect fica em coords físicas (o shift colX é feito no CvtToScreen).
+- [x] `CvtToScreen`/`CvtFromScreen` agora **column-aware**: aplicam o mesmo shift colX do render (`pt.x -= colX` / `+= colX`, espelhando `RenderCache::Paint`). Logo, qualquer página virtual + rect físico converte certo.
+- [x] `GetPageLabeTemp` converte `VirtualToPhysical` antes do engine (evita overrun 2N→N).
+- [x] Search/Seleção (TextSel.pages[] é **físico**) — roteado via `PhysicalToVirtualForRect` em:
+  - `AppendTextSelScreenRects` (SearchAndDDE), `AppendPageRectsToScreen`, `ShowSearchResult` (GoToPage virtual), `FindTextOnThread` (CurrentPageNo→físico p/ FindFirst + checagem visibilidade 2 colunas), `FindMatchTouchesVisiblePages` (span virtual `[2s-1,2e]` com `bool v2`).
+  - `SelectionOnPage::GetRect`, `FromRectangle` (itera `PageCount()` virtual), `UpdateTextSelection`/`OnSelectAll`/`OnSelectionStart` (VirtualToPhysical p/ textSelection engine), `SelectionToolbar::GetSelectionEndPoint`.
+  - `uia/TextRange`, `ReadAloudHighlight` (3 pontos), `FormFields`, `SumatraPDF` zoom-to-selection.
+- [x] `textSelection`/`textSearch` (engine-bound) recebem **físico** nos call-sites de entrada (StartAt/SelectUpTo/SelectWordAt via `VirtualToPhysical`).
+- [x] Build 0 err/0 warn + smoke `-for-testing` (estável). Teste manual pendente: seleção, busca, links e cliques corretos na 2L/2R.
+- [ ] (pendente) uia `PageProvider` e tile-math legado — não-cache já desvia; aceitável para MVP.
 
 #### FASE 5 — Estado, navegação & labels
 
@@ -94,6 +100,8 @@ Criar um **segundo modo** "Two Column v2" (`CmdViewportCropV2Toggle`) **totalmen
 - [ ] `QuickToggleViewportCropV2`: lembrar **página+coluna** ao alternar.
 - [ ] `Accelerators.cpp` (`// @gen-start virt-keys-num`): adicionar `CmdViewportCropV2Toggle` (rodar gen-code com VS no PATH, ou editar via gen-data).
 - [ ] Build + teste: ir/voltar, histórico, thumbnails coerentes.
+
+> **Nota perf autoscroll TC2 (2026-09-18):** v2 força caminho não-cache (`ShouldCacheRendering`=false), o que limita a velocidade do autoscroll (render sync por frame). Decidido otimizar só o caminho não-cache por ora. **Reverificação futura**: re-habilitar cache por página virtual roteando `VirtualToPhysical` nas funções de tile (`GetTileRectDevice/User/GetTileOnScreen`, RenderCache.cpp:308-345) + aplicar colX shift no render do tile em background. Chave de cache já resolve esq/dir (virtual pageNo distinto por coluna).
 
 #### FASE 6 — Trim + R2L + colGap
 
