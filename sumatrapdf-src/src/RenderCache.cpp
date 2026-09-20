@@ -304,10 +304,24 @@ static RectF GetTileRect(RectF pagerect, TilePosition tile) {
     return rect;
 }
 
-// get the coordinates of a specific tile
-static Rect GetTileRectDevice(EngineBase* engine, int pageNo, int rotation, float zoom, TilePosition tile,
+// get the coordinates of a specific tile. pageNo is a VIRTUAL page (two column
+// v2); the engine is physical, so route and apply the column crop (mirrors the
+// non-cached path / DisplayModel::PageMediaBox).
+static Rect GetTileRectDevice(DisplayModel* dm, int pageNo, int rotation, float zoom, TilePosition tile,
                               bool trimEnabled) {
-    RectF mediabox = engine->PageMediabox(pageNo);
+    EngineBase* engine = dm->GetEngine();
+    int renderPageNo = dm->VirtualToPhysical(pageNo);
+    RectF mediabox = engine->PageMediabox(renderPageNo);
+    if (dm->viewportCropV2Enabled) {
+        int cropColumn = dm->ColumnOfVirtual(pageNo);
+        if (cropColumn >= 0) {
+            // the virtual page is one half of the physical page, rendered at
+            // full screen width. Keep the mediabox origin (the column occupies
+            // the same on-screen x as the left column, stacked vertically); the
+            // colX shift is applied only at render time (GetTileRectUser).
+            mediabox.dx /= 2.0f;
+        }
+    }
     if (trimEnabled) {
         // margin trim: shrink the tile rect to the visible strip (trim units
         // are page coords/points)
@@ -321,14 +335,27 @@ static Rect GetTileRectDevice(EngineBase* engine, int pageNo, int rotation, floa
     if (tile.res > 0 && tile.res != INVALID_TILE_RES) {
         mediabox = GetTileRect(mediabox, tile);
     }
-    RectF pixelbox = engine->Transform(mediabox, pageNo, zoom, rotation);
+    RectF pixelbox = engine->Transform(mediabox, renderPageNo, zoom, rotation);
     return pixelbox.Round();
 }
 
-static RectF GetTileRectUser(EngineBase* engine, int pageNo, int rotation, float zoom, TilePosition tile,
+static RectF GetTileRectUser(DisplayModel* dm, int pageNo, int rotation, float zoom, TilePosition tile,
                              bool trimEnabled) {
-    Rect pixelbox = GetTileRectDevice(engine, pageNo, rotation, zoom, tile, trimEnabled);
-    RectF rect = engine->Transform(ToRectF(pixelbox), pageNo, zoom, rotation, true);
+    EngineBase* engine = dm->GetEngine();
+    int renderPageNo = dm->VirtualToPhysical(pageNo);
+    Rect pixelbox = GetTileRectDevice(dm, pageNo, rotation, zoom, tile, trimEnabled);
+    RectF rect = engine->Transform(ToRectF(pixelbox), renderPageNo, zoom, rotation, true);
+    // two column v2: rect is in column-local (left half) page coords; shift it
+    // right by the column offset so the engine renders the right/left half.
+    // Mirrors the render-time colX shift in the non-cached path.
+    if (dm->viewportCropV2Enabled) {
+        int cropColumn = dm->ColumnOfVirtual(pageNo);
+        if (cropColumn >= 0) {
+            RectF mb = engine->PageMediabox(renderPageNo);
+            float colX = mb.x + (cropColumn == 1 ? mb.dx / 2.0f : 0.0f);
+            rect.x += colX;
+        }
+    }
     if (trimEnabled) {
         // shift back into trimmed page coords (the layout uses the reduced
         // page height, so the render area starts at the top trim strip)
@@ -337,9 +364,9 @@ static RectF GetTileRectUser(EngineBase* engine, int pageNo, int rotation, float
     return rect;
 }
 
-static Rect GetTileOnScreen(EngineBase* engine, int pageNo, int rotation, float zoom, TilePosition tile,
+static Rect GetTileOnScreen(DisplayModel* dm, int pageNo, int rotation, float zoom, TilePosition tile,
                             Rect pageOnScreen, bool trimEnabled) {
-    Rect bbox = GetTileRectDevice(engine, pageNo, rotation, zoom, tile, trimEnabled);
+    Rect bbox = GetTileRectDevice(dm, pageNo, rotation, zoom, tile, trimEnabled);
     bbox.Offset(pageOnScreen.x, pageOnScreen.y);
     return bbox;
 }
@@ -356,7 +383,7 @@ static bool IsTileVisible(DisplayModel* dm, int pageNo, TilePosition tile, float
     int rotation = dm->GetRotation();
     float zoom = dm->GetZoomReal(pageNo);
     Rect r = pageInfo->pageOnScreen;
-    Rect tileOnScreen = GetTileOnScreen(engine, pageNo, rotation, zoom, tile, r, dm->marginTrimEnabled);
+    Rect tileOnScreen = GetTileOnScreen(dm, pageNo, rotation, zoom, tile, r, dm->marginTrimEnabled);
     // consider nearby tiles visible depending on the fuzz factor
     tileOnScreen.x -= (int)((float)tileOnScreen.dx * fuzz * 0.5);
     tileOnScreen.dx = (int)((float)tileOnScreen.dx * (fuzz + 1));
@@ -741,7 +768,7 @@ bool RenderCache::Render(DisplayModel* dm, int pageNo, int rotation, float zoom,
     newRequest->rotation = rotation;
     newRequest->zoom = zoom;
     if (tile) {
-        newRequest->pageRect = GetTileRectUser(dm->GetEngine(), pageNo, rotation, zoom, *tile, dm->marginTrimEnabled);
+        newRequest->pageRect = GetTileRectUser(dm, pageNo, rotation, zoom, *tile, dm->marginTrimEnabled);
         newRequest->tile = *tile;
     } else if (pageRect) {
         newRequest->pageRect = *pageRect;
@@ -981,7 +1008,11 @@ static DWORD WINAPI RenderCacheThread(LPVOID data) {
         ReportIf(req.abortCookie != nullptr);
         EngineBase* engine = req.dm->GetEngine();
 
-        RenderPageArgs args(req.pageNo, req.zoom, req.rotation, &req.pageRect, RenderTarget::View, &req.abortCookie);
+        // two column v2: req.pageNo is VIRTUAL (the cache key / layout). The
+        // engine has N physical pages, so route back to the physical page; the
+        // pageRect already carries the column crop shift (GetTileRectUser).
+        int renderPageNo = req.dm->VirtualToPhysical(req.pageNo);
+        RenderPageArgs args(renderPageNo, req.zoom, req.rotation, &req.pageRect, RenderTarget::View, &req.abortCookie);
         DarkModeProfile darkProfile;
         BuildViewDarkModeProfile(engine, &darkProfile);
         if (darkProfile.mode != PageColorMode::Normal) {
@@ -1021,7 +1052,7 @@ static DWORD WINAPI RenderCacheThread(LPVOID data) {
                 Vec<Rect>* skipRectsPtr = nullptr;
                 if (preserve) {
                     Size bmpSize(bmp->width, bmp->height);
-                    engine->GetBitmapRecolorSkipRects(req.pageNo, req.zoom, req.rotation, req.pageRect, bmpSize,
+                    engine->GetBitmapRecolorSkipRects(renderPageNo, req.zoom, req.rotation, req.pageRect, bmpSize,
                                                       skipRects);
                     FinalizeTileSkipRects(skipRects, bmpSize);
                     if (len(skipRects) > 0) {
@@ -1224,8 +1255,7 @@ int RenderCache::Paint(HDC hdc, Rect bounds, DisplayModel* dm, int pageNo, PageI
 
     while (len(queue) > 0) {
         TilePosition tile = queue.PopAt(0);
-        Rect tileOnScreen =
-            GetTileOnScreen(dm->GetEngine(), pageNo, rotation, zoom, tile, pi->pageOnScreen, dm->marginTrimEnabled);
+        Rect tileOnScreen = GetTileOnScreen(dm, pageNo, rotation, zoom, tile, pi->pageOnScreen, dm->marginTrimEnabled);
         if (tileOnScreen.IsEmpty()) {
             // display an error message when only empty tiles should be drawn (i.e. on page loading errors)
             renderDelayMin = std::min(RENDER_DELAY_FAILED, renderDelayMin);

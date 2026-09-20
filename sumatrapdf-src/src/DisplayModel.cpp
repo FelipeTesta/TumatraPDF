@@ -2823,14 +2823,11 @@ void DisplayModel::CopyNavHistory(DisplayModel& orig) {
 bool DisplayModel::ShouldCacheRendering(int /*pageNo*/) const {
     // always cache: the render cache is trim-aware (GetTileRectDevice/User
     // shrink the tile rect by the trim strips), so cached tiles stay valid
-    // even with margin trim enabled
-    if (viewportCropV2Enabled) {
-        // two column v2 renders column crops via the non-cached path
-        // (same premise as trim) so the per-column rect/offset stays in sync
-        // with the duplicated layout. Cache keying by virtual page (FASE 2)
-        // may enable caching later; for the MVP force the non-cache path.
-        return false;
-    }
+    // even with margin trim enabled. Two column v2 is also cached: the tile
+    // math is column-aware (VirtualToPhysical + half-width mediabox + colX in
+    // GetTileRectDevice/User), so background threads render the column crops
+    // and the UI thread only blits ready tiles (fixes the autoscroll jank that
+    // the synchronous non-cached RenderPage caused).
     return true;
 }
 
