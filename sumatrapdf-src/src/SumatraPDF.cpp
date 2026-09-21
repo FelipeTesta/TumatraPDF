@@ -8020,9 +8020,8 @@ static bool HandleV2ShiftHold(MainWindow* win, bool shiftDown) {
     if (!dm || !dm->viewportCropV2Enabled) {
         return false;
     }
-    bool isColumnView = dm->IsViewportCropV2Active();
-    if (shiftDown && !isColumnView) {
-        // shift pressed while quick-toggle is off: enter full-page (quick) view
+    if (shiftDown && !dm->viewportCropV2QuickToggled) {
+        // shift pressed while in column view: enter full-page quick view
         dm->QuickToggleViewportCropV2();
     } else if (!shiftDown && dm->viewportCropV2QuickToggled) {
         // shift released while in quick view: back to the column view

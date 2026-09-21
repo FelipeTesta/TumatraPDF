@@ -1,18 +1,8 @@
-fix(autoscroll): pixel-based ETA + TC2 2x auto + shift-hold speed halve
+fix(shift-hold): condition was inverted, Shift never toggled full-page view
 
-Fix ETA bug where it would decrease to zero by itself mid-page: replaced
-page-count + wall-clock countdown with pixel-based calculation
-(remainingPx = canvasSize.dy - viewPort.y) recalculated every tick.
-The ETA now always reflects the true scroll position, never drifts.
+HandleV2ShiftHold checked !isColumnView (IsViewportCropV2Active) which
+is always true when TC2 is on, so the shift-down condition was always
+false. Changed to check !viewportCropV2QuickToggled which correctly
+detects whether we're already in full-page mode.
 
-TC2 double-time is automatic: 2N virtual pages = 2x canvas height =
-correct 2x ETA with no special case needed.
-
-When shift-hold is active during TC2 autoscroll (reading full screen
-width), speed is temporarily halved (0.5x multiplier) to account for
-slower reading of full-width text. Returns to normal on Shift release.
-
-Removed etaStartTick and etaPageNo fields from AutoScrollState (no
-longer needed with pixel-based approach).
-
-prompt: em algum ponto da pagina o eta começa a diminuir sozinho até chegar a zero; quando tc2=on o cálculo tem que considerar o dobro do tempo; quando shift=on e tc2=on e autoscroll=on a velocidade tem que diminuir na metade temporariamente
+prompt: shift nao funciona
