@@ -1,5 +1,48 @@
 # TumatraPDF — Development Log
 
+## 2026-09-20 — Two Columns v2 FASE 5 (shift-hold) + FASE 6 (colGap) (BUILD OK)
+
+### Contexto
+Continuação do plano Two Columns v2. Implementadas as 2 features pedidas pelo usuário no encaixe correto do plano: shift-hold (FASE 5, QuickToggleViewportCropV2) e colGap/offset (FASE 6, overlap das colunas).
+
+### FASE 5 — Shift-hold (mostrar página inteira segurando Shift)
+- Novo `DisplayModel::IsViewportCropV2Active()` = `viewportCropV2Enabled && !viewportCropV2QuickToggled && IsContinuous`. Todas as conversões v2 gateiam por ele.
+- `QuickToggleViewportCropV2` agora faz toggle real: captura âncora (physAnchor + dyInPage), inverte `viewportCropV2QuickToggled`, re-aplica (2N↔N) e restaura via `RestoreViewportAfterV2Toggle`.
+- `SumatraPDF.cpp`: helper `HandleV2ShiftHold` + interceptação `WM_KEYDOWN`/`WM_KEYUP` de `VK_SHIFT` no WndProc do frame (adicionei o case `WM_KEYUP`).
+- `SearchAndDDE.cpp:1594` usa `IsViewportCropV2Active`.
+
+### FASE 6 — colGap/offset (overlap das colunas)
+- Helpers em DisplayModel: `ViewportCropV2Gap()` (lê `gGlobalPrefs->viewportCrop.colGap`), `ViewportCropV2ColumnWidth(mb)=halfW+gap`, `ViewportCropV2RightColumnX(mb)=mb.x+halfW-gap`.
+- Aplicados em: `PageMediaBox`, `GetTileRectDevice/User` (RenderCache), caminho não-cache `Paint`, `CvtToScreen`/`CvtFromScreen` — colunas mostram um pedaço da outra metade, sem cortar texto colado no centro. Default colGap=0 (preserva comportamento).
+- Configurável na janela Trim Config: novo campo "column gap:" (`TrimConfigDialog.cpp/h`), com save/cancel/reset e relayout quando v2 ativo.
+
+### Verificação
+- Build 0 err / 0 warn + clang-format.
+- Smoke `-for-testing` zlib.3.pdf → estável.
+
+### Arquivos
+- DisplayModel.{h,cpp}, SumatraPDF.cpp, SearchAndDDE.cpp, RenderCache.cpp, TrimConfigDialog.{h,cpp}, TODO.md.
+
+## 2026-09-20 — Two Columns v2: re-enable render cache (fix autoscroll jank) (BUILD OK)
+
+### Contexto
+O TC2 forçava o caminho não-cache (`ShouldCacheRendering`=false), então cada frame de autoscroll re-renderizava o viewport inteiro sincronamente na UI thread (~23ms render vs ~1ms blit) — travava em velocidade alta e o scroll manual estava lento/travando. Decidido re-habilitar o cache do v2 (fix mais eficiente, mesmo exigindo mais trabalho).
+
+### Alterações (RenderCache.cpp, DisplayModel.cpp)
+- `GetTileRectDevice`/`GetTileRectUser`/`GetTileOnScreen` agora tomam `DisplayModel*` (antes `EngineBase*`) e roteiam `VirtualToPhysical`; mediabox reduzido à metade quando `cropColumn>=0` (página virtual = meia página física em largura total).
+- `colX` shift (offset da coluna dir) aplicado **só no render** (`GetTileRectUser`), espelhando o caminho não-cache — bug fix: shift no device empurrava o tile para `[screenW, 2*screenW]` (fora da área visível).
+- Render thread roteia `req.pageNo`→`renderPageNo` via `VirtualToPhysical` antes de `RenderPageArgs` e `GetBitmapRecolorSkipRects`.
+- `ShouldCacheRendering` retorna `true` sempre (removeu o bloco v2→false); trim e v2 ambos cacheados agora.
+- Chave de cache já usa virtual pageNo (2k/2k-1) → esq/dir distintos sem tocar `BitmapCacheEntry`.
+- Removido timing log temporário `[v2] Paint` do caminho não-cache.
+
+### Verificação
+- Build 0 err / 0 warn + clang-format.
+- Teste manual do usuário: autoscroll "BEM melhor, ainda trava bem pouco na velocidade alta, mas resultado aceitável". Smooth scroll manual NÃO foi alterado (é o timer original).
+
+### Arquivos
+- sumatrapdf-src/src/RenderCache.cpp, sumatrapdf-src/src/DisplayModel.cpp, TODO.md.
+
 ## 2026-09-18 — Autoscroll: overlay ETA/velocidade bottom-right (fundos/fix) (BUILD OK)
 
 ### Contexto

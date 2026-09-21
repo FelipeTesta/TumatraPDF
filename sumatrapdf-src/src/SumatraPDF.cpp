@@ -8008,6 +8008,29 @@ static bool FrameOnKeydown(MainWindow* win, WPARAM key, LPARAM lp) {
     return true;
 }
 
+// shift-hold (FASE 5): while the Shift key is held down with the v2 column view
+// active, temporarily show full physical pages (viewportCropV2QuickToggled).
+// Pressing Shift turns it on, releasing turns it back to the column view.
+// Returns true if the key was consumed (v2 active), false to let it fall through.
+static bool HandleV2ShiftHold(MainWindow* win, bool shiftDown) {
+    if (!win || !win->IsDocLoaded()) {
+        return false;
+    }
+    DisplayModel* dm = win->AsFixed();
+    if (!dm || !dm->viewportCropV2Enabled) {
+        return false;
+    }
+    bool isColumnView = dm->IsViewportCropV2Active();
+    if (shiftDown && !isColumnView) {
+        // shift pressed while quick-toggle is off: enter full-page (quick) view
+        dm->QuickToggleViewportCropV2();
+    } else if (!shiftDown && dm->viewportCropV2QuickToggled) {
+        // shift released while in quick view: back to the column view
+        dm->QuickToggleViewportCropV2();
+    }
+    return true;
+}
+
 static WCHAR SingleCharLowerW(WCHAR c) {
     WCHAR buf[2] = {c, 0};
     CharLowerBuffW(buf, 1);
@@ -13614,7 +13637,20 @@ LRESULT CALLBACK WndProcSumatraFrame(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) 
 
         case WM_KEYDOWN:
             if (win && !win->isBeingClosed) {
+                // shift-hold (FASE 5): Shift down enters the full-page quick view
+                if (VK_SHIFT == wp && HandleV2ShiftHold(win, true)) {
+                    return TRUE;
+                }
                 FrameOnKeydown(win, wp, lp);
+            }
+            break;
+
+        case WM_KEYUP:
+            if (win && !win->isBeingClosed) {
+                // shift-hold (FASE 5): Shift up returns to the column view
+                if (VK_SHIFT == wp && HandleV2ShiftHold(win, false)) {
+                    return TRUE;
+                }
             }
             break;
 

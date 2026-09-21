@@ -108,30 +108,52 @@ int DisplayModel::PageCount() const {
 
 // two column v2: virtual pages are physical pages duplicated per column.
 // When v2 is active in continuous mode there are 2N virtual pages (1L,1R,2L,2R,...);
-// otherwise virtual == physical.
+// otherwise virtual == physical. The quick-toggle (shift-hold, FASE 5) turns the
+// column view OFF temporarily (viewportCropV2QuickToggled), showing full physical
+// pages at full width, without leaving v2 mode.
+bool DisplayModel::IsViewportCropV2Active() const {
+    return viewportCropV2Enabled && !viewportCropV2QuickToggled && IsContinuous(GetDisplayMode());
+}
+
+float DisplayModel::ViewportCropV2Gap() const {
+    return (float)gGlobalPrefs->viewportCrop.colGap;
+}
+
+// the virtual column page is half the physical page, plus a small overlap
+// (colGap) so text crossing the page center isn't cut flush.
+float DisplayModel::ViewportCropV2ColumnWidth(RectF mb) const {
+    return mb.dx / 2.0f + ViewportCropV2Gap();
+}
+
+// the right column is shifted left by the gap so the two columns overlap in
+// the center band ([halfW-gap, halfW+gap] is shown in both).
+float DisplayModel::ViewportCropV2RightColumnX(RectF mb) const {
+    return mb.x + mb.dx / 2.0f - ViewportCropV2Gap();
+}
+
 int DisplayModel::VirtualPageCount() const {
-    if (viewportCropV2Enabled && IsContinuous(GetDisplayMode())) {
+    if (IsViewportCropV2Active()) {
         return 2 * engine->PageCount();
     }
     return engine->PageCount();
 }
 
 int DisplayModel::VirtualToPhysical(int virtualPageNo) const {
-    if (viewportCropV2Enabled && IsContinuous(GetDisplayMode())) {
+    if (IsViewportCropV2Active()) {
         return (virtualPageNo + 1) / 2;
     }
     return virtualPageNo;
 }
 
 int DisplayModel::ColumnOfVirtual(int virtualPageNo) const {
-    if (viewportCropV2Enabled && IsContinuous(GetDisplayMode())) {
+    if (IsViewportCropV2Active()) {
         return (virtualPageNo - 1) % 2; // 0 = left, 1 = right
     }
     return -1; // no column split
 }
 
 int DisplayModel::PhysicalToVirtualForRect(int physicalPageNo, RectF rect, RectF* rectOut) const {
-    if (!(viewportCropV2Enabled && IsContinuous(GetDisplayMode()))) {
+    if (!IsViewportCropV2Active()) {
         *rectOut = rect;
         return physicalPageNo;
     }
@@ -363,9 +385,21 @@ void DisplayModel::RestoreViewportAfterV2Toggle(int physAnchor, int dyInPage) {
 
 void DisplayModel::QuickToggleViewportCropV2() {
     if (!viewportCropV2Enabled) return;
-    // note: page+column restore is implemented in FASE 5; for now toggling the
-    // quick view simply re-applies (keeps the current virtual page).
+    // capture the view anchor BEFORE flipping the flag (state is consistent
+    // here): physical page + in-page vertical offset, so toggling the quick
+    // view doesn't jump the page the user is reading.
+    int physAnchor = VirtualToPhysical(CurrentPageNo());
+    int dyInPage = 0;
+    if (ValidPageNo(CurrentPageNo())) {
+        dyInPage = viewPort.y - GetPageInfo(CurrentPageNo())->pos.y;
+    }
+    viewportCropV2QuickToggled = !viewportCropV2QuickToggled;
+    // IsViewportCropV2Active() now reflects the new flag; ApplyViewportCropV2
+    // rebuilds pagesInfo + relayouts between 2N (columns) and N (full pages).
     ApplyViewportCropV2();
+    RestoreViewportAfterV2Toggle(physAnchor, dyInPage);
+    RecalcVisibleParts();
+    RepaintDisplay();
 }
 
 static bool IsDisplayModelValid(DisplayModel* dm) {
@@ -661,13 +695,15 @@ RectF DisplayModel::PageMediaBox(int pageNo) const {
     // so the virtual page's media box is the left/right column (half the width)
     // laid out at the full page height. Giving the virtual page the half-width
     // box makes Fit Width fill the whole screen with one column and the render
-    // path shift the area by the column offset.
+    // path shift the area by the column offset. The two columns overlap in a
+    // center band (colGap) so text crossing the page middle isn't cut flush.
     int cropColumn = ColumnOfVirtual(pageNo);
     if (cropColumn >= 0) {
-        pi->mediaBox.dx /= 2.0f;
-        if (cropColumn == 1) {
-            pi->mediaBox.x += pi->mediaBox.dx;
-        }
+        RectF full = pi->mediaBox;
+        float colW = ViewportCropV2ColumnWidth(full);
+        float rightX = ViewportCropV2RightColumnX(full);
+        pi->mediaBox.x = cropColumn == 1 ? rightX : full.x;
+        pi->mediaBox.dx = colW;
     }
     return pi->mediaBox;
 }
@@ -1664,8 +1700,7 @@ Point DisplayModel::CvtToScreen(int pageNo, PointF pt) {
     if (cropColumn >= 0) {
         int renderPageNo = VirtualToPhysical(pageNo);
         RectF mb = engine->PageMediabox(renderPageNo);
-        float colX = mb.x + (cropColumn == 1 ? mb.dx / 2.0f : 0.0f);
-        pt.x -= colX;
+        pt.x -= cropColumn == 1 ? ViewportCropV2RightColumnX(mb) : mb.x;
     }
 
     PointF p = engine->Transform(pt, VirtualToPhysical(pageNo), zoom, rotation);
@@ -1706,8 +1741,7 @@ PointF DisplayModel::CvtFromScreen(Point pt, int pageNo) {
     if (cropColumn >= 0) {
         int renderPageNo = VirtualToPhysical(pageNo);
         RectF mb = engine->PageMediabox(renderPageNo);
-        float colX = mb.x + (cropColumn == 1 ? mb.dx / 2.0f : 0.0f);
-        res.x += colX;
+        res.x += cropColumn == 1 ? ViewportCropV2RightColumnX(mb) : mb.x;
     }
     return res;
 }

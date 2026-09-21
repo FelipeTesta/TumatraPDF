@@ -15,16 +15,19 @@ struct TrimConfigWnd : Wnd {
     HFONT font = nullptr;
     Edit* editTop = nullptr;
     Edit* editBottom = nullptr;
+    Edit* editColGap = nullptr;
     Button* btnSave = nullptr;
     Button* btnReset = nullptr;
     Button* btnCancel = nullptr;
     int savedTop = 0, savedBottom = 0; // values at dialog open (for cancel)
+    int savedColGap = 0;               // two-column v2 column overlap (for cancel)
     bool suppressEditUpdate = false;   // prevents feedback loop when syncing edits
     bool isDialog = false;
 
     bool Create(MainWindow* mainWin);
     void OnEditTopChanged();
     void OnEditBottomChanged();
+    void OnEditColGapChanged();
     void OnReset();
     void OnSave();
     void OnCancel();

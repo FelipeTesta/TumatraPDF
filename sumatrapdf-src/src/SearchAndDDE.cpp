@@ -1591,7 +1591,7 @@ static void RebuildFindMatchPaintCache(MainWindow* win, DisplayModel* dm, int fi
         return;
     }
     Vec<FindMatchPaintPageRect>& positions = gFindMatchPaintCache.positions;
-    bool v2 = dm->viewportCropV2Enabled && IsContinuous(dm->GetDisplayMode());
+    bool v2 = dm->IsViewportCropV2Active();
     for (int i = 0; i < len(win->findMatches); i++) {
         const FindMatch& fm = win->findMatches[i];
         if (!FindMatchTouchesVisiblePages(fm, firstPage, lastPage, v2)) {

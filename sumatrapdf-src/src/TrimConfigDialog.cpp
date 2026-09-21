@@ -120,10 +120,39 @@ void TrimConfigWnd::OnEditBottomChanged() {
     HwndRepaintNow(win->hwndCanvas);
 }
 
+void TrimConfigWnd::OnEditColGapChanged() {
+    if (suppressEditUpdate) {
+        return;
+    }
+    TempStr txt = HwndGetTextTemp(editColGap->hwnd);
+    int val = atoi(txt.s);
+    if (val < 0) {
+        val = 0;
+    }
+    // column overlap (two-column v2, FASE 6): the column width is half the page
+    // plus this gap, so each column shows a bit of the other half instead of
+    // cutting text flush at the page center. 0 = exact half split.
+    gGlobalPrefs->viewportCrop.colGap = val;
+    auto* dm = win->AsFixed();
+    if (dm && dm->IsViewportCropV2Active()) {
+        // column width changed → the virtual page's media box changed, so re-layout
+        // and drop the cached tiles (rendered with the old gap)
+        dm->RelayoutKeepingView();
+        gRenderCache->FreeForDisplayModel(dm);
+    }
+    HwndRepaintNow(win->hwndCanvas);
+}
+
 void TrimConfigWnd::OnReset() {
     win->trimConfigTop = 0;
     win->trimConfigBottom = 0;
+    gGlobalPrefs->viewportCrop.colGap = 0;
     SyncEditsFromLine();
+    auto* dm = win->AsFixed();
+    if (dm && dm->IsViewportCropV2Active()) {
+        dm->RelayoutKeepingView();
+        gRenderCache->FreeForDisplayModel(dm);
+    }
     HwndRepaintNow(win->hwndCanvas);
 }
 
@@ -135,9 +164,9 @@ void TrimConfigWnd::OnSave() {
     // page heights depend on the trim values, so re-layout (keeping the view)
     // before repainting
     auto* trimDm = win->AsFixed();
-    if (trimDm && trimDm->marginTrimEnabled) {
+    if (trimDm && (trimDm->marginTrimEnabled || trimDm->IsViewportCropV2Active())) {
         trimDm->RelayoutKeepingView();
-        // cached tiles were rendered with the old trim values
+        // cached tiles were rendered with the old trim/colGap values
         gRenderCache->FreeForDisplayModel(trimDm);
     }
     HwndRepaintNow(win->hwndCanvas);
@@ -155,9 +184,10 @@ void TrimConfigWnd::OnSave() {
 void TrimConfigWnd::OnCancel() {
     gGlobalPrefs->trim.top = savedTop;
     gGlobalPrefs->trim.bottom = savedBottom;
+    gGlobalPrefs->viewportCrop.colGap = savedColGap;
     win->trimConfigMode = 0;
     auto* trimDm = win->AsFixed();
-    if (trimDm && trimDm->marginTrimEnabled) {
+    if (trimDm && (trimDm->marginTrimEnabled || trimDm->IsViewportCropV2Active())) {
         trimDm->RelayoutKeepingView();
     }
     HwndRepaintNow(win->hwndCanvas);
@@ -179,6 +209,9 @@ void TrimConfigWnd::SyncEditsFromLine() {
     }
     if (editBottom) {
         HwndSetText(editBottom->hwnd, fmt("%d", win->trimConfigBottom));
+    }
+    if (editColGap) {
+        HwndSetText(editColGap->hwnd, fmt("%d", gGlobalPrefs->viewportCrop.colGap));
     }
     suppressEditUpdate = false;
 }
@@ -205,6 +238,7 @@ bool TrimConfigWnd::Create(MainWindow* mainWin) {
     win = mainWin;
     savedTop = gGlobalPrefs->trim.top;
     savedBottom = gGlobalPrefs->trim.bottom;
+    savedColGap = gGlobalPrefs->viewportCrop.colGap;
     win->trimConfigTop = savedTop;
     win->trimConfigBottom = savedBottom;
     win->trimConfigMode = 1; // dialog open → both lines visible
@@ -291,6 +325,36 @@ bool TrimConfigWnd::Create(MainWindow* mainWin) {
         editBottom->Create(eargs);
         editBottom->onTextChanged = MkMethod0<TrimConfigWnd, &TrimConfigWnd::OnEditBottomChanged>(this);
         hbox->AddChild(new Padding(editBottom, pad));
+        vbox->AddChild(hbox);
+    }
+
+    // Row 2b: "column gap:" label + numeric edit (two-column v2 overlap)
+    {
+        auto* hbox = new HBox();
+        hbox->alignMain = MainAxisAlign::MainStart;
+        hbox->alignCross = CrossAxisAlign::CrossCenter;
+        auto pad = Insets{4, 8, 4, 8};
+
+        Static::CreateArgs sargs;
+        sargs.parent = hwnd;
+        sargs.font = font;
+        sargs.text = _TRA("column gap:");
+        sargs.isRtl = isRtl;
+        auto* lbl = new Static();
+        lbl->Create(sargs);
+        hbox->AddChild(new Padding(lbl, Insets{0, 0, 0, 8}));
+
+        Edit::CreateArgs eargs;
+        eargs.parent = hwnd;
+        eargs.font = font;
+        eargs.isMultiLine = false;
+        eargs.withBorder = true;
+        eargs.idealWidthChars = 6;
+        eargs.isRtl = isRtl;
+        editColGap = new Edit();
+        editColGap->Create(eargs);
+        editColGap->onTextChanged = MkMethod0<TrimConfigWnd, &TrimConfigWnd::OnEditColGapChanged>(this);
+        hbox->AddChild(new Padding(editColGap, pad));
         vbox->AddChild(hbox);
     }
 

@@ -94,20 +94,20 @@ Criar um **segundo modo** "Two Column v2" (`CmdViewportCropV2Toggle`) **totalmen
 
 #### FASE 5 — Estado, navegação & labels
 
+- [x] **Shift-hold (quick toggle)** (`QuickToggleViewportCropV2`): novo `IsViewportCropV2Active()` = `viewportCropV2Enabled && !viewportCropV2QuickToggled && IsContinuous`. Todas as conversões v2 (VirtualPageCount/VirtualToPhysical/ColumnOfVirtual/PhysicalToVirtualForRect/PageMediaBox) gateiam por ele → segurar Shift mostra páginas físicas completas (largura total), soltar volta às colunas, preservando âncora (physAnchor + dyInPage via RestoreViewportAfterV2Toggle). Hook em SumatraPDF.cpp: `HandleV2ShiftHold` + interceptação `WM_KEYDOWN`/`WM_KEYUP` de `VK_SHIFT` no WndProc do frame. SearchAndDDE usa `IsViewportCropV2Active`.
 - [ ] `ScrollState.page` (`DisplayModel.h:63`): armazenar virtual pageNo; restaurar mapeia para coluna.
 - [ ] NavigationModel/histórico: 2N páginas.
 - [ ] Page labels: `1L/1R/2L/2R` (derivar de `ColumnOfVirtual`).
-- [ ] `QuickToggleViewportCropV2`: lembrar **página+coluna** ao alternar.
 - [ ] `Accelerators.cpp` (`// @gen-start virt-keys-num`): adicionar `CmdViewportCropV2Toggle` (rodar gen-code com VS no PATH, ou editar via gen-data).
 - [ ] Build + teste: ir/voltar, histórico, thumbnails coerentes.
 
-> **Nota perf autoscroll TC2 (2026-09-18):** v2 força caminho não-cache (`ShouldCacheRendering`=false), o que limita a velocidade do autoscroll (render sync por frame). Decidido otimizar só o caminho não-cache por ora. **Reverificação futura**: re-habilitar cache por página virtual roteando `VirtualToPhysical` nas funções de tile (`GetTileRectDevice/User/GetTileOnScreen`, RenderCache.cpp:308-345) + aplicar colX shift no render do tile em background. Chave de cache já resolve esq/dir (virtual pageNo distinto por coluna).
+> **Nota perf autoscroll TC2 (2026-09-18 → 2026-09-20):** v2 forçava caminho não-cache (`ShouldCacheRendering`=false), limitando a velocidade do autoscroll (render sync por frame ~23ms). **✅ RESOLVIDO (2026-09-20)**: re-habilitado o cache do v2. As funções de tile (`GetTileRectDevice/User/GetTileOnScreen`, RenderCache.cpp:308+) agora tomam `DisplayModel*`, roteiam `VirtualToPhysical` + cortam mediabox p/ coluna; colX shift só no render (`GetTileRectUser`); render thread roteia `req.pageNo`→físico. UI thread só blit de tiles prontos (~1ms). Chave de cache (virtual pageNo 2k/2k-1) já resolve esq/dir. Commit `feat(two-column-v2): re-enable render cache for TC2`. Autoscroll "BEM melhor", trava pouco só na velocidade máxima (aceitável).
 
 #### FASE 6 — Trim + R2L + colGap
 
+- [x] **colGap/offset (overlap das colunas)** (`ViewportCrop.colGap`): as colunas não cortam mais coladas no meio — cada coluna mostra um pedaço da outra metade. Helpers em DisplayModel: `ViewportCropV2Gap()` (lê `gGlobalPrefs->viewportCrop.colGap`), `ViewportCropV2ColumnWidth(mb)=halfW+gap`, `ViewportCropV2RightColumnX(mb)=mb.x+halfW-gap`. Aplicados em: `PageMediaBox`, `GetTileRectDevice/User` (RenderCache), caminho não-cache `Paint`, `CvtToScreen`/`CvtFromScreen`. Configurável na janela Trim Config (novo campo "column gap:").
 - [ ] **Trim** (`marginTrimEnabled`): integrar com corte de coluna (ambos atuam no `area`/`pageRect`; testar ordem em `RenderCache.cpp:1169`).
 - [ ] **R2L** (`displayR2L`): inverter esq/dir em docs RTL.
-- [ ] **Largura de coluna**: 50/50 vs `colGap` (`Settings.h:32` `ViewportCrop.colGap`).
 - [ ] Build + teste combos: `TwoColumn2 + Trim`, `TwoColumn2 + R2L`.
 
 #### FASE 7 — Polish & regressões

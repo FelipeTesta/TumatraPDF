@@ -312,14 +312,16 @@ static Rect GetTileRectDevice(DisplayModel* dm, int pageNo, int rotation, float 
     EngineBase* engine = dm->GetEngine();
     int renderPageNo = dm->VirtualToPhysical(pageNo);
     RectF mediabox = engine->PageMediabox(renderPageNo);
-    if (dm->viewportCropV2Enabled) {
+    if (dm->IsViewportCropV2Active()) {
         int cropColumn = dm->ColumnOfVirtual(pageNo);
         if (cropColumn >= 0) {
             // the virtual page is one half of the physical page, rendered at
             // full screen width. Keep the mediabox origin (the column occupies
             // the same on-screen x as the left column, stacked vertically); the
-            // colX shift is applied only at render time (GetTileRectUser).
-            mediabox.dx /= 2.0f;
+            // colX shift is applied only at render time (GetTileRectUser). Both
+            // columns overlap in a center band (colGap), so text near the page
+            // middle isn't cut flush.
+            mediabox.dx = dm->ViewportCropV2ColumnWidth(mediabox);
         }
     }
     if (trimEnabled) {
@@ -347,13 +349,13 @@ static RectF GetTileRectUser(DisplayModel* dm, int pageNo, int rotation, float z
     RectF rect = engine->Transform(ToRectF(pixelbox), renderPageNo, zoom, rotation, true);
     // two column v2: rect is in column-local (left half) page coords; shift it
     // right by the column offset so the engine renders the right/left half.
-    // Mirrors the render-time colX shift in the non-cached path.
-    if (dm->viewportCropV2Enabled) {
+    // Mirrors the render-time colX shift in the non-cached path. The right
+    // column is shifted by halfW-gap so the columns overlap in the center.
+    if (dm->IsViewportCropV2Active()) {
         int cropColumn = dm->ColumnOfVirtual(pageNo);
         if (cropColumn >= 0) {
             RectF mb = engine->PageMediabox(renderPageNo);
-            float colX = mb.x + (cropColumn == 1 ? mb.dx / 2.0f : 0.0f);
-            rect.x += colX;
+            rect.x += cropColumn == 1 ? dm->ViewportCropV2RightColumnX(mb) : mb.x;
         }
     }
     if (trimEnabled) {
@@ -1199,13 +1201,13 @@ int RenderCache::Paint(HDC hdc, Rect bounds, DisplayModel* dm, int pageNo, PageI
         // the (inverse) transform area is in physical mediabox units; shift it
         // right by the column offset so only the left/right half renders, at
         // full screen width (the layout already gave the virtual page a half-
-        // width media box, so Fit Width fills the viewport).
-        if (dm->viewportCropV2Enabled) {
+        // width media box, so Fit Width fills the viewport). The right column
+        // is shifted by halfW-gap so the columns overlap in the center band.
+        if (dm->IsViewportCropV2Active()) {
             int cropColumn = dm->ColumnOfVirtual(pageNo);
             if (cropColumn >= 0) {
                 RectF mb = dm->GetEngine()->PageMediabox(renderPageNo);
-                float colX = mb.x + (cropColumn == 1 ? mb.dx / 2.0f : 0.0f);
-                area.x += colX;
+                area.x += cropColumn == 1 ? dm->ViewportCropV2RightColumnX(mb) : mb.x;
             }
         }
 

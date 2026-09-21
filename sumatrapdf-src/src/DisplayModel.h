@@ -224,6 +224,18 @@ struct DisplayModel : DocController {
     // two column v2 (stacked virtual columns, independent of v1)
     void ApplyViewportCropV2();
     void QuickToggleViewportCropV2();
+    // true when the v2 column view is actually active (v2 on AND not quick-
+    // toggled off via shift-hold AND continuous mode). All the virtual<->physical
+    // conversions gate on this so shift-hold shows full physical pages.
+    bool IsViewportCropV2Active() const;
+    // v2 column overlap (colGap/offset, FASE 6): each column shows a bit of the
+    // other half so text near the page center isn't cut flush. Units are page
+    // points (the ViewportCrop.colGap setting). 0 = exact half split.
+    float ViewportCropV2Gap() const;
+    // column width for a full-width physical mediabox: half + gap.
+    float ViewportCropV2ColumnWidth(RectF mb) const;
+    // the on-page x offset to render the right column (mb.x + halfW - gap).
+    float ViewportCropV2RightColumnX(RectF mb) const;
     // restore the vertical scroll position after the N<->2N relayout so toggling
     // v2 doesn't jump the view. physAnchor + dyInPage captured BEFORE the toggle.
     void RestoreViewportAfterV2Toggle(int physAnchor, int dyInPage);
