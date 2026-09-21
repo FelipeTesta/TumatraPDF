@@ -337,10 +337,8 @@ struct MainWindow {
         float speed = 2.0f; // pixels per tick
         float speedMultiplier = 0.008f;
         float accum = 0.0f;
-        int etaMinutes = 0;     // ETA in minutes, computed on demand
-        DWORD etaStartTick = 0; // countdown base (reset on each recalc)
-        int etaLastShown = -1;  // last minute value displayed (avoid redundant updates)
-        int etaPageNo = 0;      // page ETA was computed for
+        int etaMinutes = 0;    // ETA in minutes, computed from remaining scroll pixels
+        int etaLastShown = -1; // last minute value displayed (avoid redundant updates)
         HWND hwndEtaLabel = nullptr;
         DWORD timerMinutes = 0;         // 0 = no timer (effective value used by tick)
         DWORD timerMinutesSetting = 30; // configured minutes from UI input (default 30)

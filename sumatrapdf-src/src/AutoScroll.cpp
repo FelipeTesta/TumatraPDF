@@ -89,33 +89,26 @@ float AutoScrollPxPerSec(MainWindow* win) {
     return speed * 100.0f; // speed is pixels per tick, timer fires ~100x/sec
 }
 
-// Recompute ETA from remaining pages and current speed
+// Recompute ETA from remaining scroll pixels and current speed.
+// Pixel-based: works correctly regardless of TC2 (2N virtual pages = 2x canvas
+// height = correct 2x ETA), page height variation, or mid-page position.
 void RecalcAutoScrollEta(MainWindow* win) {
     if (!win->autoScroll.active) {
         return;
     }
     auto dm = win->AsFixed();
     if (dm) {
-        int remainingPages = dm->PageCount() - dm->CurrentPageNo();
+        int remainingPx = dm->canvasSize.dy - dm->viewPort.y;
         float speedPxPerSec = AutoScrollPxPerSec(win);
-        if (remainingPages <= 0 || speedPxPerSec <= 0) {
+        if (remainingPx <= 0 || speedPxPerSec <= 0) {
             win->autoScroll.etaMinutes = 0;
         } else {
-            auto pageInfo = dm->GetPageInfo(dm->CurrentPageNo());
-            if (!pageInfo) {
+            float etaSec = (float)remainingPx / speedPxPerSec;
+            win->autoScroll.etaMinutes = (int)(etaSec / 60.0f);
+            if (win->autoScroll.etaMinutes < 0) {
                 win->autoScroll.etaMinutes = 0;
-            } else {
-                int pageHeightPx = (int)pageInfo->pos.dy;
-                float etaSec = (remainingPages * pageHeightPx) / speedPxPerSec;
-                win->autoScroll.etaMinutes = (int)(etaSec / 60.0f);
-                if (win->autoScroll.etaMinutes < 0) {
-                    win->autoScroll.etaMinutes = 0;
-                }
             }
         }
-        win->autoScroll.etaStartTick = GetTickCount();
-        win->autoScroll.etaLastShown = -1;
-        win->autoScroll.etaPageNo = dm->CurrentPageNo();
         return;
     }
     // WebView path (epub/markdown): trigger a one-shot JS eval to report remaining
@@ -368,22 +361,20 @@ void AutoScrollContinuousTick(MainWindow* win, HWND hwnd) {
                 return;
             }
         }
-        // Scroll
+        // Scroll — halve speed when shift-hold + v2 active (full-width = slower reading)
         float speed = win->autoScroll.speed * win->autoScroll.speedMultiplier;
+        if (dm->viewportCropV2Enabled && dm->viewportCropV2QuickToggled) {
+            speed *= 0.5f;
+        }
         win->autoScroll.accum += speed;
         int dy = (int)win->autoScroll.accum;
         if (dy != 0) {
             win->autoScroll.accum -= dy;
             win->MoveDocBy(0, dy);
         }
-        // ETA: recalc on page change, countdown by wall clock between
-        if (dm->CurrentPageNo() != win->autoScroll.etaPageNo) {
-            RecalcAutoScrollEta(win);
-        }
-        int remaining = win->autoScroll.etaMinutes - (int)((GetTickCount() - win->autoScroll.etaStartTick) / 60000);
-        if (remaining < 0) {
-            remaining = 0;
-        }
+        // ETA: recalc every tick from scroll position (pixel-based, no wall-clock drift)
+        RecalcAutoScrollEta(win);
+        int remaining = win->autoScroll.etaMinutes;
         if (remaining != win->autoScroll.etaLastShown) {
             win->autoScroll.etaLastShown = remaining;
             UpdateToolbarEtaText(win, remaining);
