@@ -23,6 +23,28 @@ Continuação do plano Two Columns v2. Implementadas as 2 features pedidas pelo 
 ### Arquivos
 - DisplayModel.{h,cpp}, SumatraPDF.cpp, SearchAndDDE.cpp, RenderCache.cpp, TrimConfigDialog.{h,cpp}, TODO.md.
 
+## 2026-09-21 — Autoscroll: pixel-based ETA + TC2 2x auto + shift-hold speed halve (BUILD OK)
+
+### Contexto
+ETA bug: diminuía até zero no meio da página. TC2 não duplicava tempo. Shift+TC2+autoscroll não reduzia velocidade.
+
+### Correções
+- **ETA pixel-based** (`AutoScroll.cpp`): substituído contagem de páginas + contagem regressiva por relógio mural por `remainingPx = canvasSize.dy - viewPort.y` recalculado a cada tick. O ETA sempre reflete a verdadeira posição de scroll, sem desvio.
+- **TC2 × 2 automático**: o canvas tem 2× a altura (2N páginas virtuais empilhadas), então `canvasSize.dy - viewPort.y` naturalmente dá 2× o tempo restante — nenhum cálculo especial necessário.
+- **Shift-hold → velocidade ÷ 2** (`AutoScrollContinuousTick`): quando `viewportCropV2Enabled && viewportCropV2QuickToggled` (Shift mantido + TC2 on), speed ×0.5 temporariamente. Volta ao normal ao soltar Shift.
+- Removidos campos `etaStartTick` e `etaPageNo` do `AutoScrollState` (não necessários com abordagem pixel-based).
+
+### Verificação
+- Build 0 err / 0 warn. Smoke -for-testing estável.
+- Copiado para Compiled\TumatraPDF.exe.
+
+### Commits
+- `562166b` fix(autoscroll): pixel-based ETA + TC2 2x auto + shift-hold speed halve
+
+### Arquivos
+- AutoScroll.cpp (RecalcAutoScrollEta + AutoScrollContinuousTick)
+- MainWindow.h (removidos etaStartTick/etaPageNo)
+
 ## 2026-09-20 — Two Columns v2: re-enable render cache (fix autoscroll jank) (BUILD OK)
 
 ### Contexto
