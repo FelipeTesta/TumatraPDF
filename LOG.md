@@ -1,93 +1,96 @@
 # TumatraPDF — Development Log
 
-## 2026-09-21 (s2) — TC2 fluido + ETA por página + Release x64 + fixes sistêmicos (BUILD OK)
+## 2026-09-22 (s3) — BUG-4 v2: Contrast Overlay Self-Healing (BUILD OK)
 
-### Crash/perf TC2
-- **GetTileRes** (RenderCache.cpp): único ponto esquecido no re-enable do cache — passava pageNo VIRTUAL ao engine (`PageMediabox`/`Transform`/`HasClipOptimizations`) → `ReportIf(pageNo > pageCount)` = storm de debug-report + callstack **por paint** (metade das páginas virtuais) = UI travada só com TC2 on. Roteado `VirtualToPhysical` + mediabox de coluna (half-width).
-- **Render thread guard**: requests com pageNo inválido pós-relayout (2N→N) descartados em vez de alimentar o engine.
-- **RestoreViewportAfterV2Toggle**: usava `viewportCropV2Enabled` (setting) em vez de `IsViewportCropV2Active()` (layout truth) → na quick view restorePage `2k-1 > N` falhava → viewport no fim do doc → autoscroll morto. Âncora agora **fracionária** (`frac × nova altura`) — sobrevive à troca de zoom entre coluna (fit half-width) e página inteira (fit full-width).
+### Fixed
+- **BUG-4 (trim config mata o contrast)**: sintoma refinado pelo usuário — evento pontual, só na PRIMEIRA interação com o trim config após abrir o app. Padrão raiz: 3 caminhos de estado (sessão sessionData / por-documento FileState / padrão) escrevem `win->contrastEnabled` sem sincronizar o overlay HWND — qualquer dessincronização = primeiro SaveSettings destrói o overlay visível.
+- **Novo `EnsureContrastOverlayState(win)`** (ContrastOverlay.cpp + Canvas.h): cria se `contrastEnabled && !overlay`, destrói se `!enabled && overlay`, reposiciona se sincronizado. Ligado a TODOS os escritores do flag: `ReplaceDocumentInCurrentTab` (doc-swap agora também destrói overlay órfão), `UpdateTabFileDisplayStateForTab` (SaveSettings ressuscita em vez de destruir), TrimConfig OnSave/OnCancel (RE-CRIA se algum caminho o destruiu).
+- Breadcrumbs mantidos p/ diagnóstico: `[contrast] Create/Destroy/WM_DESTROY` + logs de entrada `SchedulePrefsReload`/`ReloadSettings` (build DEBUG loga; release não).
 
-### Shift-hold v3 + ETA (spec do usuário)
-- **Shift-hold = PAUSA o autoscroll** (tick early-return; drag livre na página inteira; retoma ao soltar). Substitui o speed ÷2 anterior.
-- **Quick view**: entra = salva zoom virtual + relayout `kZoomFitWidth` (página inteira ocupa toda a largura); sai = restaura zoom salvo. `HandleV2ShiftHold` checa `quickToggled` (não `isColumnView`).
-- **ETA por página**: resync só na troca de página; fórmula `tempo-por-página × páginas restantes` (TC2 conta virtual 2N = cada página lida 2×; trim não muda contagem); entre resyncs decai como cronômetro invertido; pausas (shift/ctrl) excluídas da medição; ≥60min → `~1h 05min` (overlay 240px).
+## 2026-09-22 (s2) — Flashcard Cloze Crash Fix (BUILD OK)
 
-### Fixes sistêmicos (revisão geral via tree-sitter + hang dump)
-- **SaveSettings destruía o overlay de contrast**: `UpdateTabFileDisplayStateForTab` → `DestroyContrastOverlay` incondicional → QUALQUER SaveSettings mid-session desativava o contrast. Agora mantém/reposiciona se `contrastEnabled`. **(bug persiste por outro caminho — BUG-4 aberto)**
-- **Pipeline parcial pós-toggle = "travado até continuous off/on"**: v2 toggle terminava com `RecalcVisibleParts + HwndRepaintNow` (scrollbars stale, renders não enfileirados). Ambos os toggles v2 agora terminam com `ScrollYTo(viewPort.y)` — pipeline completo, idêntico ao caminho contínuo do `SetDisplayMode`/`GoToPage` (por isso o "c" off/on destravava).
-- **`RequestTextExtraction` recebia pageNo VIRTUAL a cada mousemove** (Canvas.cpp:1773 — stack do hang dump): threads de extração de texto da página ERRADA por movimento de mouse com TC2. Roteado via `VirtualToPhysical`.
+### Fixed
+- **Flashcard crash on card creation** (`Flashcard.cpp`): `FlashcardLoadFromDocument` called `pdf_annot_rect()` on Highlight annotations. MuPDF excludes markup types from `rect_subtypes` (`pdf-annot.c:1267`) → uncaught `fz_throw("Highlight annotations have no Rect property")` → process abort (no try/catch in the scan). Replaced with `pdf_bound_annot()` (bbox from quad-points, same pattern as `Annotation.cpp GetBounds`) and wrapped per-annot body in `fz_try`/`fz_catch` — one corrupt annotation now skips instead of crashing. Cloze positional model unchanged.
+- Stale comment (referenced removed `Q:` prefix) updated to describe author-based cloze cards.
+
+### Fixed (2)
+- **Study mask landed on wrong position under TC2** (`ViewportCrop v2` active): Canvas painted the cloze mask at the PHYSICAL page number while the DisplayModel was in VIRTUAL (2N) layout — mask ended up off-position so the text stayed readable. Cloze painting now routes each rect through `PhysicalToVirtualForRect` + virtual `CvtToScreen` (same rule as every render-path call: physical→virtual mapping before screen conversion). Mask alpha raised 200→255 (fully opaque).
+- **Multi-line cloze covered too much text**: the mask used the highlight's union bbox (`pdf_bound_annot`), so a 2-line selection produced one big rectangle hiding neighbor text. `Flashcard` now stores per-quad-point subrects (`Flashcard::rects`, via `pdf_annot_quad_point_count`/`pdf_annot_quad_point` + page CTM); Canvas paints each subrect — mask covers exactly the highlighted lines. Navigation to card (`CmdFlashcardStudy` advance + sidebar click) also routed through `PhysicalToVirtualForRect`.
+
+## 2026-09-22 — Architectural Audit & FLOW Enrichment (Analysis Only)
+
+### Added
+- **TODO.md**: Added "Architectural Audit + Refactoring Plan (2026-09-21)" — 8 findings with file:line evidence + execution phases R1-R7. Key items: TrimConfigDialog latent bug under TC2 (`GetEngine()->PageMediabox` without `VirtualToPhysical`, `TrimConfigDialog.cpp:92/113`), contrast webview JS duplicated across 3 divergent copies, colX/trim math duplication, v1 crop stack dead code.
+- **FLOW/**: 5 new process diagrams — `autoscroll.dot`, `two-columns-v2.dot`, `flashcard.dot`, `trim-contrast.dot`, `build-test.dot`.
+- **tumatrapdf.dot**: Refreshed with new ETA/canvas-overlay descriptions, TC2 + flashcard feature nodes, and updated audit notes.
+
+### Notes
+- No source code changed. R1 (`TrimConfigDialog` fix) is the first recommended step.
+
+## 2026-09-21 (s2) — Fluid TC2 + Page ETA + Release x64 + Systemic Fixes (BUILD OK)
+
+### TC2 Crash & Performance
+- **GetTileRes** (`RenderCache.cpp`): Missed cache re-enable spot — passed VIRTUAL `pageNo` to engine (`PageMediabox`/`Transform`/`HasClipOptimizations`) triggering `ReportIf(pageNo > pageCount)` = debug report storm + callstack **per paint** (half of virtual pages) causing UI freeze with TC2 on. Routed via `VirtualToPhysical` + half-width column mediabox.
+- **Render Thread Guard**: Discarded queued requests with invalid pageNo post-relayout (2N→N) instead of feeding the engine.
+- **RestoreViewportAfterV2Toggle**: Replaced `viewportCropV2Enabled` (setting) check with `IsViewportCropV2Active()` (layout truth) — quick view restorePage `2k-1 > N` failure fixed. Anchor changed to **fractional** (`frac × new height`), surviving zoom toggles between column (fit half-width) and full page (fit full-width).
+
+### Shift-hold v3 + Page ETA (User Spec)
+- **Shift-hold = PAUSE Autoscroll** (tick early-return; free drag on full page; resumes on release). Replaces previous speed ÷2.
+- **Quick View**: Entry saves virtual zoom + relayouts to `kZoomFitWidth` (full page fills screen); exit restores saved zoom. `HandleV2ShiftHold` checks `quickToggled`.
+- **Page ETA**: Resync only on page change; formula `time-per-page × remaining pages` (TC2 counts virtual 2N = each page read 2×; trim keeps count unchanged); decays like an inverted timer between resyncs; pauses (shift/ctrl) excluded; ≥60min shown as `~1h 05min` (240px overlay).
+
+### Systemic Fixes (Tree-Sitter + Hang Dump Audit)
+- **SaveSettings Contrast Overlay Destruction**: `UpdateTabFileDisplayStateForTab` had unconditional `DestroyContrastOverlay` killing contrast mid-session. Preserved/repositioned when `contrastEnabled`.
+- **Partial Toggle Pipeline**: v2 toggle ended with `RecalcVisibleParts + HwndRepaintNow` (stale scrollbars, unqueued renders). Both v2 toggles now end with `ScrollYTo(viewPort.y)` — full pipeline matching `SetDisplayMode`/`GoToPage`.
+- **RequestTextExtraction VIRTUAL pageNo**: `Canvas.cpp:1773` passed virtual pageNo on every mousemove during TC2. Routed via `VirtualToPhysical`.
 
 ### Builds
-- **Release x64 deployado**: `MSBuild vs2022\TumatraPDF.sln /t:TumatraPDF /p:Configuration=Release;Platform=x64` (não exposto no build.ts). `Compiled\TumatraPDF.exe` = **release** (leitura diária; render 5-10× mais rápido que debug; NDEBUG = sem ReportIf); `Compiled\TumatraPDF-debug.exe` = debug p/ diagnóstico.
-- Usuário confirmou: **TC2 drag "BEM fluido"** (mouse + mousepad + autoscroll).
+- **Release x64 Deployed**: `MSBuild vs2022\TumatraPDF.sln /t:TumatraPDF /p:Configuration=Release;Platform=x64`. `Compiled\TumatraPDF.exe` = **release** (daily reading; 5-10× faster than debug; NDEBUG = no ReportIf); `Compiled\TumatraPDF-debug.exe` = debug for diagnostics. User confirmed TC2 drag is **very fluid**.
 
-### Pendências
-- BUG-4: trim config ainda desativa contrast (fix parcial aplicado; há outro caminho — próxima investigação).
-- Validar ETA contando até o fim do livro após os fixes de estado.
+### Pending
+- BUG-4: Trim config still deactivates contrast in some code paths (partial fix applied).
+- Validate ETA counting to end of book.
 
-## 2026-09-20 — Two Columns v2 FASE 5 (shift-hold) + FASE 6 (colGap) (BUILD OK)
+## 2026-09-20 — Two Columns v2 FASE 5 (Shift-Hold) + FASE 6 (ColGap) (BUILD OK)
 
-### Contexto
-Continuação do plano Two Columns v2. Implementadas as 2 features pedidas pelo usuário no encaixe correto do plano: shift-hold (FASE 5, QuickToggleViewportCropV2) e colGap/offset (FASE 6, overlap das colunas).
+### Context
+Continued Two Columns v2 plan. Implemented shift-hold (FASE 5) and colGap/column overlap (FASE 6).
 
-### FASE 5 — Shift-hold (mostrar página inteira segurando Shift)
-- Novo `DisplayModel::IsViewportCropV2Active()` = `viewportCropV2Enabled && !viewportCropV2QuickToggled && IsContinuous`. Todas as conversões v2 gateiam por ele.
-- `QuickToggleViewportCropV2` agora faz toggle real: captura âncora (physAnchor + dyInPage), inverte `viewportCropV2QuickToggled`, re-aplica (2N↔N) e restaura via `RestoreViewportAfterV2Toggle`.
-- `SumatraPDF.cpp`: helper `HandleV2ShiftHold` + interceptação `WM_KEYDOWN`/`WM_KEYUP` de `VK_SHIFT` no WndProc do frame (adicionei o case `WM_KEYUP`).
-- `SearchAndDDE.cpp:1594` usa `IsViewportCropV2Active`.
+### FASE 5 — Shift-Hold (View Full Physical Page on Shift Press)
+- Added `DisplayModel::IsViewportCropV2Active()` = `viewportCropV2Enabled && !viewportCropV2QuickToggled && IsContinuous`. All v2 conversions gate on it.
+- `QuickToggleViewportCropV2` real toggle: captures anchor (physAnchor + dyInPage), flips `viewportCropV2QuickToggled`, re-applies (2N↔N), restores via `RestoreViewportAfterV2Toggle`.
+- `SumatraPDF.cpp`: helper `HandleV2ShiftHold` + intercepted `WM_KEYDOWN`/`WM_KEYUP` for `VK_SHIFT` in frame WndProc.
+- `SearchAndDDE.cpp` updated to use `IsViewportCropV2Active`.
 
-### FASE 6 — colGap/offset (overlap das colunas)
-- Helpers em DisplayModel: `ViewportCropV2Gap()` (lê `gGlobalPrefs->viewportCrop.colGap`), `ViewportCropV2ColumnWidth(mb)=halfW+gap`, `ViewportCropV2RightColumnX(mb)=mb.x+halfW-gap`.
-- Aplicados em: `PageMediaBox`, `GetTileRectDevice/User` (RenderCache), caminho não-cache `Paint`, `CvtToScreen`/`CvtFromScreen` — colunas mostram um pedaço da outra metade, sem cortar texto colado no centro. Default colGap=0 (preserva comportamento).
-- Configurável na janela Trim Config: novo campo "column gap:" (`TrimConfigDialog.cpp/h`), com save/cancel/reset e relayout quando v2 ativo.
+### FASE 6 — ColGap/Offset (Column Overlap)
+- DisplayModel helpers: `ViewportCropV2Gap()` (reads `gGlobalPrefs->viewportCrop.colGap`), `ViewportCropV2ColumnWidth(mb)=halfW+gap`, `ViewportCropV2RightColumnX(mb)=mb.x+halfW-gap`.
+- Applied in: `PageMediaBox`, `GetTileRectDevice/User` (RenderCache), non-cache `Paint`, `CvtToScreen`/`CvtFromScreen` — columns overlap center band to avoid cutting centered text. Default `colGap=0`.
+- Configurable in Trim Config dialog ("column gap:" field) with save/cancel/reset and relayout when v2 active.
 
-### Verificação
-- Build 0 err / 0 warn + clang-format.
-- Smoke `-for-testing` zlib.3.pdf → estável.
+### Verification
+- Build 0 err / 0 warn + clang-format. Smoke test stable.
 
-### Arquivos
-- DisplayModel.{h,cpp}, SumatraPDF.cpp, SearchAndDDE.cpp, RenderCache.cpp, TrimConfigDialog.{h,cpp}, TODO.md.
+## 2026-09-21 — Autoscroll: Pixel-Based ETA + TC2 2x Auto + Shift-Hold Speed Halve (BUILD OK)
 
-## 2026-09-21 — Autoscroll: pixel-based ETA + TC2 2x auto + shift-hold speed halve (BUILD OK)
-
-### Contexto
-ETA bug: diminuía até zero no meio da página. TC2 não duplicava tempo. Shift+TC2+autoscroll não reduzia velocidade.
-
-### Correções
-- **ETA pixel-based** (`AutoScroll.cpp`): substituído contagem de páginas + contagem regressiva por relógio mural por `remainingPx = canvasSize.dy - viewPort.y` recalculado a cada tick. O ETA sempre reflete a verdadeira posição de scroll, sem desvio.
-- **TC2 × 2 automático**: o canvas tem 2× a altura (2N páginas virtuais empilhadas), então `canvasSize.dy - viewPort.y` naturalmente dá 2× o tempo restante — nenhum cálculo especial necessário.
-- **Shift-hold → velocidade ÷ 2** (`AutoScrollContinuousTick`): quando `viewportCropV2Enabled && viewportCropV2QuickToggled` (Shift mantido + TC2 on), speed ×0.5 temporariamente. Volta ao normal ao soltar Shift.
-- Removidos campos `etaStartTick` e `etaPageNo` do `AutoScrollState` (não necessários com abordagem pixel-based).
-
-### Verificação
-- Build 0 err / 0 warn. Smoke -for-testing estável.
-- Copiado para Compiled\TumatraPDF.exe.
+### Corrections
+- **Pixel-Based ETA** (`AutoScroll.cpp`): Replaced page/wall-clock countdown with `remainingPx = canvasSize.dy - viewPort.y` recalculated per tick. Accurate scroll position tracking.
+- **TC2 × 2 Automatic**: Canvas height is doubled (2N virtual pages), so `canvasSize.dy - viewPort.y` naturally yields 2× remaining time.
+- **Shift-Hold Speed Halve** (`AutoScrollContinuousTick`): When `viewportCropV2Enabled && viewportCropV2QuickToggled`, speed ×0.5 temporarily.
+- Removed deprecated `etaStartTick` and `etaPageNo` fields from `AutoScrollState`.
 
 ### Commits
 - `562166b` fix(autoscroll): pixel-based ETA + TC2 2x auto + shift-hold speed halve
 
-### Arquivos
-- AutoScroll.cpp (RecalcAutoScrollEta + AutoScrollContinuousTick)
-- MainWindow.h (removidos etaStartTick/etaPageNo)
+## 2026-09-20 — Two Columns v2: Re-enable Render Cache (Fix Autoscroll Jank) (BUILD OK)
 
-## 2026-09-20 — Two Columns v2: re-enable render cache (fix autoscroll jank) (BUILD OK)
+### Changes (`RenderCache.cpp`, `DisplayModel.cpp`)
+- `GetTileRectDevice`/`GetTileRectUser`/`GetTileOnScreen` take `DisplayModel*` and route `VirtualToPhysical`; mediabox halved when `cropColumn>=0`.
+- `colX` shift applied **only at render time** (`GetTileRectUser`), mirroring the non-cached path.
+- Render thread routes `req.pageNo`→`renderPageNo` via `VirtualToPhysical` before `RenderPageArgs` and `GetBitmapRecolorSkipRects`.
+- `ShouldCacheRendering` returns `true` always (v2 cache re-enabled). Cache key uses virtual pageNo already.
 
-### Contexto
-O TC2 forçava o caminho não-cache (`ShouldCacheRendering`=false), então cada frame de autoscroll re-renderizava o viewport inteiro sincronamente na UI thread (~23ms render vs ~1ms blit) — travava em velocidade alta e o scroll manual estava lento/travando. Decidido re-habilitar o cache do v2 (fix mais eficiente, mesmo exigindo mais trabalho).
-
-### Alterações (RenderCache.cpp, DisplayModel.cpp)
-- `GetTileRectDevice`/`GetTileRectUser`/`GetTileOnScreen` agora tomam `DisplayModel*` (antes `EngineBase*`) e roteiam `VirtualToPhysical`; mediabox reduzido à metade quando `cropColumn>=0` (página virtual = meia página física em largura total).
-- `colX` shift (offset da coluna dir) aplicado **só no render** (`GetTileRectUser`), espelhando o caminho não-cache — bug fix: shift no device empurrava o tile para `[screenW, 2*screenW]` (fora da área visível).
-- Render thread roteia `req.pageNo`→`renderPageNo` via `VirtualToPhysical` antes de `RenderPageArgs` e `GetBitmapRecolorSkipRects`.
-- `ShouldCacheRendering` retorna `true` sempre (removeu o bloco v2→false); trim e v2 ambos cacheados agora.
-- Chave de cache já usa virtual pageNo (2k/2k-1) → esq/dir distintos sem tocar `BitmapCacheEntry`.
-- Removido timing log temporário `[v2] Paint` do caminho não-cache.
-
-### Verificação
-- Build 0 err / 0 warn + clang-format.
-- Teste manual do usuário: autoscroll "BEM melhor, ainda trava bem pouco na velocidade alta, mas resultado aceitável". Smooth scroll manual NÃO foi alterado (é o timer original).
-
-### Arquivos
+### Verification
+- Build 0 err / 0 warn. User manual test: autoscroll is smooth and responsive.
 - sumatrapdf-src/src/RenderCache.cpp, sumatrapdf-src/src/DisplayModel.cpp, TODO.md.
 
 ## 2026-09-18 — Autoscroll: overlay ETA/velocidade bottom-right (fundos/fix) (BUILD OK)

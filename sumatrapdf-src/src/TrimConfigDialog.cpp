@@ -170,10 +170,10 @@ void TrimConfigWnd::OnSave() {
         gRenderCache->FreeForDisplayModel(trimDm);
     }
     HwndRepaintNow(win->hwndCanvas);
-    // Ensure contrast overlay stays positioned correctly after trim changes
-    if (win->hwndContrastOverlay) {
-        UpdateContrastOverlay(win);
-    }
+    // Re-assert the contrast overlay after the trim change: repositions it on
+    // the (possibly re-laid-out) canvas and RE-CREATES it if some path
+    // destroyed it while contrast is enabled (BUG-4)
+    EnsureContrastOverlayState(win);
     // Clear modeless dialog registration
     if (GetCurrentModelessDialog() == hwnd) {
         SetCurrentModelessDialog(nullptr);
@@ -192,9 +192,7 @@ void TrimConfigWnd::OnCancel() {
     }
     HwndRepaintNow(win->hwndCanvas);
     // Ensure contrast overlay stays positioned correctly after cancel
-    if (win->hwndContrastOverlay) {
-        UpdateContrastOverlay(win);
-    }
+    EnsureContrastOverlayState(win);
     // Clear modeless dialog registration
     if (GetCurrentModelessDialog() == hwnd) {
         SetCurrentModelessDialog(nullptr);

@@ -867,14 +867,10 @@ void UpdateTabFileDisplayStateForTab(WindowTab* tab) {
     // Persist autoscroll speed multiplier
     fs->autoScrollSpeedMultiplier = win->autoScroll.speedMultiplier;
     // Contrast overlay: this persistence path also runs from mid-session
-    // SaveSettings (e.g. Trim Config's save), so keep the overlay alive when
-    // contrast is enabled - just keep it glued to the canvas. Only clean up a
-    // leftover overlay when the feature is off.
-    if (win->contrastEnabled) {
-        UpdateContrastOverlay(win);
-    } else {
-        DestroyContrastOverlay(win);
-    }
+    // SaveSettings (e.g. Trim Config's save). Keep the overlay in sync with
+    // win->contrastEnabled: recreate it if some path destroyed it while
+    // enabled, remove a leftover when disabled.
+    EnsureContrastOverlayState(win);
     // Persist invert colors and contrast overlay state
     fs->invertColors = GetInvertPageColors();
     fs->contrastEnabled = win->contrastEnabled;
@@ -2265,6 +2261,10 @@ static void ReplaceDocumentInCurrentTab(LoadArgs* args, DocController* ctrl, Fil
     // Restore contrast overlay (must run after win->ctrl points at the new document)
     if (win->contrastEnabled) {
         CreateContrastOverlay(win);
+    } else {
+        // no leaked overlay from the previous document either (BUG-4: the
+        // state must match the visual in both directions)
+        DestroyContrastOverlay(win);
     }
 
     // Reload/replace swaps the document; clear any tip for the previous page.

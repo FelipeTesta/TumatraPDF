@@ -1,0 +1,31 @@
+digraph AutoScroll {
+    rankdir=TB;
+    node [shape=box, style=rounded];
+
+    start [label="F9 / toolbar toggle\nCmdAutoScrollToggle", fillcolor="#c8e6c9", style=filled];
+    timer [label="SetTimer kContinuousAutoScrollTimerID\n(AutoScroll.cpp)", fillcolor="#bbdefb", style=filled];
+    tick [label="AutoScrollContinuousTick\n(AutoScroll.cpp:338)\nearly-return if viewportCropV2QuickToggled (Shift-hold pause)", fillcolor="#bbdefb", style=filled];
+    movedoc [label="win->MoveDocBy(0, dy)\nMainWindow.cpp:435 -> WindowTab.cpp:169", fillcolor="#bbdefb", style=filled];
+    scrolly [label="DisplayModel::ScrollYBy(dy, false)\nDisplayModel.cpp:2236", fillcolor="#bbdefb", style=filled];
+    parts [label="RecalcVisibleParts + RenderVisibleParts\n(no-op for non-cache) -> RepaintDisplay", fillcolor="#e1bee7", style=filled];
+    paint [label="WM_PAINT -> OnPaintDocument\nCanvas.cpp -> DrawDocument loop\n-> RenderCache::Paint (RenderCache.cpp:1140)", fillcolor="#e1bee7", style=filled];
+    cache [label="cached path: blit tiles (~1ms)\nnon-cache: engine->RenderPage SYNC (~23ms)", fillcolor="#fff9c4", style=filled];
+    end [label="IsAtDocumentEnd -> KillTimer", fillcolor="#ffcdd2", style=filled];
+
+    eta [label="ETA (page-based, resync on page change only)\nformula: timePerPage x remainingPages, roundUp +1min\npause (Shift/Ctrl) excluded via etaPauseStartTick\nfields: MainWindow.h AutoScrollState", shape=box, fillcolor="#c8e6c9", style=filled];
+    etaUi [label="ETA label: canvas overlay (WndProcEtaOverlay, Toolbar.cpp)\nWS_EX_LAYERED + SetLayeredWindowAttributes + magenta colorkey\nREQUIRED or invisible", shape=note, fillcolor="#fff9c4", style=filled];
+
+    md [label="Markdown (.md) webview branch:\nJS window.scrollBy(0,dy)\nautoscrollBottom -> DocController::OnAutoScrollBottom -> stop\nautoscrollProgress -> OnAutoScrollProgress -> UpdateToolbarEtaText", shape=box, fillcolor="#e3f2fd", style=filled];
+
+    shift [label="Shift hold = PAUSE tick (quick view full page)\nrelease resumes; viewport remap via RestoreViewportAfterV2Toggle\n(fraction-of-page dyInPage, not raw px)", shape=box, fillcolor="#fff9c4", style=filled];
+
+    start -> timer -> tick -> movedoc -> scrolly -> parts -> paint -> cache;
+    tick -> end [style=dashed, label="doc end"];
+    tick -> eta [style=dotted];
+    eta -> etaUi;
+    tick -> md [style=dotted, label="AsMarkdown"];
+    tick -> shift [style=dotted];
+
+    speed [label="Speed: round-step table 25-1600 px/min\nF7 +20% / F8 -20%\npersist FileState AutoScrollSpeedMultiplier", shape=box, fillcolor="#f5f5f5", style=filled];
+    start -> speed [style=dotted];
+}

@@ -36,8 +36,9 @@ static u64 FlashcardKey(int pageNo, const RectF& b) {
 }
 
 // Iterate all annotations on all pages and extract flashcards.
-// Flashcards are Highlight annotations with author "TumatraPDF-Flashcard"
-// whose contents start with "Q: "
+// Flashcards are Highlight annotations with author "TumatraPDF-Flashcard".
+// Cloze is positional: the highlight quad-points are the mask over existing
+// PDF text and the annotation content stays empty (no text duplication).
 Vec<Flashcard> FlashcardLoadFromDocument(EngineMupdf* engine) {
     logf("[fc] FlashcardLoadFromDocument - scanning document annotations\n");
     Vec<Flashcard> result;
@@ -72,11 +73,41 @@ Vec<Flashcard> FlashcardLoadFromDocument(EngineMupdf* engine) {
                 continue;
             }
 
+            // A single corrupt annotation must not abort the whole scan (an
+            // uncaught fz_throw here crashes the app). pdf_annot_rect() must NOT
+            // be used: markup annotations are excluded from rect_subtypes and
+            // throw "Highlight annotations have no Rect property". pdf_bound_annot()
+            // computes the bbox from quad-points and works for all types.
             Flashcard card;
-            card.annotId = pdf_to_num(ctx, pdf_annot_obj(ctx, annot));
-            card.pageNo = pageIdx + 1; // 1-based
-            fz_rect rect = pdf_annot_rect(ctx, annot);
-            card.bounds = RectF(PointF(rect.x0, rect.y0), PointF(rect.x1, rect.y1));
+            bool ok = false;
+            fz_try(ctx) {
+                card.annotId = pdf_to_num(ctx, pdf_annot_obj(ctx, annot));
+                card.pageNo = pageIdx + 1; // 1-based
+                fz_rect rect = pdf_bound_annot(ctx, annot);
+                card.bounds = RectF(PointF(rect.x0, rect.y0), PointF(rect.x1, rect.y1));
+                // Per-quad subrects so a multi-line cloze masks exactly the
+                // highlighted text (not the union bbox). Quads come in
+                // untransformed page space; apply the page matrix to land in
+                // the same coordinate space as pdf_bound_annot.
+                fz_matrix pageCtm;
+                pdf_page_transform(ctx, pdf_annot_page(ctx, annot), NULL, &pageCtm);
+                int nQuads = pdf_annot_quad_point_count(ctx, annot);
+                for (int i = 0; i < nQuads; i++) {
+                    fz_quad q = pdf_annot_quad_point(ctx, annot, i);
+                    fz_rect qr = fz_transform_rect(fz_rect_from_quad(q), pageCtm);
+                    card.rects.Append(RectF(PointF(qr.x0, qr.y0), PointF(qr.x1, qr.y1)));
+                }
+                if (len(card.rects) == 0) {
+                    card.rects.Append(card.bounds);
+                }
+                ok = true;
+            }
+            fz_catch(ctx) {
+                fz_report_error(ctx);
+            }
+            if (!ok) {
+                continue;
+            }
             // Cloze is positional: the highlight rect is the mask over existing PDF
             // text, so no content is stored (no duplicated text in the document).
             card.key = FlashcardKey(card.pageNo, card.bounds);

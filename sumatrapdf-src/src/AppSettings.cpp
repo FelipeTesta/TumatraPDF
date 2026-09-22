@@ -749,6 +749,7 @@ bool SaveSettings() {
 // refresh the preferences when a different SumatraPDF process saves them
 // or if they are edited by the user using a text editor
 static void ReloadSettings() {
+    logf("ReloadSettings\n"); // BUG-4 breadcrumb: see who triggers a full prefs reload
     TempStr settingsPath = GetSettingsPathTemp();
     if (!file::Exists(settingsPath)) {
         return;
@@ -827,6 +828,9 @@ void ForceReloadSettings() {
 }
 
 static void SchedulePrefsReload() {
+    // BUG-4 breadcrumb: the settings-file watcher fires (our own SaveSettings
+    // races the WatchedFileSetIgnore window); the reload nukes gGlobalPrefs
+    logf("SchedulePrefsReload\n");
     auto fn = MkFunc0Void(ReloadSettings);
     uitask::Post(fn, "TaskReloadSettings");
 }

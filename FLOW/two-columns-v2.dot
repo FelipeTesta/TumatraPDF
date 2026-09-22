@@ -1,0 +1,25 @@
+digraph TwoColumnsV2 {
+    rankdir=TB;
+    node [shape=box, style=rounded];
+
+    toggle [label="CmdViewportCropV2Toggle (SumatraPDF.cpp)\nmutually exclusive with v1 (on => off the other)", fillcolor="#c8e6c9", style=filled];
+    apply [label="DisplayModel::ApplyViewportCropV2\nBuildPagesInfo + Relayout", fillcolor="#bbdefb", style=filled];
+    layout [label="Virtual layout 2N pages stacked\nPageCount()=VirtualPageCount (2N when active)\nVirtualToPhysical(v)= (v+1)/2 ; ColumnOfVirtual(v)= v%2 ? 0 : 1", fillcolor="#bbdefb", style=filled];
+    render [label="Render: pageRect + cropColumn\nmediabox halved (PageMediaBox)\ncolX shift ONLY at render coords (GetTileRectUser)\ncache key = virtual pageNo (left/right distinct)", fillcolor="#e1bee7", style=filled];
+    scroll [label="Continuous flow: 1L->1R->2L->2R\nno jump (v1 snap block bypassed)", fillcolor="#c8e6c9", style=filled];
+
+    gate [label="IsViewportCropV2Active()\n= viewportCropV2Enabled && !quickToggled && IsContinuous\nALL v2 conversions gate on it (layout truth, not setting flag)", shape=note, fillcolor="#fff9c4", style=filled];
+    shifthold [label="Shift-hold (QuickToggleViewportCropV2)\nWM_KEYDOWN/UP VK_SHIFT on frame WndProc\nflips quickToggled -> relayout N pages full width\nanchor restore: fraction dyInPage (not raw px)", fillcolor="#fff9c4", style=filled];
+    colgap [label="colGap overlap (FASE 6)\nViewportCropV2ColumnWidth = halfW + gap\nRightColumnX = mb.x + halfW - gap\nhelpers only - never inline mb.dx/2", fillcolor="#e3f2fd", style=filled];
+
+    toggle -> apply -> layout -> render -> scroll;
+    apply -> gate [style=dotted];
+    gate -> shifthold [style=dotted];
+    render -> colgap [style=dotted];
+
+    rules [label="AUDIT RULES (from past freeze bugs):\n- every engine->(PageMediabox|Transform|HasClipOptimizations|RenderPage)\n  must get VirtualToPhysical-routed pageNo (greppable: only renderPageNo)\n- ReportIf in render path = UI freeze (callstack capture per WM_PAINT)\n- position capture across relayout = fraction of page height, not pixels", shape=note, fillcolor="#ffcdd2", style=filled];
+    render -> rules [style=dotted];
+
+    pending [label="Pending: trim+v2 combo, R2L inversion, ScrollState virtual,\nnav history 2N, page labels 1L/1R (TODO FASE 5-7)", fillcolor="#f5f5f5", style=filled];
+    scroll -> pending [style=dashed, label="next"];
+}

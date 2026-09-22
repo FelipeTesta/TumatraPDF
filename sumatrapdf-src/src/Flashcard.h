@@ -16,6 +16,9 @@ struct Flashcard {
     int annotId = -1; // MuPDF annotation object number (unstable across save; display only)
     int pageNo = -1;  // 1-based page number
     RectF bounds;     // selection rect in PAGE coordinates (PDF points) = the cloze mask
+    // Per quad-point subrects (PAGE coords): a multi-line selection has one quad per
+    // line, so the mask covers exactly the highlighted text, not the union bbox.
+    Vec<RectF> rects;
 };
 
 // FlashcardStudyState — per-card study progress (stored in external JSON)

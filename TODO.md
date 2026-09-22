@@ -1,5 +1,36 @@
 ﻿# TODO
 
+## Architectural Audit + Refactoring Plan (2026-09-21)
+
+Audit done with tree-sitter + explore agent over `sumatrapdf-src/src/`. Findings have file:line evidence. Process diagrams live in `FLOW/*.dot`.
+
+### Findings
+
+1. **TC2 column-shift math — 4 copies.** `RenderCache.cpp:354-359`, `RenderCache.cpp:1227-1233`, `DisplayModel.cpp:1735-1740` (CvtToScreen), `DisplayModel.cpp:1776-1782` (CvtFromScreen). -> helpers `ShiftToColumn` / `UnshiftFromColumn`.
+2. **Trim rect math — 3 copies, sign-flip bug already hit once.** `RenderCache.cpp:327-336`, `RenderCache.cpp:1240-1250`, `DisplayModel.cpp:1461-1464`, inverse in `Selection.cpp:48`. -> `TrimRectPage` / `TrimRectInverse`.
+3. **Trim-drag line math — 3 identical copies in Canvas.cpp** (`1645-1650`, `2090-2096`, `3632-3638`). -> `TrimDragComputeLines(win, dm, x, y, &topY, &botY)`.
+4. **Contrast webview JS — 3 divergent copies** (`ContrastOverlay.cpp:126-141`, `SumatraPDF.cpp:11151-11161`, `MarkdownModel.cpp:435-446`). Gray math drifts between copies. -> single `MarkdownContrastJs(opacity, invert)` (owned by MarkdownModel).
+5. **Layer violations:** `TrimConfigDialog.cpp:92,113` calls `GetEngine()->PageMediabox(CurrentPageNo())` **without VirtualToPhysical** — real bug under TC2 (even virtual pages). 9 sites in Canvas/RenderCache should use `DisplayModel::PageMediaBox()` (already does VirtualToPhysical + column split).
+6. **Dead code:** `QuickToggleViewportCrop` v1 zero callers (`DisplayModel.cpp:343-355`); v1 crop stack parallel to v2 (`DisplayModel.h:340-349`, 6 fields); flashcard dead fields (`hwndCardCount`, `CmdFlashcardNext`, `studyModeType`, `history`); `kEtaW` stale in `ToolbarLayout.h:22`; `CmdCommandPaletteOnlyTabs` commented in `Accelerators.cpp:84` but docs stale.
+7. **Bad coupling:** `Commands_AutoScroll.cpp:35-38` reads toolbar button state directly (`IsDlgButtonChecked`) — route via `SetToolbarButtonCheckedState`; `ContrastOverlay.cpp:119-141` reaches into webview JS (should live in MarkdownModel).
+8. **God files:** `SumatraPDF.cpp` back to 14,231 lines (target ~10k); `Canvas.cpp` 5,652; `EngineMupdf.cpp` 6,689. 16C continues.
+
+### Execution phases (effort x result)
+
+| Phase | Action | Files | Effort | Risk | Gain |
+|---|---|---|---|---|---|
+| R1 | Fix TrimConfigDialog VirtualToPhysical bug + 9 sites -> `dm->PageMediaBox()` | TrimConfigDialog, Canvas, RenderCache | Low | Low | High (latent bug) |
+| R2 | Centralize `MarkdownContrastJs` (3 divergent copies) | ContrastOverlay, MarkdownModel, SumatraPDF | Low | Low | Medium (kills drift) |
+| R3 | Helpers `ShiftToColumn/UnshiftFromColumn` + `TrimRectPage/TrimRectInverse` | DisplayModel, RenderCache, Canvas, Selection | Medium | Medium (render path) | High |
+| R4 | `TrimDragComputeLines` (3 copies) | Canvas.cpp | Low | Low | Medium |
+| R5 | Prune dead code: QuickToggleViewportCrop v1 + v1 stack + flashcard dead fields + stale kEtaW + stale docs | DisplayModel, SumatraPDF, Toolbar, Accelerators, docs | Low | Low | Medium |
+| R6 | Decouple `Commands_AutoScroll.cpp:35`; move contrast JS to MarkdownModel | Commands_AutoScroll, ContrastOverlay, MarkdownModel | Low | Low | Low-Medium |
+| R7 | 16C continuation: SumatraPDF.cpp 14.2k -> ~10k or Canvas.cpp extraction | SumatraPDF.cpp | High | Medium-High | High |
+
+Recommended order: R1 (bug) -> R2/R4/R6 (low-risk quick wins) -> R3 (render path, with manual tests) -> R5 -> R7 (only with test coverage).
+
+---
+
 ## Two Columns v2 (Crop View) — PLANO DE MIGRAÇÃO (em progresso)
 
 ### Objetivo
@@ -361,8 +392,9 @@ Duas funções, INDEPENDENTES POR DOCUMENTO (cada aba/doc mantém seu próprio e
 
 ### BUG-4: Trim Config desativa o Contrast overlay
 
-- **Status:** Em investigação (2026-09-21)
-- **Descrição:** Abrir o Trim Config e salvar desativa o contrast overlay. Fix parcial: `UpdateTabFileDisplayStateForTab` não destrói mais o overlay quando `contrastEnabled` (SaveSettings mid-session era o assassino). **Bug persiste** → há outro caminho destruindo/resetando o contrast no fluxo do trim config (suspeitos: TaskReloadSettings via FileWatcher do settings.txt, reset de `win->contrastEnabled`, z-order do overlay).
+- **Status:** Fix v2 (auto-guérison) deployado 2026-09-22 — aguardando teste do fluxo exato (1ª abertura do trim config após abrir o app + confirmar)
+- **Sintoma refinado pelo usuário:** o erro é PONTUAL — só na PRIMEIRA interação com o trim config após abrir o app (invert=off, ao confirmar o contrast sumia). Hipótese: conflito entre estado por sessão (sessionData), estado por documento (FileState) e estado padrão (ReplaceDocumentInCurrentTab tem 3 caminhos que escrevem `win->contrastEnabled`) + corrida do FileWatcher do settings.txt (`WatchedFileSetIgnore` vs `SchedulePrefsReload` → `ReloadSettings` nuka `gGlobalPrefs` inteiro).
+- **Fix v2 (invariant + auto-guérison):** novo `EnsureContrastOverlayState(win)` — cria se `contrastEnabled && !overlay`, destrói se `!enabled && overlay`, reposiciona se sincronizado. Chamado em TODOS os pontos de escrita do flag: `ReplaceDocumentInCurrentTab` (doc-swap agora também destrói overlay órfão), `UpdateTabFileDisplayStateForTab` (SaveSettings), TrimConfig OnSave/OnCancel (RE-CRIA o overlay se algum caminho o destruiu). Breadcrumbs `[contrast]` mantidos (Create/Destroy/WM_DESTROY) para diagnóstico via debug build.
 - **Lição sistêmica:** funções de persistência (SaveSettings/*ForTab) NÃO devem ter side-effects de UI (destruir HWNDs). Documentado em lemma m3a65456efb04.
 
 ## Sistema de Flashcards (Cloze sobre texto existente)

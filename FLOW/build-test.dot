@@ -1,0 +1,24 @@
+digraph BuildTest {
+    rankdir=TB;
+    node [shape=box, style=rounded];
+
+    edit [label="Edit src/ (clang-format after .cpp/.h)", fillcolor="#c8e6c9", style=filled];
+    gen [label="Codegen when adding commands/settings/flags:\nedit cmd/gen-{commands,settings,flags}.ts\n-> bun cmd/gen-code.ts\nNEVER edit @gen-start blocks by hand", fillcolor="#fff9c4", style=filled];
+    build [label="bun cmd/build.ts\nvs2022\\TumatraPDF.sln -> out/dbg64/TumatraPDF.exe\nauto-copy -> Compiled/TumatraPDF.exe (KILL running app first, EBUSY)", fillcolor="#bbdefb", style=filled];
+    rel [label="Release x64 (daily-use binary):\nMSBuild vs2022\\TumatraPDF.sln /t:TumatraPDF\n/p:Configuration=Release;Platform=x64\n~15-20min full / few min incremental\nNDEBUG: no ReportIf; renders 5-10x faster than debug", fillcolor="#e1bee7", style=filled];
+    smoke [label="Smoke: launch -for-testing\n(never skip for UI changes)", fillcolor="#c8e6c9", style=filled];
+    tests [label="Targeted tests only:\nissue fix -> bun tests/issue-<n>.ts\nutil/base -> bun cmd/run-unit-tests.ts -dbg\nNEVER run full suite", fillcolor="#bbdefb", style=filled];
+    dbgctl [label="Runtime control: -dbg-control <pipe> + cmd/control.ts\n44 Test* commands (preferred over GUI automation)", shape=box, fillcolor="#e3f2fd", style=filled];
+    docs [label="Update informativos: README, LOG.md, FLOW/*.dot\nLOG = Keep a Changelog, Unreleased accumulates", fillcolor="#f5f5f5", style=filled];
+    deploy [label="Deploy Compiled/TumatraPDF.exe (release) /\nCompiled/TumatraPDF-debug.exe (debug, crash diagnosis)", fillcolor="#e1bee7", style=filled];
+
+    edit -> gen [style=dashed, label="if APIs changed"];
+    edit -> build;
+    gen -> build;
+    build -> smoke -> tests -> docs -> deploy;
+    smoke -> dbgctl [style=dotted];
+    build -> rel [style=dashed, label="daily-use binary"];
+
+    warn [label="GOTCHAS:\n- debug renders 5-10x slower; 'app slow' complaints -> check binary first\n- WM_TIMER at USER_TIMER_MINIMUM is NOT 100Hz (coalescing)\n- PowerShell Set-Content corrupts UTF-8 (use Edit tool)\n- NEVER '2>nul' (NTFS undeletable file), use 2>/dev/null\n- cl.exe must be in PATH for full gen-code (virt-keys part)", shape=note, fillcolor="#ffcdd2", style=filled];
+    build -> warn [style=dotted];
+}

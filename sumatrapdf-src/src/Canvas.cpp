@@ -3403,20 +3403,29 @@ static bool DrawDocument(MainWindow* win, HDC hdc, Rect rcArea) {
         }
         for (int i = 0; i < len(win->flashcard.cards); i++) {
             const Flashcard& card = win->flashcard.cards[i];
-            if (!dm->ValidPageNo(card.pageNo)) continue;
-            Rect rc = dm->CvtToScreen(card.pageNo, card.bounds);
+            if (card.pageNo < 1) continue;
             Gdiplus::Graphics gs(hdc);
-            if (i == studyCardIdx && !win->flashcard.revealMode) {
-                // Studying this card: opaque mask hides the cloze text ([_____])
-                Gdiplus::Color col(200, 100, 100, 100); // dark gray, opaque
-                Gdiplus::SolidBrush brush(col);
-                gs.FillRectangle(&brush, rc.x, rc.y, rc.dx, rc.dy);
-            } else {
-                // Reading / reveal / non-current card: subtle translucent marker
-                // (text stays visible; on reveal the current card shows its original text)
-                Gdiplus::Color col(30, 128, 128, 128); // light gray, very transparent
-                Gdiplus::SolidBrush brush(col);
-                gs.FillRectangle(&brush, rc.x, rc.y, rc.dx, rc.dy);
+            // Paint each quad subrect separately so a multi-line cloze covers
+            // exactly the highlighted text (not the union bbox). Under TC2 the
+            // display uses virtual pages: map the physical rect to its column
+            // (PhysicalToVirtualForRect) so the mask lands on the text.
+            for (int rIdx = 0; rIdx < len(card.rects); rIdx++) {
+                RectF vr;
+                int vPage = dm->PhysicalToVirtualForRect(card.pageNo, card.rects[rIdx], &vr);
+                if (!dm->ValidPageNo(vPage)) continue;
+                Rect rc = dm->CvtToScreen(vPage, vr);
+                if (i == studyCardIdx && !win->flashcard.revealMode) {
+                    // Studying this card: opaque mask hides the cloze text ([_____])
+                    Gdiplus::Color col(255, 100, 100, 100); // dark gray, fully opaque
+                    Gdiplus::SolidBrush brush(col);
+                    gs.FillRectangle(&brush, rc.x, rc.y, rc.dx, rc.dy);
+                } else {
+                    // Reading / reveal / non-current card: subtle translucent marker
+                    // (text stays visible; on reveal the current card shows its original text)
+                    Gdiplus::Color col(30, 128, 128, 128); // light gray, very transparent
+                    Gdiplus::SolidBrush brush(col);
+                    gs.FillRectangle(&brush, rc.x, rc.y, rc.dx, rc.dy);
+                }
             }
         }
     }

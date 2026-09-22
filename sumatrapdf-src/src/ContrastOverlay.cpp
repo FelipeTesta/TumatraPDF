@@ -40,6 +40,9 @@ static LRESULT CALLBACK WndProcContrastOverlay(HWND hwnd, UINT msg, WPARAM wp, L
             return 0;
         }
         case WM_DESTROY:
+            // BUG-4 breadcrumb: catches EVERY destruction path (direct or
+            // indirect), so we can see in sumlog who killed the overlay
+            logfa("[contrast] overlay WM_DESTROY win=%p enabled=%d\n", win, (int)win->contrastEnabled);
             win->hwndContrastOverlay = nullptr;
             break;
     }
@@ -86,6 +89,7 @@ void CreateContrastOverlay(MainWindow* win) {
 
     SetWindowLongPtrW(hwndOverlay, GWLP_USERDATA, (LONG_PTR)win);
     win->hwndContrastOverlay = hwndOverlay;
+    logfa("[contrast] CreateContrastOverlay win=%p hwnd=%p\n", win, hwndOverlay);
 
     // Set initial transparency
     BYTE alpha = AlphaFromOpacity(win->contrastOpacity);
@@ -97,6 +101,7 @@ void CreateContrastOverlay(MainWindow* win) {
 
 void DestroyContrastOverlay(MainWindow* win) {
     if (win->hwndContrastOverlay) {
+        logfa("[contrast] DestroyContrastOverlay win=%p enabled=%d\n", win, (int)win->contrastEnabled);
         DestroyWindow(win->hwndContrastOverlay);
         win->hwndContrastOverlay = nullptr;
     }
@@ -112,6 +117,26 @@ void UpdateContrastOverlay(MainWindow* win) {
     int w = rcCanvas.right - rcCanvas.left;
     int h = rcCanvas.bottom - rcCanvas.top;
     SetWindowPos(win->hwndContrastOverlay, nullptr, rcCanvas.left, rcCanvas.top, w, h, SWP_NOZORDER | SWP_NOACTIVATE);
+}
+
+// Keep the contrast overlay in sync with win->contrastEnabled: create it when
+// enabled but missing, destroy when disabled but present, reposition when in
+// sync. Session state (sessionData), per-document state (FileState) and the
+// default state (fresh document) all write the flag at different times, and a
+// write without a matching overlay update leaves the visual out of sync with
+// the state - every such path (doc load, tab switch, trim config save,
+// SaveSettings) calls this instead, so the overlay can never silently
+// disappear while contrast is enabled (BUG-4).
+void EnsureContrastOverlayState(MainWindow* win) {
+    if (win->contrastEnabled) {
+        if (!win->hwndContrastOverlay) {
+            CreateContrastOverlay(win); // no-op for markdown (handled in-page)
+        } else {
+            UpdateContrastOverlay(win);
+        }
+    } else if (win->hwndContrastOverlay) {
+        DestroyContrastOverlay(win);
+    }
 }
 
 void UpdateContrastOverlayOpacity(MainWindow* win) {

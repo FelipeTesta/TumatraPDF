@@ -148,8 +148,10 @@ static void ListaTreeSelectionChanged(TreeView::SelectionChangedEvent* args) {
     DisplayModel* dm = tab->AsFixed();
     if (!dm) return;
 
-    Rect screenRect = dm->CvtToScreen(card.pageNo, card.bounds);
-    dm->ScrollScreenToRect(card.pageNo, screenRect);
+    RectF vr;
+    int vPage = dm->PhysicalToVirtualForRect(card.pageNo, card.bounds, &vr);
+    Rect screenRect = dm->CvtToScreen(vPage, vr);
+    dm->ScrollScreenToRect(vPage, screenRect);
 }
 
 void FlashcardSidebarCreate(MainWindow* win) {

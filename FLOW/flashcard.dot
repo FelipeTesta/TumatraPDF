@@ -1,0 +1,21 @@
+digraph Flashcard {
+    rankdir=TB;
+    node [shape=box, style=rounded];
+
+    create [label="Create card (CmdFlashcardAdd)\nselection -> MuPDF Highlight (author=TumatraPDF-Flashcard)\ncontent EMPTY (positional mask, no text duplication)\nkey = hash(pageNo, bounds) - stable across saves", fillcolor="#c8e6c9", style=filled];
+    load [label="CmdFlashcardToggle ON\nFlashcardLoadFromDocument (by author, not 'Q:' prefix)\n+ FlashcardStudyLoad (studyDoc persistence)", fillcolor="#bbdefb", style=filled];
+    filter [label="BuildFilteredStudyOrder\nnew (rating==0) OR due (nextReviewAt <= now)", fillcolor="#bbdefb", style=filled];
+    study [label="Study mode\nopaque mask ONLY on current card (studyMode && !revealMode)\nothers translucent marker", fillcolor="#e1bee7", style=filled];
+    reveal [label="Reveal (Space/Enter)\nmask removed on current card - original text visible", fillcolor="#fff9c4", style=filled];
+    rate [label="Rate 1-4 (keys 1..4)\nSM-2 update, easeFactor capped [1.3, 2.5]\nrating==1 (Again): reinsert into current queue (relearn)", fillcolor="#e1bee7", style=filled];
+    persist [label="FlashcardStudySave\nJSON per doc; reload restores counts", fillcolor="#c8e6c9", style=filled];
+
+    create -> load -> filter -> study -> reveal -> rate -> persist;
+    rate -> study [style=dashed, label="next card"];
+
+    dead [label="Dead code to prune:\nhwndCardCount, CmdFlashcardNext (no-op),\nstudyModeType, history (TODO Flashcard Passo 7)", shape=note, fillcolor="#ffcdd2", style=filled];
+    filter -> dead [style=dotted];
+
+    ui [label="UI: FlashcardToolbar (Study/Back/Lista/Filter + counter btn idx 0)\nFlashcardSidebar (floating list, click->navigate)", shape=box, fillcolor="#e3f2fd", style=filled];
+    study -> ui [style=dotted];
+}

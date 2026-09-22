@@ -103,16 +103,18 @@ digraph TumatraPDF {
         style=dashed;
         color="#1565c0";
 
-        feat_scroll [label="AutoScroll\n· middle-click anchor: Canvas.cpp thin timer call (ID 7)\n· continuous F9: Canvas.cpp thin timer call (ID 15)\n  tick handlers: AutoScrollContinuousTick / AutoScrollMiddleClickTick\n  in AutoScroll.cpp (decl AutoScroll.h:25)\n  scroll = speed × multiplier\n· ETA: RecalcAutoScrollEta AutoScroll.cpp:82\n  label UI only in Toolbar.cpp:\n  CreateEtaLabel / RepositionEtaLabel / UpdateToolbarEtaText\n  gate AutoScrollShowEta + width cache\n· md-webview: wv->Eval(window.scrollBy(0,dy)) branch;\n  JS autoscrollBottom → OnJsNotifyCb →\n  DocController::OnAutoScrollBottom → stop timer"];
+        feat_scroll [label="AutoScroll\n· continuous F9: timer tick -> AutoScrollContinuousTick\n  (AutoScroll.cpp) -> MoveDocBy -> ScrollYBy -> WM_PAINT\n· ETA: page-based (timePerPage x remaining, resync per page)\n  pause (Shift-hold/Ctrl) excluded; canvas overlay label\n  (WS_EX_LAYERED + colorkey, Toolbar.cpp WndProcEtaOverlay)\n· md-webview: wv->Eval(window.scrollBy(0,dy)) branch;\n  JS autoscrollBottom -> OnAutoScrollBottom -> stop timer\n· see FLOW/autoscroll.dot (full pipeline)"];
         feat_contrast [label="Contrast (overlay)\n· layered child window over canvas:\n  ContrastOverlay.cpp:34-104\n  alpha via AlphaFromOpacity static helper :10\n  call sites L77 + L107\n· handlers SumatraPDF.cpp:10923-10987 (steps ±10)\n· per-document persistence\n· md-webview: div#__sumatra_contrast CSS overlay via Eval\n  (pointer-events:none, z-index max,\n  opacity=contrastOpacity*255/100/255.0f);\n  CreateContrastOverlay no-op for md;\n  RestoreContrastOverlay on OnDocumentComplete"];
-        feat_crop [label="ViewportCrop (column ×2)\n· DisplayModel::ApplyViewportCrop DisplayModel.cpp:250\n  zoom ×2 on 1st application; Shift bypasses L254\n· column switch/relayout SumatraPDF.cpp:2166-2193\n· toggle saves/restores viewport+zoom :10936-10958"];
+        feat_crop [label="ViewportCrop v1 (legacy, candidates to remove)\n+ TC2 (Two Columns v2): 2N virtual pages, colGap overlap,\n  Shift-hold quick view - see FLOW/two-columns-v2.dot\n· DisplayModel VirtualToPhysical/ColumnOfVirtual\n· render cache re-enabled (cached tc2 ~1ms blit)"];
         feat_trim [label="MarginTrim (clip top/bottom)\n· tile clip via pageRect:\n  RenderCache.cpp:360/745/1170\n· toggle relayout + frees cache\n  SumatraPDF.cpp:10961-10974\n· draggable red guide lines:\n  Canvas.cpp:1624/2019/3179"];
         feat_trimdlg [label="TrimConfigDialog (new)\n· singleton gTrimConfigWnd, Show L335\n· edits synced on drag:\n  TrimConfigDialogSyncEdits L189"];
         feat_tabs [label="Tabs (VirtWnds — TabsCtrl.cpp)\n· active tab underline 3px: Paint L224-225\n· Alt+Click closes tab: L719-723\n· Middle-click closes: L775-779\n· freeze mechanism REMOVED (2026-08-24)\n· Home tab always idx 0 pinned (Tabs.cpp:712-726)\n  ⇒ nTabs ≥ 2 with 1 doc\n· LayoutTabs dx=min(DpiScale(TabWidth),(clientW−5)/nTabs)"];
         feat_persist [label="Per-doc persistence\ninvert+contrast restored on reopen\nLoadDocument :2039-2045 →\nUpdateDocumentColors() :2045\nCreateContrastOverlay after ctrl=:2096"];
         feat_picker [label="Own File Picker\npref os↔sumatrapdf\nSumatraPDF.cpp:5852-5860"];
 
-        feat_scroll -> feat_contrast -> feat_crop -> feat_trim [style=invis];
+        feat_flash [label="Flashcards (cloze positional)\n· selection -> MuPDF highlight (author=TumatraPDF-Flashcard)\n· study: opaque mask only current card; reveal removes\n· SM-2 due filter + relearn; keys 1-4, Space/Enter\n· Flashcard.cpp / Commands_Flashcard.cpp / FlashcardToolbar.\n  / FlashcardSidebar — see FLOW/flashcard.dot"];
+
+        feat_scroll -> feat_contrast -> feat_crop -> feat_trim -> feat_flash [style=invis];
         feat_trimdlg -> feat_tabs -> feat_persist -> feat_picker [style=invis];
     }
 
@@ -138,8 +140,7 @@ digraph TumatraPDF {
         style=dashed;
         color="#b71c1c";
 
-        dead1 [label="QuickToggleViewportCrop()\nDisplayModel.cpp:279 — ZERO callers\nviewportCrop.quickToggle setting orphaned\ndouble-click not wired", fillcolor="#ffebee", style=filled];
-        dead3 [label="Commented accels: CmdCommandPaletteOnlyTabs\n(Accelerators.cpp:82), CmdCreateShortcutToFile (:70);\nBTNS_DROPDOWN for text commented Toolbar.cpp:336", fillcolor="#ffebee", style=filled];
+        dead1 [label="V1 crop stack: QuickToggleViewportCrop()\nDisplayModel.cpp:343-355 — STILL ZERO callers (2026-09-21)\n+ v1/v2 parallel fields DisplayModel.h:340-349\n+ CmdCommandPaletteOnlyTabs accel commented (docs stale)\n+ flashcard dead: hwndCardCount/CmdFlashcardNext\n-> TODO.md R5 prune", fillcolor="#ffebee", style=filled];
     }
 
     // ===================== DEPENDENCIES =====================
@@ -153,7 +154,7 @@ digraph TumatraPDF {
     mupdf -> render;
 
     // ===================== NOTES / FINDINGS =====================
-    notes [label="Scroll delay 3.7 vs 3.6.17065:\nroot cause = upstream smooth-scroll\ndefault TRUE. smoothScroll=false = instant.\nResidual: uitask::Post deferral\n(Canvas.cpp:4448-4459) + async render thread.\ntrim=on intensifies — separate fix.", shape=note, fillcolor="#fff9c4", style=filled];
+    notes [label="AUDIT 2026-09-21 (tree-sitter + agent, TODO.md):\ndup: colX math x4, trim rect x3, contrast JS x3 divergent,\ntrim-drag lines x3. Bug: TrimConfigDialog no VirtualToPhysical.\nGod files: SumatraPDF.cpp 14.2k lines (16C continues).\nRefactor phases R1-R7 in TODO.md.", shape=note, fillcolor="#fff9c4", style=filled];
     audit [label="AUDIT 2026-08-24:\ndiagram rewritten from real code\n(gToolbarButtons, menuDefNewTools, Accelerators,\ngen-settings.ts, explore agent).\nBottlenecks logged in lemma memory.\n\nBATCHES 1-3 (2026-08-24):\n· dead close-icon code removed (TabsCtrl)\n· AutoScroll module extracted (src/AutoScroll.{h,cpp})\n· perf guards: gAnyToggleChecked early-out,\n  width-gated ETA reposition, StringFormat statics\n  in TabWnd::Paint\n· lint: RenderCache unused param, static\n  SafeDeleteTrimConfigDialog, comment moved .h→.cpp\n· MERGE.md corrected (factual, fork point ~912ecf2)"];
 
     // ===================== LEGEND =====================
