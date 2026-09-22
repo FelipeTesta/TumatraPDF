@@ -334,18 +334,12 @@ struct MainWindow {
     // --- begin auto-scroll feature ---
     struct AutoScrollState {
         bool active = false;
-        float speed = 2.0f; // pixels per tick
+        float speed = 2.0f; // nominal pixels per tick (at 100Hz); see AutoScrollPxPerSec
         float speedMultiplier = 0.008f;
-        float accum = 0.0f;
-        int etaMinutes = 0;          // ETA estimate (minutes) at the last resync
-        int etaLastShown = -1;       // last displayed minute (dedupe label updates)
-        int etaPageNo = 0;           // page at the last resync (change triggers a new estimate)
-        DWORD etaResyncTick = 0;     // when the estimate was made (countdown base)
-        DWORD etaPageEnterTick = 0;  // when the current page was entered (seconds-per-page measurement)
-        DWORD etaPauseStartTick = 0; // when a pause started (excludes paused time from the measurement)
-        float etaPxPerSec = 0;       // measured effective scroll speed (0 = not measured yet, use nominal)
-        float etaScrollBaseY = 0;    // viewPort.y when measuring started (px/s measurement baseline)
-        DWORD etaScrollBaseTick = 0; // when measurement started
+        float accum = 0.0f;       // fractional pixels pending scroll
+        DWORD lastScrollTick = 0; // last tick timestamp (time-based scroll)
+        int etaMinutes = 0;       // ETA (minutes) = remaining px / declared speed
+        int etaLastShown = -1;    // last displayed minute (dedupe label updates)
         HWND hwndEtaLabel = nullptr;
         DWORD timerMinutes = 0;         // 0 = no timer (effective value used by tick)
         DWORD timerMinutesSetting = 30; // configured minutes from UI input (default 30)
