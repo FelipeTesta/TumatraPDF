@@ -134,3 +134,8 @@ struct MarkdownModel : DocController {
     TempStr LinkedDocPathTemp(Str url) const;
     bool MaybeLaunchLinkedDoc(Str url);
 };
+
+// Contrast JS for webview (markdown) documents: eval the returned string in the
+// page to apply/clear the contrast filter. Single source shared by the contrast
+// toggle, the opacity change and MarkdownModel::RestoreContrastOverlay.
+TempStr MarkdownContrastJs(bool enabled, int opacity, bool invert);

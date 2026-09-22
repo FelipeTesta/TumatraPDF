@@ -1634,6 +1634,36 @@ static PointF ArchSnapScreenPoint(MainWindow* win, DisplayModel* dm, int pageNo,
     return dm->CvtFromScreen(screenPt, pageNo);
 }
 
+// Screen-space info about the two draggable trim config lines (top/bottom
+// margin) for the current page: the line y positions plus the page origin,
+// zoom, mediabox size and active trim-top reference used to derive them.
+// Shared by the drag hit-test, the drag move and the paint overlay so the
+// three copies of the math can never drift apart.
+struct TrimLineInfo {
+    int topLineY = 0;
+    int bottomLineY = 0;
+    Point tl{};
+    float zoom = 0;
+    float mbDx = 0;
+    float mbDy = 0;
+    int tRef = 0;
+};
+
+static void TrimComputeLineInfo(MainWindow* win, DisplayModel* dm, TrimLineInfo* out) {
+    int pageNo = dm->CurrentPageNo();
+    RectF mb = dm->GetEngine()->PageMediabox(dm->VirtualToPhysical(pageNo));
+    float zoom = dm->GetZoomReal(pageNo);
+    Point tl = dm->CvtToScreen(pageNo, PointF(0, 0));
+    int tRef = dm->marginTrimEnabled ? gGlobalPrefs->trim.top : 0;
+    out->tl = tl;
+    out->zoom = zoom;
+    out->mbDx = mb.dx;
+    out->mbDy = mb.dy;
+    out->tRef = tRef;
+    out->topLineY = tl.y + (int)((win->trimConfigTop - tRef) * zoom);
+    out->bottomLineY = tl.y + (int)((mb.dy - win->trimConfigBottom - tRef) * zoom);
+}
+
 static void OnMouseMove(MainWindow* win, int x, int y, WPARAM /*key*/) {
     // Track mouse position for erase mode overlay
     win->archTools.mousePos = Point{x, y};
@@ -1641,26 +1671,19 @@ static void OnMouseMove(MainWindow* win, int x, int y, WPARAM /*key*/) {
     if (win->trimDragging) {
         auto* dm = win->AsFixed();
         if (dm) {
-            int pageNo = dm->CurrentPageNo();
-            RectF mb = dm->GetEngine()->PageMediabox(dm->VirtualToPhysical(pageNo));
-            float zoom = dm->GetZoomReal(pageNo);
-            Point tl = dm->CvtToScreen(pageNo, PointF(0, 0));
-            int tRef = dm->marginTrimEnabled ? gGlobalPrefs->trim.top : 0;
-            int topLineY = tl.y + (int)((win->trimConfigTop - tRef) * zoom);
-            int bottomLineY = tl.y + (int)((mb.dy - win->trimConfigBottom - tRef) * zoom);
+            TrimLineInfo ti;
+            TrimComputeLineInfo(win, dm, &ti);
             if (win->trimConfigDragLine == 1) {
-                int minY = tl.y - (int)(tRef * zoom);
-                int maxY = bottomLineY;
-                int lineY = y < minY ? minY : (y > maxY ? maxY : y);
-                win->trimConfigTop = (int)((lineY - tl.y) / zoom + tRef);
+                int minY = ti.tl.y - (int)(ti.tRef * ti.zoom);
+                int lineY = y < minY ? minY : (y > ti.bottomLineY ? ti.bottomLineY : y);
+                win->trimConfigTop = (int)((lineY - ti.tl.y) / ti.zoom + ti.tRef);
                 if (win->trimConfigTop < 0) {
                     win->trimConfigTop = 0;
                 }
             } else if (win->trimConfigDragLine == 2) {
-                int minY = topLineY;
-                int maxY = tl.y + (int)((mb.dy - tRef) * zoom);
-                int lineY = y < minY ? minY : (y > maxY ? maxY : y);
-                win->trimConfigBottom = (int)((mb.dy - tRef) - (lineY - tl.y) / zoom);
+                int maxY = ti.tl.y + (int)((ti.mbDy - ti.tRef) * ti.zoom);
+                int lineY = y < ti.topLineY ? ti.topLineY : (y > maxY ? maxY : y);
+                win->trimConfigBottom = (int)((ti.mbDy - ti.tRef) - (lineY - ti.tl.y) / ti.zoom);
                 if (win->trimConfigBottom < 0) {
                     win->trimConfigBottom = 0;
                 }
@@ -2087,16 +2110,11 @@ static void OnMouseLeftButtonDown(MainWindow* win, int x, int y, WPARAM key) {
     if (win->trimConfigMode != 0) {
         auto* dm = win->AsFixed();
         if (dm) {
-            int pageNo = dm->CurrentPageNo();
-            RectF mb = dm->GetEngine()->PageMediabox(dm->VirtualToPhysical(pageNo));
-            float zoom = dm->GetZoomReal(pageNo);
-            Point tl = dm->CvtToScreen(pageNo, PointF(0, 0));
-            int tRef = dm->marginTrimEnabled ? gGlobalPrefs->trim.top : 0;
-            int topLineY = tl.y + (int)((win->trimConfigTop - tRef) * zoom);
-            int bottomLineY = tl.y + (int)((mb.dy - win->trimConfigBottom - tRef) * zoom);
+            TrimLineInfo ti;
+            TrimComputeLineInfo(win, dm, &ti);
             int tol = DpiScale(win->hwndFrame, 8);
-            if (abs(y - topLineY) <= tol || abs(y - bottomLineY) <= tol) {
-                win->trimConfigDragLine = abs(y - topLineY) <= abs(y - bottomLineY) ? 1 : 2;
+            if (abs(y - ti.topLineY) <= tol || abs(y - ti.bottomLineY) <= tol) {
+                win->trimConfigDragLine = abs(y - ti.topLineY) <= abs(y - ti.bottomLineY) ? 1 : 2;
                 SetCapture(win->hwndCanvas);
                 win->mouseAction = MouseAction::Dragging;
                 win->trimDragging = true;
@@ -3401,6 +3419,21 @@ static bool DrawDocument(MainWindow* win, HDC hdc, Rect rcArea) {
         if (win->flashcard.studyMode && win->flashcard.currentCardIdx >= 0 && len(win->flashcard.studyOrder) > 0) {
             studyCardIdx = win->flashcard.studyOrder[win->flashcard.currentCardIdx];
         }
+        // Temp debug logging: first paints only, to verify cloze rect mapping
+        static int fcPaintLogCount = 0;
+        int cardN = len(win->flashcard.cards);
+        if (fcPaintLogCount < 10) {
+            Rect canvasRc(Point(), dm->GetCanvasSize());
+            PageInfo* piDbg = cardN > 0 ? dm->GetPageInfo(win->flashcard.cards[0].pageNo) : nullptr;
+            logf(
+                "[fc-paint] studyMode=%d reveal=%d studyCardIdx=%d nCards=%d trim=%d canvas=%dx%d "
+                "pi->pageOnScreen=%s\n",
+                (int)win->flashcard.studyMode, (int)win->flashcard.revealMode, studyCardIdx, cardN,
+                (int)dm->marginTrimEnabled, canvasRc.dx, canvasRc.dy,
+                piDbg ? fmt("(x=%d y=%d dx=%d dy=%d)", piDbg->pageOnScreen.x, piDbg->pageOnScreen.y,
+                            piDbg->pageOnScreen.dx, piDbg->pageOnScreen.dy)
+                      : StrL("null"));
+        }
         for (int i = 0; i < len(win->flashcard.cards); i++) {
             const Flashcard& card = win->flashcard.cards[i];
             if (card.pageNo < 1) continue;
@@ -3414,6 +3447,14 @@ static bool DrawDocument(MainWindow* win, HDC hdc, Rect rcArea) {
                 int vPage = dm->PhysicalToVirtualForRect(card.pageNo, card.rects[rIdx], &vr);
                 if (!dm->ValidPageNo(vPage)) continue;
                 Rect rc = dm->CvtToScreen(vPage, vr);
+                if (fcPaintLogCount < 10) {
+                    logf(
+                        "[fc-paint]   card %d rect[%d] page=%d phys y=%.1f..%.1f x=%.1f..%.1f -> vPage=%d screen x=%d "
+                        "y=%d dx=%d dy=%d\n",
+                        i, rIdx, card.pageNo, (double)card.rects[rIdx].y,
+                        (double)(card.rects[rIdx].y + card.rects[rIdx].dy), (double)card.rects[rIdx].x,
+                        (double)(card.rects[rIdx].x + card.rects[rIdx].dx), vPage, rc.x, rc.y, rc.dx, rc.dy);
+                }
                 if (i == studyCardIdx && !win->flashcard.revealMode) {
                     // Studying this card: opaque mask hides the cloze text ([_____])
                     Gdiplus::Color col(255, 100, 100, 100); // dark gray, fully opaque
@@ -3428,6 +3469,7 @@ static bool DrawDocument(MainWindow* win, HDC hdc, Rect rcArea) {
                 }
             }
         }
+        fcPaintLogCount++;
     }
     // keep the floating selection toolbar aligned with the selection while
     // scrolling/zooming; hides itself when the selection is gone or off-screen
@@ -3638,18 +3680,13 @@ static void OnPaintDocument(MainWindow* win) {
     if (win->trimConfigMode != 0) {
         auto* dm = win->AsFixed();
         if (dm) {
-            int pageNo = dm->CurrentPageNo();
-            RectF mb = dm->GetEngine()->PageMediabox(dm->VirtualToPhysical(pageNo));
-            float zoom = dm->GetZoomReal(pageNo);
-            Point tl = dm->CvtToScreen(pageNo, PointF(0, 0));
-            int tRef = dm->marginTrimEnabled ? gGlobalPrefs->trim.top : 0;
-            int topLineY = tl.y + (int)((win->trimConfigTop - tRef) * zoom);
-            int bottomLineY = tl.y + (int)((mb.dy - win->trimConfigBottom - tRef) * zoom);
-            int pageW = (int)(mb.dx * zoom);
+            TrimLineInfo ti;
+            TrimComputeLineInfo(win, dm, &ti);
+            int pageW = (int)(ti.mbDx * ti.zoom);
             Gdiplus::Graphics gs(hdc);
             Gdiplus::Pen pen(Gdiplus::Color(255, 255, 0, 0), 2); // red 2px
-            gs.DrawLine(&pen, tl.x, topLineY, tl.x + pageW, topLineY);
-            gs.DrawLine(&pen, tl.x, bottomLineY, tl.x + pageW, bottomLineY);
+            gs.DrawLine(&pen, ti.tl.x, ti.topLineY, ti.tl.x + pageW, ti.topLineY);
+            gs.DrawLine(&pen, ti.tl.x, ti.bottomLineY, ti.tl.x + pageW, ti.bottomLineY);
         }
     }
 

@@ -343,7 +343,9 @@ struct MainWindow {
         DWORD etaResyncTick = 0;     // when the estimate was made (countdown base)
         DWORD etaPageEnterTick = 0;  // when the current page was entered (seconds-per-page measurement)
         DWORD etaPauseStartTick = 0; // when a pause started (excludes paused time from the measurement)
-        float etaTimePerPageSec = 0; // measured seconds per page (0 = not measured yet)
+        float etaPxPerSec = 0;       // measured effective scroll speed (0 = not measured yet, use nominal)
+        float etaScrollBaseY = 0;    // viewPort.y when measuring started (px/s measurement baseline)
+        DWORD etaScrollBaseTick = 0; // when measurement started
         HWND hwndEtaLabel = nullptr;
         DWORD timerMinutes = 0;         // 0 = no timer (effective value used by tick)
         DWORD timerMinutesSetting = 30; // configured minutes from UI input (default 30)

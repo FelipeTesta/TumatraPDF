@@ -11146,23 +11146,9 @@ static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, L
                     auto mm = win->AsMarkdown();
                     struct WebviewWnd* wv = mm->GetWebviewWnd();
                     if (wv) {
-                        if (win->contrastEnabled) {
-                            bool invert = GetInvertPageColors();
-                            int gray = invert ? (int)(255.0 * (win->contrastOpacity / 100.0) + 0.5)
-                                              : (int)(255.0 * (1.0 - win->contrastOpacity / 100.0) + 0.5);
-                            TempStr js =
-                                fmt("document.body.style.backgroundColor = '%s';"
-                                    "document.body.style.color = 'rgb(%d,%d,%d)';",
-                                    invert ? StrL("#050505") : StrL("#FAFAFA"), gray, gray, gray);
-                            wv->Eval(js);
-                        } else {
-                            TempStr js =
-                                fmt("document.body.style.backgroundColor = '';"
-                                    "document.body.style.color = '';");
-                            wv->Eval(js);
-                        }
+                        wv->Eval(MarkdownContrastJs(win->contrastEnabled, win->contrastOpacity, GetInvertPageColors()));
+                        LogInfo("[md] contrast toggle -> %d", (int)win->contrastEnabled);
                     }
-                    LogInfo("[md] contrast toggle -> %d", win->contrastEnabled);
                 } else {
                     // Fixed-page path (PDF, ebook, etc.)
                     if (win->contrastEnabled) {

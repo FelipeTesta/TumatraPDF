@@ -349,13 +349,11 @@ static RectF GetTileRectUser(DisplayModel* dm, int pageNo, int rotation, float z
     RectF rect = engine->Transform(ToRectF(pixelbox), renderPageNo, zoom, rotation, true);
     // two column v2: rect is in column-local (left half) page coords; shift it
     // right by the column offset so the engine renders the right/left half.
-    // Mirrors the render-time colX shift in the non-cached path. The right
-    // column is shifted by halfW-gap so the columns overlap in the center.
-    if (dm->IsViewportCropV2Active()) {
-        int cropColumn = dm->ColumnOfVirtual(pageNo);
-        if (cropColumn >= 0) {
-            RectF mb = engine->PageMediabox(renderPageNo);
-            rect.x += cropColumn == 1 ? dm->ViewportCropV2RightColumnX(mb) : mb.x;
+    // Mirrors the render-time colX shift in the non-cached path.
+    {
+        float colX;
+        if (dm->ColumnOffsetXForPage(pageNo, &colX)) {
+            rect.x += colX;
         }
     }
     if (trimEnabled) {
@@ -482,7 +480,16 @@ void RenderCache::Invalidate(DisplayModel* dm, int pageNo, RectF rect) {
 
     ScopedRecursiveMutex scopeCache(&cacheAccess);
 
-    RectF mediabox = dm->GetEngine()->PageMediabox(pageNo);
+    // two column v2: pageNo is a VIRTUAL cache key; derive the mediabox like
+    // GetTileRes/GetTileRectDevice do so the tile comparison below is valid
+    int renderPageNo = dm->VirtualToPhysical(pageNo);
+    RectF mediabox = dm->GetEngine()->PageMediabox(renderPageNo);
+    if (dm->IsViewportCropV2Active()) {
+        int cropColumn = dm->ColumnOfVirtual(pageNo);
+        if (cropColumn >= 0) {
+            mediabox.dx = dm->ViewportCropV2ColumnWidth(mediabox);
+        }
+    }
     for (int i = 0; i < cacheCount; i++) {
         auto* e = cache[i];
         if (e->dm == dm && e->pageNo == pageNo && !GetTileRect(mediabox, e->tile).Intersect(rect).IsEmpty()) {
@@ -1222,13 +1229,11 @@ int RenderCache::Paint(HDC hdc, Rect bounds, DisplayModel* dm, int pageNo, PageI
         // the (inverse) transform area is in physical mediabox units; shift it
         // right by the column offset so only the left/right half renders, at
         // full screen width (the layout already gave the virtual page a half-
-        // width media box, so Fit Width fills the viewport). The right column
-        // is shifted by halfW-gap so the columns overlap in the center band.
-        if (dm->IsViewportCropV2Active()) {
-            int cropColumn = dm->ColumnOfVirtual(pageNo);
-            if (cropColumn >= 0) {
-                RectF mb = dm->GetEngine()->PageMediabox(renderPageNo);
-                area.x += cropColumn == 1 ? dm->ViewportCropV2RightColumnX(mb) : mb.x;
+        // width media box, so Fit Width fills the viewport).
+        {
+            float colX;
+            if (dm->ColumnOffsetXForPage(pageNo, &colX)) {
+                area.x += colX;
             }
         }
 

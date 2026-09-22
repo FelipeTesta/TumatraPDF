@@ -1,5 +1,43 @@
 # TumatraPDF — Development Log
 
+## 2026-09-22 (s6) — Autoscroll ETA: feedback loop + pixel-based ETA (BUILD OK)
+
+### Fixed
+- **ETA free-fall até zero**: `AutoScrollContinuousTick` countdown chamava `UpdateToolbarEtaText(win, remaining)` que **reescrevia `etaMinutes`** com o valor já-decrementado. Após 1 min do último resync, o baseline ficava contaminado e o ETA caía ~1/tick até 0. `UpdateEtaOverlayText(win, minutes)` ganhou param display-only; `UpdateToolbarEtaText` não escreve mais `etaMinutes`.
+- **ETA oscilando 3h→2h→3h**: medição era por página (`timePerPageSec`), mas alturas de página variam (figuras/diagramas) → oscilação 2x por página. Agora: `remainingPx / pxPerSec` — pixels restantes (GetCanvasSize.dy − viewPort.y−dy) ÷ velocidade efetiva medida **acumulativamente** desde a última calibração. Resultado no teste: 203→318→319→318 min (converge; medição per-page era 203→132→226→272). Como efeito colateral, o ETA reflete a velocidade *real* (WM_TIMER renderiza ~63% do nominal) em vez da nominal.
+- **Pausa vazando no ETA**: Ctrl/shift-hold agora deslocam também `etaResyncTick` e `etaScrollBaseTick` — countdown e medição congelam durante pausas.
+- Recalibração ocorre **somente** nos 3 pontos: toggle ON, ajuste de velocidade, mudança de página. Countdown puro entre resyncs (floor 1min).
+- `~` removido do formato de horas (`%dh %02dmin`).
+
+### Notes
+- Debug logs `[as-eta]` (recalc + countdown) mantidos para diagnóstico. `tests/ad-hoc-eta-debug.ts` = repro (liga autoscroll, ~150s).
+
+## 2026-09-22 (s5) — .md ETA + MD contrast single-source (visual kept) + audit R1/R2/R3◐/R4/R5◐ (BUILD OK)
+
+### Fixed
+- **ETA .md stuck**: webview tick branch never recalculated ETA (only a one-shot async JS eval on toggle — after that, frozen). The rAF loop (`__tumatraAS`) now sends `autoscrollProgress` throttled ~10s → `OnAutoScrollProgress` → ETA continues counting while scrolling (AutoScroll.cpp, SetWebviewAutoScroll).
+- **Contrast MD: single source (R2), visual UNCHANGED by design**: there were 3 DIVERGENT copies of contrast JS (toggle/opacity/restore) with different gray math -> unified in `MarkdownContrastJs(enabled, opacity, invert)` (MarkdownModel). The MD visual (body bg #FAFAFA/#050505 + gray text) is INTENTIONALLY different from the PDF black veil and REMAINS so (user decision). Attempt to unify visual (CSS filter brightness/invert) was reverted by request.
+- **Latent BUG TrimConfigDialog (R1, audit)**: `OnEditTopChanged`/`OnEditBottomChanged` called `GetEngine()->PageMediabox(CurrentPageNo())` with VIRTUAL pageNo under TC2 (same class as GetTileRes bug that froze the app) → now `dm->PageMediaBox()` (routes virtual→physical). BONUS: `RenderCache::Invalidate` had the same missed site — routed + column halve.
+
+### Changed (audit R3/R4/R5)
+- **R3 (colX)**: 4 copies of column shift (GetTileRectUser, non-cache Paint, CvtToScreen, CvtFromScreen) unified in `DisplayModel::ColumnOffsetXForPage(pageNo, &offX)` — single source of offset (left = mb.x, right = RightColumnX). TrimRectPage NOT done: site semantics differ, forcing helper = risk in render path due to low value.
+- **R4**: 3 copies of trim drag lines math in Canvas.cpp (hit-test/move/paint) unified in `TrimComputeLineInfo`/`TrimLineInfo`.
+- **R5 partial**: removed `QuickToggleViewportCrop` v1 (zero callers) and `kEtaW` (Toolbar.cpp). V1 crop stack remains (v1 button alive); flashcard dead fields remain (agent active).
+- FLOW dots updated: `trim-contrast.dot` (R1/R2/R4 done, R3 decision), `autoscroll.dot` (rAF progress notify).
+- TODO.md: audit phases marked (R1 ✅ R2 ✅ R3 ◐ R4 ✅ R5 ◐ R6 ◐ R7).
+
+### Deploy
+- `Compiled\TumatraPDF.exe` = rel64 13:02 (daily reading) + `Compiled\TumatraPDF-debug.exe` = dbg64 12:56.
+
+## 2026-09-22 (s4) — Trim Coord Central + Flashcard Toolbar State (BUILD OK)
+
+### Fixed
+- **Trim ligado deslocava seleção/overlays (root cause sistêmico)**: `DisplayModel::CvtToScreen`/`CvtFromScreen` não aplicavam o offset do margin trim (layout usa altura reduzida; conteúdo renderizado começa na tira superior). Overlays em page coords (seleção, cloze, link hover) caíam deslocados. Fix central: `CvtToScreen` faz `y -= trim.top`, `CvtFromScreen` faz `y += trim.top`; removido o ajuste manual de `Selection.cpp::GetRect` (ficaria duplicado). Repara bug da seleção incorreta com trim e ajuda o posicionamento das máscaras cloze.
+- **Flashcard toolbar — estado visual**: botões Study/Reveal ficam checked quando ativos (`FlashcardToolbarUpdateState`, TB_SETSTATE), chamado nos toggles Study/Reveal e em HandleFlashcardRate.
+
+### Notes
+- Debug logging temporário no paint dos clozes (`[fc-paint]`, primeiros 10 frames): state + trim + canvas size + pageOnScreen + por-rect físico→virtual→screen. Remover após diagnóstico.
+
 ## 2026-09-22 (s3) — BUG-4 v2: Contrast Overlay Self-Healing (BUILD OK)
 
 ### Fixed

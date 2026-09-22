@@ -60,6 +60,7 @@ TempStr FlashcardStudyPath(const char* filePath);
 void FlashcardToolbarCreate(MainWindow* win);
 void FlashcardToolbarDestroy(MainWindow* win);
 void FlashcardToolbarUpdateCount(MainWindow* win);
+void FlashcardToolbarUpdateState(MainWindow* win);
 
 // FlashcardSidebar (in FlashcardSidebar.cpp)
 void FlashcardSidebarCreate(MainWindow* win);

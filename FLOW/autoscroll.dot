@@ -15,7 +15,7 @@ digraph AutoScroll {
     eta [label="ETA (page-based, resync on page change only)\nformula: timePerPage x remainingPages, roundUp +1min\npause (Shift/Ctrl) excluded via etaPauseStartTick\nfields: MainWindow.h AutoScrollState", shape=box, fillcolor="#c8e6c9", style=filled];
     etaUi [label="ETA label: canvas overlay (WndProcEtaOverlay, Toolbar.cpp)\nWS_EX_LAYERED + SetLayeredWindowAttributes + magenta colorkey\nREQUIRED or invisible", shape=note, fillcolor="#fff9c4", style=filled];
 
-    md [label="Markdown (.md) webview branch:\nJS window.scrollBy(0,dy)\nautoscrollBottom -> DocController::OnAutoScrollBottom -> stop\nautoscrollProgress -> OnAutoScrollProgress -> UpdateToolbarEtaText", shape=box, fillcolor="#e3f2fd", style=filled];
+    md [label="Markdown (.md) webview branch:\nrAF loop __tumatraAS (60fps scrollBy, px/sec)\nthrottled autoscrollProgress notify ~10s\n-> OnAutoScrollProgress -> UpdateToolbarEtaText\n(ETA keeps counting while scrolling; 2026-09-22 fix)\nautoscrollBottom -> OnAutoScrollBottom -> stop", shape=box, fillcolor="#e3f2fd", style=filled];
 
     shift [label="Shift hold = PAUSE tick (quick view full page)\nrelease resumes; viewport remap via RestoreViewportAfterV2Toggle\n(fraction-of-page dyInPage, not raw px)", shape=box, fillcolor="#fff9c4", style=filled];
 

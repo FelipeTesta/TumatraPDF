@@ -418,35 +418,41 @@ void MarkdownModel::OnAutoScrollProgress(int remainingPx) {
     }
 }
 
+// Single source of the webview (markdown) contrast JS. MD contrast is
+// INTENTIONALLY different from the PDF overlay look (design decision): it
+// recolors the page inline — light bg + dark gray text, or dark bg + light
+// gray text when colors are inverted — instead of dimming the page with a
+// black veil. opacity=0 -> nearly invisible text, 100 -> full contrast.
+// Kept as one function so all call sites use identical math (the previous 3
+// divergent copies drifted).
+TempStr MarkdownContrastJs(bool enabled, int opacity, bool invert) {
+    if (!enabled) {
+        return fmt(
+            "document.documentElement.style.filter='';"
+            "document.body.style.backgroundColor='';"
+            "document.body.style.color='';");
+    }
+    int op = limitValue(opacity, 0, 100);
+    int gray = invert ? (int)(255.0 * (op / 100.0) + 0.5) : (int)(255.0 * (1.0 - op / 100.0) + 0.5);
+    return fmt(
+        "document.documentElement.style.filter='';"
+        "document.body.style.backgroundColor='%s';"
+        "document.body.style.color='rgb(%d,%d,%d)';",
+        invert ? StrL("#050505") : StrL("#FAFAFA"), gray, gray, gray);
+}
+
 void MarkdownModel::RestoreContrastOverlay() {
     if (!cb) {
         return;
     }
-    bool enabled = cb->GetContrastEnabled();
-    int opacity = cb->GetContrastOpacity();
     struct WebviewWnd* wv = GetWebviewWnd();
     if (!wv) {
         return;
     }
-
-    if (enabled) {
-        bool invert = GetInvertPageColors();
-        // Markdown contrast: light bg + dark text (normal) or dark bg + light text (invert)
-        // opacity=0 -> nearly invisible, opacity=100 -> full contrast
-        int gray = invert ? (int)(255.0 * (opacity / 100.0) + 0.5) : (int)(255.0 * (1.0 - opacity / 100.0) + 0.5);
-        TempStr js =
-            fmt("document.body.style.backgroundColor = '%s';"
-                "document.body.style.color = 'rgb(%d,%d,%d)';",
-                invert ? StrL("#050505") : StrL("#FAFAFA"), gray, gray, gray);
-        wv->Eval(js);
-    } else {
-        // Remove inline styles when contrast is OFF
-        TempStr js =
-            fmt("document.body.style.backgroundColor = '';"
-                "document.body.style.color = '';");
-        wv->Eval(js);
-    }
-    LogInfo("[md] contrast enabled=%d opacity=%d", enabled, opacity);
+    bool enabled = cb->GetContrastEnabled();
+    int opacity = cb->GetContrastOpacity();
+    wv->Eval(MarkdownContrastJs(enabled, opacity, GetInvertPageColors()));
+    LogInfo("[md] contrast enabled=%d opacity=%d", (int)enabled, opacity);
 }
 
 void MarkdownModel::SelectAll() const {

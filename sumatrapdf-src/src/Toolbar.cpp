@@ -57,7 +57,6 @@ constexpr int kCtrlGapX = 4;     // horizontal gap between adjacent custom contr
 constexpr int kCtrlH = 18;       // standard height for checkbox / edit controls
 constexpr int kLabelW = 40;      // "Timer:" label fallback width
 constexpr int kTimerSlotW = 130; // timer controls slot fallback width
-constexpr int kEtaW = 50;        // ETA label fallback width
 
 // true if any toolbar toggle button (BTNS_CHECK) is currently checked;
 // used by WndProcToolbar WM_PAINT overlay to early-out when no highlight needed
@@ -1345,7 +1344,12 @@ void PositionEtaOverlay(MainWindow* win) {
 }
 
 // Refreshes the combined "speed | ETA" text of the bottom-right overlay.
-void UpdateEtaOverlayText(MainWindow* win) {
+// `minutes` is DISPLAY-ONLY; the calibrated value lives in etaMinutes and is
+// written only by RecalcAutoScrollEta (toggle on, speed change, page change).
+// Storing a countdown value back into etaMinutes created a feedback loop:
+// after 1 elapsed minute the displayed value itself became the new baseline
+// and the ETA free-fell ~1/min per timer tick until zero.
+void UpdateEtaOverlayText(MainWindow* win, int minutes) {
     HWND hwndLabel = win->autoScroll.hwndEtaLabel;
     if (!hwndLabel) {
         return;
@@ -1355,13 +1359,14 @@ void UpdateEtaOverlayText(MainWindow* win) {
         return;
     }
     float mlt = win->autoScroll.speedMultiplier;
-    // long reads: simplify "ETA 65min" to "ETA ~1h 05min"
-    int minutes = win->autoScroll.etaMinutes;
+    if (minutes < 0) {
+        minutes = win->autoScroll.etaMinutes;
+    }
     TempStr eta;
     if (minutes >= 60) {
         int hours = minutes / 60;
         int rem = minutes % 60;
-        eta = fmt("~%dh %02dmin", hours, rem);
+        eta = fmt("%dh %02dmin", hours, rem);
     } else {
         eta = fmt("%dmin", minutes);
     }
@@ -1377,7 +1382,9 @@ void UpdateToolbarEtaText(MainWindow* win, int minutes) {
     if (win->autoScroll.hwndEtaLabel == nullptr) {
         return;
     }
-    win->autoScroll.etaMinutes = minutes < 0 ? 0 : minutes;
+    // Do NOT write etaMinutes here — it's the calibrated value from
+    // RecalcAutoScrollEta (toggle/speed/page-change). A countdown display
+    // value written back here self-feeds the next countdown baseline.
     if (!gGlobalPrefs->autoScrollShowEta) {
         if (IsWindowVisible(win->autoScroll.hwndEtaLabel)) {
             ShowWindow(win->autoScroll.hwndEtaLabel, SW_HIDE);
@@ -1388,14 +1395,14 @@ void UpdateToolbarEtaText(MainWindow* win, int minutes) {
         ShowWindow(win->autoScroll.hwndEtaLabel, SW_HIDE);
         return;
     }
-    UpdateEtaOverlayText(win);
+    UpdateEtaOverlayText(win, minutes);
 }
 
 void UpdateToolbarSpeedLabel(MainWindow* win) {
     // Speed is shown only in the bottom-right overlay (with ETA); the toolbar
     // speed label was removed to avoid duplication.
     if (win->autoScroll.active && win->autoScroll.hwndEtaLabel) {
-        UpdateEtaOverlayText(win);
+        UpdateEtaOverlayText(win, -1);
     }
 }
 

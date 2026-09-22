@@ -219,7 +219,6 @@ struct DisplayModel : DocController {
 
     // viewport crop
     void ApplyViewportCrop();
-    void QuickToggleViewportCrop();
 
     // two column v2 (stacked virtual columns, independent of v1)
     void ApplyViewportCropV2();
@@ -236,6 +235,12 @@ struct DisplayModel : DocController {
     float ViewportCropV2ColumnWidth(RectF mb) const;
     // the on-page x offset to render the right column (mb.x + halfW - gap).
     float ViewportCropV2RightColumnX(RectF mb) const;
+    // x offset (physical page coords) of the column this virtual page renders:
+    // left -> full mediabox.x, right -> ViewportCropV2RightColumnX. Single
+    // source for the render-time colX shift and its CvtToScreen/CvtFromScreen
+    // inverses; returns false (offset untouched) when pageNo is not a split
+    // column (non-v2, quick view, odd page).
+    bool ColumnOffsetXForPage(int pageNo, float* offset) const;
     // restore the vertical scroll position after the N<->2N relayout so toggling
     // v2 doesn't jump the view. physAnchor + dyInPage captured BEFORE the toggle.
     void RestoreViewportAfterV2Toggle(int physAnchor, int dyInPage);

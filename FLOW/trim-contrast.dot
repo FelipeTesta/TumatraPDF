@@ -3,17 +3,19 @@ digraph TrimContrast {
     node [shape=box, style=rounded];
 
     trim [label="Trim (CmdMarginTrimToggle)\nclip-based render: pageRect shrinks top/bottom\nRenderCache tile funcs shrink mediabox + shift user rect", fillcolor="#c8e6c9", style=filled];
-    trimdlg [label="TrimConfigDialog (singleton gTrimConfigWnd)\nmargin-top/bottom buttons -> draggable red 2px line\ndrag syncs edits (TrimConfigDialogSyncEdits)\ncheck button saves gGlobalPrefs->trim", fillcolor="#bbdefb", style=filled];
-    trimbug [label="BUG LATENT (audit 2026-09-21):\nTrimConfigDialog.cpp:92,113 uses\nGetEngine()->PageMediabox(CurrentPageNo()) WITHOUT\nVirtualToPhysical -> wrong mediabox under TC2 even pages\nfix: DisplayModel::PageMediaBox()", shape=note, fillcolor="#ffcdd2", style=filled];
-    trimdup [label="Duplication: trim rect math in 3 places\nRenderCache.cpp:327/1240, DisplayModel.cpp:1461\n(+ inverse Selection.cpp:48) -> TrimRectPage/Inverse", shape=note, fillcolor="#fff9c4", style=filled];
+    trimdlg [label="TrimConfigDialog (singleton gTrimConfigWnd)\nmargin-top/bottom buttons -> draggable red 2px line\ndrag syncs edits (TrimConfigDialogSyncEdits)\ncheck button saves gGlobalPrefs->trim\nedit validation: DisplayModel::PageMediaBox(CurrentPageNo())\n(virtual->physical routed, TC2-safe)", fillcolor="#bbdefb", style=filled];
+    trimbug [label="FIXED 2026-09-22 (audit R1):\nTrimConfigDialog.cpp:92,113 used engine\nPageMediabox(CurrentPageNo()) w/o routing\nunder TC2 even pages = ReportIf + wrong box\nnow dm->PageMediaBox(); bonus: RenderCache::Invalidate\nsame class also routed (VirtualToPhysical + column halve)", shape=note, fillcolor="#c8e6c9", style=filled];
+    trimdup [label="R3 evaluated 2026-09-22: trim rect snippets kept\ninline (site semantics differ: mediabox shrink vs\narea shift vs pt shift + distinct guards);\nforcing helper = render-path risk, low value\ncolX math IS unified -> DisplayModel::ColumnOffsetXForPage", shape=note, fillcolor="#fff9c4", style=filled];
+    trimlines [label="R4 DONE 2026-09-22: 3 drag-line math copies in\nCanvas.cpp (hit-test/move/paint) unified in\nTrimComputeLineInfo(TrimLineInfo) static helper", shape=note, fillcolor="#c8e6c9", style=filled];
 
-    contrast [label="Contrast (Ctrl+Shift+C)\nWin32 overlay: WS_EX_LAYERED child, alpha slider\nper-doc persist (FileState ContrastEnabled/Opacity)", fillcolor="#e1bee7", style=filled];
-    cmd [label="Markdown path: div#__sumatra_contrast CSS via Eval\npointer-events:none, remove() on OFF", fillcolor="#e3f2fd", style=filled];
-    contrastdup [label="Duplication: contrast JS in 3 divergent copies\nContrastOverlay.cpp:126 / SumatraPDF.cpp:11151 /\nMarkdownModel.cpp:435 (gray math drifts)\n-> MarkdownContrastJs() single source", shape=note, fillcolor="#ffcdd2", style=filled];
+    contrast [label="Contrast (Ctrl+Shift+C)\nPDF: Win32 overlay veil WS_EX_LAYERED child,\nalpha=opacity%, result = pixel x (1-a)\nper-doc persist (FileState ContrastEnabled/Opacity)", fillcolor="#e1bee7", style=filled];
+    cmd [label="Markdown path (R2 DONE 2026-09-22):\nMarkdownContrastJs(enabled,opacity,invert)\nsingle source in MarkdownModel (3 copies killed)\nMD visual INTENTIONALLY different from PDF veil:\nbody bg #FAFAFA/#050505 + gray text\n(opacity scales text gray; invert swaps)", fillcolor="#e3f2fd", style=filled];
+    contrastdup [label="R2 DONE 2026-09-22: gray-math drift killed\nall 3 sites (toggle SumatraPDF / opacity\nContrastOverlay / restore MarkdownModel)\neval the same MarkdownContrastJs string", shape=note, fillcolor="#c8e6c9", style=filled];
 
     trim -> trimdlg;
     trimdlg -> trimbug [style=dotted];
     trim -> trimdup [style=dotted];
+    trim -> trimlines [style=dotted];
     contrast -> cmd;
     cmd -> contrastdup [style=dotted];
 }

@@ -140,30 +140,12 @@ void EnsureContrastOverlayState(MainWindow* win) {
 }
 
 void UpdateContrastOverlayOpacity(MainWindow* win) {
-    // Native CSS style approach for markdown contrast (replaces WebView overlay div)
+    // Markdown contrast: native CSS filter replicating the PDF veil math
     if (win->AsMarkdown()) {
         auto mm = win->AsMarkdown();
         struct WebviewWnd* wv = mm->GetWebviewWnd();
         if (wv) {
-            int opacity = win->contrastOpacity;
-            float cssOpacity = opacity / 100.0f;
-
-            if (win->contrastEnabled) {
-                bool invert = GetInvertPageColors();
-                int textGray = invert ? (int)(255 * cssOpacity) : (int)(255 * (1.0f - cssOpacity));
-                // Set background and text colors directly on body via inline styles
-                TempStr js =
-                    fmt("document.body.style.backgroundColor = '%s';"
-                        "document.body.style.color = 'rgb(%d,%d,%d)';",
-                        invert ? StrL("#050505") : StrL("#FAFAFA"), textGray, textGray, textGray);
-                wv->Eval(js);
-            } else {
-                // Remove inline styles when contrast is OFF
-                TempStr js =
-                    fmt("document.body.style.backgroundColor = '';"
-                        "document.body.style.color = '';");
-                wv->Eval(js);
-            }
+            wv->Eval(MarkdownContrastJs(win->contrastEnabled, win->contrastOpacity, GetInvertPageColors()));
         }
         LogInfo("[md] contrast opacity -> %d", win->contrastOpacity);
         return;

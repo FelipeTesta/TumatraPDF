@@ -115,6 +115,7 @@ static void HandleFlashcardRate(MainWindow* win, int rating) {
 
     // Advance to next card
     win->flashcard.revealMode = false;
+    FlashcardToolbarUpdateState(win);
     win->flashcard.currentCardIdx++;
     if (win->flashcard.currentCardIdx >= len(win->flashcard.studyOrder)) {
         win->flashcard.studyMode = false;
@@ -294,6 +295,7 @@ bool HandleCommandFlashcard(MainWindow* win, int cmd) {
             } else {
                 logf("[fc] CmdFlashcardStudy - study OFF\n");
             }
+            FlashcardToolbarUpdateState(win);
             MainWindowRerender(win);
             return true;
         }
@@ -301,6 +303,7 @@ bool HandleCommandFlashcard(MainWindow* win, int cmd) {
             logf("[fc] CmdFlashcardReveal - revealing answer for card %d\n", win->flashcard.currentCardIdx);
             if (win->flashcard.studyMode && !win->flashcard.revealMode) {
                 win->flashcard.revealMode = true;
+                FlashcardToolbarUpdateState(win);
                 MainWindowRerender(win);
             }
             return true;

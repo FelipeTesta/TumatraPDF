@@ -10,7 +10,7 @@ void UpdateToolbarButtonsToolTipsForWindow(MainWindow*);
 void UpdateToolbarFindText(MainWindow*);
 void UpdateToolbarPageText(MainWindow*, int pageCount, bool updateOnly = false);
 void UpdateToolbarEtaText(MainWindow* win, int minutes);
-void UpdateEtaOverlayText(MainWindow* win);
+void UpdateEtaOverlayText(MainWindow* win, int minutes);
 void PositionEtaOverlay(MainWindow* win);
 
 void UpdateToolbarSpeedLabel(MainWindow* win);

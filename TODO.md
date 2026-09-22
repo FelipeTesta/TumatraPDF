@@ -15,19 +15,23 @@ Audit done with tree-sitter + explore agent over `sumatrapdf-src/src/`. Findings
 7. **Bad coupling:** `Commands_AutoScroll.cpp:35-38` reads toolbar button state directly (`IsDlgButtonChecked`) — route via `SetToolbarButtonCheckedState`; `ContrastOverlay.cpp:119-141` reaches into webview JS (should live in MarkdownModel).
 8. **God files:** `SumatraPDF.cpp` back to 14,231 lines (target ~10k); `Canvas.cpp` 5,652; `EngineMupdf.cpp` 6,689. 16C continues.
 
-### Execution phases (effort x result)
+### Execution phases (effort x result) — status 2026-09-22
 
 | Phase | Action | Files | Effort | Risk | Gain |
 |---|---|---|---|---|---|
-| R1 | Fix TrimConfigDialog VirtualToPhysical bug + 9 sites -> `dm->PageMediaBox()` | TrimConfigDialog, Canvas, RenderCache | Low | Low | High (latent bug) |
-| R2 | Centralize `MarkdownContrastJs` (3 divergent copies) | ContrastOverlay, MarkdownModel, SumatraPDF | Low | Low | Medium (kills drift) |
-| R3 | Helpers `ShiftToColumn/UnshiftFromColumn` + `TrimRectPage/TrimRectInverse` | DisplayModel, RenderCache, Canvas, Selection | Medium | Medium (render path) | High |
-| R4 | `TrimDragComputeLines` (3 copies) | Canvas.cpp | Low | Low | Medium |
-| R5 | Prune dead code: QuickToggleViewportCrop v1 + v1 stack + flashcard dead fields + stale kEtaW + stale docs | DisplayModel, SumatraPDF, Toolbar, Accelerators, docs | Low | Low | Medium |
-| R6 | Decouple `Commands_AutoScroll.cpp:35`; move contrast JS to MarkdownModel | Commands_AutoScroll, ContrastOverlay, MarkdownModel | Low | Low | Low-Medium |
+| R1 ✅ | TrimConfigDialog VirtualToPhysical bug + `dm->PageMediaBox()`; BONUS: RenderCache::Invalidate same class also routed | TrimConfigDialog, RenderCache | Low | Low | High (latent bug) — DONE |
+| R2 ✅ | Centralize `MarkdownContrastJs` (3 divergent copies killed) + PDF-parity filter semantics | ContrastOverlay, MarkdownModel, SumatraPDF | Low | Low | High (kills drift + PDF/MD parity) — DONE |
+| R3 ◐ | colX math unified → `DisplayModel::ColumnOffsetXForPage` (4 copies → 1). TrimRectPage/Inverse NOT done: site semantics differ (mediabox shrink vs area/pt shift + distinct guards), forcing helper = render-path risk, low value | DisplayModel, RenderCache | Medium | Medium (render path) | High (colX part done) |
+| R4 ✅ | `TrimComputeLineInfo(TrimLineInfo)` (3 copies) | Canvas.cpp | Low | Low | Medium — DONE |
+| R5 ◐ | Pruned: QuickToggleViewportCrop v1 (0 callers) + kEtaW. LEFT: v1 crop stack (v1 button still live), flashcard dead fields (flashcard agent ACTIVE) | DisplayModel, Toolbar | Low | Low | Medium |
+| R6 ◐ | Contrast JS → MarkdownModel done via R2; Commands_AutoScroll decouple NOT done | Commands_AutoScroll, ContrastOverlay, MarkdownModel | Low | Low | Low-Medium |
 | R7 | 16C continuation: SumatraPDF.cpp 14.2k -> ~10k or Canvas.cpp extraction | SumatraPDF.cpp | High | Medium-High | High |
 
-Recommended order: R1 (bug) -> R2/R4/R6 (low-risk quick wins) -> R3 (render path, with manual tests) -> R5 -> R7 (only with test coverage).
+### Fixes 2026-09-22 (user-reported)
+
+- [x] **ETA .md stuck**: webview branch never recalculated ETA (only one-shot async eval at toggle); rAF loop now throttles `autoscrollProgress` notify ~10s → ETA keeps counting while scrolling (SetWebviewAutoScroll, AutoScroll.cpp).
+- [x] **Contrast .md: drift eliminated, visual kept**: 3 divergent copies of contrast JS → single source `MarkdownContrastJs` (MarkdownModel). MD visual (body bg + gray text) INTENTIONALLY different from PDF veil — remains (visual parity attempt reverted by user request).
+- [x] Deploy: `Compiled\TumatraPDF.exe` (rel64, 13:02) + `Compiled\TumatraPDF-debug.exe` (12:56).
 
 ---
 

@@ -43,10 +43,8 @@ SelectionOnPage::SelectionOnPage(int pageNo, const RectF* const rect) {
 
 Rect SelectionOnPage::GetRect(DisplayModel* dm) const {
     // if the page is not visible, we return an empty rectangle
+    // NOTE: trim offset is applied centrally in CvtToScreen, not here
     RectF adjustedRect = rect;
-    if (dm->marginTrimEnabled) {
-        adjustedRect.y -= (float)gGlobalPrefs->trim.top; // FIXED: was +=
-    }
     // pageNo is PHYSICAL (comes from TextSel); map to the virtual page that
     // owns this rect (left/right column) before CvtToScreen (which is virtual
     // and column-aware). Non-v2: identity.

@@ -89,7 +89,10 @@ void TrimConfigWnd::OnEditTopChanged() {
     }
     auto* dm = win->AsFixed();
     if (dm) {
-        RectF mb = dm->GetEngine()->PageMediabox(dm->CurrentPageNo());
+        // PageMediaBox routes virtual->physical under TC2 (CurrentPageNo() is a
+        // virtual page number there); calling the engine with it directly hits
+        // ReportIf(pageNo > pageCount) and clamps against the wrong box
+        RectF mb = dm->PageMediaBox(dm->CurrentPageNo());
         int maxTop = (int)mb.dy - win->trimConfigBottom;
         if (val > maxTop) {
             val = maxTop;
@@ -110,7 +113,8 @@ void TrimConfigWnd::OnEditBottomChanged() {
     }
     auto* dm = win->AsFixed();
     if (dm) {
-        RectF mb = dm->GetEngine()->PageMediabox(dm->CurrentPageNo());
+        // see OnEditTopChanged: PageMediaBox routes virtual->physical under TC2
+        RectF mb = dm->PageMediaBox(dm->CurrentPageNo());
         int maxBottom = (int)mb.dy - win->trimConfigTop;
         if (val > maxBottom) {
             val = maxBottom;

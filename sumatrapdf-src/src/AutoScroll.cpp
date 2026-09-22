@@ -89,36 +89,31 @@ float AutoScrollPxPerSec(MainWindow* win) {
     return speed * 100.0f; // speed is pixels per tick, timer fires ~100x/sec
 }
 
-// Estimate the remaining reading time as (time per page) x (remaining pages).
-// Resynced on page changes (AutoScrollContinuousTick); between resyncs the
-// display counts down from the last estimate like an inverted timer.
-// TC2 is naturally accounted for: PageCount()/CurrentPageNo() are VIRTUAL
-// (2N columns = each physical page counts twice). Margin trim doesn't matter:
-// the page count is unchanged and the measured seconds-per-page covers it.
+// Estimate the remaining reading time as (remaining pixels) / (pixels per
+// second). Pixel-based (not page-based): page heights vary (images, diagrams),
+// so per-page measurements oscillated 2x page to page. The speed is measured
+// cumulatively since the last calibration point (toggle / speed change):
+// scrolledPx / elapsedSec — converges instead of swinging per page.
 void RecalcAutoScrollEta(MainWindow* win) {
     if (!win->autoScroll.active) {
         return;
     }
     auto dm = win->AsFixed();
     if (dm) {
-        int remainingPages = dm->PageCount() - dm->CurrentPageNo();
-        // measured seconds per page once available; until then estimate from
-        // the current page height and the nominal scroll speed
-        float timePerPageSec = win->autoScroll.etaTimePerPageSec;
-        if (timePerPageSec <= 0) {
-            float pxPerSec = AutoScrollPxPerSec(win);
-            PageInfo* pi = dm->GetPageInfo(dm->CurrentPageNo());
-            float pageHeightPx = pi ? (float)pi->pos.dy : 0.0f;
-            if (pxPerSec > 0 && pageHeightPx > 0) {
-                timePerPageSec = pageHeightPx / pxPerSec;
-            }
+        float pxPerSec = win->autoScroll.etaPxPerSec;
+        if (pxPerSec <= 0) {
+            pxPerSec = AutoScrollPxPerSec(win); // nominal until measured
         }
-        if (remainingPages <= 0 || timePerPageSec <= 0) {
+        Size cs = dm->GetCanvasSize();
+        float remainingPx = (float)cs.dy - (float)(dm->viewPort.y + dm->viewPort.dy);
+        if (remainingPx <= 0 || pxPerSec <= 0) {
             win->autoScroll.etaMinutes = 0;
         } else {
-            float etaSec = (float)remainingPages * timePerPageSec;
+            float etaSec = remainingPx / pxPerSec;
             win->autoScroll.etaMinutes = (int)(etaSec / 60.0f) + 1; // round up, reader-friendly
         }
+        logf("[as-eta] recalc: page=%d remainingPx=%.0f pxPerSec=%.1f -> etaMinutes=%d\n", dm->CurrentPageNo(),
+             (double)remainingPx, (double)pxPerSec, win->autoScroll.etaMinutes);
         win->autoScroll.etaResyncTick = GetTickCount();
         return;
     }
@@ -143,8 +138,11 @@ void RecalcAutoScrollEta(MainWindow* win) {
 
 // Install a requestAnimationFrame-driven autoscroll loop in the markdown page and
 // start/update it at the given speed in px/sec (0 stops it). The JS loop scrolls
-// smoothly in the renderer at ~60fps without a cross-process Eval per WM_TIMER tick,
-// and notifies __sumatra__ 'autoscrollBottom' when it reaches the end.
+// smoothly in the renderer at ~60fps without a cross-process Eval per WM_TIMER tick.
+// It notifies __sumatra__ 'autoscrollBottom' when it reaches the end and throttles
+// an 'autoscrollProgress' notify every ~10s so the ETA keeps updating while a
+// markdown document auto-scrolls (the WM_TIMER tick has no page-change signal
+// for webview documents, so the rAF loop is the only reliable progress source).
 static void SetWebviewAutoScroll(MainWindow* win, float pxPerSec) {
     auto mm = win->AsMarkdown();
     struct WebviewWnd* wv = mm ? mm->GetWebviewWnd() : nullptr;
@@ -156,8 +154,9 @@ static void SetWebviewAutoScroll(MainWindow* win, float pxPerSec) {
         return;
     }
     TempStr js =
-        fmt("if(!window.__tumatraAS){window.__tumatraAS={raf:0,pxPerSec:0,last:0,accum:0,"
+        fmt("if(!window.__tumatraAS){window.__tumatraAS={raf:0,pxPerSec:0,last:0,accum:0,lastProg:0,"
             "start:function(p){this.stop();this.pxPerSec=p;this.accum=0;this.last=performance.now();"
+            "this.lastProg=this.last-9500;"
             "this.raf=requestAnimationFrame(this.tick.bind(this));},"
             "stop:function(){if(this.raf){cancelAnimationFrame(this.raf);this.raf=0;}this.pxPerSec=0;this.accum=0;},"
             "tick:function(t){var dt=(t-this.last)/1000;this.last=t;if(this.pxPerSec<=0)return;"
@@ -165,6 +164,8 @@ static void SetWebviewAutoScroll(MainWindow* win, float pxPerSec) {
             "if(dy>0){this.accum-=dy;window.scrollBy(0,dy);}"
             "var y=window.scrollY||window.pageYOffset,h=window.innerHeight,"
             "sh=document.documentElement.scrollHeight;"
+            "if(t-this.lastProg>=10000){this.lastProg=t;var rem=sh-(y+h);if(rem<0)rem=0;"
+            "window.__sumatra__.notify('autoscrollProgress',rem);}"
             "if((y+h)>=sh-2){this.stop();window.__sumatra__.notify('autoscrollBottom',1);return;}"
             "this.raf=requestAnimationFrame(this.tick.bind(this));}};}"
             "window.__tumatraAS.start(%f);",
@@ -187,11 +188,13 @@ void AutoScrollToggle(MainWindow* win) {
     if (win->autoScroll.active) {
         win->autoScroll.accum = 0;
         win->autoScroll.startTick = GetTickCount();
-        // fresh ETA state: measure seconds per page from scratch
+        // fresh ETA state: speed measured cumulatively from the scroll base
         win->autoScroll.etaPageNo = 0;
         win->autoScroll.etaPageEnterTick = 0;
         win->autoScroll.etaPauseStartTick = 0;
-        win->autoScroll.etaTimePerPageSec = 0;
+        win->autoScroll.etaPxPerSec = 0;
+        win->autoScroll.etaScrollBaseTick = win->autoScroll.startTick;
+        win->autoScroll.etaScrollBaseY = dm ? (float)dm->viewPort.y : 0.0f;
         win->autoScroll.etaLastShown = -1;
         // Feed the timer stop-logic: use configured minutes if timer enabled, else 0 (no limit)
         win->autoScroll.timerMinutes = win->autoScroll.timerEnabled ? win->autoScroll.timerMinutesSetting : 0;
@@ -241,10 +244,13 @@ void AutoScrollSpeedAdjust(MainWindow* win, int direction) {
     // persist to global prefs as last-used speed for new documents
     gGlobalPrefs->autoScrollSpeedMultiplier = win->autoScroll.speedMultiplier;
     if (win->autoScroll.active) {
-        // the measured seconds-per-page is stale at the new speed; the
-        // fallback estimate (page height / nominal speed) covers the display
-        // until the next page transition re-measures
-        win->autoScroll.etaTimePerPageSec = 0;
+        // the measured speed is stale at the new multiplier; recalibrate from
+        // now (cumulative px/s starts over at the new speed)
+        auto dmAdj = win->AsFixed();
+        win->autoScroll.etaPxPerSec = 0;
+        win->autoScroll.etaScrollBaseTick = GetTickCount();
+        win->autoScroll.etaScrollBaseY = dmAdj ? (float)dmAdj->viewPort.y : 0.0f;
+        win->autoScroll.etaPageNo = 0; // force treat-as-page-change on next tick
         RecalcAutoScrollEta(win);
         if (win->AsMarkdown() && !(GetKeyState(VK_CONTROL) & 0x8000)) {
             win->autoScroll.webviewPxPerSec = AutoScrollPxPerSec(win);
@@ -374,10 +380,18 @@ void AutoScrollContinuousTick(MainWindow* win, HWND hwnd) {
             return;
         }
         // resuming after a pause (shift-hold or Ctrl): exclude the paused
-        // time from the seconds-per-page measurement
+        // time from the page timer, the ETA countdown baseline AND the px/s
+        // measurement base (otherwise the ETA keeps decreasing while paused)
         if (win->autoScroll.etaPauseStartTick != 0) {
+            DWORD pausedMs = GetTickCount() - win->autoScroll.etaPauseStartTick;
             if (win->autoScroll.etaPageEnterTick > 0) {
-                win->autoScroll.etaPageEnterTick += GetTickCount() - win->autoScroll.etaPauseStartTick;
+                win->autoScroll.etaPageEnterTick += pausedMs;
+            }
+            if (win->autoScroll.etaResyncTick > 0) {
+                win->autoScroll.etaResyncTick += pausedMs;
+            }
+            if (win->autoScroll.etaScrollBaseTick > 0) {
+                win->autoScroll.etaScrollBaseTick += pausedMs;
             }
             win->autoScroll.etaPauseStartTick = 0;
         }
@@ -411,31 +425,32 @@ void AutoScrollContinuousTick(MainWindow* win, HWND hwnd) {
             win->autoScroll.accum -= dy;
             win->MoveDocBy(0, dy);
         }
-        // ETA resync: once per page change, measure the seconds spent on the
-        // page we just left and re-estimate as (time per page) x (remaining
-        // pages). TC2 counts virtual pages so each physical page naturally
-        // counts twice; trim doesn't change the page count.
+        // ETA resync: once per page change, measure the effective scroll speed
+        // cumulatively since calibration (scrolledPx / elapsedSec). Cumulative
+        // => converges; per-page times oscillated 2x with page height.
         int currPage = dm->CurrentPageNo();
         if (currPage != win->autoScroll.etaPageNo) {
             DWORD now = GetTickCount();
-            if (win->autoScroll.etaPageEnterTick > 0) {
-                float pageSec = (float)(now - win->autoScroll.etaPageEnterTick) / 1000.0f;
-                if (pageSec > 0.5f) { // ignore instant transitions / jitter
-                    // light smoothing so a single outlier page doesn't skew the estimate
-                    float prev = win->autoScroll.etaTimePerPageSec;
-                    win->autoScroll.etaTimePerPageSec = prev > 0 ? (prev + pageSec) / 2.0f : pageSec;
-                }
+            float elapsedSec = (float)(now - win->autoScroll.etaScrollBaseTick) / 1000.0f;
+            float scrolledPx = (float)dm->viewPort.y - win->autoScroll.etaScrollBaseY;
+            if (elapsedSec > 2.0f && scrolledPx > 100.0f) {
+                win->autoScroll.etaPxPerSec = scrolledPx / elapsedSec;
             }
             win->autoScroll.etaPageEnterTick = now;
             win->autoScroll.etaPageNo = currPage;
             RecalcAutoScrollEta(win);
         }
-        // between resyncs the display counts down like an inverted timer
-        int remaining = win->autoScroll.etaMinutes - (int)((GetTickCount() - win->autoScroll.etaResyncTick) / 60000);
-        if (remaining < 0) {
-            remaining = 0;
+        // between resyncs the display counts down like an inverted timer;
+        // floor at 1 min: without a page change we can't know the real speed,
+        // and a stale estimate decaying to "0min" mid-document reads as a bug
+        DWORD elapsedSinceResync = GetTickCount() - win->autoScroll.etaResyncTick;
+        int remaining = win->autoScroll.etaMinutes - (int)(elapsedSinceResync / 60000);
+        if (remaining < 1) {
+            remaining = 1;
         }
         if (remaining != win->autoScroll.etaLastShown) {
+            logf("[as-eta] countdown: etaMinutes=%d elapsedMs=%u remaining=%d currPage=%d\n",
+                 win->autoScroll.etaMinutes, elapsedSinceResync, remaining, currPage);
             win->autoScroll.etaLastShown = remaining;
             UpdateToolbarEtaText(win, remaining);
         }
@@ -468,8 +483,10 @@ void AutoScrollContinuousTick(MainWindow* win, HWND hwnd) {
                 return;
             }
         }
-        // ETA: not implemented for webview mode (single-page scroll, no page count)
-        // Could be added later by estimating from scroll position vs scrollHeight
+        // ETA: the rAF loop inside the page throttles an 'autoscrollProgress'
+        // notify every ~10s (see SetWebviewAutoScroll); OnAutoScrollProgress
+        // turns it into the ETA label. No page-change signal exists for
+        // webview documents, so no per-tick work is needed here.
     }
 }
 

@@ -166,3 +166,15 @@ void FlashcardToolbarUpdateCount(MainWindow* win) {
     bi.pszText = (WCHAR*)CWStrTemp(ToWStrTemp(Str(text)));
     SendMessageW(win->flashcard.hwndToolbarFlashcard, TB_SETBUTTONINFOW, 0, (LPARAM)&bi);
 }
+
+// Reflect study/reveal state on the toolbar buttons (checked = active).
+void FlashcardToolbarUpdateState(MainWindow* win) {
+    if (!win->flashcard.hwndToolbarFlashcard) {
+        return;
+    }
+    HWND hwnd = win->flashcard.hwndToolbarFlashcard;
+    WPARAM studyState = win->flashcard.studyMode ? (TBSTATE_ENABLED | TBSTATE_CHECKED) : TBSTATE_ENABLED;
+    WPARAM revealState = win->flashcard.revealMode ? (TBSTATE_ENABLED | TBSTATE_CHECKED) : TBSTATE_ENABLED;
+    SendMessageW(hwnd, TB_SETSTATE, (WPARAM)CmdFlashcardStudy, MAKELONG(studyState, 0));
+    SendMessageW(hwnd, TB_SETSTATE, (WPARAM)CmdFlashcardReveal, MAKELONG(revealState, 0));
+}

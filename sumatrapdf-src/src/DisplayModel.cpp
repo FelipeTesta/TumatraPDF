@@ -131,6 +131,25 @@ float DisplayModel::ViewportCropV2RightColumnX(RectF mb) const {
     return mb.x + mb.dx / 2.0f - ViewportCropV2Gap();
 }
 
+// x offset (physical page coords) of the column a virtual page renders: the
+// left column keeps the full mediabox origin, the right column starts at
+// halfW-gap. Render paths ADD it (column-local -> physical coords, the
+// render-time colX shift), CvtToScreen SUBTRACTS it and CvtFromScreen ADDS it
+// back. Keeping the selection in one place is what keeps the render, the
+// screen<->page conversions and the hit-testing from drifting apart.
+bool DisplayModel::ColumnOffsetXForPage(int pageNo, float* offset) const {
+    if (!IsViewportCropV2Active()) {
+        return false;
+    }
+    int cropColumn = ColumnOfVirtual(pageNo);
+    if (cropColumn < 0) {
+        return false;
+    }
+    RectF mb = engine->PageMediabox(VirtualToPhysical(pageNo));
+    *offset = cropColumn == 1 ? ViewportCropV2RightColumnX(mb) : mb.x;
+    return true;
+}
+
 int DisplayModel::VirtualPageCount() const {
     if (IsViewportCropV2Active()) {
         return 2 * engine->PageCount();
@@ -339,17 +358,8 @@ void DisplayModel::ApplyViewportCrop() {
 
 // margin trim is clip-based now (RenderCache::Paint clips the render area via
 // RenderPageArgs.pageRect); the old zoom-hack ApplyMarginTrim was removed.
-
-void DisplayModel::QuickToggleViewportCrop() {
-    if (!viewportCropEnabled) return;
-    viewportCropQuickToggled = !viewportCropQuickToggled;
-    if (viewportCropQuickToggled) {
-        viewPort = viewportCropSaved;
-        SetZoomVirtual(viewportCropSavedZoom, nullptr);
-    } else {
-        ApplyViewportCrop();
-    }
-}
+// QuickToggleViewportCrop (v1) was removed 2026-09-22: zero callers (the v2
+// quick toggle is QuickToggleViewportCropV2).
 
 // two column v2: no viewport manipulation needed. The layout itself is
 // duplicated into 2N virtual pages (one per column); Relayout handles the
@@ -1730,11 +1740,20 @@ Point DisplayModel::CvtToScreen(int pageNo, PointF pt) {
     // two column v2: pt is in PHYSICAL full-width page coords; shift it by the
     // column offset so the right column lands on its (half-width) virtual page.
     // Mirrors the render-time colX shift (RenderCache::Paint). Non-v2: no-op.
-    int cropColumn = ColumnOfVirtual(pageNo);
-    if (cropColumn >= 0) {
-        int renderPageNo = VirtualToPhysical(pageNo);
-        RectF mb = engine->PageMediabox(renderPageNo);
-        pt.x -= cropColumn == 1 ? ViewportCropV2RightColumnX(mb) : mb.x;
+    {
+        float colX;
+        if (ColumnOffsetXForPage(pageNo, &colX)) {
+            pt.x -= colX;
+        }
+    }
+
+    // margin trim: pageOnScreen is the TRIMMED strip (layout uses the reduced
+    // height) and the rendered content starts at the top trim strip, so overlay
+    // coordinates (page coords, points) must shift up by trim.top. Without this,
+    // selection/highlight/cloze overlays land too low on the page (the render
+    // cache applies the same shift in GetTileRectUser).
+    if (marginTrimEnabled) {
+        pt.y -= (float)gGlobalPrefs->trim.top;
     }
 
     PointF p = engine->Transform(pt, VirtualToPhysical(pageNo), zoom, rotation);
@@ -1771,11 +1790,16 @@ PointF DisplayModel::CvtFromScreen(Point pt, int pageNo) {
     PointF res = engine->Transform(p, VirtualToPhysical(pageNo), zoom, rotation, true);
     // two column v2: result is in column-local coords (right column already
     // shifted -colX); shift it back into PHYSICAL full-width page coords.
-    int cropColumn = ColumnOfVirtual(pageNo);
-    if (cropColumn >= 0) {
-        int renderPageNo = VirtualToPhysical(pageNo);
-        RectF mb = engine->PageMediabox(renderPageNo);
-        res.x += cropColumn == 1 ? ViewportCropV2RightColumnX(mb) : mb.x;
+    {
+        float colX;
+        if (ColumnOffsetXForPage(pageNo, &colX)) {
+            res.x += colX;
+        }
+    }
+    // margin trim: inverse of the CvtToScreen shift (screen strip -> untrimmed
+    // page coords)
+    if (marginTrimEnabled) {
+        res.y += (float)gGlobalPrefs->trim.top;
     }
     return res;
 }
