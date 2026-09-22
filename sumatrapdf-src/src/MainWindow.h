@@ -337,8 +337,13 @@ struct MainWindow {
         float speed = 2.0f; // pixels per tick
         float speedMultiplier = 0.008f;
         float accum = 0.0f;
-        int etaMinutes = 0;    // ETA in minutes, computed from remaining scroll pixels
-        int etaLastShown = -1; // last minute value displayed (avoid redundant updates)
+        int etaMinutes = 0;          // ETA estimate (minutes) at the last resync
+        int etaLastShown = -1;       // last displayed minute (dedupe label updates)
+        int etaPageNo = 0;           // page at the last resync (change triggers a new estimate)
+        DWORD etaResyncTick = 0;     // when the estimate was made (countdown base)
+        DWORD etaPageEnterTick = 0;  // when the current page was entered (seconds-per-page measurement)
+        DWORD etaPauseStartTick = 0; // when a pause started (excludes paused time from the measurement)
+        float etaTimePerPageSec = 0; // measured seconds per page (0 = not measured yet)
         HWND hwndEtaLabel = nullptr;
         DWORD timerMinutes = 0;         // 0 = no timer (effective value used by tick)
         DWORD timerMinutesSetting = 30; // configured minutes from UI input (default 30)

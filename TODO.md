@@ -94,7 +94,7 @@ Criar um **segundo modo** "Two Column v2" (`CmdViewportCropV2Toggle`) **totalmen
 
 #### FASE 5 — Estado, navegação & labels
 
-- [x] **Shift-hold (quick toggle)** (`QuickToggleViewportCropV2`): novo `IsViewportCropV2Active()` = `viewportCropV2Enabled && !viewportCropV2QuickToggled && IsContinuous`. Todas as conversões v2 (VirtualPageCount/VirtualToPhysical/ColumnOfVirtual/PhysicalToVirtualForRect/PageMediaBox) gateiam por ele → segurar Shift mostra páginas físicas completas (largura total), soltar volta às colunas, preservando âncora (physAnchor + dyInPage via RestoreViewportAfterV2Toggle). Hook em SumatraPDF.cpp: `HandleV2ShiftHold` + interceptação `WM_KEYDOWN`/`WM_KEYUP` de `VK_SHIFT` no WndProc do frame. SearchAndDDE usa `IsViewportCropV2Active`.
+- [x] **Shift-hold (quick toggle) v3** (`QuickToggleViewportCropV2`): `IsViewportCropV2Active()` = `viewportCropV2Enabled && !viewportCropV2QuickToggled && IsContinuous`. **Shift-hold PAUSA o autoscroll** (drag livre na página inteira; retoma ao soltar). Quick view: entra = salva zoom virtual + relayout `kZoomFitWidth` (página física inteira ocupa toda a largura); sai = restaura zoom salvo; âncora fracionária (frac × nova altura). Hook: `HandleV2ShiftHold` (checa `quickToggled`) + `WM_KEYDOWN`/`WM_KEYUP` de `VK_SHIFT` no WndProc do frame. Ambos os toggles v2 terminam com `ScrollYTo` (pipeline completo — corrige o "travado até continuous off/on").
 - [ ] `ScrollState.page` (`DisplayModel.h:63`): armazenar virtual pageNo; restaurar mapeia para coluna.
 - [ ] NavigationModel/histórico: 2N páginas.
 - [ ] Page labels: `1L/1R/2L/2R` (derivar de `ColumnOfVirtual`).
@@ -358,6 +358,12 @@ Duas funções, INDEPENDENTES POR DOCUMENTO (cada aba/doc mantém seu próprio e
 - **Status:** Pendente
 - **Descrição:** Menu contexto botão direito em imagens: apenas Copy to clipboard funciona; outras opções (Save as, Copy link, etc.) não funcionam
 - **Nota:** Pode não ter sido implementado no SumatraPDF original — investigar antes de corrigir
+
+### BUG-4: Trim Config desativa o Contrast overlay
+
+- **Status:** Em investigação (2026-09-21)
+- **Descrição:** Abrir o Trim Config e salvar desativa o contrast overlay. Fix parcial: `UpdateTabFileDisplayStateForTab` não destrói mais o overlay quando `contrastEnabled` (SaveSettings mid-session era o assassino). **Bug persiste** → há outro caminho destruindo/resetando o contrast no fluxo do trim config (suspeitos: TaskReloadSettings via FileWatcher do settings.txt, reset de `win->contrastEnabled`, z-order do overlay).
+- **Lição sistêmica:** funções de persistência (SaveSettings/*ForTab) NÃO devem ter side-effects de UI (destruir HWNDs). Documentado em lemma m3a65456efb04.
 
 ## Sistema de Flashcards (Cloze sobre texto existente)
 

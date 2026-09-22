@@ -495,12 +495,25 @@ void RenderCache::Invalidate(DisplayModel* dm, int pageNo, RectF rect) {
 // determine the count of tiles required for a page at a given zoom level
 USHORT RenderCache::GetTileRes(DisplayModel* dm, int pageNo) const {
     auto* engine = dm->GetEngine();
-    RectF mediabox = engine->PageMediabox(pageNo);
+    // two column v2: pageNo is VIRTUAL. Derive the mediabox the same way the
+    // tile rects do (GetTileRectDevice): route to the physical page and use
+    // the column (half-width) box. Passing the virtual pageNo straight to the
+    // engine triggers ReportIf(pageNo > pageCount) on every paint for half
+    // the virtual pages (a debug-report/callstack storm that freezes the UI)
+    // and sizes the tile resolution from the wrong (full) page.
+    int renderPageNo = dm->VirtualToPhysical(pageNo);
+    RectF mediabox = engine->PageMediabox(renderPageNo);
+    if (dm->IsViewportCropV2Active()) {
+        int cropColumn = dm->ColumnOfVirtual(pageNo);
+        if (cropColumn >= 0) {
+            mediabox.dx = dm->ViewportCropV2ColumnWidth(mediabox);
+        }
+    }
     float zoom = dm->GetZoomReal(pageNo);
     float zoomVirt = dm->GetZoomVirtual();
     Rect viewPort = dm->GetViewPort();
     int rotation = dm->GetRotation();
-    RectF pixelbox = engine->Transform(mediabox, pageNo, zoom, rotation);
+    RectF pixelbox = engine->Transform(mediabox, renderPageNo, zoom, rotation);
 
     float factorW = pixelbox.dx / (float)(maxTileSize.dx + 1);
     float factorH = pixelbox.dy / (float)(maxTileSize.dy + 1);
@@ -513,7 +526,7 @@ USHORT RenderCache::GetTileRes(DisplayModel* dm, int pageNo) const {
     // than the visible canvas width/height or when rendering pages
     // without clipping optimizations
     if (zoomVirt == kZoomFitPage || zoomVirt == kZoomFitWidth || pixelbox.dx <= (float)viewPort.dx ||
-        pixelbox.dy < (float)viewPort.dy || !engine->HasClipOptimizations(pageNo)) {
+        pixelbox.dy < (float)viewPort.dy || !engine->HasClipOptimizations(renderPageNo)) {
         factorAvg /= 2.0;
     }
 
@@ -995,6 +1008,14 @@ static DWORD WINAPI RenderCacheThread(LPVOID data) {
         }
 
         if (!cache->GetNextRequest(&req, threadIdx)) {
+            continue;
+        }
+
+        // the v2 quick-toggle relayout (and any page-count change) can shrink
+        // the layout while requests are still queued; drop requests for pages
+        // that no longer exist instead of feeding pageNo > pageCount to the
+        // engine (ReportIf crash)
+        if (!req.dm->ValidPageNo(req.pageNo)) {
             continue;
         }
 

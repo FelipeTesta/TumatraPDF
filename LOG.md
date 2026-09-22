@@ -1,5 +1,30 @@
 # TumatraPDF — Development Log
 
+## 2026-09-21 (s2) — TC2 fluido + ETA por página + Release x64 + fixes sistêmicos (BUILD OK)
+
+### Crash/perf TC2
+- **GetTileRes** (RenderCache.cpp): único ponto esquecido no re-enable do cache — passava pageNo VIRTUAL ao engine (`PageMediabox`/`Transform`/`HasClipOptimizations`) → `ReportIf(pageNo > pageCount)` = storm de debug-report + callstack **por paint** (metade das páginas virtuais) = UI travada só com TC2 on. Roteado `VirtualToPhysical` + mediabox de coluna (half-width).
+- **Render thread guard**: requests com pageNo inválido pós-relayout (2N→N) descartados em vez de alimentar o engine.
+- **RestoreViewportAfterV2Toggle**: usava `viewportCropV2Enabled` (setting) em vez de `IsViewportCropV2Active()` (layout truth) → na quick view restorePage `2k-1 > N` falhava → viewport no fim do doc → autoscroll morto. Âncora agora **fracionária** (`frac × nova altura`) — sobrevive à troca de zoom entre coluna (fit half-width) e página inteira (fit full-width).
+
+### Shift-hold v3 + ETA (spec do usuário)
+- **Shift-hold = PAUSA o autoscroll** (tick early-return; drag livre na página inteira; retoma ao soltar). Substitui o speed ÷2 anterior.
+- **Quick view**: entra = salva zoom virtual + relayout `kZoomFitWidth` (página inteira ocupa toda a largura); sai = restaura zoom salvo. `HandleV2ShiftHold` checa `quickToggled` (não `isColumnView`).
+- **ETA por página**: resync só na troca de página; fórmula `tempo-por-página × páginas restantes` (TC2 conta virtual 2N = cada página lida 2×; trim não muda contagem); entre resyncs decai como cronômetro invertido; pausas (shift/ctrl) excluídas da medição; ≥60min → `~1h 05min` (overlay 240px).
+
+### Fixes sistêmicos (revisão geral via tree-sitter + hang dump)
+- **SaveSettings destruía o overlay de contrast**: `UpdateTabFileDisplayStateForTab` → `DestroyContrastOverlay` incondicional → QUALQUER SaveSettings mid-session desativava o contrast. Agora mantém/reposiciona se `contrastEnabled`. **(bug persiste por outro caminho — BUG-4 aberto)**
+- **Pipeline parcial pós-toggle = "travado até continuous off/on"**: v2 toggle terminava com `RecalcVisibleParts + HwndRepaintNow` (scrollbars stale, renders não enfileirados). Ambos os toggles v2 agora terminam com `ScrollYTo(viewPort.y)` — pipeline completo, idêntico ao caminho contínuo do `SetDisplayMode`/`GoToPage` (por isso o "c" off/on destravava).
+- **`RequestTextExtraction` recebia pageNo VIRTUAL a cada mousemove** (Canvas.cpp:1773 — stack do hang dump): threads de extração de texto da página ERRADA por movimento de mouse com TC2. Roteado via `VirtualToPhysical`.
+
+### Builds
+- **Release x64 deployado**: `MSBuild vs2022\TumatraPDF.sln /t:TumatraPDF /p:Configuration=Release;Platform=x64` (não exposto no build.ts). `Compiled\TumatraPDF.exe` = **release** (leitura diária; render 5-10× mais rápido que debug; NDEBUG = sem ReportIf); `Compiled\TumatraPDF-debug.exe` = debug p/ diagnóstico.
+- Usuário confirmou: **TC2 drag "BEM fluido"** (mouse + mousepad + autoscroll).
+
+### Pendências
+- BUG-4: trim config ainda desativa contrast (fix parcial aplicado; há outro caminho — próxima investigação).
+- Validar ETA contando até o fim do livro após os fixes de estado.
+
 ## 2026-09-20 — Two Columns v2 FASE 5 (shift-hold) + FASE 6 (colGap) (BUILD OK)
 
 ### Contexto

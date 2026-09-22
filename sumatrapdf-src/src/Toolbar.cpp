@@ -1336,7 +1336,7 @@ void PositionEtaOverlay(MainWindow* win) {
     RECT rcCanvas;
     GetWindowRect(win->hwndCanvas, &rcCanvas);
     MapWindowPoints(HWND_DESKTOP, GetParent(win->hwndCanvas), (LPPOINT)&rcCanvas, 2);
-    int dx = DpiScale(win->hwndFrame, 200); // width for "xMLT | ETA Nmin"
+    int dx = DpiScale(win->hwndFrame, 240); // width for "xMLT | ETA ~1h 05min"
     int dy = DpiScale(win->hwndFrame, 22);
     int margin = DpiScale(win->hwndFrame, 8);
     int x = (rcCanvas.right - rcCanvas.left) - dx - margin;
@@ -1355,7 +1355,17 @@ void UpdateEtaOverlayText(MainWindow* win) {
         return;
     }
     float mlt = win->autoScroll.speedMultiplier;
-    HwndSetText(hwndLabel, fmt("x%.2f  |  ETA %dmin", mlt, win->autoScroll.etaMinutes));
+    // long reads: simplify "ETA 65min" to "ETA ~1h 05min"
+    int minutes = win->autoScroll.etaMinutes;
+    TempStr eta;
+    if (minutes >= 60) {
+        int hours = minutes / 60;
+        int rem = minutes % 60;
+        eta = fmt("~%dh %02dmin", hours, rem);
+    } else {
+        eta = fmt("%dmin", minutes);
+    }
+    HwndSetText(hwndLabel, fmt("x%.2f  |  ETA %s", mlt, eta));
     ShowWindow(hwndLabel, SW_SHOW);
     HwndInvalidateRect(hwndLabel, HwndClientRect(hwndLabel), false);
 }

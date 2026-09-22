@@ -1,8 +1,52 @@
-fix(shift-hold): condition was inverted, Shift never toggled full-page view
+feat(two-column-v2): fluid TC2 + shift-hold pause + page-based ETA + systemic fixes
 
-HandleV2ShiftHold checked !isColumnView (IsViewportCropV2Active) which
-is always true when TC2 is on, so the shift-down condition was always
-false. Changed to check !viewportCropV2QuickToggled which correctly
-detects whether we're already in full-page mode.
+TC2 crash/perf:
+- GetTileRes: route virtual pageNo via VirtualToPhysical (the last missed spot
+  of the cache re-enable; it fed the engine pageNo > N, tripping ReportIf with
+  a callstack capture on every paint for half the virtual pages = frozen UI
+  with TC2 on); column mediabox (half width) for correct tile resolution
+- render thread: drop queued requests whose page no longer exists after a
+  2N<->N relayout instead of feeding pageNo > pageCount to the engine
+- RestoreViewportAfterV2Toggle: use IsViewportCropV2Active() (layout truth)
+  instead of viewportCropV2Enabled (setting stays on during quick view); the
+  failed restore clamped the viewport to the doc bottom and killed autoscroll
+- fractional dyInPage anchor (frac x new page height) survives the zoom change
+  between column view (fit half width) and quick view (fit full width)
 
-prompt: shift nao funciona
+Shift-hold v3 (user spec):
+- shift-hold now PAUSES autoscroll so the full page can be dragged/panned
+  freely; releasing Shift resumes (replaces the speed-halve approach)
+- quick view: enter = save virtual zoom + relayout kZoomFitWidth so the whole
+  physical page fills the screen; release = restore the saved zoom
+- HandleV2ShiftHold checks quickToggled (the old isColumnView condition never
+  fired)
+
+ETA (user spec):
+- resync only on page change; formula = time-per-page x remaining pages (TC2
+  counts virtual 2N pages so each physical page naturally counts twice;
+  trim-neutral since the page count is unchanged)
+- measured seconds per page (smoothed, jitter-guarded, pauses excluded via
+  etaPauseStartTick); fallback = page height / nominal speed until measured
+- between resyncs the display counts down like an inverted timer
+- >=60min displayed as "~1h 05min"; overlay widened to 240px
+
+Systemic fixes (general button-interaction review via tree-sitter + hang dump):
+- UpdateTabFileDisplayStateForTab no longer destroys the contrast overlay when
+  contrast is enabled (any mid-session SaveSettings - e.g. Trim Config's save -
+  was silently killing it; only recreated on next document load)
+- both v2 toggle paths (toolbar + quick view) end with ScrollYTo(viewPort.y) =
+  the full scroll pipeline (RenderVisibleParts + UpdateScrollbars + PageNoChanged
+  + async repaint), matching SetDisplayMode's continuous path - fixes the
+  "stuck scroll until continuous off/on" bug (the c-dance ran exactly this
+  pipeline via GoToPage)
+- RequestTextExtraction routed via VirtualToPhysical (OnMouseMove passed the
+  virtual pageNo to the engine on every move - the hang-dump stack showed the
+  UI thread stuck there, spawning text-extraction threads for wrong pages)
+
+Builds:
+- Release x64 deployed: MSBuild TumatraPDF.sln /p:Configuration=Release;Platform=x64
+  (not exposed in build.ts). Compiled\TumatraPDF.exe = release for daily reading
+  (render 5-10x faster than debug); Compiled\TumatraPDF-debug.exe = debug build
+- user confirmed TC2 drag now "BEM fluido" (mouse, touchpad, autoscroll)
+
+prompt: shift crashou + spec zoom shift-hold; eta ate final do livro por tempo-por-pagina; tc2 travado - bug modo continuo; revisao geral dos botoes com tree-sitter; compilar 64 bits release

@@ -365,13 +365,16 @@ void DisplayModel::ApplyViewportCropV2() {
 
 void DisplayModel::RestoreViewportAfterV2Toggle(int physAnchor, int dyInPage) {
     // Called AFTER the N<->2N relayout. physAnchor is the PHYSICAL page the user
-    // was looking at before the toggle. If v2 is now ON, that page shows as
-    // virtual page 2*physAnchor-1 (left column); if OFF it's the physical page
+    // was looking at before the toggle. If the v2 column layout is now active,
+    // that page shows as virtual page 2*physAnchor-1 (left column); if it's not
+    // (v2 off, or the quick view showing full pages), it's the physical page
     // itself. Restore the same in-page vertical offset.
+    // NOTE: must check IsViewportCropV2Active(), NOT viewportCropV2Enabled -
+    // the setting stays on during the quick view, but the layout has N pages.
     if (!ValidPageNo(physAnchor)) {
         return;
     }
-    int restorePage = viewportCropV2Enabled ? physAnchor * 2 - 1 : physAnchor;
+    int restorePage = IsViewportCropV2Active() ? physAnchor * 2 - 1 : physAnchor;
     if (!ValidPageNo(restorePage)) {
         return;
     }
@@ -387,19 +390,50 @@ void DisplayModel::QuickToggleViewportCropV2() {
     if (!viewportCropV2Enabled) return;
     // capture the view anchor BEFORE flipping the flag (state is consistent
     // here): physical page + in-page vertical offset, so toggling the quick
-    // view doesn't jump the page the user is reading.
+    // view doesn't jump the page the user is reading. The offset is captured
+    // as a FRACTION of the page height because the zoom changes between the
+    // column layout (fits half width) and the quick view (fits full width):
+    // raw pixels would land in the wrong spot or clamp to the page bottom.
     int physAnchor = VirtualToPhysical(CurrentPageNo());
-    int dyInPage = 0;
+    float dyFrac = 0;
     if (ValidPageNo(CurrentPageNo())) {
-        dyInPage = viewPort.y - GetPageInfo(CurrentPageNo())->pos.y;
+        PageInfo* pi = GetPageInfo(CurrentPageNo());
+        if (pi && pi->pos.dy > 0) {
+            dyFrac = (float)(viewPort.y - pi->pos.y) / (float)pi->pos.dy;
+            if (dyFrac < 0) {
+                dyFrac = 0;
+            }
+        }
+    }
+    if (!viewportCropV2QuickToggled) {
+        // entering the full-page quick view: remember the current (virtual)
+        // zoom so releasing Shift restores exactly the previous column zoom
+        viewportCropV2SavedZoom = GetZoomVirtual();
     }
     viewportCropV2QuickToggled = !viewportCropV2QuickToggled;
-    // IsViewportCropV2Active() now reflects the new flag; ApplyViewportCropV2
-    // rebuilds pagesInfo + relayouts between 2N (columns) and N (full pages).
-    ApplyViewportCropV2();
+    // IsViewportCropV2Active() now reflects the new flag. Rebuild pagesInfo
+    // (the page count changes between 2N and N) and relayout:
+    // - entering: fit the FULL page width to the screen (PageMediaBox returns
+    //   the whole physical page while the quick view is on)
+    // - leaving: restore the column layout at the saved zoom
+    float zoom = viewportCropV2QuickToggled ? kZoomFitWidth : viewportCropV2SavedZoom;
+    BuildPagesInfo();
+    Relayout(zoom, rotation);
+    // map the captured fraction back to pixels in the NEW layout and restore
+    int dyInPage = 0;
+    int restorePage = IsViewportCropV2Active() ? physAnchor * 2 - 1 : physAnchor;
+    if (ValidPageNo(restorePage)) {
+        PageInfo* pi = GetPageInfo(restorePage);
+        if (pi) {
+            dyInPage = (int)(dyFrac * (float)pi->pos.dy);
+        }
+    }
     RestoreViewportAfterV2Toggle(physAnchor, dyInPage);
-    RecalcVisibleParts();
-    RepaintDisplay();
+    // full scroll pipeline (background renders queued + scrollbars updated +
+    // PageNoChanged + async repaint), matching the v2 toggle and SetDisplayMode
+    // paths - a bare RecalcVisibleParts + RepaintDisplay left the scrollbars
+    // stale and renders unqueued
+    ScrollYTo(viewPort.y);
 }
 
 static bool IsDisplayModelValid(DisplayModel* dm) {

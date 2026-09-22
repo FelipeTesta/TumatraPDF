@@ -866,8 +866,15 @@ void UpdateTabFileDisplayStateForTab(WindowTab* tab) {
     UpdateSidebarDisplayState(tab, fs);
     // Persist autoscroll speed multiplier
     fs->autoScrollSpeedMultiplier = win->autoScroll.speedMultiplier;
-    // Destroy any leaked contrast overlay from previous document
-    DestroyContrastOverlay(win);
+    // Contrast overlay: this persistence path also runs from mid-session
+    // SaveSettings (e.g. Trim Config's save), so keep the overlay alive when
+    // contrast is enabled - just keep it glued to the canvas. Only clean up a
+    // leftover overlay when the feature is off.
+    if (win->contrastEnabled) {
+        UpdateContrastOverlay(win);
+    } else {
+        DestroyContrastOverlay(win);
+    }
     // Persist invert colors and contrast overlay state
     fs->invertColors = GetInvertPageColors();
     fs->contrastEnabled = win->contrastEnabled;
@@ -11238,8 +11245,16 @@ static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, L
                     v2Dm->RestoreViewportAfterV2Toggle(physAnchor, dyInPage);
                     logfa("[v2] toggle post: enabled=%d curPageNo(virtual)=%d viewPortY=%d\n",
                           (int)v2Dm->viewportCropV2Enabled, v2Dm->CurrentPageNo(), v2Dm->viewPort.y);
-                    v2Dm->RecalcVisibleParts();
-                    HwndRepaintNow(win->hwndCanvas);
+                    // Run the full scroll pipeline (RecalcVisibleParts +
+                    // EnsureMediaBoxesForVisiblePages + RenderVisibleParts +
+                    // UpdateScrollbars + PageNoChanged + async repaint), exactly
+                    // like SetDisplayMode's continuous path. The old version only
+                    // recalced visible parts and synchronously repainted, leaving
+                    // the scrollbar range stale and background renders unqueued -
+                    // the "stuck scroll until continuous off/on" bug (the
+                    // continuous c-dance fixed it by running this same pipeline
+                    // via GoToPage).
+                    v2Dm->ScrollYTo(v2Dm->viewPort.y);
                 }
                 SetToolbarButtonCheckedState(win, CmdViewportCropV2Toggle,
                                              win->AsFixed() ? win->AsFixed()->viewportCropV2Enabled : false);

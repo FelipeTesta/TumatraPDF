@@ -346,6 +346,7 @@ struct DisplayModel : DocController {
     // two column v2 (independent of v1): stacked virtual columns, 2N pages
     bool viewportCropV2Enabled = false;
     bool viewportCropV2QuickToggled = false; // currently showing full page
+    float viewportCropV2SavedZoom = 1.0f;    // column zoom restored on quick-view release
 
     // margin trim (independent of viewport crop)
     bool marginTrimEnabled = false;

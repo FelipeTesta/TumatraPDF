@@ -1770,7 +1770,10 @@ static void OnMouseMove(MainWindow* win, int x, int y, WPARAM /*key*/) {
     Point pos{x, y};
     int pageNo = dm->GetPageNoByPoint(pos);
     if (dm->ValidPageNo(pageNo)) {
-        dm->GetEngine()->RequestTextExtraction(pageNo);
+        // two column v2: pageNo is VIRTUAL but the engine is physical - route
+        // it (else half the hovers hit pageNo > pageCount and the other half
+        // spawn text-extraction threads for the WRONG page on every mouse move)
+        dm->GetEngine()->RequestTextExtraction(dm->VirtualToPhysical(pageNo));
     }
 
     NotificationWnd* cursorPosNotif = GetNotificationForGroup(win->hwndCanvas, kNotifCursorPos);
