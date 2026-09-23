@@ -389,6 +389,33 @@ Build `bun cmd/build.ts` → `Compiled\TumatraPDF.exe`, 0 errors / 0 warnings. D
 - **Note (process):** do not edit file bytes with PowerShell `Set-Content` (adds UTF-8 BOM to `.cpp`); use the Edit tool or Python `utf-8-sig` round-trip to strip a BOM if introduced.
 - **Removed dead commands** from the pre-cloze Q/A model: `CmdFlashcardNext` (no-op) and `CmdFlashcardAddTip` (placeholder tip) — removed from `cmd/gen-commands.ts`, regenerated `Commands.h/.cpp`, handlers removed from `Commands_Flashcard.cpp`. Also removed now-write-only `Flashcard::text` / `Flashcard::tip` fields (positional model stores no content). Flashcard commands renumbered to `499..509`.
 
+## 2026-09 (retro, FR→EN) — Flashcard System branch log recovered
+
+Recovered from `sumatrapdf-src/LOG.md` (`feature/flashcard-system` branch, French [Unreleased]) before deprecating that file to `TEMP/`. Commits ~40bbedd/d57d7f3 era. Unique content below (MVP feature list already in 2026-09-11 entry):
+
+### Added
+- `CmdFlashcardFilter` — new ID via gen-commands.ts (page range filter)
+- `ToolbarApplyThemeToRebar()` helper — rebar theme (subclass, dark mode, background)
+- `CmdArchCleanAll` — single button clears measurements + resets scale + tool mode
+- Arch Tools per-page scale: `ArchScaleState` struct + `scaleStates` Vec in `ArchToolsState`
+- `CmdGoToPageNextKeepScroll` / `CmdGoToPagePrevKeepScroll` — Ctrl+Right/Left nav preserving vertical scroll
+
+### Changed
+- `SetToolbarButtonCheckedState` extended to search both toolbars
+- Arch Tools persistence → per-page format with legacy fallback
+
+### Fixed
+- `_TR` → raw `L""` strings; `engine->doc` → `EngineMupdfSaveUpdated()`
+- `FlashcardToolbarUpdate` via `SetWindowTextW`; rebar integration with `RelayoutFrame`
+- `#include "DisplayModel.h"` in `Commands_ArchTools.cpp` → 49 cascade errors → `DocController.h` (see AGENTS §12)
+
+### Decisions
+- Cards stored INSIDE PDF as Highlight annotations (cloze, portable); cloze = gray highlight, study mode = opaque overlay
+- Study state in external JSON `%APPDATA%\SumatraPDF\FlashcardStudy\<MD5>.json`
+
+### Known Issues (of that branch, since fixed or tracked)
+BUG-FC1 LoadFromDocument only FREE_TEXT (Highlight cards lost on reload) · BUG-FC2 card count label floating · BUG-FC3 toolbar ignores theme · BUG-FC4 text selection displaced with trim=on (`Selection.cpp += → -=`) · label/tip + image occlusion deferred to v2
+
 ## 2026-09-11 — Flashcard MVP (BUILD OK)
 
 ### What

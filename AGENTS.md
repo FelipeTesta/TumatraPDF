@@ -28,32 +28,59 @@ Rules:
 - The user has repeatedly had to insist that agents use tree-sitter — **do not skip it**. If a task involves "map", "trace", "where is X called", "audit call-sites", use tree-sitter FIRST.
 - Project must be registered before use; the server forgets the project between sessions (empty `list_projects_tool`).
 
+Recommended flow: register → `analyze_project` → `get_symbols` / `get_ast` / `get_dependencies` → `find_usage` → `run_query` (advanced).
+Warning: `tree-sitter_find_text` AVOID repo-wide on this large C++ tree with vendored subfolders (`mupdf/`, `ext/`) — risk MCP timeout (-32001). Scope with `file_pattern` or use targeted grep.
+
 # 1. Overview
 
-TumatraPDF is a fork of SumatraPDF — a Windows C++ PDF reader using Win32 API. Own string/container types in `src/base/` (no STL). Early macOS app in `src/mac/` (not in scope). External deps in `ext/` and `mupdf/`.
+TumatraPDF is a fork of SumatraPDF (upstream baseline ~912ecf2, Aug 2026) — Windows C++ PDF reader, Win32 API. All fork features = direct patches in `sumatrapdf-src/src/` (`src/features/` aspirational, never existed). Own string/container types in `sumatrapdf-src/src/base/` (no STL).
 
-Use `tree-sitter` tools to understand project structure.
+## Informativo hierarchy (single source of truth)
+
+| File | Role | Audience |
+|---|---|---|
+| `AGENTS.md` (root) | ONLY governing doc — rules for agents editing code. Wins ALL conflicts | agents |
+| `README.md` (root) | ONLY showcase — TumatraPDF features vs forked SumatraPDF | users/kjk |
+| `BUILD.md` / `MERGE.md` | working docs: build, upstream sync | agents |
+| `LOG.md` / `TODO.md` | changelog (append-only, never rewrite) / active backlog | agents |
+| `FLOW/*.dot` | process maps only (never code architecture — §0b) | agents |
+| `TEMP/` | deprecated informativos (gitignored) | — |
+| `sumatrapdf-src/agents.md`, `sumatrapdf-src/docs/**` | upstream SumatraPDF reference, verbatim | upstream |
+
+Any other `.md` in subfolders = deprecated (→ `TEMP/`) or upstream reference. Root `AGENTS.md` overrides anything found in subfolders.
+
+Use `tree-sitter` tools (§0b) to understand project structure.
 
 # 2. Setup / Build / Test / Debug
 
+Repo root has NO `cmd/` — all build/test commands run with workdir = `sumatrapdf-src/`. Details: BUILD.md.
+
 ```
-Build:              bun ./cmd/build.ts                    → ./out/dbg64/SumatraPDF.exe
+Build:              bun cmd/build.ts                      → out/dbg64/TumatraPDF.exe (auto-deploys to ../Compiled/)
 Test build:         bun cmd/build-test.ts
 Unit tests:         bun cmd/run-unit-tests.ts -dbg        (or -rel / -asan)
-Debug:              windbgx -Q -o -g ./out/dbg64/SumatraPDF.exe
+Debug:              windbgx -Q -o -g out/dbg64/TumatraPDF.exe
 ```
 
-VS command-line tools (`cl.exe`, `msbuild.exe`) must be in PATH.
+VS command-line tools (`cl.exe`, `msbuild.exe`) must be in PATH. Fallback: `MSBuild.exe sumatrapdf-src\vs2022\TumatraPDF.sln /t:TumatraPDF /p:Configuration=Debug /p:Platform=x64 /m`.
 
 # 3. Project Layout
 
-- `src/` — all source code
-- `src/base/` — custom string/helper/container types (Str, Vec, StrVec, etc.)
-- `ext/`, `mupdf/` — external dependencies (don't clang-format)
-- `cmd/` — TypeScript build/codegen scripts (run with `bun`)
-- `tests/` — TypeScript tests
-- `.work/` — build artifacts, embedded data sources
-- `docs/md/` — documentation
+```
+TumatraPDF/                   # repo root
+├── sumatrapdf-src/           # forked upstream tree
+│   ├── src/                  # all source code (fork patches live here)
+│   ├── src/base/             # custom string/helper/container types (Str, Vec, StrVec)
+│   ├── ext/, mupdf/          # vendored deps (no clang-format)
+│   ├── cmd/                  # bun build/codegen scripts
+│   ├── tests/                # bun tests
+│   └── docs/md/              # upstream documentation
+├── Compiled/                 # deployed TumatraPDF.exe (gitignored)
+├── FLOW/                     # process .dot maps
+├── TEMP/                     # deprecated informativos (gitignored)
+├── .tmp_compare/             # upstream baseline for merge diffs (gitignored)
+└── *.md                      # root informativos (hierarchy §1)
+```
 
 # 4. C/C++ Code Conventions
 
@@ -149,6 +176,22 @@ VS command-line tools (`cl.exe`, `msbuild.exe`) must be in PATH.
 - Binary fixtures from source → commit source alongside (with regeneration instructions)
 - Bug repro files → `C:\Users\kjk\OneDrive\!sumatra\bugs\bug-<no>*`
 
+# 6b. Debug tooling inventory
+
+(moved from README 2026-09-23; research 2026-08-16, paths relative to `sumatrapdf-src/`)
+
+- **Build/run:** `cmd/build.ts` (vs2022\TumatraPDF.sln /t:TumatraPDF → `out/dbg64/TumatraPDF.exe`), `cmd/run.ts` (build + launch)
+- **Runtime control:** `-dbg-control <pipe>` + `cmd/control.ts` — Test* commands (Ping/Quit/TestSearch/TestToc/TestToolbarButtons/TestAIChat)
+- **UI automation:** `tests/winapi.ts`, `tests/win-automation.ts` — FFI win32, postMessage cross-process, `captureWindowToPng` (works occluded)
+- **Flags:** `-for-testing -console -log -stress-test -bench -render -extract-text -set-color-range`
+- **Static analysis:** `cmd/clang-tidy.ts`, `cmd/cppcheck.ts`
+- **Logging:** `SumatraLog.h/.cpp` auto-log → `%LOCALAPPDATA%\SumatraPDF\<hash>\sumatra-log.txt`, rotation >5MB; tags `[fc]` `[arch]` `[autoscroll]` `[md]` `[webview]`
+
+**Known issues (fix when touched):**
+- `cmd/build-asan.ts` references `SumatraPDF.sln`/`SumatraPDF-static` — ASan pipeline broken
+- `.vscode/launch.json`/`tasks.json` target `SumatraPDF-dll.exe`/`SumatraPDF.sln` — no F5 debug in VS Code
+- `-dbg-control` lacks commands for custom feature state (crop rect, trim, autoscroll ETA, contrast/invert)
+
 # 7. Windows Shell Safety
 
 The Bash tool runs under Git Bash (MSYS2), **not** cmd.exe:
@@ -211,10 +254,10 @@ _Living document — append patterns/gotchas discovered during development._
 
 # 13. Informativos: English + Caveman (MANDATORY)
 
-All project informativos (`README.md`, `LOG.md`, `TODO.md`, `BUILD.md`, `MERGE.md`, `FLASHCARD_IMPLEMENTATION_PLAN.md`, `FLOW/*.dot`, `docs/`) are written in **English, caveman-compressed — always**. No Portuguese in new content; translate PT on sight.
+All project informativos (`README.md`, `LOG.md`, `TODO.md`, `BUILD.md`, `MERGE.md`, `FLOW/*.dot`) are written in **English, caveman-compressed — always**. No Portuguese in new content; translate PT on sight.
 
 - Caveman: drop articles/filler/hedging, fragments OK. Preserve EXACTLY: code blocks, inline code, paths, commands, IDs, numbers, table layout, headings.
 - TODO unfinished sections (`[ ]`, pending, awaiting-validation, future plans): translate only, NEVER compress. Done sections (`[x]`/`✅`/COMPLETE/resolved): translate + compress.
 - Keep `FASE` (not PHASE) as phase identifier — matches LOG.md history.
-- `FLOW/*.dot` = process maps only. Never hand-maintain code-architecture `.dot` — use tree-sitter (§0b, README tree-sitter section).
-- `docs/TumatraPDF2/PLAN.md` is a frozen future reference (TumatraPDF2 off-limits) — translate only, never extend.
+- `FLOW/*.dot` = process maps only. Never hand-maintain code-architecture `.dot` — use tree-sitter (§0b).
+- Deprecated informativos live in `TEMP/` (gitignored): `FLASHCARD_IMPLEMENTATION_PLAN.md`, `docs/TumatraPDF2/PLAN.md` (TumatraPDF2 discontinued), `sumatrapdf-src/LOG.md`, `sumatrapdf-src/readme.md`, `diff_sumatra.txt` — reference only, never extend.

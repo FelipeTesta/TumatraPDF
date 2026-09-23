@@ -52,7 +52,7 @@ The features below were developed on top of SumatraPDF and **do not exist in the
 - Numeric field for timer (minutes, 0 = no limit)
 - Label showing ETA (e.g.: "⏱ 12min remaining") — works on both PDF (fixed pages: remaining height / speed) and Markdown (webview `autoscrollProgress` ~100ms → `DocController::OnAutoScrollProgress` → `UpdateToolbarEtaText`)
 
-**Persistence:** Speed and timer saved in `TumatraPDF-settings.txt` (`AutoScrollSpeed`, `AutoScrollTimerMinutes`). Fresh docs start at min speed `0.0167×` (`0.1f` → `0.0167f` in `MainWindow.h`, `LoadDocument`, `AutoScrollSpeedAdjust`, `gen-settings.ts`). Any persisted value < 0.1 clamps to 0.1.
+**Persistence:** Speed and timer saved in `TumatraPDF-settings.txt` (`AutoScrollSpeed`, `AutoScrollTimerMinutes`). Fresh docs start at min speed `0.008×` (`kMinSpeedMultiplier = 0.008f` ≈ 100 px/min — never-used default). Persistence unchanged; any persisted value below min clamps to min.
 
 **Advanced Options:** `AutoScrollShowEta` (default `true`) — set to `false` to hide the ETA label in the toolbar entirely.
 
@@ -180,7 +180,7 @@ The script compares the version in `sumatrapdf-src/src/Version.h` with the pre-r
 | Hold `E` + click | Erase individual line |
 | `Esc` | Cancel draw / close dialog |
 
-**Technical:** `src/ArchScaleDialog.{h,cpp}` (floating dialog), `src/ArchVector.{h,cpp}` (PDF vector segment extraction + snap + hit-test), `src/Canvas.cpp` (draw overlay + erase), `src/Toolbar.cpp` (2nd toolbar + underline), `src/SumatraPDF.cpp` (command handlers + RelayoutFrame). Per-document state in `FileState` + `MainWindow`. Modularity gate: global pref `archToolsEnabled` (default on; off = zero cost).
+**Technical:** `sumatrapdf-src/src/ArchScaleDialog.{h,cpp}` (floating dialog), `sumatrapdf-src/src/ArchVector.{h,cpp}` (PDF vector segment extraction + snap + hit-test), `sumatrapdf-src/src/Canvas.cpp` (draw overlay + erase), `sumatrapdf-src/src/Toolbar.cpp` (2nd toolbar + underline), `sumatrapdf-src/src/SumatraPDF.cpp` (command handlers + RelayoutFrame). Per-document state in `FileState` + `MainWindow`. Modularity gate: global pref `archToolsEnabled` (default on; off = zero cost).
 
 ---
 ### 6. 🎨 Own Visual Identity
@@ -261,42 +261,6 @@ TumatraPDF/
 - Notifies when a new upstream version is available
 - Script `scripts/check-updates.ps1` for manual checking
 - Merge process documented in `MERGE.md`
-
-## Debug Tooling
-
-Inventory of debug tooling in `sumatrapdf-src/` (research 2026-08-16):
-
-- **Build/run:** `cmd/build.ts` (vs2022\TumatraPDF.sln /t:TumatraPDF → `out/dbg64/TumatraPDF.exe`), `cmd/run.ts` (build + launch)
-- **Unit tests:** `cmd/run-unit-tests.ts` `-dbg|-rel|-asan` → `test_util.exe -for-ai` (callstacks captured)
-- **Runtime control:** `-dbg-control <pipe>` + `cmd/control.ts` — 44 Test* commands (Ping/Quit/List/TestSearch/TestToc/TestToolbarButtons/TestAIChat)
-- **UI automation:** `tests/winapi.ts`, `tests/win-automation.ts` — FFI win32, postMessage cross-process, `captureWindowToPng` (works on occluded windows)
-- **Flags:** `-for-testing -console -log -stress-test -bench -render -extract-text -set-color-range`
-- **Static analysis:** `cmd/clang-tidy.ts`, `cmd/cppcheck.ts`
-- **Codegen:** `cmd/gen-{commands,settings,flags}.ts`; log viewer `src/tools/logview`; 112 `tests/issue-*.ts`
-- **Logging:** `SumatraLog.h/.cpp` — auto-log to `%LOCALAPPDATA%\SumatraPDF\<hash>\sumatra-log.txt` (`StartLogToFile` unconditional); file output `[YYYY-MM-DD HH:MM:SS.mmm] [INFO]/[WARN]/[ERROR]` + rotation truncate >5MB; instrumentation tags `[md] doc complete / contrast restore / toggle / opacity`, `[autoscroll] start|stop / webview tick / bottom reached`, `[webview] autoscrollBottom notify`
-
-**Known issues (fix next session):**
-- `cmd/build-asan.ts` references `SumatraPDF.sln`/`SumatraPDF-static` — renamed to `TumatraPDF.sln` → ASan + windbg pipeline broken
-- `.vscode/launch.json`/`tasks.json` target `SumatraPDF-dll.exe`/`SumatraPDF.sln` → no F5 debug in VS Code
-- `-dbg-control` lacks commands for custom feature state (crop rect, trim, autoscroll ETA, contrast/invert)
-- Scroll delay 3.7.20958 vs 3.6.17065: root cause = upstream smooth-scroll (default TRUE since 2026-07-29); `smoothScroll=false` → instant scroll. Residual delay: `uitask::Post` deferral + async render thread. trim=on intensifies it (fix separate)
-
-## Code analysis with tree-sitter (MCP)
-
-The `tree-sitter` MCP server provides structural source analysis with no need for hand-maintained architecture `.dot` files.
-
-Recommended flow (always register project before querying):
-1. **Register project**: `tree-sitter_register_project_tool` (path = repo root, e.g.: `sumatrapdf-src`).
-2. **Overview**: `tree-sitter_analyze_project` (detects languages and directory layout).
-3. **File symbols**: `tree-sitter_get_symbols` (functions, classes, imports).
-4. **AST**: `tree-sitter_get_ast` (syntax tree of a file).
-5. **Dependencies/includes**: `tree-sitter_get_dependencies` (include graph).
-6. **Symbol usage**: `tree-sitter_find_usage` (where a function/class is used in project).
-7. **Text search**: `tree-sitter_find_text` — **AVOID** in large C++ repos with vendor/ext subfolders (e.g.: `mupdf/`), MCP timeout (-32001). Use targeted `grep` instead.
-8. **Queries**: `tree-sitter_run_query` (advanced tree-sitter queries).
-9. **List**: `tree-sitter_list_projects_tool`, `tree-sitter_list_languages`, `tree-sitter_list_files`.
-
-Rule: `FLOW/*.dot` are **PROCESS** maps (workflow), NOT code architecture. Never hand-maintain architecture `.dot` — use tree-sitter for structure (symbols + dependency graph) before planning.
 
 ## Architecture
 
