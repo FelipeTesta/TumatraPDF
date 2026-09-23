@@ -804,6 +804,7 @@ const fileSettings: Field[] = [
   field("ArchUnit", Int, 2, "arch unit: 0=mm,1=cm,2=m,3=in,4=ft"),
   field("ArchScaleSet", Bool, false, "whether arch scale is defined for this doc"),
   field("ArchMeasurements", Str, "", "arch tools measurements serialized for this document"),
+  field("ArchScaleStates", Str, "", "per-page scale states serialized for this document"),
 ];
 
 const tabState: Field[] = [
@@ -845,6 +846,7 @@ const viewportCrop: Field[] = [
   field("Bottom", Int, 0, "bottom crop margin in pixels at 100% display scaling"),
   field("ColGap", Int, 0, "gap between columns in pixels at 100% display scaling"),
   field("Enabled", Bool, false, "if true, viewport crop is enabled"),
+  field("V2Enabled", Bool, false, "if true, two-column v2 (stacked virtual columns) is enabled"),
   field("QuickToggle", Bool, false, "if true, double-click toggles between cropped and full view"),
 ];
 

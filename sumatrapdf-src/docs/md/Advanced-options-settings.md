@@ -345,7 +345,7 @@ ZoomLevels =
 ZoomIncrement = 0
 
 ; viewport crop settings for two-column reading (introduced in version 3.7)
-ViewportCrop = 0 0 0 0 0 false false
+ViewportCrop = 0 0 0 0 0 false false false
 
 ; margin trim settings (top/bottom elimination) (introduced in version 3.7)
 Trim = 0 0 false
@@ -1018,6 +1018,9 @@ FileStates [
 
     ; arch tools measurements serialized for this document
     ArchMeasurements = 
+
+    ; per-page scale states serialized for this document
+    ArchScaleStates = 
   ]
 ]
 

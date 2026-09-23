@@ -14,6 +14,7 @@
 #include "Settings.h"
 #include "DocController.h"
 #include "EngineBase.h"
+#include "DisplayModel.h"
 #include "FileHistory.h"
 #include "GlobalPrefs.h"
 #include "SumatraPDF.h"
@@ -373,10 +374,19 @@ void SetSearchStartFavorite(MainWindow* win) {
     }
 
     Str path = tab->filePath;
+    // labels are computed from the (virtual) pageNo so a two-column v2
+    // favorite keeps its column ("3L"/"3R")
     TempStr pageLabel = win->ctrl->GetPageLabeTemp(pageNo);
     TempStr plainLabel = fmt("%d", pageNo);
     bool needsLabel = pageLabel && !str::Eq(plainLabel, pageLabel);
     Str pl = needsLabel ? pageLabel : Str{};
+    // favorites persist PHYSICAL page numbers: win->currPageNo is VIRTUAL
+    // under an active two-column v2 (up to 2N) and would break the favorite
+    // in a non-v2 session; the stored label preserves the column
+    DisplayModel* dm = win->AsFixed();
+    if (dm && dm->IsViewportCropV2Active()) {
+        pageNo = dm->VirtualToPhysical(pageNo);
+    }
 
     FileState* fs = GetFavByFilePath(path);
     if (!fs) {
@@ -637,9 +647,29 @@ WindowTab* FindFavoritesTab(MainWindow* win) {
     return nullptr;
 }
 
-static void GoToFavoritePage(MainWindow* win, int pageNo) {
+// Favorites store PHYSICAL page numbers + an optional label; under an
+// active two-column v2 the virtual page for the same physical page depends
+// on the column. Prefer the stored label ("3L"/"3R" encodes it); without a
+// label (pre-v2 favorites) fall back to the left column, the start of the
+// physical page's reading sequence.
+static void GoToFavoritePage(MainWindow* win, int pageNo, Str pageLabel) {
     if (!IsMainWindowValid(win)) {
         return;
+    }
+    DisplayModel* dm = win->AsFixed();
+    if (win->IsDocLoaded() && dm && dm->IsViewportCropV2Active() && pageNo >= 1) {
+        int virtualPageNo = -1;
+        if (pageLabel) {
+            virtualPageNo = win->ctrl->GetPageByLabel(pageLabel);
+        }
+        if (!win->ctrl->ValidPageNo(virtualPageNo)) {
+            // pageNo is physical here (favorites are normalized on add);
+            // 2p-1 = left column of the same physical page
+            virtualPageNo = 2 * pageNo - 1;
+        }
+        if (win->ctrl->ValidPageNo(virtualPageNo)) {
+            pageNo = virtualPageNo;
+        }
     }
     if (win->IsDocLoaded() && win->ctrl->ValidPageNo(pageNo)) {
         win->ctrl->GoToPage(pageNo, true);
@@ -653,10 +683,12 @@ static void GoToFavoritePage(MainWindow* win, int pageNo) {
 struct GoToFavoritePageData {
     MainWindow* win;
     int pageNo;
+    Str pageLabel; // owned copy (str::Dup), freed by the task
 };
 
 static void GoToFavoritePage(GoToFavoritePageData* d) {
-    GoToFavoritePage(d->win, d->pageNo);
+    GoToFavoritePage(d->win, d->pageNo, d->pageLabel);
+    str::Free(d->pageLabel);
     delete d;
 }
 
@@ -674,6 +706,7 @@ void GoToFavorite(MainWindow* win, FileState* fs, Favorite* fav) {
     if (existingWin) {
         auto* data = new GoToFavoritePageData;
         data->pageNo = fav->pageNo;
+        data->pageLabel = fav->pageLabel ? str::Dup(fav->pageLabel) : Str{};
         data->win = existingWin;
         auto fn = MkFunc0<GoToFavoritePageData>(GoToFavoritePage, data);
         uitask::Post(fn, "TaskGoToFavorite");
@@ -701,6 +734,7 @@ void GoToFavorite(MainWindow* win, FileState* fs, Favorite* fav) {
     if (win) {
         auto* data = new GoToFavoritePageData;
         data->pageNo = pageNo;
+        data->pageLabel = fav->pageLabel ? str::Dup(fav->pageLabel) : Str{};
         data->win = win;
         auto fn = MkFunc0<GoToFavoritePageData>(GoToFavoritePage, data);
         uitask::Post(fn, "TaskGoToFavorite2");

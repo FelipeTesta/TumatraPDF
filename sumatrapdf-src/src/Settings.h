@@ -42,6 +42,8 @@ struct ViewportCrop {
     int colGap;
     // if true, viewport crop is enabled
     bool enabled;
+    // if true, two-column v2 (stacked virtual columns) is enabled
+    bool v2Enabled;
     // if true, double-click toggles between cropped and full view
     bool quickToggle;
 };
@@ -1035,17 +1037,18 @@ static const FieldInfo gViewportCropFields[] = {
     {offsetof(ViewportCrop, bottom), SettingType::Int, 0},
     {offsetof(ViewportCrop, colGap), SettingType::Int, 0},
     {offsetof(ViewportCrop, enabled), SettingType::Bool, false},
+    {offsetof(ViewportCrop, v2Enabled), SettingType::Bool, false},
     {offsetof(ViewportCrop, quickToggle), SettingType::Bool, false},
 };
 static const StructInfo gViewportCropInfo = {
     sizeof(ViewportCrop),
-    7,
+    8,
     gViewportCropFields,
-    "Left\0Right\0Top\0Bottom\0ColGap\0Enabled\0QuickToggle",
+    "Left\0Right\0Top\0Bottom\0ColGap\0Enabled\0V2Enabled\0QuickToggle",
     "left crop margin in pixels at 100% display scaling\0right crop margin in pixels at 100% display scaling\0top crop "
     "margin in pixels at 100% display scaling\0bottom crop margin in pixels at 100% display scaling\0gap between "
-    "columns in pixels at 100% display scaling\0if true, viewport crop is enabled\0if true, double-click toggles "
-    "between cropped and full view",
+    "columns in pixels at 100% display scaling\0if true, viewport crop is enabled\0if true, two-column v2 (stacked "
+    "virtual columns) is enabled\0if true, double-click toggles between cropped and full view",
     false};
 
 static const FieldInfo gTrimFields[] = {

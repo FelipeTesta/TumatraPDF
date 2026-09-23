@@ -148,10 +148,15 @@ Create a **second mode** "Two Column v2" (`CmdViewportCropV2Toggle`) **fully ind
 
 #### FASE 7 — Polish & regressions
 
-- [ ] Reset on tab switch/close; v2 state persistence.
-- [ ] Test non-continuous modes (SinglePage/Facing) — v2 only makes sense in continuous (or disable there).
-- [ ] `bun cmd/run-unit-tests.ts -dbg` + smoke.
-- [ ] Final build + deploy `Compiled/TumatraPDF.exe`.
+- [x] **v2 state persistence** (2026-09-23): `ViewportCrop.V2Enabled` setting (gen-settings.ts); `DisplayModel` ctor applies before `SetInitialViewSettings` (continuous doc starts at 2N; latent flag safe in non-continuous — conversions gate on `IsViewportCropV2Active`); toggle writes pref. "Reset on tab switch/close" n/a: flag is per-DisplayModel (per tab), no leak between tabs.
+- [x] **Non-continuous modes** (2026-09-23): toggling v2 ON from non-continuous auto-switches to Continuous first (`SwitchToDisplayMode`) — anchor/rebuild/nav-remap all run in the right domain. Nav remap now gated on actual domain transition (latent toggle no longer remaps). Visual test by user pending.
+- [x] **Unit tests + smoke** (2026-09-23): harness fixed (VS2026 detector → fallback, stale `SumatraPDF.sln` name → `TumatraPDF.sln`); smoke OK. **8 pre-existing failures in base/tests** (3× SettingsUtil roundtrip, 5× StrFormat) — `src/base/` untouched by fork changes that day; diagnose as follow-up (see found-issues below).
+- [x] Final build + deploy `Compiled/TumatraPDF.exe` (release 19:07 + debug 18:53, 2026-09-23).
+
+**Found-issues (2026-09-23, follow-ups):**
+- [ ] `premake5.exe vs2022` (run by run-unit-tests.ts) REGENERATES vcxproj from upstream premake5.lua and strips 10 fork-added sources (Flashcard*, ToolbarLayout, Commands_AutoScroll/ArchTools/View/File, MainWindowCreate) → app link fails (53 unresolved externals). Recover via `git stash push -- sumatrapdf-src/vs2022/`. Permanent fix: update premake5.lua OR skip premake step in run-unit-tests.ts.
+- [ ] Unit test failures (base/tests, pre-existing): SettingsUtil_ut@155 (serialize/reserialize roundtrip), StrFormat_ut@91 (FormatTemp vs printf) ×5.
+- [ ] Hand-added Settings.h fields must live in gen-settings.ts: `FileState.archScaleStates` was regen-lost once (fixed 2026-09-23 by adding `ArchScaleStates` to gen-settings.ts); audit other fork FileState fields for gen-coverage before next regen.
 
 ### NOTES
 

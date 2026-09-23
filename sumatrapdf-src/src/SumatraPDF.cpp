@@ -11231,7 +11231,18 @@ static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, L
                           (int)v2Dm->viewportCropV2Enabled, v2Dm->CurrentPageNo(), physAnchor, dyInPage,
                           v2Dm->viewPort.y);
                     bool wasEnabled = v2Dm->viewportCropV2Enabled;
+                    bool gateBefore = v2Dm->IsViewportCropV2Active();
+                    // v2 only makes sense in continuous mode: if turning it
+                    // ON from a non-continuous mode, switch to continuous
+                    // first so the anchor capture, layout rebuild and nav
+                    // remap below all run in the right page domain
+                    if (!wasEnabled && !IsContinuous(v2Dm->GetDisplayMode())) {
+                        SwitchToDisplayMode(win, DisplayMode::Continuous, false);
+                    }
                     v2Dm->viewportCropV2Enabled = !wasEnabled;
+                    // persist the toggle so the next session starts in the
+                    // same mode (DisplayModel ctor applies this pref)
+                    gGlobalPrefs->viewportCrop.v2Enabled = v2Dm->viewportCropV2Enabled;
                     if (v2Dm->viewportCropV2Enabled) {
                         // mutual exclusion with v1: turning v2 on turns v1 off
                         if (v2Dm->viewportCropEnabled) {
@@ -11251,10 +11262,14 @@ static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, L
                         // ApplyViewportCropV2 rebuilds pagesInfo + relayouts
                         v2Dm->ApplyViewportCropV2();
                     }
-                    // the page domain changed (physical N <-> virtual 2N):
-                    // remap nav history so Back/Forward stay on the same
-                    // physical pages
-                    v2Dm->RemapNavHistoryForV2(v2Dm->viewportCropV2Enabled);
+                    // remap nav history only when the ACTIVE page domain
+                    // changed (gate flips). A latent flag (v2 on in a
+                    // non-continuous mode) keeps the physical domain on
+                    // both sides, so the entries must not be touched
+                    bool gateAfter = v2Dm->IsViewportCropV2Active();
+                    if (gateBefore != gateAfter) {
+                        v2Dm->RemapNavHistoryForV2(gateAfter);
+                    }
                     v2Dm->RestoreViewportAfterV2Toggle(physAnchor, dyInPage);
                     logfa("[v2] toggle post: enabled=%d curPageNo(virtual)=%d viewPortY=%d\n",
                           (int)v2Dm->viewportCropV2Enabled, v2Dm->CurrentPageNo(), v2Dm->viewPort.y);

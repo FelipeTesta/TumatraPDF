@@ -717,6 +717,13 @@ DisplayModel::DisplayModel(EngineBase* engine, DocControllerCallback* cb) : DocC
     engineType = engine->kind;
 
     marginTrimEnabled = gGlobalPrefs->trim.enabled;
+    // v2 persistence: apply the global setting at creation, before
+    // SetInitialViewSettings builds the first layout (VirtualPageCount()
+    // gates on IsViewportCropV2Active(), so a continuous document starts
+    // directly at 2N virtual pages). Latent flag in non-continuous modes is
+    // safe: all conversions gate on the layout truth, and any later switch
+    // to continuous relayouts through the same path.
+    viewportCropV2Enabled = gGlobalPrefs->viewportCrop.v2Enabled;
 
     SetUiDpi(96);
 

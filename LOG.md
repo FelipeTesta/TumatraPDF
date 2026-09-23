@@ -1,5 +1,24 @@
 # TumatraPDF — Development Log
 
+## 2026-09-23 (s12) — FASE 7: v2 persistence + auto-continuous + favorites physical (BUILD OK)
+
+### Added
+- **v2 state persistence**: new `ViewportCrop.V2Enabled` setting (gen-settings.ts → Settings.h regen); `DisplayModel` ctor applies it (`viewportCropV2Enabled = gGlobalPrefs->viewportCrop.v2Enabled`) BEFORE `SetInitialViewSettings` → continuous doc starts directly at 2N virtual pages; latent flag in non-continuous modes safe (all conversions gate on `IsViewportCropV2Active`). `CmdViewportCropV2Toggle` writes the pref back.
+- **Auto-continuous**: toggling v2 ON from a non-continuous mode switches to Continuous first (`SwitchToDisplayMode`) — anchor capture, layout rebuild and nav remap all run in the right page domain. Uniform for toolbar/menu/palette.
+- **Favorites physical**: add-normalize — `win->currPageNo` (VIRTUAL under v2) → `VirtualToPhysical` before storing; label ("3L"/"3R") keeps the column. Click-resolve: `GoToFavoritePage` under active v2 prefers the stored label (`GetPageByLabel` parses L/R), falls back to `2p-1` (left column); label copied via `str::Dup` into the posted task (no dangling on favorite delete).
+
+### Fixed
+- **Nav remap gate guard**: `RemapNavHistoryForV2` now runs only when the ACTIVE domain changed (gate before ≠ after). Latent flag (v2 on, non-continuous) no longer wrongly remaps physical-domain entries.
+- **`FileState.archScaleStates` lost by regen**: first `gen-code.ts` run dropped the hand-added field (never in gen-settings.ts) → 10 C2039 build errors. Fixed properly: `ArchScaleStates` added to gen-settings.ts FileState[] + regen. LESSON: every hand-added Settings.h field MUST live in gen-settings.ts.
+- **gen-code needs VS env**: `bun cmd/gen-code.ts` fails at virt-keys (`cl` ENOENT) on bare PATH; runs clean inside `vcvars64.bat`. `Settings.h/Settings.cpp` regen only completes with cl available.
+- **run-unit-tests.ts harness**: stale `detectVisualStudio2026()` (machine has VS 2022) → switched to fallback `detectVisualStudio()`; stale sln name `vs2022\SumatraPDF.sln` → `TumatraPDF.sln`.
+
+### Notes
+- **Unit tests RUN (first time on fork)**: 8 assertion failures, ALL pre-existing in `base/tests` (3× SettingsUtil serialize/reserialize roundtrip @155, 5× StrFormat FormatTemp-vs-printf @91). `src/base/` clean in working tree — unrelated to today's changes. Follow-up: diagnose base/ divergence.
+- **premake TRAP**: `run-unit-tests.ts` runs `premake5.exe vs2022` which REGENERATES vcxproj from upstream premake5.lua → strips 10 fork-added sources (Flashcard*, ToolbarLayout, Commands_AutoScroll/ArchTools/View/File, MainWindowCreate) → release link fails LNK1120 (53 externals). Recovered via `git stash push -- vs2022/` (rtk safety net blocked checkout/restore/drop). Permanent fix pending: update premake5.lua OR skip premake in run-unit-tests.
+- Stash `premake-regen-damage` left in list (rtk blocks `stash drop` — drop manually if desired).
+- Build dbg+rel 0 err/0 warn; deployed release 19:07 + debug 18:53; smoke OK.
+
 ## 2026-09-23 (s11) — .md: space/Ctrl/position/F-key + traces removed (BUILD OK)
 
 ### Fixed
