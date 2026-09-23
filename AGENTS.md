@@ -191,13 +191,13 @@ The Bash tool runs under Git Bash (MSYS2), **not** cmd.exe:
 
 # 11. LOG.md Conventions
 
-LOG.md uses [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) format.
+LOG.md uses [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format. Actual entry style in this repo: `## YYYY-MM-DD (sN) — Short Title` with `### Fixed/Added/Changed/Verified/Notes` (no `[Unreleased]` section — history only, newest first).
 
-- Header: `## [YYYY-MM-DD] — Short Title`
-- Categories: Added, Changed, Fixed, Removed, Deprecated, Decisions, Notes
-- `[Unreleased]` at top for WIP
+- Header: `## YYYY-MM-DD (sN) — Short Title`
+- Categories: Fixed, Added, Changed, Verified, Removed, Notes
 - Concise bullets, describe WHY, reference commits when relevant
 - Update at end of sessions, before checkpoints, when starting/stopping feature branches
+- Language: English + caveman (§13) — always
 
 # 12. Project Learnings
 
@@ -208,3 +208,13 @@ _Living document — append patterns/gotchas discovered during development._
 - **2026-09-14**: Nested structs need full qualification: `MainWindow::ArchToolsState::ArchScaleState`.
 - **2026-09-12**: `Commands_Flashcard.cpp` requires exact include order: Settings.h → DocController.h → DocProperties.h → TreeModel.h → EngineBase.h → DisplayModel.h → EngineMupdf.h. Missing TreeModel.h before EngineBase.h causes 30+ cascade errors.
 - **2026-09-12**: `AddUniquePageNo` is static in SumatraPDF.cpp — must reimplement locally if needed.
+
+# 13. Informativos: English + Caveman (MANDATORY)
+
+All project informativos (`README.md`, `LOG.md`, `TODO.md`, `BUILD.md`, `MERGE.md`, `FLASHCARD_IMPLEMENTATION_PLAN.md`, `FLOW/*.dot`, `docs/`) are written in **English, caveman-compressed — always**. No Portuguese in new content; translate PT on sight.
+
+- Caveman: drop articles/filler/hedging, fragments OK. Preserve EXACTLY: code blocks, inline code, paths, commands, IDs, numbers, table layout, headings.
+- TODO unfinished sections (`[ ]`, pending, awaiting-validation, future plans): translate only, NEVER compress. Done sections (`[x]`/`✅`/COMPLETE/resolved): translate + compress.
+- Keep `FASE` (not PHASE) as phase identifier — matches LOG.md history.
+- `FLOW/*.dot` = process maps only. Never hand-maintain code-architecture `.dot` — use tree-sitter (§0b, README tree-sitter section).
+- `docs/TumatraPDF2/PLAN.md` is a frozen future reference (TumatraPDF2 off-limits) — translate only, never extend.

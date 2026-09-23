@@ -166,7 +166,9 @@ int DisplayModel::VirtualToPhysical(int virtualPageNo) const {
 
 int DisplayModel::ColumnOfVirtual(int virtualPageNo) const {
     if (IsViewportCropV2Active()) {
-        return (virtualPageNo - 1) % 2; // 0 = left, 1 = right
+        // odd virtual pages = left column, even = right; R2L flips the order
+        int col = (virtualPageNo - 1) % 2;
+        return displayR2L ? 1 - col : col;
     }
     return -1; // no column split
 }
@@ -180,7 +182,10 @@ int DisplayModel::PhysicalToVirtualForRect(int physicalPageNo, RectF rect, RectF
     float halfW = mb.dx / 2.0f;
     // which column contains the rect's horizontal center?
     int col = (rect.x + rect.dx / 2.0f) >= (mb.x + halfW) ? 1 : 0;
-    int virtualPageNo = 2 * physicalPageNo - 1 + col;
+    // R2L flips the virtual page order, not the physical column side
+    // (the rect itself keeps coming from the physical half it's in)
+    int vCol = displayR2L ? 1 - col : col;
+    int virtualPageNo = 2 * physicalPageNo - 1 + vCol;
     // keep the rect in PHYSICAL full-width coords; CvtToScreen/CvtFromScreen
     // apply the column shift internally (mirrors the render-time colX shift)
     *rectOut = rect;
@@ -222,11 +227,65 @@ bool DisplayModel::HasPageLabels() const {
 TempStr DisplayModel::GetPageLabeTemp(int pageNo) const {
     // engine is bound to PHYSICAL pages; two column v2 callers pass virtual
     // page numbers (up to 2N) which would overrun the engine's N pages
-    return engine->GetPageLabeTemp(VirtualToPhysical(pageNo));
+    TempStr label = engine->GetPageLabeTemp(VirtualToPhysical(pageNo));
+    if (IsViewportCropV2Active() && ValidPageNo(pageNo)) {
+        // mark which column of the physical page this virtual page shows
+        int col = ColumnOfVirtual(pageNo);
+        return fmt("%s%s", label, col == 1 ? StrL("R") : StrL("L"));
+    }
+    return label;
 }
 
 int DisplayModel::GetPageByLabel(Str label) const {
+    // under two-column v2, GetPageLabeTemp appends an L/R column marker;
+    // strip it and map the physical result back to the matching virtual
+    // column, so "Go to page 3R" lands on the right column of page 3
+    if (IsViewportCropV2Active() && len(label) > 0) {
+        char last = label.s[len(label) - 1];
+        if (last == 'L' || last == 'R') {
+            Str base(label.s, len(label) - 1);
+            int phys = engine->GetPageByLabel(base);
+            int virtualPageNo = 2 * phys - 1 + (last == 'R' ? 1 : 0);
+            if (phys >= 1 && ValidPageNo(virtualPageNo)) {
+                return virtualPageNo;
+            }
+            return phys;
+        }
+        // unmarked label under v2: go to the left column = the start of
+        // that physical page's reading sequence
+        int phys = engine->GetPageByLabel(label);
+        if (phys >= 1 && ValidPageNo(2 * phys - 1)) {
+            return 2 * phys - 1;
+        }
+        return phys;
+    }
     return engine->GetPageByLabel(label);
+}
+
+// Toggling two-column v2 changes the page domain of the nav history between
+// physical (N) and virtual (2N). Remap entries so Back/Forward keep pointing
+// at the same physical page: enabling maps each physical entry to the left
+// column of that page (the start of its reading sequence); disabling maps
+// each virtual entry back to its physical page. Out-of-range entries drop.
+void DisplayModel::RemapNavHistoryForV2(bool enabled) {
+    for (int i = len(navHistory) - 1; i >= 0; i--) {
+        int page = navHistory[i].page;
+        page = enabled ? 2 * page - 1 : (page + 1) / 2;
+        if (ValidPageNo(page)) {
+            navHistory[i].page = page;
+        } else {
+            navHistory.RemoveAt(i);
+            if (i < navHistoryIdx) {
+                navHistoryIdx--;
+            }
+        }
+    }
+    if (navHistoryIdx > len(navHistory)) {
+        navHistoryIdx = len(navHistory);
+    }
+    if (navHistoryIdx < 0) {
+        navHistoryIdx = 0;
+    }
 }
 
 // common shortcuts
@@ -509,7 +568,10 @@ void DisplayModel::GetDisplayState(FileState* fs) {
     ZoomToString(&fs->zoom, inPresentation ? presZoomVirtual : zoomVirtual, fs);
 
     ScrollState ss = GetScrollState();
-    fs->pageNo = ss.page;
+    // persist the PHYSICAL page: FileState outlives the v2 mode (v2 isn't
+    // persisted yet), and a virtual pageNo (up to 2N) would overrun
+    // PageCount()=N when restored into a non-v2 next session
+    fs->pageNo = VirtualToPhysical(ss.page);
     fs->scrollPos = PointF();
     if (!inPresentation) {
         fs->scrollPos = PointF((float)ss.x, (float)ss.y);

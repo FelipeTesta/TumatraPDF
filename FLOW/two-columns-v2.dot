@@ -4,7 +4,7 @@ digraph TwoColumnsV2 {
 
     toggle [label="CmdViewportCropV2Toggle (SumatraPDF.cpp)\nmutually exclusive with v1 (on => off the other)", fillcolor="#c8e6c9", style=filled];
     apply [label="DisplayModel::ApplyViewportCropV2\nBuildPagesInfo + Relayout", fillcolor="#bbdefb", style=filled];
-    layout [label="Virtual layout 2N pages stacked\nPageCount()=VirtualPageCount (2N when active)\nVirtualToPhysical(v)= (v+1)/2 ; ColumnOfVirtual(v)= v%2 ? 0 : 1", fillcolor="#bbdefb", style=filled];
+    layout [label="Virtual layout 2N pages stacked\nPageCount()=VirtualPageCount (2N when active)\nVirtualToPhysical(v)= (v+1)/2\nColumnOfVirtual(v)= (v-1)%2 ; R2L flips (r2l ? 1-col : col)", fillcolor="#bbdefb", style=filled];
     render [label="Render: pageRect + cropColumn\nmediabox halved (PageMediaBox)\ncolX shift ONLY at render coords (GetTileRectUser)\ncache key = virtual pageNo (left/right distinct)", fillcolor="#e1bee7", style=filled];
     scroll [label="Continuous flow: 1L->1R->2L->2R\nno jump (v1 snap block bypassed)", fillcolor="#c8e6c9", style=filled];
 
@@ -12,14 +12,22 @@ digraph TwoColumnsV2 {
     shifthold [label="Shift-hold (QuickToggleViewportCropV2)\nWM_KEYDOWN/UP VK_SHIFT on frame WndProc\nflips quickToggled -> relayout N pages full width\nanchor restore: fraction dyInPage (not raw px)", fillcolor="#fff9c4", style=filled];
     colgap [label="colGap overlap (FASE 6)\nViewportCropV2ColumnWidth = halfW + gap\nRightColumnX = mb.x + halfW - gap\nhelpers only - never inline mb.dx/2", fillcolor="#e3f2fd", style=filled];
 
+    r2l [label="R2L (FASE 6, done 2026-09-22)\nflip ONLY in ColumnOfVirtual (single source)\nPhysicalToVirtualForRect: vCol flips, rectOut keeps PHYSICAL col\ntoggle via CmdToggleMangaMode -> Relayout (scroll state preserved)", fillcolor="#c8e6c9", style=filled];
+    trimv2 [label="Trim x TC2 (FASE 6, verified 2026-09-22)\naxes independent: column cut dx/x, trim dy/y\nall paths compose (layout/cache/non-cache Paint/CvtTo/FromScreen)\nvisual combo test = user pending", fillcolor="#c8e6c9", style=filled];
+
     toggle -> apply -> layout -> render -> scroll;
     apply -> gate [style=dotted];
     gate -> shifthold [style=dotted];
     render -> colgap [style=dotted];
+    layout -> r2l [style=dotted];
+    layout -> trimv2 [style=dotted];
+
+    state5 [label="FASE 5 state (done 2026-09-22, user test pending)\nFileState.pageNo = PHYSICAL (VirtualToPhysical on save)\nrestore maps 2p-1 (left col) when v2 active\nRemapNavHistoryForV2 on persistent toggle (ON: p->2p-1, OFF: (p+1)/2)\nlabels: GetPageLabeTemp appends L/R (ColumnOfVirtual);\nGetPageByLabel parses suffix back to virtual column", fillcolor="#c8e6c9", style=filled];
 
     rules [label="AUDIT RULES (from past freeze bugs):\n- every engine->(PageMediabox|Transform|HasClipOptimizations|RenderPage)\n  must get VirtualToPhysical-routed pageNo (greppable: only renderPageNo)\n- ReportIf in render path = UI freeze (callstack capture per WM_PAINT)\n- position capture across relayout = fraction of page height, not pixels", shape=note, fillcolor="#ffcdd2", style=filled];
     render -> rules [style=dotted];
+    scroll -> state5 [style=dotted];
 
-    pending [label="Pending: trim+v2 combo, R2L inversion, ScrollState virtual,\nnav history 2N, page labels 1L/1R (TODO FASE 5-7)", fillcolor="#f5f5f5", style=filled];
+    pending [label="Pending: TC2 accelerator key (user choice),\nfavorites pageNo under v2 (physical normalize),\npersistence v2 state (FASE 7)", fillcolor="#f5f5f5", style=filled];
     scroll -> pending [style=dashed, label="next"];
 }

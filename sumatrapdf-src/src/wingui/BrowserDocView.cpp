@@ -31,6 +31,35 @@ constexpr const char* kReportScrollJs =
     "window.__sumatra__.notify('scroll',x,y);}catch(e){}};"
     "window.addEventListener('scroll',post,true);})();";
 
+// Space must never scroll a webview document (user preference 2026-09-23):
+// Chromium's native Space = page-down is disabled in every hosted page.
+// Typing into HTML inputs/textareas stays untouched, and modifier
+// combinations (Ctrl/Alt/Meta+Space) pass through for accessibility.
+constexpr const char* kBlockSpaceScrollJs =
+    "(function(){window.addEventListener('keydown',function(e){"
+    "if(e.code!=='Space'||e.ctrlKey||e.altKey||e.metaKey)return;"
+    "var t=e.target;"
+    "if(t&&(t.tagName==='INPUT'||t.tagName==='TEXTAREA'||t.tagName==='SELECT'||t.isContentEditable))return;"
+    "e.preventDefault();},true);})();";
+
+// WebView2 only raises AcceleratorKeyPressed for keys Chromium classifies as
+// accelerators (F-keys, arrows, Home/End, ...), so plain-letter app shortcuts
+// like F (fullscreen) or Shift+F never reach the host while the webview has
+// focus. Forward unmodified/plain-shift letter keys to the host via the JS
+// bridge; OnJsNotifyCb resolves them through the app accelerator table and
+// invokes the command. Only keys bound in the host table do anything; the
+// static .md content has no plain-letter key behavior of its own, and
+// typing into HTML inputs is excluded.
+constexpr const char* kForwardAppKeysJs =
+    "(function(){window.addEventListener('keydown',function(e){"
+    "if(e.ctrlKey||e.altKey||e.metaKey)return;"
+    "var c=e.keyCode||e.which;"
+    "if(c<65||c>90)return;"
+    "var t=e.target;"
+    "if(t&&(t.tagName==='INPUT'||t.tagName==='TEXTAREA'||t.tagName==='SELECT'||t.isContentEditable))return;"
+    "try{window.__sumatra__.notify('appKey',c,e.shiftKey?1:0);}catch(x){}"
+    "e.preventDefault();},true);})();";
+
 // Injected on every WebView2 navigation. In-page find driven by the host's
 // own find UI: searches the *rendered* DOM text (so what we find is exactly
 // what's shown) and highlights matches with the CSS Custom Highlight API,
@@ -282,6 +311,25 @@ void BrowserWebviewWnd::OnJsNotifyCb(void* ctx, Str method, Str paramsJson) {
         self->webviewScrollPos = Point(x, y);
         return;
     }
+    if (str::Eq(method, "appKey")) {
+        // plain-letter app shortcut forwarded from the page (see
+        // kForwardAppKeysJs): WebView2 never raises AcceleratorKeyPressed for
+        // plain letters, so F (fullscreen), Shift+F, etc. must come through
+        // the JS bridge. Resolve through the app accelerator table and
+        // invoke the command, mirroring webview2_accel_handler
+        int vk = st.Int(0);
+        bool shift = st.Int(1) != 0;
+        if (self->wv && self->wv->events.resolveAccelCmd) {
+            int cmd = self->wv->events.resolveAccelCmd(self->wv->events.ctx, (u16)vk, false, shift, false);
+            if (cmd > 0) {
+                HWND root = GetAncestor(self->hwndParent, GA_ROOT);
+                if (root && IsWindow(root)) {
+                    PostMessageW(root, WM_COMMAND, (WPARAM)cmd, 0);
+                }
+            }
+        }
+        return;
+    }
     if (!self->cb) {
         return;
     }
@@ -474,7 +522,9 @@ bool BrowserDocView::CreateWebView2() {
     }
 
     wv->Init(kReportScrollJs);
+    wv->Init(kForwardAppKeysJs);
     wv->Init(kFindInPageJs);
+    wv->Init(kBlockSpaceScrollJs);
 
     subclassId = NextSubclassId();
     BOOL ok = SetWindowSubclass(hwndParent, ParentWndProc, subclassId, (DWORD_PTR)this);

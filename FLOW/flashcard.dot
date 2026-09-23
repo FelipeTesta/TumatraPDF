@@ -13,9 +13,9 @@ digraph Flashcard {
     create -> load -> filter -> study -> reveal -> rate -> persist;
     rate -> study [style=dashed, label="next card"];
 
-    dead [label="Dead code to prune:\nhwndCardCount, CmdFlashcardNext (no-op),\nstudyModeType, history (TODO Flashcard Passo 7)", shape=note, fillcolor="#ffcdd2", style=filled];
+    dead [label="Dead code to prune:\nhwndCardCount, CmdFlashcardNext (no-op),\nstudyModeType, history (TODO Flashcard Step 7)", shape=note, fillcolor="#ffcdd2", style=filled];
     filter -> dead [style=dotted];
 
-    ui [label="UI: FlashcardToolbar (Study/Back/Lista/Filter + counter btn idx 0)\nFlashcardSidebar (floating list, click->navigate)", shape=box, fillcolor="#e3f2fd", style=filled];
+    ui [label="UI: FlashcardToolbar (Study/Back/List/Filter + counter btn idx 0)\nFlashcardSidebar (floating list, click->navigate)", shape=box, fillcolor="#e3f2fd", style=filled];
     study -> ui [style=dotted];
 }

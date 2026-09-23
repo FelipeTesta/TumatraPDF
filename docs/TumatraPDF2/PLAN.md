@@ -1,106 +1,106 @@
-# TumatraPDF 2 — Plano de Rebuild (Rust)
+# TumatraPDF 2 — Rebuild Plan (Rust)
 
-> **Status:** 📌 Referência futura — *não* está sendo executado. Criado em 2026-08-16.
-> Objetivo: documentar a stack otimizada e a arquitetura modular caso o projeto seja refeito do zero.
+> **Status:** 📌 Future reference — *not* being executed. Created 2026-08-16.
+> Goal: document the optimized stack and modular architecture in case the project is rebuilt from scratch.
 
-## Contexto
+## Context
 
-TumatraPDF v1 = fork C++/Win32/MuPDF de SumatraPDF. Features exclusivas já maduras:
-AutoScroll+ETA, CropView/Trim, ContrastOverlay, Recolor/Inversão, themes, AI chat.
+TumatraPDF v1 = C++/Win32/MuPDF fork of SumatraPDF. Mature exclusive features:
+AutoScroll+ETA, CropView/Trim, ContrastOverlay, Recolor/Inversion, themes, AI chat.
 
-Rebuild do zero **perde** o valor de merge com upstream (MERGE.md) e ~1M linhas de
-renderização/formatos. Decisão é hipotética/adiada — este plano preserva o desenho.
+Rebuilding from zero **loses** upstream merge value (MERGE.md) and ~1M lines of
+rendering/formats. Decision hypothetical/deferred — this plan preserves the design.
 
-## Stack recomendada
+## Recommended stack
 
-| Camada | Escolha | Motivo |
+| Layer | Choice | Reason |
 |---|---|---|
-| Linguagem | Rust (1.94+ stable) | Memory-safe, `cargo`, 1 binário |
-| Engine PDF | MuPDF via `mupdf-rs` | Herda PDF/EPUB/MOBI/CBZ + perf |
-| UI | egui (glow/wgpu) | Immediate mode, ideal para crop/overlay |
-| Config | serde + TOML | Tipada, `#[serde(default)]` migra versões |
-| Testes | `cargo test` + snapshot de render | Regressão visual no CI |
-| Build/CI | GitHub Actions, target windows-msvc | Sem VS |
+| Language | Rust (1.94+ stable) | Memory-safe, `cargo`, 1 binary |
+| PDF engine | MuPDF via `mupdf-rs` | Inherits PDF/EPUB/MOBI/CBZ + perf |
+| UI | egui (glow/wgpu) | Immediate mode, ideal for crop/overlay |
+| Config | serde + TOML | Typed, `#[serde(default)]` migrates versions |
+| Tests | `cargo test` + render snapshot | Visual regression in CI |
+| Build/CI | GitHub Actions, target windows-msvc | No VS |
 
-### Alternativa (maior facilidade IA, porém mais pesada)
-Tauri v2 + React/TS + PDF.js — RAM ~150-250MB, render 2-3x mais lento. Contradiz a leveza.
+### Alternative (easier for AI, but heavier)
+Tauri v2 + React/TS + PDF.js — RAM ~150-250MB, 2-3x slower render. Contradicts lightness.
 
-## Arquitetura modular
+## Modular architecture
 
 ```
 tumatra/
 ├── Cargo.toml              # [workspace]
 ├── crates/
-│   ├── core/               # Document, ViewState, pipeline (sem UI, testável)
+│   ├── core/               # Document, ViewState, pipeline (no UI, testable)
 │   ├── ui/                 # egui app shell (thin)
 │   ├── render/             # passes: Crop/Recolor/Contrast
 │   ├── scroll/             # autoscroll state machine + ETA
-│   ├── settings/           # serde TOML versionado
+│   ├── settings/           # versioned serde TOML
 │   └── ai-chat/            # trait ChatProvider (Claude/Grok/Anthropic)
 └── tests/
-    └── snapshot/           # golden images de render
+    └── snapshot/           # render golden images
 ```
 
-### Pipeline de render (correção de bug por construção)
+### Render pipeline (bug-free by construction)
 
-Bug conhecido v1: `RenderCache::Paint` tinha 2 paths (cached/não-cached), só o cached
-chamava `RecolorPixmap` → inversão perdida com trim on. No v2, **um único pipeline**:
+Known v1 bug: `RenderCache::Paint` had 2 paths (cached/non-cached), only cached
+called `RecolorPixmap` → inversion lost with trim on. In v2, **one single pipeline**:
 
 ```
 RenderPage(engine, page, opts) -> Bitmap
-  1. MuPDF rasteriza (mupdf-rs)
+  1. MuPDF rasterizes (mupdf-rs)
   2. CropPass    (margins L/R/T/B + inter-column gap)  <- CropView/Trim
-  3. RecolorPass (inversão / tema dark)                <- Theme + Invert
-  4. ContrastPass (contraste/brilho overlay)           <- ContrastOverlay
+  3. RecolorPass (inversion / dark theme)              <- Theme + Invert
+  4. ContrastPass (contrast/brightness overlay)        <- ContrastOverlay
 ```
 
-Cada passo: `trait RenderPass { fn apply(&self, img: &mut Image, ctx: &PassCtx) }`.
-Config via `RenderOptions` (serde). Sem globals (`gRenderCache` some).
+Each step: `trait RenderPass { fn apply(&self, img: &mut Image, ctx: &PassCtx) }`.
+Config via `RenderOptions` (serde). No globals (`gRenderCache` gone).
 
-### Mapeamento das features v1 → crates v2
+### Mapping v1 features → v2 crates
 
-| Feature v1 | Crate v2 | Ganho |
+| v1 feature | v2 crate | Gain |
 |---|---|---|
-| CropView + TrimConfigDialog | `render` (CropPass) + `ui` | geometria = teste unit |
-| AutoScroll + ETA label | `scroll` | state machine pura, timer injetado |
-| ContrastOverlay | `render` (ContrastPass) | WS_EX_TRANSPARENT some |
-| Recolor/Inversão/themes | `render` (RecolorPass) | 1 path só |
-| AI chat (Claude/Grok/AntiGravity) | `ai-chat` | novo provider = 1 impl |
-| Settings (registry/txt) | `settings` | TOML versionado |
+| CropView + TrimConfigDialog | `render` (CropPass) + `ui` | geometry = unit test |
+| AutoScroll + ETA label | `scroll` | pure state machine, injected timer |
+| ContrastOverlay | `render` (ContrastPass) | WS_EX_TRANSPARENT gone |
+| Recolor/Inversion/themes | `render` (RecolorPass) | 1 path only |
+| AI chat (Claude/Grok/AntiGravity) | `ai-chat` | new provider = 1 impl |
+| Settings (registry/txt) | `settings` | versioned TOML |
 
-### Camadas e contratos
-- `core` não conhece UI: consome `Document` (Arc imutável) + `ViewState { page, zoom, viewport, crop, scroll }`
-- UI fina declarativa (egui)
-- Eventos: `enum AppEvent { ScrollTick, PageChanged, UserClick{x,y}, ChatMsg }` — 1 loop de update
+### Layers and contracts
+- `core` never touches UI: consumes `Document` (immutable Arc) + `ViewState { page, zoom, viewport, crop, scroll }`
+- Thin declarative UI (egui)
+- Events: `enum AppEvent { ScrollTick, PageChanged, UserClick{x,y}, ChatMsg }` — 1 update loop
 
-## Fases de migração
+## Migration phases
 
-### Fase 0 — Spike do engine (maior risco)
-1. `cargo new` workspace + crate `core`
-2. Integrar `mupdf-rs` (ou `pdfium-render`) → render PDF fixture → PNG
-3. Prova dos passes Crop+Recolor+Contrast no bitmap
-4. **Go/no-go:** página A4 < 200ms, binário < 20MB, output ≈ SumatraPDF
-5. Entregável: CLI `tumatra render in.pdf -o out.png --crop --invert`
+### Phase 0 — Engine spike (biggest risk)
+1. `cargo new` workspace + `core` crate
+2. Integrate `mupdf-rs` (or `pdfium-render`) → render PDF fixture → PNG
+3. Prove Crop+Recolor+Contrast passes on bitmap
+4. **Go/no-go:** A4 page < 200ms, binary < 20MB, output ≈ SumatraPDF
+5. Deliverable: CLI `tumatra render in.pdf -o out.png --crop --invert`
 
-### Fase 1 — Workspace + Pipeline
-Crater `core`/`render`/`settings`/`scroll`/`ai-chat`/`ui`. `trait RenderPass` + `RenderOptions`.
-1 path de render único. Testes unit + snapshot.
+### Phase 1 — Workspace + Pipeline
+Create `core`/`render`/`settings`/`scroll`/`ai-chat`/`ui`. `trait RenderPass` + `RenderOptions`.
+1 single render path. Unit + snapshot tests.
 
-### Fase 2 — UI egui leitura básica
-Page up/down, zoom, scroll, dark theme. ViewState pura.
+### Phase 2 — Basic egui reading UI
+Page up/down, zoom, scroll, dark theme. Pure ViewState.
 
-### Fase 3 — Portar features (ordem de risco)
+### Phase 3 — Port features (risk order)
 CropView/Trim → Recolor/Theme → Contrast → AutoScroll/ETA → AI chat.
 
-### Fase 4 — Settings + release
-TOML versionado, `--release`, CI (cargo test + snapshot diff).
+### Phase 4 — Settings + release
+Versioned TOML, `--release`, CI (cargo test + snapshot diff).
 
-## Decisões pendentes (quando executar)
-1. **Engine:** `mupdf-rs` (formatos+perf, build do C MuPDF — recomendado) vs `pdfium-render` (DLL pré-compilada, Windows fácil, menos formatos)
-2. **UI:** `egui` (recomendado) vs `iced`
-3. **Escopo MVP:** só PDF + features atuais vs paridade completa de formatos
-4. **Local:** pasta irmã `TumatraPDF2\` vs subpasta no repo atual
+## Pending decisions (when executing)
+1. **Engine:** `mupdf-rs` (formats+perf, builds C MuPDF — recommended) vs `pdfium-render` (prebuilt DLL, easy Windows, fewer formats)
+2. **UI:** `egui` (recommended) vs `iced`
+3. **MVP scope:** PDF only + current features vs full format parity
+4. **Location:** sibling `TumatraPDF2\` folder vs subfolder in current repo
 
-## Ferramentas verificadas (2026-08-16)
+## Verified tooling (2026-08-16)
 - cargo 1.94.1, rustc 1.94.1, target stable-x86_64-pc-windows-msvc
 - Git 2.53.0

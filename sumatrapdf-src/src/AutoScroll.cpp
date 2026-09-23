@@ -95,39 +95,59 @@ float AutoScrollPxPerSec(MainWindow* win) {
 // (dragging forward honestly lowers remainingPx; dragging back raises it).
 // The scroll step itself is time-based (AutoScrollContinuousTick), so the
 // declared speed is the real speed regardless of WM_TIMER granularity.
+//
+// Two fully independent logics, one per document kind: fixed-page (PDF) and
+// webview (markdown). They never touch each other's domain so a change on
+// one side can't regress the other.
+static void RecalcAutoScrollEtaPdf(MainWindow* win);
+static void RecalcAutoScrollEtaWebview(MainWindow* win);
+
 void RecalcAutoScrollEta(MainWindow* win) {
     if (!win->autoScroll.active) {
         return;
     }
+    if (win->AsFixed()) {
+        RecalcAutoScrollEtaPdf(win);
+    } else {
+        RecalcAutoScrollEtaWebview(win);
+    }
+}
+
+// Fixed-page (PDF) ETA: canvas coordinates are the layout truth; remaining
+// distance is canvas height minus the viewport's bottom edge.
+static void RecalcAutoScrollEtaPdf(MainWindow* win) {
     auto dm = win->AsFixed();
-    if (dm) {
-        float pxPerSec = AutoScrollPxPerSec(win);
-        Size cs = dm->GetCanvasSize();
-        float remainingPx = (float)cs.dy - (float)(dm->viewPort.y + dm->viewPort.dy);
-        if (remainingPx <= 0 || pxPerSec <= 0) {
-            win->autoScroll.etaMinutes = 0;
-        } else {
-            float etaSec = remainingPx / pxPerSec;
-            win->autoScroll.etaMinutes = (int)(etaSec / 60.0f) + 1; // round up, reader-friendly
-        }
+    float pxPerSec = AutoScrollPxPerSec(win);
+    Size cs = dm->GetCanvasSize();
+    float remainingPx = (float)cs.dy - (float)(dm->viewPort.y + dm->viewPort.dy);
+    if (remainingPx <= 0 || pxPerSec <= 0) {
+        win->autoScroll.etaMinutes = 0;
+    } else {
+        float etaSec = remainingPx / pxPerSec;
+        win->autoScroll.etaMinutes = (int)(etaSec / 60.0f) + 1; // round up, reader-friendly
+    }
+}
+
+// WebView (markdown) ETA: the document has no pages and scrolls in the
+// renderer, so trigger a one-shot JS eval that reports the remaining height.
+// The result arrives async via __sumatra__.notify('autoscrollProgress') ->
+// OnAutoScrollProgress, which updates the ETA label (the rAF autoscroll loop
+// also throttles the same notify every ~10s).
+static void RecalcAutoScrollEtaWebview(MainWindow* win) {
+    auto mm = win->AsMarkdown();
+    if (!mm) {
         return;
     }
-    // WebView path (epub/markdown): trigger a one-shot JS eval to report remaining
-    // height. The result arrives async via __sumatra__.notify -> OnAutoScrollProgress
-    // which updates the ETA label.
-    auto mm = win->AsMarkdown();
-    if (mm) {
-        struct WebviewWnd* wv = mm->GetWebviewWnd();
-        if (wv && wv->webview) {
-            TempStr js =
-                fmt("(function(){var y=window.scrollY||window.pageYOffset||0;"
-                    "var h=window.innerHeight;"
-                    "var sh=document.documentElement.scrollHeight;"
-                    "var rem=sh-(y+h);"
-                    "if(rem<0) rem=0;"
-                    "window.__sumatra__.notify('autoscrollProgress',rem);}())");
-            wv->Eval(js);
-        }
+    struct WebviewWnd* wv = mm->GetWebviewWnd();
+    if (wv && wv->webview) {
+        TempStr js =
+            fmt("(function(){var y=window.scrollY||window.pageYOffset||0;"
+                "var h=window.innerHeight;"
+                "var sh=document.documentElement.scrollHeight;"
+                "var rem=sh-(y+h);"
+                "if(rem<0) rem=0;"
+                "window.__sumatra__.notify('autoscrollProgress',rem);}())");
+        wv->Eval(js);
     }
 }
 
@@ -149,13 +169,19 @@ static void SetWebviewAutoScroll(MainWindow* win, float pxPerSec) {
         return;
     }
     TempStr js =
-        fmt("if(!window.__tumatraAS){window.__tumatraAS={raf:0,pxPerSec:0,last:0,accum:0,lastProg:0,"
+        fmt("if(!window.__tumatraAS){window.__tumatraAS={raf:0,pxPerSec:0,last:0,accum:0,lastProg:0,dpr:1,"
             "start:function(p){this.stop();this.pxPerSec=p;this.accum=0;this.last=performance.now();"
-            "this.lastProg=this.last-9500;"
+            "this.lastProg=this.last-9500;this.dpr=window.devicePixelRatio||1;"
             "this.raf=requestAnimationFrame(this.tick.bind(this));},"
             "stop:function(){if(this.raf){cancelAnimationFrame(this.raf);this.raf=0;}this.pxPerSec=0;this.accum=0;},"
+            // accumulate fractional CSS px, but step in WHOLE DEVICE pixels: at
+            // 125%%/150%% scaling a 1 CSS px step lands on fractional device
+            // pixels, so glyphs re-rasterize with a different subpixel phase on
+            // every step and the text visibly shimmers. Stepping by exactly
+            // k*devicePixelRatio CSS px keeps the raster phase stable.
             "tick:function(t){var dt=(t-this.last)/1000;this.last=t;if(this.pxPerSec<=0)return;"
-            "this.accum+=this.pxPerSec*dt;var dy=Math.floor(this.accum);"
+            "this.accum+=this.pxPerSec*dt;"
+            "var dy=Math.floor(this.accum*this.dpr)/this.dpr;"
             "if(dy>0){this.accum-=dy;window.scrollBy(0,dy);}"
             "var y=window.scrollY||window.pageYOffset,h=window.innerHeight,"
             "sh=document.documentElement.scrollHeight;"
@@ -342,12 +368,6 @@ void StartAutoScrollAtCursor(MainWindow* win) {
 
 // Timer tick handler for continuous auto-scroll
 void AutoScrollContinuousTick(MainWindow* win, HWND hwnd) {
-    // Ctrl held = pause auto-scroll temporarily. Keep the time base fresh so
-    // resuming doesn't scroll by the whole paused amount in one tick.
-    if (GetKeyState(VK_CONTROL) & 0x8000) {
-        win->autoScroll.lastScrollTick = GetTickCount();
-        return;
-    }
     if (!win->autoScroll.active) {
         KillTimer(hwnd, kContinuousAutoScrollTimerID);
         return;
@@ -355,6 +375,15 @@ void AutoScrollContinuousTick(MainWindow* win, HWND hwnd) {
     auto dm = win->AsFixed();
     if (dm) {
         // Fixed-page path (PDF, ebook, etc.)
+        // Ctrl held = pause auto-scroll temporarily. Keep the time base fresh
+        // so resuming doesn't scroll by the whole paused amount in one tick.
+        // Fixed-page ONLY: webview documents pause their JS rAF loop in the
+        // else-branch below (webviewCtrlDown state machine) — an early return
+        // here would starve it and Ctrl would never pause the .md scroll.
+        if (GetKeyState(VK_CONTROL) & 0x8000) {
+            win->autoScroll.lastScrollTick = GetTickCount();
+            return;
+        }
         // v2 quick view (shift-hold): temporarily pause the auto-scroll so the
         // user can freely drag/pan the full page; releasing Shift resumes it.
         if (dm->viewportCropV2QuickToggled) {

@@ -58,3 +58,6 @@ Compiled/
 
 # Upstream baseline comparison
 .tmp_compare/
+
+# Deprecated informativos + scratch (see TEMP/, contents ignored via TEMP/.gitignore)
+TEMP/

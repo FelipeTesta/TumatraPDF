@@ -12,10 +12,12 @@ digraph AutoScroll {
     cache [label="cached path: blit tiles (~1ms)\nnon-cache: engine->RenderPage SYNC (~23ms)", fillcolor="#fff9c4", style=filled];
     end [label="IsAtDocumentEnd -> KillTimer", fillcolor="#ffcdd2", style=filled];
 
-    eta [label="ETA (page-based, resync on page change only)\nformula: timePerPage x remainingPages, roundUp +1min\npause (Shift/Ctrl) excluded via etaPauseStartTick\nfields: MainWindow.h AutoScrollState", shape=box, fillcolor="#c8e6c9", style=filled];
+    eta [label="ETA PDF: puramente MATEMATICO, per-tick\n(AutoScroll.cpp RecalcAutoScrollEtaPdf)\nremainingPx = canvasSize.dy - viewport bottom\netaMinutes = remainingPx/pxPerSec/60, roundUp +1\nnever display <1min mid-doc (floor at display)\ndedupe label updates via etaLastShown", shape=box, fillcolor="#c8e6c9", style=filled];
     etaUi [label="ETA label: canvas overlay (WndProcEtaOverlay, Toolbar.cpp)\nWS_EX_LAYERED + SetLayeredWindowAttributes + magenta colorkey\nREQUIRED or invisible", shape=note, fillcolor="#fff9c4", style=filled];
 
-    md [label="Markdown (.md) webview branch:\nrAF loop __tumatraAS (60fps scrollBy, px/sec)\nthrottled autoscrollProgress notify ~10s\n-> OnAutoScrollProgress -> UpdateToolbarEtaText\n(ETA keeps counting while scrolling; 2026-09-22 fix)\nautoscrollBottom -> OnAutoScrollBottom -> stop", shape=box, fillcolor="#e3f2fd", style=filled];
+    md [label="Markdown (.md) webview branch - SEPARATE ETA logic:\nrAF loop __tumatraAS (60fps, px/sec)\nscroll steps quantized to whole DEVICE pixels\n(step=floor(accum*dpr)/dpr; 1-CSS-px steps at 125/150%\nscaling = fractional device px = subpixel shimmer)\nthrottled autoscrollProgress notify ~10s -> OnAutoScrollProgress\nfloor 1min; autoscrollBottom -> hide label + stop", shape=box, fillcolor="#e3f2fd", style=filled];
+    mdhop [label="ADAPTER TRAP (2026-09-23 fix):\nJS notify -> BrowserDocView::OnJsNotifyCb\n-> MarkdownHtmlWindowHandler (adapter, MarkdownModel.cpp:179)\n-> MarkdownModel -> ControllerCallbackHandler\nadapter MUST forward every new HtmlWindowCallback method\n(no-op default = feature silently dead)", shape=note, fillcolor="#ffcdd2", style=filled];
+    mdkeys [label="WebView2 keys (2026-09-23):\nkBlockSpaceScrollJs: Chromium-native Space=page-down lives INSIDE\nthe webview, outside the accel table -> preventDefault via init script\nkForwardAppKeysJs: plain letters A-Z -> notify('appKey') ->\nresolveAccelCmd -> WM_COMMAND (WebView2 only raises\nAcceleratorKeyPressed for F-keys/arrows/Home/End)\nCtrl pause: dm-branch tick owns the Ctrl early-return;\nwebview branch = webviewCtrlDown state machine -> SetWebviewAutoScroll(0)\n.md reading pos: fs->scrollPos -> ScrollTo on LoadDoc\n(seeds htmlScrollPos, applied at OnDocumentComplete like CHM)", shape=note, fillcolor="#e3f2fd", style=filled];
 
     shift [label="Shift hold = PAUSE tick (quick view full page)\nrelease resumes; viewport remap via RestoreViewportAfterV2Toggle\n(fraction-of-page dyInPage, not raw px)", shape=box, fillcolor="#fff9c4", style=filled];
 
@@ -24,6 +26,8 @@ digraph AutoScroll {
     tick -> eta [style=dotted];
     eta -> etaUi;
     tick -> md [style=dotted, label="AsMarkdown"];
+    md -> mdhop [style=dotted];
+    md -> mdkeys [style=dotted];
     tick -> shift [style=dotted];
 
     speed [label="Speed: round-step table 25-1600 px/min\nF7 +20% / F8 -20%\npersist FileState AutoScrollSpeedMultiplier", shape=box, fillcolor="#f5f5f5", style=filled];

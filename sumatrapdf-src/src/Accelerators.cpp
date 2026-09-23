@@ -36,11 +36,11 @@ static ACCEL gBuiltInAccelerators[] = {
     {FVIRTKEY, VK_NEXT, CmdScrollDownPage},
     {FVIRTKEY, VK_PRIOR, CmdScrollUpPage},
 
-    {FVIRTKEY, VK_SPACE, CmdScrollDownPage},
+    // spacebar intentionally unbound (user request 2026-09-22: it made the
+    // page jump a small interval while reading)
     {FVIRTKEY, VK_RETURN, CmdScrollDownPage},
     {FCONTROL | FVIRTKEY, VK_DOWN, CmdScrollDownPage},
 
-    {FSHIFT | FVIRTKEY, VK_SPACE, CmdScrollUpPage},
     {FSHIFT | FVIRTKEY, VK_RETURN, CmdScrollUpPage},
     {FCONTROL | FVIRTKEY, VK_UP, CmdScrollUpPage},
 

@@ -8,7 +8,9 @@ import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 export const ROOT = join(import.meta.dir, "..");
-export const EXE = join(ROOT, "out", "dbg64", "SumatraPDF.exe");
+// build.ts produces TumatraPDF.exe (the old SumatraPDF.exe in out\dbg64 is a
+// stale binary from before the rename — tests must run the current one)
+export const EXE = join(ROOT, "out", "dbg64", "TumatraPDF.exe");
 
 // Extract page text via the debug -extract-text harness (hex-encoded UTF-8).
 // The GUI exe's stdout often does not reach a Bun pipe on Windows; PowerShell

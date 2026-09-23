@@ -15,6 +15,7 @@ import { dlopen, FFIType, JSCallback, ptr, toArrayBuffer } from "bun:ffi";
 const user32 = dlopen("user32.dll", {
   EnumWindows: { args: [FFIType.function, FFIType.i64], returns: FFIType.bool },
   EnumChildWindows: { args: [FFIType.ptr, FFIType.function, FFIType.i64], returns: FFIType.bool },
+  GetWindow: { args: [FFIType.ptr, FFIType.u32], returns: FFIType.u64 },
   GetClassNameW: { args: [FFIType.ptr, FFIType.ptr, FFIType.i32], returns: FFIType.i32 },
   GetWindowThreadProcessId: { args: [FFIType.ptr, FFIType.ptr], returns: FFIType.u32 },
   PostMessageW: { args: [FFIType.ptr, FFIType.u32, FFIType.i64, FFIType.i64], returns: FFIType.bool },
@@ -340,6 +341,18 @@ export function enumChildWindows(parent: number, visit: (hwnd: number) => boolea
   } finally {
     cb.close();
   }
+}
+
+// GetWindow relationship constants (uCmd argument)
+export const GW_HWNDFIRST = 0;
+export const GW_HWNDLAST = 1;
+export const GW_HWNDNEXT = 2;
+export const GW_HWNDPREV = 3;
+
+// sibling/relationship window handle: e.g. GetWindow(hwnd, GW_HWNDNEXT) is the
+// sibling right below hwnd in z-order (0 if none)
+export function getWindow(hwnd: number, cmd: number): number {
+  return Number(user32.symbols.GetWindow(hwnd, cmd));
 }
 
 // find a top-level window of a given process and window class (0 if none)

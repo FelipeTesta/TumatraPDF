@@ -1,28 +1,92 @@
 # TumatraPDF — Development Log
 
+## 2026-09-23 (s11) — .md: space/Ctrl/position/F-key + traces removed (BUILD OK)
+
+### Fixed
+- **Space never scrolls (also .md/CHM)**: Win32 side already clean (VK_SPACE/Shift+Space outside `gBuiltInAccelerators`), but Chromium INSIDE WebView2 has NATIVE Space=page-down, outside accelerator table → new init script `kBlockSpaceScrollJs` (BrowserDocView.cpp): keydown capture, `code==='Space'`, no ctrl/alt/meta, not typing in INPUT/TEXTAREA/SELECT/contentEditable → `preventDefault`. Injected alongside existing Inits.
+- **Ctrl did not pause autoscroll .md**: Ctrl early-return in `AutoScrollContinuousTick` (ETA math rework) ran BEFORE webview branch, starved `webviewCtrlDown` state machine calling `SetWebviewAutoScroll(0)`. Tick restructured: active-check first; `if (dm)` branch (fixed pages) CONTAINS Ctrl early-return; webview branch unchanged (state machine + timer check, zero ETA work per tick).
+- **.md reading position lost on reopen**: save existed (`MarkdownModel::GetDisplayState` → `fs->scrollPos` via `SaveHtmlScrollPos`); restore missing — `OnDocumentComplete` only consulted in-session `htmlScrollPositions` map (empty after restart). LoadDoc markdown branch (SumatraPDF.cpp ~:2343): `fs->scrollPos.y > 0` → `ScrollTo(page, RectF(fs->scrollPos), kInvalidZoom)` (seeds htmlScrollPos → applied in OnDocumentComplete, same mechanism as CHM); else GoToPage. Requires normal close (settings save); `-for-testing` runs never persist.
+- **F (fullscreen) dead in .md**: WebView2 fires `AcceleratorKeyPressed` only for Chromium-classified accelerators (F-keys, arrows, Home/End) — plain letters (F→CmdToggleFullscreen) never reach host. New init script `kForwardAppKeysJs`: keydown without modifiers, keyCode 65-90, outside inputs → `notify('appKey', keyCode, shift)` + preventDefault; handler in `OnJsNotifyCb` BEFORE `if (!self->cb)` guard: resolves via `resolveAccelCmd`, `cmd > 0` → `PostMessageW(GA_ROOT, WM_COMMAND, cmd)` (mirrors webview2_accel_handler).
+
+### Verified
+- **"ETA disappearing in fullscreen"**: NOT bug in current build — `tests/ad-hoc-md-fullscreen.ts` (ad-hoc): overlay topmost sibling (above canvas), visible, text alive, repositioned correctly in fullscreen AND presentation mode with autoscroll on. User observation was old binary still running. New helpers `getWindow`/GW_HWNDPREV/GW_HWNDNEXT added to tests/winapi.ts.
+
+### Changed
+- **TEMP `[as-md]` traces removed** (3 sites: BrowserDocView OnJsNotifyCb, SetWebviewAutoScroll, OnAutoScrollProgress) — pipeline verified, full diagnosis in ad-hoc tests.
+- `tests/util.ts` EXE: `SumatraPDF.exe` → `TumatraPDF.exe` (current binary; SumatraPDF.exe in out\dbg64 is stale pre-rename — tests with `launchSumatra` ran old build). Note: per-test taskkills still reference old process name in some files (cosmetic follow-up).
+
+### Notes
+- All .md fixes in INDEPENDENT functions per user rule (.md changes never regress PDF/CHM). User visual check: F→fullscreen, ETA both modes, space dead, Ctrl pauses, reopen restores height, shimmer.
+
+## 2026-09-23 (s10) — .md ETA: adapter no-op + separate logics + shimmer (BUILD OK)
+
+### Fixed
+- **.md ETA dead (page scrolled, time never showed)**: root cause — `MarkdownHtmlWindowHandler` (adapter MarkdownModel↔BrowserDocView, created in `SetParentHwnd`, MarkdownModel.cpp:179) never forwarded `OnAutoScrollProgress`/`OnAutoScrollBottom`; both fell to `HtmlWindowCallback` no-op default (HtmlWindow.h:40-43). Entire pipeline alive (rAF `__tumatraAS` → notify `autoscrollProgress` → BrowserDocView), died SILENTLY at last hop. Diagnosed with `tests/ad-hoc-md-eta.ts` (ad-hoc repro: overlay text/visible/rect + webview pixel column + `[as-md]` traces in sumlog): notifies arrived with rem 2041→1263 px, `ControllerCallbackHandler::OnAutoScrollProgress` never fired. Adapter now forwards both — also fixes desynced bottom-stop (rAF self-stopped at end, C++ state stayed "active").
+- **.md ETA "0min" at end**: `OnAutoScrollProgress` truncated (`(int)`) — showed "0min" with <1min reading left. Now floor 1min (same rule as PDF); actual end still via `autoscrollBottom` (hides label).
+
+### Changed
+- **Two fully independent ETA logics** (user rule: .md changes never regress PDF): `RecalcAutoScrollEtaPdf` (canvas: `remainingPx = canvasSize.dy − viewportBottom`) and `RecalcAutoScrollEtaWebview` (one-shot JS probe for remaining height; async result via notify) — `RecalcAutoScrollEta` dispatcher only picks by doc type. Zero shared calculation.
+- **Shimmer/flicker of letters in .md autoscroll**: rAF steps quantized to DEVICE pixels (`step = Math.floor(accum×dpr)/dpr`, `dpr=window.devicePixelRatio`): at 125%/150% scaling, each 1 CSS px step landed on fractional device pixels → glyphs re-rasterized with alternating subpixel phase each step. Step = exactly k×dpr keeps raster phase stable. At 100% scaling behavior identical. **Visual check pending (user)**.
+
+### Notes
+- TEMP `[as-md]` traces still in code (notify entry in BrowserDocView, SetWebviewAutoScroll, OnAutoScrollProgress) — remove before commit.
+- `tests/ad-hoc-md-eta.ts`: ad-hoc repro (NOT registered in all.ts) — launches .md, speedUp x10, toggle, samples overlay + pixel column.
+- Lateral find: `tests/util.ts` EXE points to `SumatraPDF.exe` (old name; current binary = `TumatraPDF.exe`) — tests using `launchSumatra` run STALE binary from yesterday. Pending EXE fix.
+
+## 2026-09-22 (s9) — FASE 5: state/nav/labels under TC2 (BUILD OK)
+
+### Added
+- **Page labels `L`/`R` under v2**: `GetPageLabeTemp` appends `L`/`R` (from `ColumnOfVirtual`) when `IsViewportCropV2Active` — toolbar shows "3L"/"3R"; `GetPageByLabel` inverse-parses ("3R" → virtual of right column; plain label → left column = reading-sequence start). Favorites/TOC/search inherit consistent labels.
+- **Nav history 2N**: `DisplayModel::RemapNavHistoryForV2(bool)` — v2 toggle remaps history physical (N) ↔ virtual (2N): ON `p→2p-1`, OFF `(p+1)/2`; out-of-range entries drop; Back/Forward stay on same physical page. Called in `CmdViewportCropV2Toggle` handler (never in quick-toggle shift-hold — transient).
+
+### Fixed
+- **FileState persistence**: `GetCurrentFileState` saved VIRTUAL `fs->pageNo` (up to 2N) — reopen without v2 ran GoToPage(2N) on N PageCount (clamp to last page = wrong position). Now saves PHYSICAL (`VirtualToPhysical(ss.page)`); restore maps `2p-1` (left column) when v2 active. Future-proof for v2 state changes between sessions.
+
+### Notes
+- Finding (pending): favorites saved under v2 store virtual pageNo + label "3L" — in non-v2 session click resolves via label (ParseInt tolerates) but raw pageNo may no-op. Same fix class as FileState; physical normalization pending.
+- Build dbg+rel 0 err/0 warn; smoke OK; release+debug deployed. Visual test pending (user): Back/Forward after toggle, page edit "3R", reopen doc saved under v2.
+- TC2 accelerator: **user decision — NO shortcut** (toolbar/menu only).
+
+### Removed
+- **Spacebar disabled** (user request): `VK_SPACE` removed from `gBuiltInAccelerators` (`CmdScrollDownPage`) and `Shift+Space` (`CmdScrollUpPage`) — the bar made the page "jump a small interval". Enter/Ctrl+↑↓/PgUp/PgDn remain in place. Side effect: space no longer advances in presentation mode either (no alternate handler in code). `gNotSafeKeys` (edit-control safety) untouched.
+
+## 2026-09-22 (s8) — FASE 6: R2L under TC2 + Trim×TC2 verified (BUILD OK)
+
+### Added
+- **R2L (manga/RTL) under Two Columns v2**: SINGLE flip in `DisplayModel::ColumnOfVirtual` — `col = (v-1)%2; return displayR2L ? 1-col : col`. Under R2L 1st virtual column shows RIGHT column of physical page (inverted reading order). Everything else (render colX, `PageMediaBox`, `ColumnOffsetXForPage` → hit-test/overlays) derives from this mapping — zero extra code.
+- `PhysicalToVirtualForRect`: same inversion for virtual page number (`vCol = r2l ? 1-col : col`), but rect shift (`rectOut`) keeps PHYSICAL column — rect coords are physical truth, only reading order changes. Left/right navigation (keys, SumatraPDF.cpp:10533+) already virtual next/prev — consistent.
+
+### Verified
+- **Trim × TC2**: independent axes (column cuts dx/x, trim cuts dy/y) in all paths (layout, cache, non-cache Paint, CvtToScreen/FromScreen). Zero ordering conflict. Visual combo test pending with user.
+- Build dbg+rel 0 err/0 warn; smoke `-for-testing` OK; release+debug deployed in `Compiled\`.
+
+### Notes
+- Toggle: `CmdToggleMangaMode` → `ToggleMangaModeInternal` (GetScrollState → Relayout → SetScrollState) preserves virtual position across flip.
+- (retroactive, commit a09534e) purely mathematical ETA + time-based scroll — s7 LOG entry never committed; summary: `accum += AutoScrollPxPerSec*elapsedSec` (WM_TIMER ~64Hz, not 100Hz); ETA = `remainingPx/pxPerSec` per tick; measurement apparatus (~50 lines) removed. User rule: ETA mathematical, NEVER measured.
+
 ## 2026-09-22 (s6) — Autoscroll ETA: feedback loop + pixel-based ETA (BUILD OK)
 
 ### Fixed
-- **ETA free-fall até zero**: `AutoScrollContinuousTick` countdown chamava `UpdateToolbarEtaText(win, remaining)` que **reescrevia `etaMinutes`** com o valor já-decrementado. Após 1 min do último resync, o baseline ficava contaminado e o ETA caía ~1/tick até 0. `UpdateEtaOverlayText(win, minutes)` ganhou param display-only; `UpdateToolbarEtaText` não escreve mais `etaMinutes`.
-- **ETA oscilando 3h→2h→3h**: medição era por página (`timePerPageSec`), mas alturas de página variam (figuras/diagramas) → oscilação 2x por página. Agora: `remainingPx / pxPerSec` — pixels restantes (GetCanvasSize.dy − viewPort.y−dy) ÷ velocidade efetiva medida **acumulativamente** desde a última calibração. Resultado no teste: 203→318→319→318 min (converge; medição per-page era 203→132→226→272). Como efeito colateral, o ETA reflete a velocidade *real* (WM_TIMER renderiza ~63% do nominal) em vez da nominal.
-- **Pausa vazando no ETA**: Ctrl/shift-hold agora deslocam também `etaResyncTick` e `etaScrollBaseTick` — countdown e medição congelam durante pausas.
-- Recalibração ocorre **somente** nos 3 pontos: toggle ON, ajuste de velocidade, mudança de página. Countdown puro entre resyncs (floor 1min).
-- `~` removido do formato de horas (`%dh %02dmin`).
+- **ETA free-fall to zero**: `AutoScrollContinuousTick` countdown called `UpdateToolbarEtaText(win, remaining)` which **overwrote `etaMinutes`** with already-decremented value. 1 min past last resync baseline contaminated, ETA fell ~1/tick to 0. `UpdateEtaOverlayText(win, minutes)` gained display-only param; `UpdateToolbarEtaText` never writes `etaMinutes`.
+- **ETA oscillating 3h→2h→3h**: measurement was per-page (`timePerPageSec`), page heights vary (figures/diagrams) → 2x oscillation per page. Now: `remainingPx / pxPerSec` — remaining pixels (GetCanvasSize.dy − viewPort.y−dy) ÷ effective speed measured **cumulatively** since last calibration. Test: 203→318→319→318 min (converges; per-page was 203→132→226→272). Side effect: ETA reflects *real* speed (WM_TIMER renders ~63% nominal), not nominal.
+- **Pause leaking into ETA**: Ctrl/shift-hold also shift `etaResyncTick` + `etaScrollBaseTick` — countdown and measurement freeze during pauses.
+- Recalibration **only** at 3 points: toggle ON, speed change, page change. Pure countdown between resyncs (floor 1min).
+- `~` dropped from hours format (`%dh %02dmin`).
 
 ### Notes
-- Debug logs `[as-eta]` (recalc + countdown) mantidos para diagnóstico. `tests/ad-hoc-eta-debug.ts` = repro (liga autoscroll, ~150s).
+- Debug logs `[as-eta]` (recalc + countdown) kept for diagnosis. `tests/ad-hoc-eta-debug.ts` = repro (enables autoscroll, ~150s).
 
 ## 2026-09-22 (s5) — .md ETA + MD contrast single-source (visual kept) + audit R1/R2/R3◐/R4/R5◐ (BUILD OK)
 
 ### Fixed
-- **ETA .md stuck**: webview tick branch never recalculated ETA (only a one-shot async JS eval on toggle — after that, frozen). The rAF loop (`__tumatraAS`) now sends `autoscrollProgress` throttled ~10s → `OnAutoScrollProgress` → ETA continues counting while scrolling (AutoScroll.cpp, SetWebviewAutoScroll).
-- **Contrast MD: single source (R2), visual UNCHANGED by design**: there were 3 DIVERGENT copies of contrast JS (toggle/opacity/restore) with different gray math -> unified in `MarkdownContrastJs(enabled, opacity, invert)` (MarkdownModel). The MD visual (body bg #FAFAFA/#050505 + gray text) is INTENTIONALLY different from the PDF black veil and REMAINS so (user decision). Attempt to unify visual (CSS filter brightness/invert) was reverted by request.
-- **Latent BUG TrimConfigDialog (R1, audit)**: `OnEditTopChanged`/`OnEditBottomChanged` called `GetEngine()->PageMediabox(CurrentPageNo())` with VIRTUAL pageNo under TC2 (same class as GetTileRes bug that froze the app) → now `dm->PageMediaBox()` (routes virtual→physical). BONUS: `RenderCache::Invalidate` had the same missed site — routed + column halve.
+- **ETA .md stuck**: webview tick branch never recalculated ETA (only one-shot async JS eval on toggle — frozen after). rAF loop (`__tumatraAS`) now sends `autoscrollProgress` throttled ~10s → `OnAutoScrollProgress` → ETA keeps counting while scrolling (AutoScroll.cpp, SetWebviewAutoScroll).
+- **Contrast MD: single source (R2), visual UNCHANGED by design**: 3 DIVERGENT contrast JS copies (toggle/opacity/restore), different gray math -> unified in `MarkdownContrastJs(enabled, opacity, invert)` (MarkdownModel). MD visual (body bg #FAFAFA/#050505 + gray text) INTENTIONALLY differs from PDF black veil, REMAINS so (user decision). Visual-unify attempt (CSS filter brightness/invert) reverted by request.
+- **Latent BUG TrimConfigDialog (R1, audit)**: `OnEditTopChanged`/`OnEditBottomChanged` called `GetEngine()->PageMediabox(CurrentPageNo())` with VIRTUAL pageNo under TC2 (same class as GetTileRes bug that froze app) → now `dm->PageMediaBox()` (routes virtual→physical). BONUS: `RenderCache::Invalidate` same missed site — routed + column halve.
 
 ### Changed (audit R3/R4/R5)
-- **R3 (colX)**: 4 copies of column shift (GetTileRectUser, non-cache Paint, CvtToScreen, CvtFromScreen) unified in `DisplayModel::ColumnOffsetXForPage(pageNo, &offX)` — single source of offset (left = mb.x, right = RightColumnX). TrimRectPage NOT done: site semantics differ, forcing helper = risk in render path due to low value.
-- **R4**: 3 copies of trim drag lines math in Canvas.cpp (hit-test/move/paint) unified in `TrimComputeLineInfo`/`TrimLineInfo`.
-- **R5 partial**: removed `QuickToggleViewportCrop` v1 (zero callers) and `kEtaW` (Toolbar.cpp). V1 crop stack remains (v1 button alive); flashcard dead fields remain (agent active).
+- **R3 (colX)**: 4 column-shift copies (GetTileRectUser, non-cache Paint, CvtToScreen, CvtFromScreen) unified in `DisplayModel::ColumnOffsetXForPage(pageNo, &offX)` — single offset source (left = mb.x, right = RightColumnX). TrimRectPage NOT done: site semantics differ, forcing helper = render-path risk, low value.
+- **R4**: 3 trim-drag-lines math copies in Canvas.cpp (hit-test/move/paint) unified in `TrimComputeLineInfo`/`TrimLineInfo`.
+- **R5 partial**: removed `QuickToggleViewportCrop` v1 (zero callers) + `kEtaW` (Toolbar.cpp). V1 crop stack remains (v1 button alive); flashcard dead fields remain (agent active).
 - FLOW dots updated: `trim-contrast.dot` (R1/R2/R4 done, R3 decision), `autoscroll.dot` (rAF progress notify).
 - TODO.md: audit phases marked (R1 ✅ R2 ✅ R3 ◐ R4 ✅ R5 ◐ R6 ◐ R7).
 
@@ -32,18 +96,18 @@
 ## 2026-09-22 (s4) — Trim Coord Central + Flashcard Toolbar State (BUILD OK)
 
 ### Fixed
-- **Trim ligado deslocava seleção/overlays (root cause sistêmico)**: `DisplayModel::CvtToScreen`/`CvtFromScreen` não aplicavam o offset do margin trim (layout usa altura reduzida; conteúdo renderizado começa na tira superior). Overlays em page coords (seleção, cloze, link hover) caíam deslocados. Fix central: `CvtToScreen` faz `y -= trim.top`, `CvtFromScreen` faz `y += trim.top`; removido o ajuste manual de `Selection.cpp::GetRect` (ficaria duplicado). Repara bug da seleção incorreta com trim e ajuda o posicionamento das máscaras cloze.
-- **Flashcard toolbar — estado visual**: botões Study/Reveal ficam checked quando ativos (`FlashcardToolbarUpdateState`, TB_SETSTATE), chamado nos toggles Study/Reveal e em HandleFlashcardRate.
+- **Trim enabled displaced selection/overlays (systemic root cause)**: `DisplayModel::CvtToScreen`/`CvtFromScreen` never applied margin trim offset (layout uses reduced height; rendered content starts at trim strip). Page-coord overlays (selection, cloze, link hover) landed displaced. Central fix: `CvtToScreen` does `y -= trim.top`, `CvtFromScreen` does `y += trim.top`; manual adjustment in `Selection.cpp::GetRect` removed (would duplicate). Fixes incorrect-selection-with-trim bug, helps cloze mask positioning.
+- **Flashcard toolbar — visual state**: Study/Reveal buttons stay checked while active (`FlashcardToolbarUpdateState`, TB_SETSTATE), called in Study/Reveal toggles + HandleFlashcardRate.
 
 ### Notes
-- Debug logging temporário no paint dos clozes (`[fc-paint]`, primeiros 10 frames): state + trim + canvas size + pageOnScreen + por-rect físico→virtual→screen. Remover após diagnóstico.
+- Temp debug logging in cloze paint (`[fc-paint]`, first 10 frames): state + trim + canvas size + pageOnScreen + per-rect physical→virtual→screen. Remove after diagnosis.
 
 ## 2026-09-22 (s3) — BUG-4 v2: Contrast Overlay Self-Healing (BUILD OK)
 
 ### Fixed
-- **BUG-4 (trim config mata o contrast)**: sintoma refinado pelo usuário — evento pontual, só na PRIMEIRA interação com o trim config após abrir o app. Padrão raiz: 3 caminhos de estado (sessão sessionData / por-documento FileState / padrão) escrevem `win->contrastEnabled` sem sincronizar o overlay HWND — qualquer dessincronização = primeiro SaveSettings destrói o overlay visível.
-- **Novo `EnsureContrastOverlayState(win)`** (ContrastOverlay.cpp + Canvas.h): cria se `contrastEnabled && !overlay`, destrói se `!enabled && overlay`, reposiciona se sincronizado. Ligado a TODOS os escritores do flag: `ReplaceDocumentInCurrentTab` (doc-swap agora também destrói overlay órfão), `UpdateTabFileDisplayStateForTab` (SaveSettings ressuscita em vez de destruir), TrimConfig OnSave/OnCancel (RE-CRIA se algum caminho o destruiu).
-- Breadcrumbs mantidos p/ diagnóstico: `[contrast] Create/Destroy/WM_DESTROY` + logs de entrada `SchedulePrefsReload`/`ReloadSettings` (build DEBUG loga; release não).
+- **BUG-4 (trim config kills contrast)**: symptom refined by user — one-off event, only FIRST trim-config interaction after app open. Root pattern: 3 state paths (session sessionData / per-document FileState / default) write `win->contrastEnabled` without syncing overlay HWND — any desync = first SaveSettings destroys visible overlay.
+- **New `EnsureContrastOverlayState(win)`** (ContrastOverlay.cpp + Canvas.h): creates if `contrastEnabled && !overlay`, destroys if `!enabled && overlay`, repositions if in sync. Wired to ALL flag writers: `ReplaceDocumentInCurrentTab` (doc-swap now also destroys orphan overlay), `UpdateTabFileDisplayStateForTab` (SaveSettings resurrects instead of destroying), TrimConfig OnSave/OnCancel (RE-CREATES if any path destroyed it).
+- Breadcrumbs kept for diagnosis: `[contrast] Create/Destroy/WM_DESTROY` + entry logs `SchedulePrefsReload`/`ReloadSettings` (DEBUG build logs; release doesn't).
 
 ## 2026-09-22 (s2) — Flashcard Cloze Crash Fix (BUILD OK)
 
@@ -52,8 +116,8 @@
 - Stale comment (referenced removed `Q:` prefix) updated to describe author-based cloze cards.
 
 ### Fixed (2)
-- **Study mask landed on wrong position under TC2** (`ViewportCrop v2` active): Canvas painted the cloze mask at the PHYSICAL page number while the DisplayModel was in VIRTUAL (2N) layout — mask ended up off-position so the text stayed readable. Cloze painting now routes each rect through `PhysicalToVirtualForRect` + virtual `CvtToScreen` (same rule as every render-path call: physical→virtual mapping before screen conversion). Mask alpha raised 200→255 (fully opaque).
-- **Multi-line cloze covered too much text**: the mask used the highlight's union bbox (`pdf_bound_annot`), so a 2-line selection produced one big rectangle hiding neighbor text. `Flashcard` now stores per-quad-point subrects (`Flashcard::rects`, via `pdf_annot_quad_point_count`/`pdf_annot_quad_point` + page CTM); Canvas paints each subrect — mask covers exactly the highlighted lines. Navigation to card (`CmdFlashcardStudy` advance + sidebar click) also routed through `PhysicalToVirtualForRect`.
+- **Study mask landed on wrong position under TC2** (`ViewportCrop v2` active): Canvas painted cloze mask at PHYSICAL page number while DisplayModel was in VIRTUAL (2N) layout — mask off-position, text stayed readable. Cloze painting now routes each rect through `PhysicalToVirtualForRect` + virtual `CvtToScreen` (same rule as every render-path call: physical→virtual mapping before screen conversion). Mask alpha 200→255 (fully opaque).
+- **Multi-line cloze covered too much text**: mask used highlight union bbox (`pdf_bound_annot`), so 2-line selection produced one big rectangle hiding neighbor text. `Flashcard` now stores per-quad-point subrects (`Flashcard::rects`, via `pdf_annot_quad_point_count`/`pdf_annot_quad_point` + page CTM); Canvas paints each subrect — mask covers exactly highlighted lines. Card navigation (`CmdFlashcardStudy` advance + sidebar click) also routed through `PhysicalToVirtualForRect`.
 
 ## 2026-09-22 — Architectural Audit & FLOW Enrichment (Analysis Only)
 
@@ -68,9 +132,9 @@
 ## 2026-09-21 (s2) — Fluid TC2 + Page ETA + Release x64 + Systemic Fixes (BUILD OK)
 
 ### TC2 Crash & Performance
-- **GetTileRes** (`RenderCache.cpp`): Missed cache re-enable spot — passed VIRTUAL `pageNo` to engine (`PageMediabox`/`Transform`/`HasClipOptimizations`) triggering `ReportIf(pageNo > pageCount)` = debug report storm + callstack **per paint** (half of virtual pages) causing UI freeze with TC2 on. Routed via `VirtualToPhysical` + half-width column mediabox.
-- **Render Thread Guard**: Discarded queued requests with invalid pageNo post-relayout (2N→N) instead of feeding the engine.
-- **RestoreViewportAfterV2Toggle**: Replaced `viewportCropV2Enabled` (setting) check with `IsViewportCropV2Active()` (layout truth) — quick view restorePage `2k-1 > N` failure fixed. Anchor changed to **fractional** (`frac × new height`), surviving zoom toggles between column (fit half-width) and full page (fit full-width).
+- **GetTileRes** (`RenderCache.cpp`): missed cache re-enable spot — passed VIRTUAL `pageNo` to engine (`PageMediabox`/`Transform`/`HasClipOptimizations`), triggering `ReportIf(pageNo > pageCount)` = debug report storm + callstack **per paint** (half virtual pages), freezing UI with TC2 on. Routed via `VirtualToPhysical` + half-width column mediabox.
+- **Render Thread Guard**: discards queued requests with invalid pageNo post-relayout (2N→N) instead of feeding engine.
+- **RestoreViewportAfterV2Toggle**: replaced `viewportCropV2Enabled` (setting) check with `IsViewportCropV2Active()` (layout truth) — quick-view restorePage `2k-1 > N` failure fixed. Anchor now **fractional** (`frac × new height`), survives zoom toggles between column (fit half-width) and full page (fit full-width).
 
 ### Shift-hold v3 + Page ETA (User Spec)
 - **Shift-hold = PAUSE Autoscroll** (tick early-return; free drag on full page; resumes on release). Replaces previous speed ÷2.
@@ -131,160 +195,160 @@ Continued Two Columns v2 plan. Implemented shift-hold (FASE 5) and colGap/column
 - Build 0 err / 0 warn. User manual test: autoscroll is smooth and responsive.
 - sumatrapdf-src/src/RenderCache.cpp, sumatrapdf-src/src/DisplayModel.cpp, TODO.md.
 
-## 2026-09-18 — Autoscroll: overlay ETA/velocidade bottom-right (fundos/fix) (BUILD OK)
+## 2026-09-18 — Autoscroll: bottom-right ETA/speed overlay (backgrounds/fixes) (BUILD OK)
 
-### Contexto
-Após o commit `ef19739` (velocidade por multiplicador direto x0.03..0.40), o usuário reportou que o overlay de ETA/velocidade no bottom-right não aparecia; depois que apareceu, tinha caracteres sobrepostos, velocidade duplicada na toolbar e texto ilegível sem fundo.
+### Context
+After commit `ef19739` (direct-multiplier speed x0.03..x0.40), the user reported the bottom-right ETA/speed overlay wasn't showing; once it did, it had overlapping characters, duplicated speed in the toolbar and unreadable text without a background.
 
-### Alterações
-- **Overlay invisível**: `CreateEtaLabel` criava `WS_EX_LAYERED` mas nunca chamava `SetLayeredWindowAttributes` — child layered não desenha conteúdo sem alpha (o `ContrastOverlay` modelo chama na linha 92). Corrigido.
-- **Caracteres sobrepostos**: `WM_PAINT` do overlay usava `SetBkMode(TRANSPARENT)` sem limpar o retângulo, empilhando texto a cada frame. Corrigido preenchendo o rect com a cor-chave magenta + `SetLayeredWindowAttributes(LWA_COLORKEY)`: fundo transparente e texto apagado entre frames.
-- **Velocidade duplicada**: removido o speed label da toolbar (slot `SpeedInfoId`), mantendo a velocidade só no overlay. Removidos `CreateSpeedLabel`, placeholder do botão, reserva de largura `kSpeedSlotW`/`speedSlotW`, `SpeedInfoId` de `ToolbarIds.h`, campo `hwndSpeedLabel` de `MainWindow.h`, bloco de posicionamento/destruição no ToolbarLayout.
-- **Fundo preto legível**: overlay agora desenha o texto branco sobre um fundo preto (rect inflado `-4,-2`), acima da cor-chave transparente.
+### Changes
+- **Invisible overlay**: `CreateEtaLabel` created `WS_EX_LAYERED` but never called `SetLayeredWindowAttributes` — a layered child draws no content without alpha (the `ContrastOverlay` model calls it at line 92). Fixed.
+- **Overlapping characters**: the overlay's `WM_PAINT` used `SetBkMode(TRANSPARENT)` without clearing the rectangle, stacking text every frame. Fixed by filling the rect with the magenta color key + `SetLayeredWindowAttributes(LWA_COLORKEY)`: transparent background and text erased between frames.
+- **Duplicated speed**: removed the toolbar speed label (`SpeedInfoId` slot), keeping speed only in the overlay. Removed `CreateSpeedLabel`, button placeholder, `kSpeedSlotW`/`speedSlotW` width reservation, `SpeedInfoId` from `ToolbarIds.h`, `hwndSpeedLabel` field from `MainWindow.h`, positioning/destruction block in ToolbarLayout.
+- **Readable black background**: the overlay now draws white text over a black background (rect inflated `-4,-2`), above the transparent color key.
 
-### Verificação
+### Verification
 - Build `bun cmd/build.ts` → 0 err / 0 warn (~47s) + clang-format.
-- Smoke `-for-testing` zlib.3.pdf → estável.
-- Teste manual do usuário: overlay `x0.15 | ETA Nmin` no bottom-right, legível, sem sobreposição, sem duplicação na toolbar.
+- Smoke `-for-testing` zlib.3.pdf → stable.
+- User manual test: `x0.15 | ETA Nmin` overlay bottom-right, readable, no overlap, no duplication in toolbar.
 
-### Arquivos
+### Files
 - Toolbar.cpp, ToolbarLayout.cpp/.h, MainWindow.h, ToolbarIds.h, LOG.md.
 
-## 2026-09-18 — Two Columns v2 FASE 4 (conversões virtual↔físico no engine) (BUILD OK)
+## 2026-09-18 — Two Columns v2 FASE 4 (virtual↔physical conversions at the engine) (BUILD OK)
 
-### Contexto
-Continuação do plano Two Columns v2. FASE 3 verificada sem código. Esta sessão completou a FASE 4: auditar e rotear todos os call-sites que cruzam a fronteira virtual↔físico (layout/UI usam **virtual** 2N; engine usa **físico** N).
+### Context
+Continuation of the Two Columns v2 plan. FASE 3 verified with no code. This session completed FASE 4: audit and route every call-site crossing the virtual↔physical boundary (layout/UI use **virtual** 2N; engine uses **physical** N).
 
-### Decisão de arquitetura
-- `PageCount()` retorna **virtual** (layout, navegação, UI, labels). Engine é **físico**. Todo ponto que cruza a fronteira roteia explicitamente.
+### Architecture decision
+- `PageCount()` returns **virtual** (layout, navigation, UI, labels). Engine is **physical**. Every boundary crossing routes explicitly.
 
-### Mudanças-chave
-- **`DisplayModel::PhysicalToVirtualForRect(phys, rect, &out)`** (DisplayModel.cpp:133): física k + rect → virtual `2k-1` (esq) / `2k` (dir), decidido pela metade horizontal do centro do rect; não-v2 = identidade. Mantém rect em coords físicas (shift colX aplicado no CvtToScreen).
-- **`CvtToScreen`/`CvtFromScreen` column-aware**: aplicam o mesmo shift colX do render (`pt.x -= colX` no CvtToScreen, `+= colX` no CvtFromScreen, espelhando `RenderCache::Paint`). Assim qualquer par (virtual, rect físico) converte certo automaticamente.
-- **`GetPageLabeTemp`**: `engine->GetPageLabeTemp(VirtualToPhysical(pageNo))` — evita overrun 2N→N e devolve o label físico correto.
+### Key changes
+- **`DisplayModel::PhysicalToVirtualForRect(phys, rect, &out)`** (DisplayModel.cpp:133): physical k + rect → virtual `2k-1` (left) / `2k` (right), decided by the horizontal half containing the rect's center; non-v2 = identity. Keeps the rect in physical coords (colX shift applied in CvtToScreen).
+- **`CvtToScreen`/`CvtFromScreen` column-aware**: apply the same colX shift as the render (`pt.x -= colX` in CvtToScreen, `+= colX` in CvtFromScreen, mirroring `RenderCache::Paint`). So any (virtual, physical rect) pair converts correctly automatically.
+- **`GetPageLabeTemp`**: `engine->GetPageLabeTemp(VirtualToPhysical(pageNo))` — avoids the 2N→N overrun and returns the correct physical label.
 
-### Roteamento físico→virtual (TextSel.pages[] é físico)
-- `SearchAndDDE`: `AppendTextSelScreenRects`, `AppendPageRectsToScreen`, `ShowSearchResult` (GoToPage virtual), `FindTextOnThread` (converte `CurrentPageNo()` virtual→físico p/ `FindFirst`; checa visibilidade das 2 colunas da página física), `FindMatchTouchesVisiblePages` (span virtual `[2*start-1, 2*end]` com param `bool v2`), `RebuildFindMatchPaintCache`.
-- `Selection`: `SelectionOnPage::GetRect` (mapeia físico→virtual), `FromRectangle` (itera `PageCount()` virtual), `UpdateTextSelection`/`OnSelectAll`/`OnSelectionStart` (`VirtualToPhysical` p/ textSelection engine-bound), `SelectionToolbar::GetSelectionEndPoint`.
-- `uia/TextRange`, `ReadAloudHighlight` (3 pontos: GetViewportStart, word-paint, pageUnion-paint), `FormFields` (widget), `SumatraPDF` zoom-to-selection (`PhysicalToVirtualForRect`).
+### Physical→virtual routing (TextSel.pages[] is physical)
+- `SearchAndDDE`: `AppendTextSelScreenRects`, `AppendPageRectsToScreen`, `ShowSearchResult` (GoToPage virtual), `FindTextOnThread` (converts virtual `CurrentPageNo()`→physical for `FindFirst`; checks visibility of both columns of the physical page), `FindMatchTouchesVisiblePages` (virtual span `[2*start-1, 2*end]` with param `bool v2`), `RebuildFindMatchPaintCache`.
+- `Selection`: `SelectionOnPage::GetRect` (maps physical→virtual), `FromRectangle` (iterates virtual `PageCount()`), `UpdateTextSelection`/`OnSelectAll`/`OnSelectionStart` (`VirtualToPhysical` for the engine-bound textSelection), `SelectionToolbar::GetSelectionEndPoint`.
+- `uia/TextRange`, `ReadAloudHighlight` (3 points: GetViewportStart, word-paint, pageUnion-paint), `FormFields` (widget), `SumatraPDF` zoom-to-selection (`PhysicalToVirtualForRect`).
 
-### textSelection/textSearch (engine-bound) recebem físico
-- Call-sites de entrada (`StartAt`/`SelectUpTo`/`SelectWordAt`) em Canvas.cpp e Selection.cpp usam `VirtualToPhysical(pageNo)`.
+### textSelection/textSearch (engine-bound) receive physical
+- Entry call-sites (`StartAt`/`SelectUpTo`/`SelectWordAt`) in Canvas.cpp and Selection.cpp use `VirtualToPhysical(pageNo)`.
 
-### Verificação
-- Build `bun cmd/build.ts` → 0 err / 0 warn (~50s) + clang-format em 9 arquivos.
-- Smoke `-for-testing` zlib.3.pdf → estável (respondendo).
-- Teste manual pendente do usuário: seleção de texto, busca, links e cliques corretos na 2L/2R.
+### Verification
+- Build `bun cmd/build.ts` → 0 err / 0 warn (~50s) + clang-format on 9 files.
+- Smoke `-for-testing` zlib.3.pdf → stable (responding).
+- User manual test pending: text selection, search, links and correct clicks on 2L/2R.
 
-### Pendências (FASE 4)
-- uia `PageProvider` e tile-math legado: caminho não-cache já desvia; aceitável para MVP.
+### Pending (FASE 4)
+- uia `PageProvider` and legacy tile-math: the non-cache path already diverts; acceptable for the MVP.
 
-## 2026-09-17 — Autoscroll: velocidade por multiplicador direto (x0.03..x0.40) + fix limite ~2200px/min (BUILD OK)
+## 2026-09-17 — Autoscroll: direct-multiplier speed (x0.03..x0.40) + ~2200px/min cap fix (BUILD OK)
 
-### Contexto
-Após a otimização rAF + overlay (commit `e7b0108`), o autoscroll de PDF parava de aumentar por volta de 2200 px/min. Causa: conversão px/min↔multiplicador com float32 em `FindCurrentSpeedStep`/`kSpeedSteps` (tabela de 300..4000). Decidido expor o multiplicador diretamente, sem passo de conversão.
+### Context
+After the rAF + overlay optimization (commit `e7b0108`), PDF autoscroll stopped increasing around 2200 px/min. Cause: px/min↔multiplier conversion with float32 in `FindCurrentSpeedStep`/`kSpeedSteps` (a 300..4000 table). Decided to expose the multiplier directly, without a conversion step.
 
-### Alterações
-- `AutoScroll.cpp`: removidos `kSpeedSteps`, `kSpeedStepCount`, `FindCurrentSpeedStep`. Novos `kMinSpeedMultiplier=0.03f`, `kMaxSpeedMultiplier=0.4f`, `kSpeedStepSize=0.01f`, e `SnapSpeedMultiplier()` (clamp na faixa + arredonda p/ passo 0.01).
-- `AutoScrollSpeedAdjust`: agora `mlt ± 0.01` direto (sem tabela/conversão) — vale p/ PDF e markdown.
-- `AutoScrollToggle`: snap no start para a faixa/passo; log `speed=%.2f mlt`.
-- Display: toolbar mostra `x0.15`; overlay bottom-right mostra `x0.15 | ETA Nmin`.
-- Markdown: mlt convertido p/ `pxPerSec` uma vez no ajuste de velocidade (`webviewPxPerSec = AutoScrollPxPerSec` → `SetWebviewAutoScroll`), não por frame — o rAF não sofre do bug float32.
-- Comentários/strings "px/min" atualizados p/ formato `xMLT`.
+### Changes
+- `AutoScroll.cpp`: removed `kSpeedSteps`, `kSpeedStepCount`, `FindCurrentSpeedStep`. New `kMinSpeedMultiplier=0.03f`, `kMaxSpeedMultiplier=0.4f`, `kSpeedStepSize=0.01f`, and `SnapSpeedMultiplier()` (clamps to range + rounds to the 0.01 step).
+- `AutoScrollSpeedAdjust`: now `mlt ± 0.01` directly (no table/conversion) — applies to PDF and markdown.
+- `AutoScrollToggle`: snap on start to the range/step; log `speed=%.2f mlt`.
+- Display: toolbar shows `x0.15`; bottom-right overlay shows `x0.15 | ETA Nmin`.
+- Markdown: mlt converted to `pxPerSec` once at speed adjustment (`webviewPxPerSec = AutoScrollPxPerSec` → `SetWebviewAutoScroll`), not per frame — the rAF doesn't suffer the float32 bug.
+- "px/min" comments/strings updated to the `xMLT` format.
 
-### Verificação
+### Verification
 - Build `bun cmd/build.ts` → 0 err / 0 warn (60s) + clang-format.
-- Smoke test PDF sem crash.
-- Teste manual do usuário: velocidade sobe de 0.03 a 0.40 sem travar.
+- Smoke test PDF without crash.
+- User manual test: speed climbs from 0.03 to 0.40 without stalling.
 
-### Arquivos
+### Files
 - AutoScroll.cpp, Toolbar.cpp, ToolbarLayout.cpp.
 
-## 2026-09-17 — Autoscroll Markdown suave (rAF) + ETA/velocidade em overlay bottom-right (BUILD OK)
+## 2026-09-17 — Smooth Markdown autoscroll (rAF) + ETA/speed in bottom-right overlay (BUILD OK)
 
-### Contexto
-Otimização do autoscroll em arquivos .md (WebView2): antes cada tick WM_TIMER (~100×/s) fazia `wv->Eval("window.scrollBy(...)")` — chamada COM cross-process por tick → jank + gargalo de perf. Migrou o scroll do caminho webview para uma loop `requestAnimationFrame` no renderer.
+### Context
+Autoscroll optimization for .md files (WebView2): previously every WM_TIMER tick (~100×/s) did `wv->Eval("window.scrollBy(...)")` — a cross-process COM call per tick → jank + perf bottleneck. Migrated the webview scroll path to a `requestAnimationFrame` loop in the renderer.
 
-### Autoscroll webview → rAF JS
-- Novo `SetWebviewAutoScroll(win, pxPerSec)` (AutoScroll.cpp): injeta via `Eval` um objeto `window.__tumatraAS` com loop rAF (60fps) que scrolla no renderer, sem Eval por tick. Detecção de fim via notify `autoscrollBottom` (reusa bridge existente).
-- `AutoScrollContinuousTick` caminho webview virou guardião: só Ctrl-pause (toggle em mudança de estado) + verificação de timer. **Zero Eval de scroll por tick** (~2-3 Eval por evento de estado).
-- `AutoScrollToggle` / `AutoScrollSpeedAdjust`: iniciam/param/atualizam a loop rAF (pxPerSec), mantendo `webviewPxPerSec` + `webviewCtrlDown` no estado.
-- **Bug de velocidade corrigido**: rAF fazia `dy=pxPerSec*dt` → em velocidades baixas <1px/frame, `scrollBy` arredonda a 0 e **não acumula** → velocidade não respeitada. Fix: acumulador no objeto JS (`accum += pxPerSec*dt; dy=floor(accum); accum-=dy`), mesmo padrão de carry do C++. (Verificado: fixed-page e middle-click já usavam acumulador correto — sem o bug.)
+### Webview autoscroll → JS rAF
+- New `SetWebviewAutoScroll(win, pxPerSec)` (AutoScroll.cpp): injects via `Eval` a `window.__tumatraAS` object with a rAF loop (60fps) that scrolls in the renderer, no per-tick Eval. End detection via the `autoscrollBottom` notify (reuses the existing bridge).
+- `AutoScrollContinuousTick` webview path became a guardian: only Ctrl-pause (toggle on state change) + timer check. **Zero scroll Eval per tick** (~2-3 Eval per state event).
+- `AutoScrollToggle` / `AutoScrollSpeedAdjust`: start/stop/update the rAF loop (pxPerSec), keeping `webviewPxPerSec` + `webviewCtrlDown` in state.
+- **Speed bug fixed**: the rAF did `dy=pxPerSec*dt` → at low speeds <1px/frame, `scrollBy` rounds to 0 and **doesn't accumulate** → speed not respected. Fix: accumulator in the JS object (`accum += pxPerSec*dt; dy=floor(accum); accum-=dy`), same carry pattern as C++. (Verified: fixed-page and middle-click already used a correct accumulator — no bug.)
 
-### ETA + Velocidade em overlay bottom-right
-- Problema: `hwndEtaLabel` era child da toolbar e flutuava sobre ela → cobria Contrast/Invert/Two Column/Trim (grupo autoscroll no meio da toolbar).
-- Solução (padrão ContrastOverlay): ETA agora é overlay `WS_EX_LAYERED | WS_EX_TRANSPARENT` (child do parent do canvas), ancorado no **canto bottom-right** via `PositionEtaOverlay` (reposicionado no WM_SIZE do canvas).
-- Combinou velocidade + ETA num bloco único: `"%d px/min  |  ETA %dmin"` (`UpdateEtaOverlayText`), refrescado por `UpdateToolbarEtaText` e `UpdateToolbarSpeedLabel`.
-- `PositionFloatingLabels` (ToolbarLayout.cpp) esvaziado (não posiciona mais o ETA); removido campo obsoleto `etaToolbarWidth`.
+### ETA + speed in bottom-right overlay
+- Problem: `hwndEtaLabel` was a child of the toolbar and floated over it → covered Contrast/Invert/Two Column/Trim (the autoscroll group in the middle of the toolbar).
+- Solution (ContrastOverlay pattern): ETA is now a `WS_EX_LAYERED | WS_EX_TRANSPARENT` overlay (child of the canvas's parent), anchored at the **bottom-right corner** via `PositionEtaOverlay` (repositioned on canvas WM_SIZE).
+- Combined speed + ETA in a single block: `"%d px/min  |  ETA %dmin"` (`UpdateEtaOverlayText`), refreshed by `UpdateToolbarEtaText` and `UpdateToolbarSpeedLabel`.
+- `PositionFloatingLabels` (ToolbarLayout.cpp) emptied (no longer positions the ETA); removed obsolete field `etaToolbarWidth`.
 
-### Arquivos
+### Files
 - AutoScroll.cpp, Toolbar.cpp, Toolbar.h, ToolbarLayout.cpp, Canvas.cpp, MainWindow.h.
 
-### Verificação
+### Verification
 - Build `bun cmd/build.ts` → 0 err / 0 warn (84s) + clang-format.
-- Smoke test: abre .md e PDF sem crash.
-- Teste manual do usuário: autoscroll suave no .md; velocidade regulável respeita o painel; ETA/velocidade no canto inferior direito sem cobrir ferramentas.
+- Smoke test: opens .md and PDF without crash.
+- User manual test: smooth autoscroll on .md; adjustable speed respects the panel; ETA/speed at the bottom-right corner without covering tools.
 
-## 2026-09-17 — Two Columns v2 FASE 3 (fluxo contínuo) (BUILD OK)
+## 2026-09-17 — Two Columns v2 FASE 3 (continuous flow) (BUILD OK)
 
-### Contexto
-Continuação do plano Two Columns v2. FASE 2 commitada (`ca60840`). Esta sessão verificou a FASE 3 (fluxo contínuo sem salto — critério central do usuário). **Nenhuma mudança de código foi necessária**: a arquitetura 2N empilhada + exclusão mútua v1/v2 já entrega o fluxo natural.
+### Context
+Continuation of the Two Columns v2 plan. FASE 2 committed (`ca60840`). This session verified FASE 3 (continuous flow without jumping — the user's central criterion). **No code change was needed**: the stacked 2N architecture + v1/v2 mutual exclusion already delivers natural flow.
 
-### FASE 3 — Verificação por análise de código
-- `ScrollYBy()` (`:2155-2198`): o snap `viewPort.y = colTop` e o bloqueio `colBottom - viewPort.dy` vivem no bloco v1 (`if (viewportCropEnabled ...)`, `:2217`). Como v2 on força v1 off (exclusão mútua, SumatraPDF.cpp:11185), o v2 desvia desse bloco e usa o caminho natural `newYOff += dy` (`:2262-2279`) — rola as 2N páginas empilhadas verticalmente sem salto.
-- `GoToNextPage`/`GoToPrevPage`: já operam sobre virtual. `PageCount()`=VirtualPageCount, contínuo usa `columns=1` → `FirstPageInARowNo`=pageNo, navega `2k-1→2k→2k+1` naturalmente.
-- Autoscroll (`MoveDocBy`→`ScrollYBy`): flui sem interrupção.
+### FASE 3 — Verification by code analysis
+- `ScrollYBy()` (`:2155-2198`): the `viewPort.y = colTop` snap and the `colBottom - viewPort.dy` block live in the v1 block (`if (viewportCropEnabled ...)`, `:2217`). Since v2 on forces v1 off (mutual exclusion, SumatraPDF.cpp:11185), v2 bypasses that block and uses the natural `newYOff += dy` path (`:2262-2279`) — scrolls the 2N stacked pages vertically without jumping.
+- `GoToNextPage`/`GoToPrevPage`: already operate on virtual. `PageCount()`=VirtualPageCount, continuous uses `columns=1` → `FirstPageInARowNo`=pageNo, navigates `2k-1→2k→2k+1` naturally.
+- Autoscroll (`MoveDocBy`→`ScrollYBy`): flows without interruption.
 
-### Verificação
+### Verification
 - Build `bun cmd/build.ts` → 0 err / 0 warn (85s).
-- Teste de aceite manual pendente do usuário: `autoscroll=on` + Two Column 2 lê `1L→1R→2L→2R` como texto único, sem salto.
+- User manual acceptance test pending: `autoscroll=on` + Two Column 2 reads `1L→1R→2L→2R` as a single text, without jumping.
 
-### Próximo
-- FASE 4 (conversões virtual↔físico no engine: CurrentPageNo, GetPageNoByPoint, Cvt, GoToPage, ScrollState, tile math, Search/Selection/DDE/uia).
+### Next
+- FASE 4 (virtual↔physical conversions at the engine: CurrentPageNo, GetPageNoByPoint, Cvt, GoToPage, ScrollState, tile math, Search/Selection/DDE/uia).
 
-## 2026-09-17 — Two Columns v2 FASE 2 (corte de coluna no render) (BUILD OK)
+## 2026-09-17 — Two Columns v2 FASE 2 (column cut in the render) (BUILD OK)
 
-### Contexto
-Continuação do plano Two Columns v2. FASE 1 (duplicar layout 2N) foi commitada (`ef85d17`). Esta sessão implementou a FASE 2: cada página virtual (1L/1R/2L/2R...) renderiza só metade da página física, com a coluna preenchendo a largura total da tela.
+### Context
+Continuation of the Two Columns v2 plan. FASE 1 (2N layout duplication) committed (`ef85d17`). This session implemented FASE 2: each virtual page (1L/1R/2L/2R...) renders only half the physical page, with the column filling the full screen width.
 
-### FASE 2 — Corte de coluna no render
-- `DisplayModel::PageMediaBox` (`:604`): quando `ColumnOfVirtual(pageNo)>=0`, corta mediabox pela metade (`dx/=2`, `x+=dx` se dir). Página virtual ganha mediabox de meia-largura → Fit Width enche a tela com a coluna (criterio do usuário: NUNCA deixar metade da tela preta; permitir zoom).
-- `RenderCache.cpp` caminho não-cache: quando `viewportCropV2Enabled && cropColumn>=0`, desloca `area` por `colX = mb.x + (cropColumn==1 ? mb.dx/2 : 0)` antes do render (mesmo padrão do trim shift vertical), render com `physicalPageNo`. Logs `[v2]` já presentes na FASE 1.
-- Cache: MVP força não-cache via `ShouldCacheRendering`=false (já feito na FASE 1); virtual pageNo como chave resolve esq/dir sem colisão.
+### FASE 2 — Column cut in the render
+- `DisplayModel::PageMediaBox` (`:604`): when `ColumnOfVirtual(pageNo)>=0`, cuts the mediabox in half (`dx/=2`, `x+=dx` if right). The virtual page gets a half-width mediabox → Fit Width fills the screen with the column (user criterion: NEVER leave half the screen black; allow zoom).
+- `RenderCache.cpp` non-cache path: when `viewportCropV2Enabled && cropColumn>=0`, shifts `area` by `colX = mb.x + (cropColumn==1 ? mb.dx/2 : 0)` before rendering (same pattern as the vertical trim shift), renders with `physicalPageNo`. `[v2]` logs already present from FASE 1.
+- Cache: the MVP forces non-cache via `ShouldCacheRendering`=false (done in FASE 1); virtual pageNo as key resolves left/right without collision.
 
-### Fix crash ao desligar o v2 (`EngineMupdf.cpp:4110` `pageNo > pageCount`)
-- **Sintoma:** toggle liga OK; ao desligar, crash `GetFzPageInfoLocked` (`pageNo > e->pageCount`), stack `OnSetCursorMouseNone → GetWidgetAtPos → EngineGetWidgetAtPos`.
-- **Causa:** call-sites de hit-test passavam `pageNo` **virtual** (até 2N) ao engine, que tem N páginas físicas. Quando o layout voltava a N, um pageNo residual > N estourava o ReportIf.
-- **Fix:** roteados via `VirtualToPhysical(pageNo)` em `DisplayModel.cpp`: `GetElementAtPos` (:1682), `GetAnnotationAtPos` (:1699), `GetWidgetAtPos` (:1715), `IsOverText`/`HasTextForPage` (:1728), `GetTextInRegion` (:2494).
+### Crash fix when turning v2 off (`EngineMupdf.cpp:4110` `pageNo > pageCount`)
+- **Symptom:** turning on works; turning off crashes `GetFzPageInfoLocked` (`pageNo > e->pageCount`), stack `OnSetCursorMouseNone → GetWidgetAtPos → EngineGetWidgetAtPos`.
+- **Cause:** hit-test call-sites passed **virtual** pageNo (up to 2N) to the engine, which has N physical pages. When the layout fell back to N, a residual pageNo > N tripped the ReportIf.
+- **Fix:** routed via `VirtualToPhysical(pageNo)` in `DisplayModel.cpp`: `GetElementAtPos` (:1682), `GetAnnotationAtPos` (:1699), `GetWidgetAtPos` (:1715), `IsOverText`/`HasTextForPage` (:1728), `GetTextInRegion` (:2494).
 
-### Verificação
+### Verification
 - Build `bun cmd/build.ts` → 0 err / 0 warn (76s) + clang-format.
-- Teste manual do usuário: toggle v2 liga/desliga **sem crash**, volta ao estado original.
-- Log `[v2] Paint pageNo=4 -> renderPageNo=2 cropColumn=1` confirma render de coluna esq/dir correto (virtual 4 = física 2, coluna direita).
+- User manual test: v2 toggle on/off **without crash**, returns to the original state.
+- Log `[v2] Paint pageNo=4 -> renderPageNo=2 cropColumn=1` confirms correct left/right column rendering (virtual 4 = physical 2, right column).
 
-### Pendências (polish, próxima sessão)
-- Ajustes visuais/zoom apontados pelo usuário após teste.
-- FASE 3 (fluxo contínuo sem salto) é o próximo passo estrutural.
+### Pending (polish, next session)
+- Visual/zoom adjustments pointed out by the user after testing.
+- FASE 3 (continuous flow without jumping) is the next structural step.
 
-## 2026-09-16 — Two Columns v2 FASE 0 concluída + FASE 1 (duplicar layout 2N) (BUILD OK)
+## 2026-09-16 — Two Columns v2 FASE 0 complete + FASE 1 (2N layout duplication) (BUILD OK)
 
-### Contexto
-Retomada do plano Two Columns v2 (TODO.md). A sessão anterior deixou a FASE 0 implementada e commitada (`fc50439`) sem atualizar o TODO — verificado e atualizado.
+### Context
+Resuming the Two Columns v2 plan (TODO.md). The previous session left FASE 0 implemented and committed (`fc50439`) without updating the TODO — verified and updated.
 
-### FASE 0 (já commitada, agora documentada)
-- `CmdViewportCropV2Toggle` (id 510), campos v2 em DisplayModel, handler com exclusão mútua v1/v2, botão toolbar "Two Column 2" + BTNS_CHECK, item menu, gating CommandAvailability.
+### FASE 0 (already committed, now documented)
+- `CmdViewportCropV2Toggle` (id 510), v2 fields in DisplayModel, handler with v1/v2 mutual exclusion, "Two Column 2" toolbar button + BTNS_CHECK, menu item, CommandAvailability gating.
 
-### FASE 1 — Duplicar layout para 2N (2N linhas empilhadas, sem corte ainda)
-- `PageCount()` retorna `VirtualPageCount()` (2N se v2 on & contínuo); `ValidPageNo` aceita 1..VirtualPageCount.
-- `DocumentLayoutPage` e `PageInfo` ganharam `physicalPageNo` + `cropColumn` (=-1 sem split).
-- `Relayout()` itera `VirtualPageCount()`, setando `physicalPageNo=VirtualToPhysical(v)` e `cropColumn=ColumnOfVirtual(v)`.
-- `BuildPagesInfo()` agora é re-callable (libera array existente) — necessário porque o toggle alterna N↔2N. `ApplyViewportCropV2` agora chama `BuildPagesInfo()` + `Relayout()` (liga e desliga).
-- Roteamento engine virtual→físico: `PageMediaBox`, `PageSizeAfterRotation`, `GetContentBox`, `CvtToScreen`/`CvtFromScreen`, `ZoomRealFromVirtualForPage` (contentBox loop), `ScrollTo`, e `Canvas.cpp` trim-drag/erase/full-image → `VirtualToPhysical(pageNo)`.
-- Render: `ShouldCacheRendering` = false quando v2 (força caminho não-cache, igual trim); `RenderCache::Paint` mapeia `renderPageNo = dm->VirtualToPhysical(pageNo)`. Logs `[v2]` no Paint e ApplyViewportCropV2 para debug.
-- Build `bun cmd/build.ts` → 0 err / 0 warn (75s) + clang-format + smoke estável (zlib.3.pdf, sem crash).
+### FASE 1 — Duplicate layout to 2N (2N stacked rows, no cut yet)
+- `PageCount()` returns `VirtualPageCount()` (2N if v2 on & continuous); `ValidPageNo` accepts 1..VirtualPageCount.
+- `DocumentLayoutPage` and `PageInfo` gained `physicalPageNo` + `cropColumn` (=-1 without split).
+- `Relayout()` iterates `VirtualPageCount()`, setting `physicalPageNo=VirtualToPhysical(v)` and `cropColumn=ColumnOfVirtual(v)`.
+- `BuildPagesInfo()` is now re-callable (frees the existing array) — needed because the toggle switches N↔2N. `ApplyViewportCropV2` now calls `BuildPagesInfo()` + `Relayout()` (on and off).
+- Engine routing virtual→physical: `PageMediaBox`, `PageSizeAfterRotation`, `GetContentBox`, `CvtToScreen`/`CvtFromScreen`, `ZoomRealFromVirtualForPage` (contentBox loop), `ScrollTo`, and `Canvas.cpp` trim-drag/erase/full-image → `VirtualToPhysical(pageNo)`.
+- Render: `ShouldCacheRendering` = false when v2 (forces the non-cache path, like trim); `RenderCache::Paint` maps `renderPageNo = dm->VirtualToPhysical(pageNo)`. `[v2]` logs in Paint and ApplyViewportCropV2 for debugging.
+- Build `bun cmd/build.ts` → 0 err / 0 warn (75s) + clang-format + stable smoke (zlib.3.pdf, no crash).
 
-### Próximo (amanhã)
-- FASE 2: corte de coluna no render (esq/dir via cropColumn, largura total da tela).
+### Next (tomorrow)
+- FASE 2: column cut in the render (left/right via cropColumn, full screen width).
 
 ## 2026-09-16 — Markdown Full-Width + Flashcard/Trim Fixes Batch (BUILD OK)
 
@@ -1378,25 +1442,25 @@ Polish round 2 for md autoscroll/contrast — speed visibility, md ETA parity, f
 - **Build:** 0 errors / 0 warnings (un ./cmd/build.ts). **Deploy:** Compiled\TumatraPDF.exe (21.9 MB). **Smoke:** clean launch -for-testing -console, no crash, no new dump.
 
 ## 2026-08-29 — Autoscroll Timer UI (Fase 15, BUILD OK)
-- Adicionado controle Timer na toolbar ANTES do botão Autoscroll: `[checkbox][Timer:][input numérico]`.
-- Comportamento: checkbox ON → autoscroll para sozinho após N min (valor do input, padrão 30). OFF → sem limite.
-- Backend de auto-parada já existia (AutoScroll.cpp `AutoScrollContinuousTick` para quando `autoScrollTimerMinutes > 0` e tempo passa); a UI agora alimenta `autoScrollTimerMinutes`.
-- Arquivos editados: `MainWindow.h` (autoScrollTimerMinutesSetting=30, autoScrollTimerEnabled=false, HWNDs dos controles), `AutoScroll.cpp` (feed do campo em AutoScrollToggle), `SumatraPDF.cpp` (handlers CmdAutoScrollTimerToggle/Edit + apply de gGlobalPrefs), `Toolbar.cpp` (placeholder TimerInfoId + CreateTimerControls/RepositionTimerControls + WM_CTLCOLORBTN dark mode), `Settings.h` (campos AutoScrollTimerMinutes/AutoScrollTimerEnabled regenerados), `cmd/gen-settings.ts` (campos).
-- PENDENTE: verificação UI pelo usuário (amanhã) — `[checkbox][Timer:][input]` antes de Autoscroll; timer para autoscroll após N min.
-- Build: OK (0 erros, 1 warning unrelated em test_util). Commands.h regenerado, Settings em sync, deploy feito, smoke test limpo.
+- Added Timer control to the toolbar BEFORE the Autoscroll button: `[checkbox][Timer:][numeric input]`.
+- Behavior: checkbox ON → autoscroll stops by itself after N min (input value, default 30). OFF → no limit.
+- The auto-stop backend already existed (AutoScroll.cpp `AutoScrollContinuousTick` stops when `autoScrollTimerMinutes > 0` and time passes); the UI now feeds `autoScrollTimerMinutes`.
+- Files edited: `MainWindow.h` (autoScrollTimerMinutesSetting=30, autoScrollTimerEnabled=false, control HWNDs), `AutoScroll.cpp` (field feed in AutoScrollToggle), `SumatraPDF.cpp` (CmdAutoScrollTimerToggle/Edit handlers + gGlobalPrefs apply), `Toolbar.cpp` (TimerInfoId placeholder + CreateTimerControls/RepositionTimerControls + WM_CTLCOLORBTN dark mode), `Settings.h` (regenerated AutoScrollTimerMinutes/AutoScrollTimerEnabled fields), `cmd/gen-settings.ts` (fields).
+- PENDING: user UI verification (tomorrow) — `[checkbox][Timer:][input]` before Autoscroll; autoscroll timer after N min.
+- Build: OK (0 errors, 1 unrelated warning in test_util). Commands.h regenerated, Settings in sync, deployed, clean smoke test.
 
 ## 2026-08-29 (2) — Fase 15 fixes: autoscroll speed + timer visual
-- Autoscroll: `kMinSpeedMultiplier` (AutoScroll.cpp) 0.1f -> 0.008f; velocidade mínima agora ~100 px/min (antes ~1400). Persistência de `AutoScrollSpeedMultiplier` garantida (load+save); default = mínimo se nunca usado.
-- Timer control: `TimerInfoId` 110->130px; layout com tokens de design (kCtrlGapX=4, kCtrlH=18) — gaps consistentes + centragem vertical. Início de design system mínimo.
-- Build: 0 erros. Deploy + smoke OK.
+- Autoscroll: `kMinSpeedMultiplier` (AutoScroll.cpp) 0.1f -> 0.008f; minimum speed now ~100 px/min (was ~1400). `AutoScrollSpeedMultiplier` persistence guaranteed (load+save); default = minimum if never used.
+- Timer control: `TimerInfoId` 110->130px; layout with design tokens (kCtrlGapX=4, kCtrlH=18) — consistent gaps + vertical centering. Start of a minimal design system.
+- Build: 0 errors. Deploy + smoke OK.
 
-## 2026-08-30 — Fase 15 Fixes (speed clamp, persistência, timer visual, build fix)
+## 2026-08-30 — Fase 15 Fixes (speed clamp, persistence, timer visual, build fix)
 
-- **Autoscroll speed clamp**: `kMinSpeedMultiplier` 0.1f → 0.008f (AutoScroll.cpp:74). Min speed agora ~100 px/min (era ~1400).
-- **Lembrar última velocidade**: persistência via FileState `autoScrollSpeedMultiplier` (já existia, per-documento). Defaults baixados 0.0167f → 0.008f (MainWindow.h:332, SumatraPDF.cpp:2084/2104, gen-settings.ts:792). "Se nunca usado → mínimo" correto.
-- **Timer visual**: design tokens `kCtrlGapX=4`, `kCtrlH=18` (Toolbar.cpp:54-56); `TimerInfoId` 110 → 130 (Toolbar.cpp:1201); CreateTimerControls/RepositionTimerControls com token math. Fix bug `slot`→`r` em CreateTimerControls (Toolbar.cpp:1361).
-- **Build fix**: revert regressão `..\vs2022\TumatraPDF.sln` → `vs2022\TumatraPDF.sln` (build.ts:37). Build roda de `sumatrapdf-src` (`bun cmd/build.ts`). 0 err / 0 warn. Deploy automático p/ Compiled\TumatraPDF.exe. Smoke limpo (0 crash dumps).
-- **Pendente**: teste UI prático pelo usuário (amanhã) — timer control [checkbox][Timer:][input] antes de Autoscroll; speed mínimo; persistência; alinhamento visual.
+- **Autoscroll speed clamp**: `kMinSpeedMultiplier` 0.1f → 0.008f (AutoScroll.cpp:74). Min speed now ~100 px/min (was ~1400).
+- **Remember last speed**: persistence via FileState `autoScrollSpeedMultiplier` (already existed, per-document). Defaults lowered 0.0167f → 0.008f (MainWindow.h:332, SumatraPDF.cpp:2084/2104, gen-settings.ts:792). "If never used → minimum" correct.
+- **Timer visual**: design tokens `kCtrlGapX=4`, `kCtrlH=18` (Toolbar.cpp:54-56); `TimerInfoId` 110 → 130 (Toolbar.cpp:1201); CreateTimerControls/RepositionTimerControls with token math. Fixed `slot`→`r` bug in CreateTimerControls (Toolbar.cpp:1361).
+- **Build fix**: reverted regression `..\vs2022\TumatraPDF.sln` → `vs2022\TumatraPDF.sln` (build.ts:37). Build runs from `sumatrapdf-src` (`bun cmd/build.ts`). 0 err / 0 warn. Auto-deploy to Compiled\TumatraPDF.exe. Clean smoke (0 crash dumps).
+- **Pending**: practical UI test by user (tomorrow) — timer control [checkbox][Timer:][input] before Autoscroll; minimum speed; persistence; visual alignment.
 
 ## 2026-08-30 — Fase 16B: MainWindow.h Struct Modularization (AutoScrollState + ArchToolsState)
 

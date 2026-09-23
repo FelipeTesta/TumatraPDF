@@ -35,290 +35,291 @@ Audit done with tree-sitter + explore agent over `sumatrapdf-src/src/`. Findings
 
 ---
 
-## Two Columns v2 (Crop View) — PLANO DE MIGRAÇÃO (em progresso)
+## Two Columns v2 (Crop View) — MIGRATION PLAN (in progress)
 
-### Objetivo
+### Goal
 
-Criar um **segundo modo** "Two Column v2" (`CmdViewportCropV2Toggle`) **totalmente independente** do existente (`CmdViewportCropToggle`), para poder excluir o v1 depois sem conflitos. O v2 implementa o conceito do cropview: cada metade da página vira uma **"página virtual" empilhada verticalmente** (`1L → 1R → 2L → 2R → ...`), largura total da tela, para o autoscroll fluir como texto contínuo **sem salto**.
+Create a **second mode** "Two Column v2" (`CmdViewportCropV2Toggle`) **fully independent** of the existing one (`CmdViewportCropToggle`), so v1 can later be removed without conflicts. v2 implements the cropview concept: each half of the page becomes a **"virtual page" stacked vertically** (`1L → 1R → 2L → 2R → ...`), full screen width, so autoscroll flows as continuous text **without jumping**.
 
-### Estado atual (v1)
+### Current state (v1)
 
-- v1 = manipulação de viewport (`ApplyViewportCrop` em `DisplayModel.cpp:250`): zoom ×2 + shift horizontal (`viewPort.x`) entre colunas. `PageCount()` = N físico, **sem duplicação**.
-- Bug central: em `ScrollYBy()` (`DisplayModel.cpp:2165`) ao fim da coluna esquerda faz `viewPort.y = colTop` (snap pro topo da direita) = **salto** descrito no TODO.
-- Autoscroll → `MoveDocBy` (`WindowTab.cpp:169`) → `ScrollYBy(dy,false)` → mesmo salto.
-- Render: caminho não-cache `RenderCache.cpp:1140-1195` já corta sub-retângulo via `RenderPageArgs(...,&area)` (`:1182`); cacheado usa `req.pageRect` (`RenderCache.cpp:984`). `EngineMupdf::RenderPage` (`:5024`) corta pelo `pageRect`. **Base pronta para coluna.**
+- v1 = viewport manipulation (`ApplyViewportCrop` in `DisplayModel.cpp:250`): ×2 zoom + horizontal shift (`viewPort.x`) between columns. `PageCount()` = N physical, **no duplication**.
+- Central bug: in `ScrollYBy()` (`DisplayModel.cpp:2165`) at the end of the left column it does `viewPort.y = colTop` (snap to the top of the right one) = the **jump** described in this TODO.
+- Autoscroll → `MoveDocBy` (`WindowTab.cpp:169`) → `ScrollYBy(dy,false)` → same jump.
+- Render: the non-cache path `RenderCache.cpp:1140-1195` already cuts a sub-rectangle via `RenderPageArgs(...,&area)` (`:1182`); cached uses `req.pageRect` (`RenderCache.cpp:984`). `EngineMupdf::RenderPage` (`:5024`) cuts by `pageRect`. **Base ready for columns.**
 
-### Decisões do usuário
+### User decisions
 
-1. Botão **separado** "Two Column 2" (não substitui o v1).
-2. v2 **o mais independente possível** (facilitar exclusão do v1 depois).
-3. Plano **o mais detalhado possível**.
+1. **Separate** "Two Column 2" button (does not replace v1).
+2. v2 **as independent as possible** (make removing v1 later easy).
+3. Plan **as detailed as possible**.
 
-### Design — Independência v2
+### Design — v2 independence
 
-- Campos novos em `DisplayModel`: `viewportCropV2Enabled`, `viewportCropV2QuickToggled` (NÃO reusar campos v1).
-- Métodos novos: `ApplyViewportCropV2()`, `QuickToggleViewportCropV2()`, `VirtualToPhysical()`, `ColumnOfVirtual()`, `VirtualPageCount()`.
-- Comando novo `CmdViewportCropV2Toggle` (independente do `CmdViewportCropToggle`).
-- v1 e v2 **mutuamente excludentes** (ligar um desliga o outro).
-- Render: cortar coluna via `pageRect`/`area` + `physicalPageNo`; cache key por **virtual pageNo** (resolve esq/dir sem tocar `BitmapCacheEntry`).
+- New fields in `DisplayModel`: `viewportCropV2Enabled`, `viewportCropV2QuickToggled` (do NOT reuse v1 fields).
+- New methods: `ApplyViewportCropV2()`, `QuickToggleViewportCropV2()`, `VirtualToPhysical()`, `ColumnOfVirtual()`, `VirtualPageCount()`.
+- New command `CmdViewportCropV2Toggle` (independent of `CmdViewportCropToggle`).
+- v1 and v2 **mutually exclusive** (turning one on turns the other off).
+- Render: cut the column via `pageRect`/`area` + `physicalPageNo`; cache key by **virtual pageNo** (resolves left/right without touching `BitmapCacheEntry`).
 
-### Arquivos afetados
+### Affected files
 
-`DisplayModel.{h,cpp}`, `DocumentLayout.{h,cpp}`, `RenderCache.{h,cpp}`, `Canvas.cpp`, `SumatraPDF.cpp`, `cmd/gen-commands.ts`, `Toolbar.cpp`, `Menu.cpp`, `CommandAvailability.cpp`, `Accelerators.cpp`. (Settings do v2: reusar `ViewportCrop` — margens são do PDF, não do modo.)
+`DisplayModel.{h,cpp}`, `DocumentLayout.{h,cpp}`, `RenderCache.{h,cpp}`, `Canvas.cpp`, `SumatraPDF.cpp`, `cmd/gen-commands.ts`, `Toolbar.cpp`, `Menu.cpp`, `CommandAvailability.cpp`, `Accelerators.cpp`. (v2 settings: reuse `ViewportCrop` — margins belong to the PDF, not the mode.)
 
-### Fases (cada fase: `bun cmd/build.ts` 0 err/0 warn + clang-format + smoke manual `-for-testing`)
+### Phases (each phase: `bun cmd/build.ts` 0 err/0 warn + clang-format + manual smoke `-for-testing`)
 
-#### FASE 0 — Infra paralela (comando + estado + botão) — EM ANDAMENTO
+#### FASE 0 — Parallel infra (command + state + button) — IN PROGRESS
 
-- [x] `cmd/gen-commands.ts`: adicionado `CmdViewportCropV2Toggle` (antes de `CmdNone`). → `Commands.h: CmdViewportCropV2Toggle = 512`.
-- [x] `bun cmd/gen-code.ts`: Commands.h/Commands.cpp regenerados. _(Erro `cl` não achado no final é só da parte virt-keys; ignorar, ver Accelerators na FASE 5)_.
-- [x] `DisplayModel.h`: adicionados campos `viewportCropV2Enabled`, `viewportCropV2QuickToggled` + métodos `ApplyViewportCropV2()`, `QuickToggleViewportCropV2()`, `VirtualToPhysical()`, `ColumnOfVirtual()`, `VirtualPageCount()`.
-- [x] `DisplayModel.cpp`: implementar `VirtualPageCount()` (2N se v2 on & contínuo, senão N) e helpers `VirtualToPhysical`/`ColumnOfVirtual` (`:112-131`).
-- [x] `SumatraPDF.cpp`: handler `case CmdViewportCropV2Toggle:` (`:11177`, clonado de v1, exclusão mútua, commitado).
-- [x] `Toolbar.cpp`: botão novo `{TbIcon::Text, CmdViewportCropV2Toggle, _TRN("Two Column 2")}` (`:106`) + `BTNS_CHECK` (`:395`).
-- [x] `Menu.cpp`: item de menu novo (`:631`).
+- [x] `cmd/gen-commands.ts`: added `CmdViewportCropV2Toggle` (before `CmdNone`). → `Commands.h: CmdViewportCropV2Toggle = 512`.
+- [x] `bun cmd/gen-code.ts`: Commands.h/Commands.cpp regenerated. _(The `cl` not-found error at the end is only in the virt-keys part; ignore, see Accelerators in FASE 5)_.
+- [x] `DisplayModel.h`: added fields `viewportCropV2Enabled`, `viewportCropV2QuickToggled` + methods `ApplyViewportCropV2()`, `QuickToggleViewportCropV2()`, `VirtualToPhysical()`, `ColumnOfVirtual()`, `VirtualPageCount()`.
+- [x] `DisplayModel.cpp`: implement `VirtualPageCount()` (2N if v2 on & continuous, else N) and helpers `VirtualToPhysical`/`ColumnOfVirtual` (`:112-131`).
+- [x] `SumatraPDF.cpp`: handler `case CmdViewportCropV2Toggle:` (`:11177`, cloned from v1, mutual exclusion, committed).
+- [x] `Toolbar.cpp`: new button `{TbIcon::Text, CmdViewportCropV2Toggle, _TRN("Two Column 2")}` (`:106`) + `BTNS_CHECK` (`:395`).
+- [x] `Menu.cpp`: new menu item (`:631`).
 - [x] `CommandAvailability.cpp`: gating (`:232`,`:262`).
-- [x] Build + teste: toggle liga/desliga **sem mudança visual** (v2 ainda no-off). ✅ FASE 0 completa (commitada em fc50439).
+- [x] Build + test: toggle on/off **with no visual change** (v2 still visual-off). ✅ FASE 0 complete (committed in fc50439).
 
-#### FASE 1 — Duplicar layout para 2N
+#### FASE 1 — Duplicate layout to 2N
 
-- [x] `DisplayModel::PageCount()` (`:102`): retorna `VirtualPageCount()` (2N se v2 on & contínuo; senão N). `ValidPageNo` aceita 1..VirtualPageCount.
-- [x] `ValidPageNo` (`:150`): aceitar virtual (1..VirtualPageCount()). ✅
-- [x] `Relayout()` (`:1277`): `layout.Reset(VirtualPageCount())`, iterar 2N preenchendo `physicalPageNo=VirtualToPhysical(v)`, `cropColumn=ColumnOfVirtual(v)`, mediaBox/zoomReal da página física.
-- [x] `BuildPagesInfo()` (`:738`): aloca `VirtualPageCount()` e agora é re-callable (libera array existente) — necessário quando v2 alterna N↔2N.
-- [x] `CopyDocumentLayoutToPageInfo` (`:685`): copia `physicalPageNo`+`cropColumn`.
+- [x] `DisplayModel::PageCount()` (`:102`): returns `VirtualPageCount()` (2N if v2 on & continuous; else N). `ValidPageNo` accepts 1..VirtualPageCount.
+- [x] `ValidPageNo` (`:150`): accept virtual (1..VirtualPageCount()). ✅
+- [x] `Relayout()` (`:1277`): `layout.Reset(VirtualPageCount())`, iterate 2N filling `physicalPageNo=VirtualToPhysical(v)`, `cropColumn=ColumnOfVirtual(v)`, mediaBox/zoomReal of the physical page.
+- [x] `BuildPagesInfo()` (`:738`): allocates `VirtualPageCount()` and is now re-callable (frees the existing array) — needed when v2 switches N↔2N.
+- [x] `CopyDocumentLayoutToPageInfo` (`:685`): copies `physicalPageNo`+`cropColumn`.
 - [x] `DocumentLayoutPage` (`DocumentLayout.h:13`): + `int physicalPageNo` + `int cropColumn = -1`.
 - [x] `PageInfo` (`DisplayModel.h:22`): + `int physicalPageNo` + `int cropColumn = -1`.
-- [x] Roteamento engine: `PageMediaBox`, `PageSizeAfterRotation`, `GetContentBox`, `CvtToScreen`/`CvtFromScreen`, `ZoomRealFromVirtualForPage` (contentBox loop), `ScrollTo` → `VirtualToPhysical(pageNo)`.
-- [x] Render: `ShouldCacheRendering` = false quando v2 (força não-cache, igual trim); `RenderCache::Paint` mapeia `renderPageNo = dm->VirtualToPhysical(pageNo)`.
-- [x] `ApplyViewportCropV2` agora chama `BuildPagesInfo()` + `Relayout()` (toggle liga/desliga rebuilda pagesInfo 2N/N). Handler OFF em SumatraPDF.cpp usa `ApplyViewportCropV2`.
-- [x] `Canvas.cpp`: `PageMediabox` em trim-drag/erase/full-image → `VirtualToPhysical(pageNo)`.
-- [x] Build 0 err/0 warn (75s) + clang-format + smoke estável (zlib.3.pdf 3 páginas, sem crash). ✅ FASE 1 completa — 2N linhas empilhadas, ainda sem corte de coluna.
+- [x] Engine routing: `PageMediaBox`, `PageSizeAfterRotation`, `GetContentBox`, `CvtToScreen`/`CvtFromScreen`, `ZoomRealFromVirtualForPage` (contentBox loop), `ScrollTo` → `VirtualToPhysical(pageNo)`.
+- [x] Render: `ShouldCacheRendering` = false when v2 (forces non-cache, like trim); `RenderCache::Paint` maps `renderPageNo = dm->VirtualToPhysical(pageNo)`.
+- [x] `ApplyViewportCropV2` now calls `BuildPagesInfo()` + `Relayout()` (toggling on/off rebuilds pagesInfo 2N/N). The OFF handler in SumatraPDF.cpp uses `ApplyViewportCropV2`.
+- [x] `Canvas.cpp`: `PageMediabox` in trim-drag/erase/full-image → `VirtualToPhysical(pageNo)`.
+- [x] Build 0 err/0 warn (75s) + clang-format + stable smoke (zlib.3.pdf 3 pages, no crash). ✅ FASE 1 complete — 2N stacked rows, column cut still missing.
 
-#### FASE 2 — Corte de coluna no render ✅ COMPLETA
+#### FASE 2 — Column cut in the render ✅ COMPLETE
 
-- [x] `DisplayModel::PageMediaBox` (`:604`): quando `ColumnOfVirtual(pageNo)>=0`, cortar mediabox para metade (`dx/=2`, `x+=dx` se dir). A página virtual ganha mediabox de meia-largura → Fit Width preenche a tela com a coluna (criterio central do usuário: sem metade preta).
-- [x] Caminho não-cache `RenderCache.cpp:1162`: quando `viewportCropV2Enabled && cropColumn>=0`, deslocar `area` por `colX = mb.x + (cropColumn==1 ? mb.dx/2 : 0)` (mesmo padrao do trim shift vertical) e render com `physicalPageNo`.
-- [x] Caminho cacheado: MVP = forçar não-cache (já feito na FASE 1 via `ShouldCacheRendering`=false). Avaliar perf na FASE 7.
-- [x] Cache: virtual pageNo como chave já funciona (esq/dir não colidem).
-- [x] **Fix crash ao desligar** (`EngineMupdf.cpp:4110` `pageNo>pageCount`): hit-test passava pageNo **virtual** (até 2N) ao engine (que tem N). Roteados via `VirtualToPhysical` em `DisplayModel.cpp`: `GetElementAtPos` (:1682), `GetAnnotationAtPos` (:1699), `GetWidgetAtPos` (:1715), `IsOverText`/`HasTextForPage` (:1728), `GetTextInRegion` (:2494).
-- [x] Build 0 err/0 warn (76s) + clang-format + teste manual: liga/desliga v2 **sem crash**, volta ao estado original. Log `[v2] Paint pageNo=4 -> renderPageNo=2 cropColumn=1` confirma render de coluna esq/dir correto. ✅ FASE 2 completa — corte de coluna com largura total da tela. (Pendências de polish: ver na próxima sessão.)
+- [x] `DisplayModel::PageMediaBox` (`:604`): when `ColumnOfVirtual(pageNo)>=0`, cut the mediabox in half (`dx/=2`, `x+=dx` if right). The virtual page gets a half-width mediabox → Fit Width fills the screen with the column (user's central criterion: no black half).
+- [x] Non-cache path `RenderCache.cpp:1162`: when `viewportCropV2Enabled && cropColumn>=0`, shift `area` by `colX = mb.x + (cropColumn==1 ? mb.dx/2 : 0)` (same pattern as the vertical trim shift) and render with `physicalPageNo`.
+- [x] Cached path: MVP = force non-cache (already done in FASE 1 via `ShouldCacheRendering`=false). Evaluate perf in FASE 7.
+- [x] Cache: virtual pageNo as key already works (left/right don't collide).
+- [x] **Turning-off crash fix** (`EngineMupdf.cpp:4110` `pageNo>pageCount`): hit-test passed **virtual** pageNo (up to 2N) to the engine (which has N). Routed via `VirtualToPhysical` in `DisplayModel.cpp`: `GetElementAtPos` (:1682), `GetAnnotationAtPos` (:1699), `GetWidgetAtPos` (:1715), `IsOverText`/`HasTextForPage` (:1728), `GetTextInRegion` (:2494).
+- [x] Build 0 err/0 warn (76s) + clang-format + manual test: v2 on/off **without crash**, returns to original state. Log `[v2] Paint pageNo=4 -> renderPageNo=2 cropColumn=1` confirms correct left/right column rendering. ✅ FASE 2 complete — column cut with full screen width. (Polish pending: see next session.)
 
-#### FASE 3 — Fluxo contínuo (sem salto) — CRITÉRIO CENTRAL
+#### FASE 3 — Continuous flow (no jump) — CENTRAL CRITERION
 
-- [x] `ScrollYBy()` (`:2155-2198`): **nada a remover para v2** — o snap `viewPort.y = colTop` e o bloqueio `colBottom - viewPort.dy` estão dentro do bloco v1 (`if (viewportCropEnabled ...)`). Exclusão mútua (v2 on ⇒ v1 off, SumatraPDF.cpp:11185) faz o v2 **desviar desse bloco** e cair no caminho natural `newYOff += dy` (`:2262-2279`), que rola as 2N páginas empilhadas verticalmente sem salto.
-- [x] `GoToNextPage`/`GoToPrevPage` já operam sobre virtual: `PageCount()`=VirtualPageCount, modo contínuo usa `columns=1` → `FirstPageInARowNo` = pageNo, navega `2k-1→2k→2k+1` naturalmente (`:2034-2040`, `:2080-2091`).
-- [x] Autoscroll (`MoveDocBy`→`ScrollYBy`): contínuo sem interrupção.
-- [x] **Teste de aceite**: `autoscroll=on` + Two Column 2 lê `1L→1R→2L→2R` como texto único, sem salto. (Verificado por análise de código; teste manual do usuário pendente.)
+- [x] `ScrollYBy()` (`:2155-2198`): nothing to remove for v2 — snap `viewPort.y = colTop` and `colBottom - viewPort.dy` block live inside v1 block (`if (viewportCropEnabled ...)`). Mutual exclusion (v2 on ⇒ v1 off, SumatraPDF.cpp:11185) makes v2 bypass block, fall into natural `newYOff += dy` path (`:2262-2279`) scrolling 2N stacked pages vertically, no jump.
+- [x] `GoToNextPage`/`GoToPrevPage` already virtual: `PageCount()`=VirtualPageCount, continuous uses `columns=1` → `FirstPageInARowNo` = pageNo, navigates `2k-1→2k→2k+1` naturally (`:2034-2040`, `:2080-2091`).
+- [x] Autoscroll (`MoveDocBy`→`ScrollYBy`): continuous, no break.
+- [x] **Acceptance test**: `autoscroll=on` + Two Column 2 reads `1L→1R→2L→2R` as single text, no jump. (Verified by code analysis; user manual test pending.)
 
-> **Nota FASE 3:** não houve mudança de código nesta fase — a arquitetura 2N empilhada + exclusão mútua já entrega o fluxo contínuo. Confirmado por build 0 err/0 warn.
+> **FASE 3 note:** zero code change — stacked 2N architecture + mutual exclusion already delivers continuous flow. Build 0 err/0 warn.
 
-#### FASE 4 — Conversões virtual↔físico no engine ✅ COMPLETA
+#### FASE 4 — virtual↔physical conversions in engine ✅ COMPLETE
 
-- [x] Decidido: `PageCount()` retorna **virtual** (layout/nav/UI), engine usa **físico**. Todo call-site que cruza a fronteira roteia.
-- [x] `DisplayModel::PhysicalToVirtualForRect(physPageNo, rect, &rectOut)` (DisplayModel.cpp:133): mapa física k + rect → virtual 2k-1 (esq) / 2k (dir); não-v2 = identidade. rect fica em coords físicas (o shift colX é feito no CvtToScreen).
-- [x] `CvtToScreen`/`CvtFromScreen` agora **column-aware**: aplicam o mesmo shift colX do render (`pt.x -= colX` / `+= colX`, espelhando `RenderCache::Paint`). Logo, qualquer página virtual + rect físico converte certo.
-- [x] `GetPageLabeTemp` converte `VirtualToPhysical` antes do engine (evita overrun 2N→N).
-- [x] Search/Seleção (TextSel.pages[] é **físico**) — roteado via `PhysicalToVirtualForRect` em:
-  - `AppendTextSelScreenRects` (SearchAndDDE), `AppendPageRectsToScreen`, `ShowSearchResult` (GoToPage virtual), `FindTextOnThread` (CurrentPageNo→físico p/ FindFirst + checagem visibilidade 2 colunas), `FindMatchTouchesVisiblePages` (span virtual `[2s-1,2e]` com `bool v2`).
-  - `SelectionOnPage::GetRect`, `FromRectangle` (itera `PageCount()` virtual), `UpdateTextSelection`/`OnSelectAll`/`OnSelectionStart` (VirtualToPhysical p/ textSelection engine), `SelectionToolbar::GetSelectionEndPoint`.
-  - `uia/TextRange`, `ReadAloudHighlight` (3 pontos), `FormFields`, `SumatraPDF` zoom-to-selection.
-- [x] `textSelection`/`textSearch` (engine-bound) recebem **físico** nos call-sites de entrada (StartAt/SelectUpTo/SelectWordAt via `VirtualToPhysical`).
-- [x] Build 0 err/0 warn + smoke `-for-testing` (estável). Teste manual pendente: seleção, busca, links e cliques corretos na 2L/2R.
-- [ ] (pendente) uia `PageProvider` e tile-math legado — não-cache já desvia; aceitável para MVP.
+- [x] Decided: `PageCount()` returns **virtual** (layout/nav/UI), engine uses **physical**. Every boundary-crossing call-site routes.
+- [x] `DisplayModel::PhysicalToVirtualForRect(physPageNo, rect, &rectOut)` (DisplayModel.cpp:133): physical k + rect → virtual 2k-1 (left) / 2k (right); non-v2 = identity. Rect stays in physical coords (colX shift applied in CvtToScreen).
+- [x] `CvtToScreen`/`CvtFromScreen` now **column-aware**: same colX shift as render (`pt.x -= colX` / `+= colX`, mirroring `RenderCache::Paint`). Any virtual page + physical rect converts correctly.
+- [x] `GetPageLabeTemp` converts `VirtualToPhysical` before engine (avoids 2N→N overrun).
+- [x] Search/Selection (TextSel.pages[] is **physical**) — routed via `PhysicalToVirtualForRect` in:
+  - `AppendTextSelScreenRects` (SearchAndDDE), `AppendPageRectsToScreen`, `ShowSearchResult` (GoToPage virtual), `FindTextOnThread` (CurrentPageNo→physical for FindFirst + 2-column visibility check), `FindMatchTouchesVisiblePages` (virtual span `[2s-1,2e]` with `bool v2`).
+  - `SelectionOnPage::GetRect`, `FromRectangle` (iterates virtual `PageCount()`), `UpdateTextSelection`/`OnSelectAll`/`OnSelectionStart` (VirtualToPhysical for engine textSelection), `SelectionToolbar::GetSelectionEndPoint`.
+  - `uia/TextRange`, `ReadAloudHighlight` (3 sites), `FormFields`, `SumatraPDF` zoom-to-selection.
+- [x] `textSelection`/`textSearch` (engine-bound) receive **physical** at entry call-sites (StartAt/SelectUpTo/SelectWordAt via `VirtualToPhysical`).
+- [x] Build 0 err/0 warn + smoke `-for-testing` (stable). Manual test pending: selection, search, links and correct clicks on 2L/2R.
+- [ ] (pending) uia `PageProvider` and legacy tile math — non-cache path already diverts; acceptable for MVP.
 
-#### FASE 5 — Estado, navegação & labels
+#### FASE 5 — State, navigation & labels
 
-- [x] **Shift-hold (quick toggle) v3** (`QuickToggleViewportCropV2`): `IsViewportCropV2Active()` = `viewportCropV2Enabled && !viewportCropV2QuickToggled && IsContinuous`. **Shift-hold PAUSA o autoscroll** (drag livre na página inteira; retoma ao soltar). Quick view: entra = salva zoom virtual + relayout `kZoomFitWidth` (página física inteira ocupa toda a largura); sai = restaura zoom salvo; âncora fracionária (frac × nova altura). Hook: `HandleV2ShiftHold` (checa `quickToggled`) + `WM_KEYDOWN`/`WM_KEYUP` de `VK_SHIFT` no WndProc do frame. Ambos os toggles v2 terminam com `ScrollYTo` (pipeline completo — corrige o "travado até continuous off/on").
-- [ ] `ScrollState.page` (`DisplayModel.h:63`): armazenar virtual pageNo; restaurar mapeia para coluna.
-- [ ] NavigationModel/histórico: 2N páginas.
-- [ ] Page labels: `1L/1R/2L/2R` (derivar de `ColumnOfVirtual`).
-- [ ] `Accelerators.cpp` (`// @gen-start virt-keys-num`): adicionar `CmdViewportCropV2Toggle` (rodar gen-code com VS no PATH, ou editar via gen-data).
-- [ ] Build + teste: ir/voltar, histórico, thumbnails coerentes.
+- [x] **Shift-hold (quick toggle) v3** (`QuickToggleViewportCropV2`): `IsViewportCropV2Active()` = `viewportCropV2Enabled && !viewportCropV2QuickToggled && IsContinuous`. **Shift-hold PAUSES autoscroll** (free drag on full page; resumes on release). Quick view: enter = save virtual zoom + relayout `kZoomFitWidth` (full physical page fills width); exit = restore saved zoom; fractional anchor (frac × new height). Hook: `HandleV2ShiftHold` (checks `quickToggled`) + `WM_KEYDOWN`/`WM_KEYUP` for `VK_SHIFT` in frame WndProc. Both v2 toggles end with `ScrollYTo` (full pipeline — fixes "stuck until continuous off/on").
+- [x] `ScrollState.page` — live session already virtual (GetScrollState/GoToPage operate in PageCount domain); real gap was persistence: `GetCurrentFileState` now saves **PHYSICAL** pageNo (`VirtualToPhysical(ss.page)`); session restore maps physical→virtual left column (`2p-1`) when v2 active (SumatraPDF.cpp restore). No 2N pageNo risk in non-v2 session.
+- [x] NavigationModel/history: 2N pages — `DisplayModel::RemapNavHistoryForV2(bool)`: toggle ON maps each physical entry → virtual left column (`2p-1`); OFF → `(p+1)/2`; out-of-range entries drop; called in `CmdViewportCropV2Toggle` handler (Back/Forward point at same physical page). Quick-toggle (shift-hold) does NOT remap (transient).
+- [x] Page labels: `GetPageLabeTemp` under v2 appends `L`/`R` (from `ColumnOfVirtual`) — toolbar shows "3L"/"3R"; `GetPageByLabel` accepts suffix ("Go to 3R" → right column of physical page 3; no suffix → left column). Applies to favorites/TOC/search (consistent labels).
+- [x] `Accelerators.cpp`: **user decision 2026-09-22 — NO shortcut** (toolbar/menu only; shift-hold peek remains). `gBuiltInAccelerators` (Accelerators.cpp:17) is hand-editable table, outside gen-markers — adding later is 1 line if mind changes.
+- [ ] Build + test: back/forward, history, coherent thumbnails — build OK (dbg+rel 0 err), smoke OK; **visual test pending (user)**: Back/Forward after v2 toggle; page edit "3R"; reopen doc saved with v2.
+- [ ] **Finding 2026-09-22**: favorites saved under v2 store VIRTUAL pageNo (`win->currPageNo`) + label "3L" — clicking in a non-v2 session falls into ParseInt("3L")=3 (physical, tolerable) but virtual pageNo > N may no-op. Physical normalization pending at favorite creation (same class as FileState fix).
 
-> **Nota perf autoscroll TC2 (2026-09-18 → 2026-09-20):** v2 forçava caminho não-cache (`ShouldCacheRendering`=false), limitando a velocidade do autoscroll (render sync por frame ~23ms). **✅ RESOLVIDO (2026-09-20)**: re-habilitado o cache do v2. As funções de tile (`GetTileRectDevice/User/GetTileOnScreen`, RenderCache.cpp:308+) agora tomam `DisplayModel*`, roteiam `VirtualToPhysical` + cortam mediabox p/ coluna; colX shift só no render (`GetTileRectUser`); render thread roteia `req.pageNo`→físico. UI thread só blit de tiles prontos (~1ms). Chave de cache (virtual pageNo 2k/2k-1) já resolve esq/dir. Commit `feat(two-column-v2): re-enable render cache for TC2`. Autoscroll "BEM melhor", trava pouco só na velocidade máxima (aceitável).
+> **Autoscroll TC2 perf note (2026-09-18 → 2026-09-20):** v2 forced non-cache path (`ShouldCacheRendering`=false), limiting autoscroll speed (sync render per frame ~23ms). **✅ RESOLVED (2026-09-20)**: v2 cache re-enabled. Tile functions (`GetTileRectDevice/User/GetTileOnScreen`, RenderCache.cpp:308+) now take `DisplayModel*`, route `VirtualToPhysical` + cut mediabox per column; colX shift only at render (`GetTileRectUser`); render thread routes `req.pageNo`→physical. UI thread only blits ready tiles (~1ms). Cache key (virtual pageNo 2k/2k-1) already resolves left/right. Commit `feat(two-column-v2): re-enable render cache for TC2`. Autoscroll "MUCH better", only stutters at max speed (acceptable).
 
 #### FASE 6 — Trim + R2L + colGap
 
-- [x] **colGap/offset (overlap das colunas)** (`ViewportCrop.colGap`): as colunas não cortam mais coladas no meio — cada coluna mostra um pedaço da outra metade. Helpers em DisplayModel: `ViewportCropV2Gap()` (lê `gGlobalPrefs->viewportCrop.colGap`), `ViewportCropV2ColumnWidth(mb)=halfW+gap`, `ViewportCropV2RightColumnX(mb)=mb.x+halfW-gap`. Aplicados em: `PageMediaBox`, `GetTileRectDevice/User` (RenderCache), caminho não-cache `Paint`, `CvtToScreen`/`CvtFromScreen`. Configurável na janela Trim Config (novo campo "column gap:").
-- [ ] **Trim** (`marginTrimEnabled`): integrar com corte de coluna (ambos atuam no `area`/`pageRect`; testar ordem em `RenderCache.cpp:1169`).
-- [ ] **R2L** (`displayR2L`): inverter esq/dir em docs RTL.
-- [ ] Build + teste combos: `TwoColumn2 + Trim`, `TwoColumn2 + R2L`.
+- [x] **colGap/offset (column overlap)** (`ViewportCrop.colGap`): columns no longer cut flush at middle — each column shows a slice of the other half. DisplayModel helpers: `ViewportCropV2Gap()` (reads `gGlobalPrefs->viewportCrop.colGap`), `ViewportCropV2ColumnWidth(mb)=halfW+gap`, `ViewportCropV2RightColumnX(mb)=mb.x+halfW-gap`. Applied in: `PageMediaBox`, `GetTileRectDevice/User` (RenderCache), non-cache `Paint`, `CvtToScreen`/`CvtFromScreen`. Configurable in Trim Config dialog (new "column gap:" field).
+- [x] **Trim** (`marginTrimEnabled`): integration verified — independent axes (column cut acts on dx/x, trim on dy/y) across all paths: layout (`DocumentLayout` cuts `pageSize.dy`), cache (`GetTileRectDevice/User`), non-cache `Paint` (crop.x + inflate cvp), `CvtToScreen/CvtFromScreen`. No ordering conflict. Visual combo test `TwoColumn2 + Trim` pending (user).
+- [x] **R2L** (`displayR2L`): implemented 2026-09-22 — SINGLE flip in `ColumnOfVirtual` (DisplayModel.cpp): `int col = (v-1) % 2; return displayR2L ? 1 - col : col`. Everything derives from it (`PageMediaBox`, `ColumnOffsetXForPage` → render/hit-test). `PhysicalToVirtualForRect` same: PHYSICAL column (rectOut shift) unchanged, only virtual page number (`vCol`) flips. Toggle via `CmdToggleMangaMode` → `ToggleMangaModeInternal` (GetScrollState → Relayout → SetScrollState) preserves position.
+- [ ] Build + test combos: `TwoColumn2 + Trim`, `TwoColumn2 + R2L` — build OK (dbg+rel 0 err), smoke OK; **visual test pending (user)**: enable TC2 + manga mode → first virtual column must show the RIGHT column.
 
-#### FASE 7 — Polish & regressões
+#### FASE 7 — Polish & regressions
 
-- [ ] Reset ao trocar aba/fechar; persistência estado v2.
-- [ ] Testar modos não-contínuos (SinglePage/Facing) — v2 só faz sentido em contínuo (ou desabilitar lá).
+- [ ] Reset on tab switch/close; v2 state persistence.
+- [ ] Test non-continuous modes (SinglePage/Facing) — v2 only makes sense in continuous (or disable there).
 - [ ] `bun cmd/run-unit-tests.ts -dbg` + smoke.
-- [ ] Build final + deploy `Compiled/TumatraPDF.exe`.
+- [ ] Final build + deploy `Compiled/TumatraPDF.exe`.
 
-### NOTAS
+### NOTES
 
-- `cl.exe` (VS) não está no PATH nesta sessão: `bun cmd/gen-code.ts` falha só na geração de virt-keys (`Accelerators.cpp`). Para regenerar Commands.h/Commands.cpp, roda o gen-code e ignora o erro `cl` (o enum/arrays já são gravados antes).
-- Forçar não-cache no v2 é aceitável para o MVP (mesma premissa do trim), mas pode re-renderizar ao rolar — avaliar perf na FASE 2/7.
+- `cl.exe` (VS) not in PATH in this session: `bun cmd/gen-code.ts` fails only at virt-keys generation (`Accelerators.cpp`). To regenerate Commands.h/Commands.cpp, run gen-code and ignore the `cl` error (enum/arrays already written before).
+- Forcing non-cache in v2 is acceptable for MVP (same premise as trim), but may re-render while scrolling — evaluate perf in FASE 2/7.
 
 ---
 
 ## Two Columns (Crop View)
 
-- O botão deve se comportar dessa forma:
+- The button must behave as follows:
 
 **Crop view OFF:**
 
 ```
-| ? largura total da tela ou zoom usuário ? |
-|           página 1 (original)             |
-|    coluna esquerda | coluna direita      |
-|                 página 2                  |
-|    coluna esquerda | coluna direita      |
+| ? full screen width or user zoom ? |
+|           page 1 (original)             |
+|    left column | right column         |
+|                 page 2                  |
+|    left column | right column         |
 ```
 
 **Crop view ON:**
 
 ```
-| ? largura total da tela ? |
-|        página 1           |
-|      coluna esquerda      |
-|         página 1          |
-|       coluna direita      |
-|        página 2           |
-|       coluna esquerda     |
-|        página 2           |
-|       coluna direita      |
+| ? full screen width ? |
+|        page 1           |
+|      left column        |
+|         page 1          |
+|       right column      |
+|        page 2           |
+|       left column       |
+|        page 2           |
+|       right column      |
 ```
 
-**Problema atual:** ao "tocar" o limite inferior da página, o app pula automaticamente para o topo direito, não dando tempo de ler o texto de forma fluida como continuidade.
+**Current problem:** when "touching" the bottom edge of the page, the app automatically jumps to the top right, leaving no time to read the text fluidly as a continuation.
 
-**Solução:** a próxima página renderizada deve ser (1) a mesma página novamente focada na metade direita, depois (2) a página seguinte focada na metade esquerda. Assim, com autoscroll=on, o texto flui de forma contínua sem saltos, como se fosse um texto de única coluna.
+**Solution:** the next rendered page must be (1) the same page again focused on the right half, then (2) the next page focused on the left half. This way, with autoscroll=on, the text flows continuously without jumps, as if it were single-column text.
 
 ## Margin
 
-Configuração de margens:
+Margin configuration:
 
 ```
 ______________
-| margem esquerda | margem topo | margem direita |
-| margem esquerda | COLUNA 1 | gap entre colunas | COLUNA 2 | margem direita |
-| margem esquerda | margem inferior | margem direita |
+| left margin | top margin | right margin |
+| left margin | COLUMN 1 | column gap | COLUMN 2 | right margin |
+| left margin | bottom margin | right margin |
 ______________
 ```
 
-Quando `trim=on`, deve recortar do zoom esses pixels, otimizando o uso da tela.
+When `trim=on`, it must crop these pixels from the zoom, optimizing screen usage.
 
 ## TRIM
 
-Desenvolver funções do TRIM sem afetar o CROP por enquanto.
+Develop TRIM functions without affecting CROP for now.
 
-Dois botões: `[Trim]` (on/off) e `[Trim Config]`:
+Two buttons: `[Trim]` (on/off) and `[Trim Config]`:
 
-- Abre janela com botões "margin-top" / "margin-bottom"
-- Clicar em qualquer um exibe linha vermelha horizontal 2px com distância 0px do topo/bottom
-- Linha permite clicar e arrastar para baixo/cima
-- Arrastar calcula automaticamente a distância do topo até nova posição da linha
-- Clicar em ✓ salva as distâncias
+- Opens a window with "margin-top" / "margin-bottom" buttons
+- Clicking either one shows a 2px horizontal red line with 0px distance from top/bottom
+- The line can be clicked and dragged down/up
+- Dragging automatically computes the distance from the top to the new line position
+- Clicking ✓ saves the distances
 
-**Status:** ✅ IMPLEMENTADO (2026-08-15) — clip-based top/bottom elimination + Trim Config dialog (margin-top/margin-bottom buttons, draggable red 2px line, ✓ save). Left/right/column-gap NÃO implementados (decisão do usuário).
+**Status:** ✅ IMPLEMENTED (2026-08-15) — clip-based top/bottom elimination + Trim Config dialog (margin-top/margin-bottom buttons, draggable red 2px line, ✓ save). Left/right/column-gap NOT implemented (user decision).
 
 ## AUTOSCROLL TIMER
 
-Incluir na barra de ferramentas um Checkbox, logo após o autoscroll: `[✓ Timer | Input Numérico]`.
+Add a checkbox to the toolbar, right after autoscroll: `[✓ Timer | Numeric Input]`.
 
-**Ideia:** quando timer=✓, o autoscroll desliga sozinho após N minutos (input numérico — padrão 30min).
+**Idea:** when timer=✓, autoscroll turns itself off after N minutes (numeric input — default 30min).
 
 ## ARCH TOOLS (Scale + Measure)
 
-Nova aba "Arch Tools" no sidebar esquerdo (nova aba ao lado de Conteúdo/Favoritos).
+New "Arch Tools" tab in the left sidebar (new tab next to Contents/Favorites).
 
-Duas funções, INDEPENDENTES POR DOCUMENTO (cada aba/doc mantém seu próprio estado):
+Two functions, INDEPENDENT PER DOCUMENT (each tab/doc keeps its own state):
 
 ### Scale
 
-- Ativar modo Scale
-- Selecionar uma LINHA VETORIAL existente (hit-test nos segmentos extraídos do PDF) OU desenhar uma linha (2 cliques) com SNAP nos pontos/endpoints vetoriais
-- Informar a medida real daquela linha (ex: "5 m") num input
-- Calcula fator de escala = comprimentoEmPagina / medidaReal
-- O desenho "assume a escala" no documento (escala por documento, ancorada na linha desenhada)
+- Enable Scale mode
+- Select an existing VECTOR LINE (hit-test on segments extracted from the PDF) OR draw a line (2 clicks) with SNAP on vector points/endpoints
+- Enter the real measurement of that line (e.g. "5 m") in an input
+- Computes scale factor = pageLength / realMeasure
+- The drawing "adopts the scale" in the document (per-document scale, anchored on the drawn line)
 
 ### Measure
 
-- Requer escala definida (senão, avisa para definir Scale)
-- Clicar 2x para desenhar linha temporária (com SNAP)
-- Calcula (pela escala): largura (x = |pageX|), altura (y = |pageY|), comprimento linear (√(x²+y²))
-- Mostra readout (x/y/comprimento) junto à linha + lista na aba
+- Requires a defined scale (otherwise, warn to define Scale)
+- Click 2x to draw a temporary line (with SNAP)
+- Computes (via scale): width (x = |pageX|), height (y = |pageY|), linear length (√(x²+y²))
+- Shows readout (x/y/length) next to the line + list in the tab
 
-### Técnico
+### Technical
 
-- Extração vetorial: fz_device custom (stroke_path) coletando segmentos por página (page coords) → cache em DisplayModel/EngineMupdf
-- SNAP: endpoint mais próximo dentro de threshold (px tela)
-- Coordenadas: converter tela↔página via DisplayModel (CvtScreenToPage/CvtPageToScreen) → medições em page units, zoom-independentes
-- Estado por doc: FileState (archScaleFactor, archScaleAnchorX/Y, archUnit, archScaleSet) + MainWindow (modo, pontos, lista de medições)
-- Overlay: desenhar em OnPaintDocument (padrão TrimConfigDialog/ContrastOverlay) com GDI+
-- Persistência: UpdateTabFileDisplayStateForTab / SetDisplayState
+- Vector extraction: custom fz_device (stroke_path) collecting segments per page (page coords) → cache in DisplayModel/EngineMupdf
+- SNAP: nearest endpoint within threshold (screen px)
+- Coordinates: convert screen↔page via DisplayModel (CvtScreenToPage/CvtPageToScreen) → measurements in page units, zoom-independent
+- Per-doc state: FileState (archScaleFactor, archScaleAnchorX/Y, archUnit, archScaleSet) + MainWindow (mode, points, measurement list)
+- Overlay: draw in OnPaintDocument (TrimConfigDialog/ContrastOverlay pattern) with GDI+
+- Persistence: UpdateTabFileDisplayStateForTab / SetDisplayState
 
-**Status:** ✅ EM TESTE (2026-08-28) — Fases 1-4 build-verificadas (infra+shell, extração vetorial+SNAP, overlay+interação+math Scale/Measure, persistência FileState+polish); aguardando validação runtime do usuário (Scale/Measure interativos).
+**Status:** ✅ IN TESTING (2026-08-28) — Phases 1-4 build-verified (infra+shell, vector extraction+SNAP, overlay+interaction+Scale/Measure math, FileState persistence+polish); awaiting user runtime validation (interactive Scale/Measure).
 
-**Refinamentos:**
+**Refinements:**
 
-- Fase 5: janela flutuante Scale, clique-clique+arrastar, tabela Measure + Limpar linhas — aguardando validação runtime
-- Fase 5b: logging automático [arch] + correção bug Desenhar linha (arme modo, não pre-set archDragLine=1) — aguardando validação runtime
-- Fase 6: [Limpar linhas] visível, label medida na linha scale, cursor crosshair no desenho, Esc cancela modo, minidump-on-crash (sumatrapdfcrash.dmp) — aguardando validação runtime
-- Fase 6b: corrigido crash OnOk (atof null) — valida linha desenhada + float>0 antes de atof — aguardando validação runtime
-- Fase 7: UI redesign — removido sidebar, botão 'Arch Tools' na toolbar abre 2a toolbar (Scale/Measure/Reset Scale); linhas visíveis só com Arch Tools=on; modo apagar (segurar 'e' = cursor vermelho + click apaga linha individual); fix flicker — aguardando validação runtime
-- Modularidade: gated by global pref archToolsEnabled (default on); off → zero UI + zero processing cost
-- Fase 8: Scale dialog ativa linha existente + mostra comprimento real no edit; label bg mede texto (sem vazar); erase 'e' funciona com Arch Tools on (cursor vermelho + overlay); barra 2a tem 'Limpar linhas' (CmdArchClear) + 'Reset Scale' (scale-only) — aguardando validação runtime
-- Fase 9: 'Limpar linhas' limpa só medidas (não escala); erase 'e' funciona com Arch Tools on (fora do gate draw mode); cursor 'e' sem fundo preto (overlay vermelho no canvas) — aguardando validação runtime
-- Fase 10: Scale simplificado — sem clicar na linha; digitar nova medida + OK recalcula escala (usa linha existente); desenhar nova linha substitui anterior; pre-fill do comprimento atual no dialog — aguardando validação runtime
-- Fase 11: editar escala funciona (OnOk usa archScaleSet; toggle não zera archScaleLineDefined); erase 'e' hit-test direto nas linhas armazenadas (não segmento PDF); underline branco desenha p/ toggle ativo (sem early-out gAnyToggleChecked) — aguardando validação runtime
-- Fase 12: corrigido regressão OnOk (guarda archScaleLineDefined||archScaleSet, permitia desenhar nova linha de escala); corrigido underline invertido do Measure (removido BTNS_CHECK auto-toggle, estado gerenciado por UpdateToolbar2State); renomeado 'Limpar linhas'→'Clean lines' — aguardando validação runtime
-- Fase 13: fator escala canônico (metros) + label respeita unidade atual + lembrar última unidade (ArchUnit) + separador decimal configurável (ArchDecimalSeparator, default ',') + Shift constrain horizontal/vertical — aguardando validação runtime
-- Fase 13b: escala e medições independentes por documento (HashMap archMeasurementsByDoc, save/restore no switch de aba, descartado ao fechar) — aguardando validação runtime
+- Phase 5: floating Scale window, click-click+drag, Measure table + Clear lines — awaiting runtime validation
+- Phase 5b: automatic [arch] logging + Draw line bug fix (arm mode, do not pre-set archDragLine=1) — awaiting runtime validation
+- Phase 6: [Clear lines] visible, measure label on scale line, crosshair cursor while drawing, Esc cancels mode, minidump-on-crash (sumatrapdfcrash.dmp) — awaiting runtime validation
+- Phase 6b: fixed OnOk crash (atof null) — validate drawn line + float>0 before atof — awaiting runtime validation
+- Phase 7: UI redesign — sidebar removed, 'Arch Tools' toolbar button opens 2nd toolbar (Scale/Measure/Reset Scale); lines visible only with Arch Tools=on; erase mode (hold 'e' = red cursor + click deletes single line); flicker fix — awaiting runtime validation
+- Modularity: gated by global pref archToolsEnabled (default on); off → zero UI + zero processing cost
+- Phase 8: Scale dialog activates existing line + shows real length in edit; label bg measures text (no leak); erase 'e' works with Arch Tools on (red cursor + overlay); 2nd bar has 'Clear lines' (CmdArchClear) + 'Reset Scale' (scale-only) — awaiting runtime validation
+- Phase 9: 'Clear lines' clears only measurements (not scale); erase 'e' works with Arch Tools on (outside draw-mode gate); 'e' cursor without black background (red overlay on canvas) — awaiting runtime validation
+- Phase 10: simplified Scale — no line clicking; type new measure + OK recomputes scale (uses existing line); drawing a new line replaces the previous one; pre-fill current length in dialog — awaiting runtime validation
+- Phase 11: scale editing works (OnOk uses archScaleSet; toggle does not clear archScaleLineDefined); erase 'e' hit-tests stored lines directly (not PDF segment); white underline draws for active toggle (no gAnyToggleChecked early-out) — awaiting runtime validation
+- Phase 12: fixed OnOk regression (archScaleLineDefined||archScaleSet guard, allowed drawing new scale line); fixed inverted Measure underline (removed BTNS_CHECK auto-toggle, state managed by UpdateToolbar2State); renamed 'Limpar linhas'→'Clean lines' — awaiting runtime validation
+- Phase 13: canonical scale factor (meters) + label respects current unit + remember last unit (ArchUnit) + configurable decimal separator (ArchDecimalSeparator, default ',') + Shift constrain horizontal/vertical — awaiting runtime validation
+- Phase 13b: scale and measurements independent per document (HashMap archMeasurementsByDoc, save/restore on tab switch, discarded on close) — awaiting runtime validation
 
-## Fase 15 — Autoscroll Timer (BUILD OK)
+## Phase 15 — Autoscroll Timer (BUILD OK)
 
-- [x] `cmd/gen-commands.ts`: adicionar `CmdAutoScrollTimerToggle = 494`, `CmdAutoScrollTimerEdit = 495`; rodar `bun cmd/gen-commands.ts`
-- [x] Verificar `cmd/gen-settings.ts` tem `AutoScrollTimerMinutes` + `AutoScrollTimerEnabled`; regen `Settings.h` se necessário
+- [x] `cmd/gen-commands.ts`: add `CmdAutoScrollTimerToggle = 494`, `CmdAutoScrollTimerEdit = 495`; run `bun cmd/gen-commands.ts`
+- [x] Check `cmd/gen-settings.ts` has `AutoScrollTimerMinutes` + `AutoScrollTimerEnabled`; regen `Settings.h` if needed
 - [x] Rebuild (0 err / 0 warn)
 - [x] Deploy `out\dbg64\TumatraPDF.exe` → `Compiled\TumatraPDF.exe`
 - [x] Smoke test launch (`-for-testing -console`)
-- [ ] Verificação UI: `[checkbox][Timer:][input]` antes de Autoscroll; timer para autoscroll após N min
+- [ ] UI check: `[checkbox][Timer:][input]` before Autoscroll; timer stops autoscroll after N min
 
-## Fase 15 Fixes (BUILD OK)
+## Phase 15 Fixes (BUILD OK)
 
 - [x] Autoscroll speed clamp 0.1f → 0.008f (AutoScroll.cpp:74)
-- [x] Lembrar última velocidade: persist FileState + defaults 0.0167f → 0.008f (MainWindow.h, SumatraPDF.cpp, gen-settings.ts)
-- [x] Timer visual: design tokens kCtrlGapX/kCtrlH + TimerInfoId 130 + fix bug slot→r (Toolbar.cpp)
-- [x] Build fix: revert build.ts:37 `..\vs2022` → `vs2022\TumatraPDF.sln`; build 0 err/0 warn; deploy Compiled\TumatraPDF.exe; smoke limpo
-- [x] BUILD.md criado (método de build documentado separado)
-- [ ] Teste UI prático pelo usuário (amanhã): timer control, speed mínimo, persistência, alinhamento
+- [x] Remember last speed: FileState persistence + defaults 0.0167f → 0.008f (MainWindow.h, SumatraPDF.cpp, gen-settings.ts)
+- [x] Timer visuals: design tokens kCtrlGapX/kCtrlH + TimerInfoId 130 + slot→r bug fix (Toolbar.cpp)
+- [x] Build fix: revert build.ts:37 `..\vs2022` → `vs2022\TumatraPDF.sln`; build 0 err/0 warn; deploy Compiled\TumatraPDF.exe; clean smoke
+- [x] BUILD.md created (build method documented separately)
+- [ ] Practical UI test by user (tomorrow): timer control, minimum speed, persistence, alignment
 
-## Fase 16 — Modularização (refactoring, baseline commit 968b4ec)
+## Phase 16 — Modularization (refactoring, baseline commit 968b4ec)
 
-### 16A — Design tokens Toolbar.cpp (risco baixo, payoff visual)
+### 16A — Toolbar.cpp design tokens (low risk, visual payoff)
 
-- [x] Substituir medidas ad-hoc DpiScale(4/8/10/12/50/70/110) por tokens nomeados (kCtrlGapX/kCtrlH existem; adicionar kPadX, kLabelW, kSlotW)
-- [x] Corrigir checkbox 18px hardcoded → token kCtrlH
-- [x] Corrigir gaps inconsistentes (2/20/22/64px) entre checkbox/label/edit
+- [x] Replace ad-hoc DpiScale(4/8/10/12/50/70/110) with named tokens (kCtrlGapX/kCtrlH exist; add kPadX, kLabelW, kSlotW)
+- [x] Fix hardcoded 18px checkbox → kCtrlH token
+- [x] Fix inconsistent gaps (2/20/22/64px) between checkbox/label/edit
 - [x] Build + smoke test
 
 <!-- 16A DONE 2026-08-30: tokens kPadX/kGapX/kTextAnchor/kPagePad/kEtaW/kSpeedSlotW/kSlotW/kLabelW/kToolbarPadY/kToolbarPadY2 added; checkbox 18px→kCtrlH; build 0/0, deploy, smoke clean. -->
 
-### 16B — Structs MainWindow.h (risco médio)
+### 16B — MainWindow.h structs (medium risk)
 
-- [x] Agrupar ~274 membros em structs por domínio (AutoScrollState, ArchToolsState, TimerState)
+- [x] Group ~274 members into domain structs (AutoScrollState, ArchToolsState, TimerState)
 - [x] Build + smoke test
 
-### 16C — Split SumatraPDF.cpp (12.743 linhas, alto valor, incremental)
+### 16C — Split SumatraPDF.cpp (12,743 lines, high value, incremental)
 
-- [x] C1: Mapear clusters de handlers (grep `case Cmd` + helpers estáticos por domínio)
-- [x] C2: Extrair AutoScrollCommands (menor, bem conhecido)
-- [x] C3: Extrair ArchToolsCommands
-- [x] C4: Extrair ViewCommands
-- [x] C5: Extrair FileCommands → 24 HandleCmdXxx wrappers em SumatraPDF.cpp, dispatch convertido, stubs Commands_File.cpp limpos (2026-09-01)
-- [x] Build + smoke test após CADA extração (dispatch permanece em SumatraPDF.cpp)
+- [x] C1: Map handler clusters (grep `case Cmd` + static helpers per domain)
+- [x] C2: Extract AutoScrollCommands (smallest, well-known)
+- [x] C3: Extract ArchToolsCommands
+- [x] C4: Extract ViewCommands
+- [x] C5: Extract FileCommands → 24 HandleCmdXxx wrappers in SumatraPDF.cpp, dispatch converted, Commands_File.cpp stubs cleaned (2026-09-01)
+- [x] Build + smoke test after EACH extraction (dispatch stays in SumatraPDF.cpp)
 
-### 16D — Accessors tipados gGlobalPrefs (por último)
+### 16D — Typed gGlobalPrefs accessors (last)
 
-- [ ] Avaliar necessidade (152 acessos em SumatraPDF.cpp) — só com testes
+- [ ] Evaluate need (152 accesses in SumatraPDF.cpp) — only with tests
 
 <!-- 16B DONE 2026-08-30: AutoScrollState + ArchToolsState structs created in MainWindow.h; ~90% of .cpp refs renamed via mechanical PowerShell; bare identifiers in measurement functions fixed with this->; build 0 err/0 warn, deploy, smoke clean. -->
 <!-- 16C-2 DONE 2026-08-30: Markdown contrast (light bg + dark gray text), Arch Tools hidden for .md, AutoScroll commands extracted → Commands_AutoScroll.{h,cpp}; build 0 err/0 warn, deploy, smoke clean. -->
@@ -326,184 +327,193 @@ Duas funções, INDEPENDENTES POR DOCUMENTO (cada aba/doc mantém seu próprio e
 
 ---
 
-## Análise Esforço x Resultado — Próximos Passos (2026-09-01)
+## Effort x Result Analysis — Next Steps (2026-09-01)
 
-### Matriz de Decisão
+### Decision Matrix
 
-| Ação                                                           | Esforço                                                         | Resultado                                          | Risco                                       | ROI   | Prioridade |
+| Action | Effort | Result | Risk | ROI | Priority |
 | -------------------------------------------------------------- | --------------------------------------------------------------- | -------------------------------------------------- | ------------------------------------------- | ----- | ---------- |
-| **16C-F6: Extrair init/window creation do SumatraPDF.cpp**     | Médio (pattern C2-C5 já estabelecido)                           | Alto (-800~1200 linhas, god file ~10k)             | Médio (static deps, mas pattern comprovado) | ????? | 1          |
-| **Canvas.cpp: Extrair event handling**                         | Alto (5091 linhas, mouse/keyboard entrelaçados com rendering)   | Alto (2o maior arquivo)                            | Alto (rendering code, sem pattern)          | ????? | 2          |
-| **16D: Encapsular gGlobalPrefs**                               | Alto (152 acessos em SumatraPDF.cpp, toca muitos arquivos)      | Alto (reduz acoplamento global significativamente) | Alto (muitos arquivos, fácil de quebrar)    | ????? | 3          |
-| **EngineMupdf.cpp: Desacoplar helpers de rendering**           | Médio (extrair helpers por formato)                             | Médio (isola dependência MuPDF)                    | Médio (acoplamento profundo)                | ????? | 4          |
-| ~~MainWindow.h: FileState struct~~ → **SelectionState struct** | Baixo (pattern estabelecido com AutoScrollState/ArchToolsState) | Médio (organiza god class)                         | Baixo                                       | ????? | 5          |
-| **Toolbar.cpp: Refinar mais**                                  | Baixo (2368 linhas, já tem design tokens)                       | Baixo (já modular o suficiente)                    | Baixo                                       | ????? | 6          |
+| **16C-F6: Extract init/window creation from SumatraPDF.cpp**     | Medium (C2-C5 pattern already established)                      | High (-800~1200 lines, god file ~10k)              | Medium (static deps, but proven pattern)    | ????? | 1          |
+| **Canvas.cpp: Extract event handling**                         | High (5091 lines, mouse/keyboard interleaved with rendering)    | High (2nd largest file)                            | High (rendering code, no pattern)           | ????? | 2          |
+| **16D: Encapsulate gGlobalPrefs**                              | High (152 accesses in SumatraPDF.cpp, touches many files)       | High (reduces global coupling significantly)       | High (many files, easy to break)            | ????? | 3          |
+| **EngineMupdf.cpp: Decouple rendering helpers**                | Medium (extract helpers per format)                             | Medium (isolates MuPDF dependency)                 | Medium (deep coupling)                      | ????? | 4          |
+| ~~MainWindow.h: FileState struct~~ → **SelectionState struct** | Low (established pattern with AutoScrollState/ArchToolsState)   | Medium (organizes god class)                       | Low                                         | ????? | 5          |
+| **Toolbar.cpp: Refine further**                                | Low (2368 lines, already has design tokens)                     | Low (already modular enough)                       | Low                                         | ????? | 6          |
 
-### Recomendação: Caminho ideal
+### Recommendation: ideal path
 
-**Fase 16C-F6** (Extração restante SumatraPDF.cpp):
+**Phase 16C-F6** (remaining SumatraPDF.cpp extraction):
 
-- Mantém momentum das extrações C2-C5
-- Pattern já validado (HandleCmdXxx wrappers)
-- Reduz god file de ~11.200 para ~10.000 linhas
-- Esforço: médio — reaproveita infra existente
+- Keeps C2-C5 extraction momentum
+- Already validated pattern (HandleCmdXxx wrappers)
+- Shrinks god file from ~11,200 to ~10,000 lines
+- Effort: medium — reuses existing infra
 
-**Depois: FileState struct** (MainWindow.h):
+**Then: FileState struct** (MainWindow.h):
 
-- Quick win a baixo risco, melhoria organizacional
-- Complementa AutoScrollState/ArchToolsState já feitos
+- Low-risk quick win, organizational improvement
+- Complements AutoScrollState/ArchToolsState already done
 
-**Evitar por agora:**
+**Avoid for now:**
 
-- Canvas.cpp extraction (alto risco, sem pattern, rendering entrelaçado)
-- gGlobalPrefs encapsulation (muito disruptivo sem testes unitários)
+- Canvas.cpp extraction (high risk, no pattern, interleaved rendering)
+- gGlobalPrefs encapsulation (too disruptive without unit tests)
 
-### Ordem Sugerida de Execução
+### Suggested Execution Order
 
-1. [x] 16C-F6: Extrair init/window creation do SumatraPDF.cpp (reduzido de 14,212 para ~13,830 linhas) — 2026-09-08
-2. [x] MainWindow.h: SelectionState struct (15 membros selection/touch agrupados) — 2026-09-08
-3. [ ] 16D: gGlobalPrefs typed accessors (só quando houver testes)
-4. [ ] Canvas.cpp: Mapear dependências antes de extrair
-5. [ ] EngineMupdf.cpp: Desacoplar helpers de rendering por formato
+1. [x] 16C-F6: Extract init/window creation from SumatraPDF.cpp (reduced from 14,212 to ~13,830 lines) — 2026-09-08
+2. [x] MainWindow.h: SelectionState struct (15 grouped selection/touch members) — 2026-09-08
+3. [ ] 16D: gGlobalPrefs typed accessors (only when tests exist)
+4. [ ] Canvas.cpp: Map dependencies before extracting
+5. [ ] EngineMupdf.cpp: Decouple rendering helpers per format
 
 ## Design System Rules (2026-09-08)
 
-### Botões e Inputs — Centralização de Conteúdo
+### Buttons and Inputs — Content Centering
 
-- **Regra:** Botões e inputs devem centralizar conteúdo (texto/ícones) horizontal E verticalmente dentro dos seus bounds
-- Aplica-se a: controles ToolbarLayout, botões toolbar, inputs timer/speed, e quaisquer novos elementos UI
-- **Status:** ⚠️ Regra definida, pendente implementação
+- **Rule:** Buttons and inputs must center content (text/icons) horizontally AND vertically within their bounds
+- Applies to: ToolbarLayout controls, toolbar buttons, timer/speed inputs, and any new UI elements
+- **Status:** ⚠️ Rule defined, implementation pending
 
 ## Known Bugs (2026-09-09)
 
 ### BUG-1: Invert=on — Clipboard image copy broken
 
-- **Status:** ✅ Resolvido (2026-09-10)
-- **Descrição:** Quando Invert (contrast overlay) está ativado, não é possível copiar imagens para o clipboard
-- **Fix:** Adicionado `case WM_NCHITTEST: return HTTRANSPARENT;` ao WndProcContrastOverlay — overlay agora é click-through
+- **Status:** ✅ Resolved (2026-09-10)
+- **Description:** When Invert (contrast overlay) is on, copying images to clipboard fails
+- **Fix:** Added `case WM_NCHITTEST: return HTTRANSPARENT;` to WndProcContrastOverlay — overlay now click-through
 
 ### BUG-2: Trim=on — Text selection displaced
 
-- **Status:** ✅ Resolvido (2026-09-10)
-- **Descrição:** Quando Trim está ativado, a seleção de texto fica deslocada da posição renderizada do texto
-- **Fix:** Adicionado trim.top offset em SelectionOnPage::GetRect() antes de CvtToScreen — seleção agora segue posição de renderização
+- **Status:** ✅ Resolved (2026-09-10)
+- **Description:** When Trim is on, text selection lands displaced from rendered text position
+- **Fix:** Added trim.top offset in SelectionOnPage::GetRect() before CvtToScreen — selection now follows render position
 
-### BUG-3: Right-click image context menu — maioria das funções broken
+### BUG-3: Right-click image context menu — most functions broken
 
-- **Status:** Pendente
-- **Descrição:** Menu contexto botão direito em imagens: apenas Copy to clipboard funciona; outras opções (Save as, Copy link, etc.) não funcionam
-- **Nota:** Pode não ter sido implementado no SumatraPDF original — investigar antes de corrigir
+- **Status:** Pending
+- **Description:** Right-click context menu on images: only Copy to clipboard works; other options (Save as, Copy link, etc.) do not work
+- **Note:** May never have been implemented in original SumatraPDF — investigate before fixing
 
-### BUG-4: Trim Config desativa o Contrast overlay
+### BUG-4: Trim Config disables Contrast overlay
 
-- **Status:** Fix v2 (auto-guérison) deployado 2026-09-22 — aguardando teste do fluxo exato (1ª abertura do trim config após abrir o app + confirmar)
-- **Sintoma refinado pelo usuário:** o erro é PONTUAL — só na PRIMEIRA interação com o trim config após abrir o app (invert=off, ao confirmar o contrast sumia). Hipótese: conflito entre estado por sessão (sessionData), estado por documento (FileState) e estado padrão (ReplaceDocumentInCurrentTab tem 3 caminhos que escrevem `win->contrastEnabled`) + corrida do FileWatcher do settings.txt (`WatchedFileSetIgnore` vs `SchedulePrefsReload` → `ReloadSettings` nuka `gGlobalPrefs` inteiro).
-- **Fix v2 (invariant + auto-guérison):** novo `EnsureContrastOverlayState(win)` — cria se `contrastEnabled && !overlay`, destrói se `!enabled && overlay`, reposiciona se sincronizado. Chamado em TODOS os pontos de escrita do flag: `ReplaceDocumentInCurrentTab` (doc-swap agora também destrói overlay órfão), `UpdateTabFileDisplayStateForTab` (SaveSettings), TrimConfig OnSave/OnCancel (RE-CRIA o overlay se algum caminho o destruiu). Breadcrumbs `[contrast]` mantidos (Create/Destroy/WM_DESTROY) para diagnóstico via debug build.
-- **Lição sistêmica:** funções de persistência (SaveSettings/*ForTab) NÃO devem ter side-effects de UI (destruir HWNDs). Documentado em lemma m3a65456efb04.
+- **Status:** Fix v2 (self-healing) deployed 2026-09-22 — awaiting test of exact flow (1st trim config open after app launch + confirm)
+- **Symptom refined by user:** the bug is ONE-SHOT — only on the FIRST interaction with trim config after opening the app (invert=off, on confirm the contrast vanished). Hypothesis: conflict between session state (sessionData), per-document state (FileState) and default state (ReplaceDocumentInCurrentTab has 3 paths writing `win->contrastEnabled`) + settings.txt FileWatcher race (`WatchedFileSetIgnore` vs `SchedulePrefsReload` → `ReloadSettings` nukes whole `gGlobalPrefs`).
+- **Fix v2 (invariant + self-healing):** new `EnsureContrastOverlayState(win)` — creates if `contrastEnabled && !overlay`, destroys if `!enabled && overlay`, repositions if in sync. Called at ALL flag write sites: `ReplaceDocumentInCurrentTab` (doc-swap now also destroys orphan overlay), `UpdateTabFileDisplayStateForTab` (SaveSettings), TrimConfig OnSave/OnCancel (RE-CREATE overlay if any path destroyed it). `[contrast]` breadcrumbs kept (Create/Destroy/WM_DESTROY) for diagnosis via debug build.
+- **Systemic lesson:** persistence functions (SaveSettings/*ForTab) must NOT have UI side effects (destroying HWNDs). Documented in lemma m3a65456efb04.
 
-## Sistema de Flashcards (Cloze sobre texto existente)
+### BUG-5..9: .md regressions (2026-09-23) — ALL FIXED (LOG s10/s11)
 
-### Modelo (decidido 2026-09-16)
+- **BUG-5** .md ETA dead: adapter `MarkdownHtmlWindowHandler` did not forward `OnAutoScrollProgress/Bottom` (no-op default). Fixed + ETA split into independent logics (`RecalcAutoScrollEtaPdf`/`RecalcAutoScrollEtaWebview`). Lesson: adapter trap documented in FLOW/autoscroll.dot + lemma.
+- **BUG-6** .md shimmer: rAF steps quantized in device px (`floor(accum*dpr)/dpr`). Visual verification pending.
+- **BUG-7** Space scrolling .md/CHM: WebView2 internal Chromium has native Space — `kBlockSpaceScrollJs` (init script).
+- **BUG-8** Ctrl not pausing .md: tick restructured (Ctrl early-return only in dm branch; webview branch = state machine).
+- **BUG-9** .md reading position not restoring + F dead in .md: restore via `ScrollTo` in LoadDoc (same path as CHM) + `kForwardAppKeysJs` forwards A-Z letters to host (WebView2 only fires AcceleratorKeyPressed for F-keys/arrows). "ETA vanishing in fullscreen" = stale binary, non-bug (verified by ad-hoc-md-fullscreen.ts).
+- New ad-hoc tests: `ad-hoc-md-eta.ts`, `ad-hoc-md-fullscreen.ts` (do not register in all.ts). `tests/util.ts` EXE → `TumatraPDF.exe` (was stale SumatraPDF.exe). Cosmetic follow-up: per-test taskkills cite old process name.
 
-- **1 highlight = 1 carta cloze.** A seleção de texto vira um Highlight MuPDF = máscara posicional sobre o texto ORIGINAL do PDF.
-- **SEM duplicação de conteúdo:** o texto original já está no PDF. A carta guarda só `annotId`, `pageNo`, `bounds` (rect do highlight). **Content do highlight fica VAZIO** (não grava `"Q: texto"`).
-- **Study=on:** máscara opaca cobre o rect do cloze → `[_____]`. **Reveal:** remove a máscara → texto original visível.
-- Múltiplos clozes na mesma frase = múltiplos highlights/cartas (cada seleção = 1 carta).
-- **Futuro (pós-MVP):** selecionar várias frases → 1 cloze único (preservar numerais de lista fora do cloze). Não bloqueia o MVP.
+## Flashcard System (Cloze over existing text)
 
-### Matriz de render (Canvas) — study on/off NUNCA cobre texto no momento errado
+### Model (decided 2026-09-16)
 
-| Estado        | flashcard.on | studyMode | revealMode | Ação sobre cada carta                                                        |
+- **1 highlight = 1 cloze card.** A text selection becomes a MuPDF Highlight = positional mask over the ORIGINAL PDF text.
+- **NO content duplication:** the original text is already in the PDF. The card stores only `annotId`, `pageNo`, `bounds` (highlight rect). **Highlight content stays EMPTY** (do not write `"Q: text"`).
+- **Study=on:** opaque mask covers the cloze rect → `[_____]`. **Reveal:** removes the mask → original text visible.
+- Multiple clozes in the same sentence = multiple highlights/cards (each selection = 1 card).
+- **Future (post-MVP):** select several sentences → 1 single cloze (keep list numerals outside the cloze). Does not block MVP.
+
+### Render matrix (Canvas) — study on/off NEVER covers text at the wrong time
+
+| State         | flashcard.on | studyMode | revealMode | Action per card                                                              |
 | ------------- | ------------ | --------- | ---------- | ---------------------------------------------------------------------------- |
-| Off           | false        | —         | —          | nada (zero custo)                                                            |
-| Leitura       | true         | false     | false      | marcador translúcido sutil (`30,128,128,128`) em TODAS — texto visível       |
-| Estudo        | true         | true      | false      | máscara opaca (`200,100,100,100`) SÓ na carta atual — texto oculto           |
-| Estudo+Reveal | true         | true      | true       | SEM máscara na carta atual — texto original visível (highlight PDF 40% fica) |
+| Off           | false        | —         | —          | nothing (zero cost)                                                        |
+| Reading       | true         | false     | false      | subtle translucent marker (`30,128,128,128`) on ALL — text visible         |
+| Study         | true         | true      | false      | opaque mask (`200,100,100,100`) ONLY on current card — text hidden         |
+| Study+Reveal  | true         | true      | true       | NO mask on current card — original text visible (PDF 40% highlight stays)  |
 
-> Regra: **máscara opaca só em `studyMode && !revealMode` e só no rect da carta atual.** Fora disso, nunca cobrir texto. O bug atual (FC-A) desenha a máscara em todas as cartas e não a remove no reveal.
+> Rule: **opaque mask only in `studyMode && !revealMode` and only on the current card rect.** Otherwise, never cover text. The current bug (FC-A) draws the mask on all cards and does not remove it on reveal.
 
-### Status atual do código (referência)
+### Current code status (reference)
 
-- Comandos: 11 IDs (CmdFlashcardToggle..CmdFlashcardAddTip) via gen-commands.ts
-- `Flashcard.cpp`: `LoadFromDocument` (parse `Q:`/`T:` — a remover), SM-2, study save/load (load **nunca chamado** — bug FC-B)
-- `FlashcardToolbar.cpp`: toolbar secundária (Study/Back/Lista/Filter + contador via botão idx 0)
+- Commands: 11 IDs (CmdFlashcardToggle..CmdFlashcardAddTip) via gen-commands.ts
+- `Flashcard.cpp`: `LoadFromDocument` (parses `Q:`/`T:` — to remove), SM-2, study save/load (load **never called** — bug FC-B)
+- `FlashcardToolbar.cpp`: secondary toolbar (Study/Back/List + counter via button idx 0)
 - `Commands_Flashcard.cpp`: handlers
-- `FlashcardSidebar.cpp`: sidebar Lista flutuante
-- `Canvas.cpp:3390-3418`: overlay study/reading (reveal quebrado)
-- `EditAnnotations.cpp:1300-1313`: filtro `Author == TumatraPDF-Flashcard` (✅ já feito)
+- `FlashcardSidebar.cpp`: floating List sidebar
+- `Canvas.cpp:3390-3418`: study/reading overlay (reveal broken)
+- `EditAnnotations.cpp:1300-1313`: `Author == TumatraPDF-Flashcard` filter (✅ already done)
 
-### Plano de Implementação (Cloze posicional)
+### Implementation Plan (positional Cloze)
 
-#### Passo 1 — Render: matriz study/reveal correta (Canvas.cpp:3390-3418) [CRÍTICO]
+#### Step 1 — Render: correct study/reveal matrix (Canvas.cpp:3390-3418) [CRITICAL]
 
-- Reestruturar o loop de cartas: máscara opaca **só na carta atual** (`studyOrder[currentCardIdx]`) quando `studyMode && !revealMode`.
-- Reveal: **não** desenhar máscara na carta atual (texto original aparece).
-- Demais cartas em study: marcador translúcido (não opaco) — senão todos os clozes aparecem mascarados.
-- Leitura (on, !study): marcador translúcido em todas.
-- **Verificar:** `texto → study=on → [_____] → reveal → 'texto'` (exemplo do usuário).
+- Restructure the card loop: opaque mask **only on the current card** (`studyOrder[currentCardIdx]`) when `studyMode && !revealMode`.
+- Reveal: do **not** draw the mask on the current card (original text shows).
+- Other cards in study: translucent marker (not opaque) — otherwise all clozes appear masked.
+- Reading (on, !study): translucent marker on all.
+- **Verify:** `text → study=on → [_____] → reveal → 'text'` (user example).
 
-#### Passo 2 — Chave estável da carta (Flashcard.h/cpp) [pré-persistência]
+#### Step 2 — Stable card key (Flashcard.h/cpp) [pre-persistence]
 
-- `annotId = pdf_to_num(...)` é **instável** (MuPDF renumera ao salvar).
-- Nova chave: `u64 key = hash(pageNo, bounds)` (bounds arredondados), usada para casar `studyDoc` e ordenar.
-- Manter `annotId` só como referência de anotação, não como chave.
+- `annotId = pdf_to_num(...)` is **unstable** (MuPDF renumbers on save).
+- New key: `u64 key = hash(pageNo, bounds)` (rounded bounds), used to match `studyDoc` and order.
+- Keep `annotId` only as annotation reference, not as key.
 
-#### Passo 3 — Persistência: carregar studyDoc no Toggle ON (Commands_Flashcard.cpp) [FC-B]
+#### Step 3 — Persistence: load studyDoc on Toggle ON (Commands_Flashcard.cpp) [FC-B]
 
-- `CmdFlashcardToggle` ON (após `FlashcardLoadFromDocument`): chamar `win->flashcard.studyDoc = FlashcardStudyLoad(tab->filePath.s)`.
-- Garante `newCount`/`dueCount` corretos após reinício.
-- **Verificar:** cria carta, estuda, fecha, reabre → contador mantém estado.
+- `CmdFlashcardToggle` ON (after `FlashcardLoadFromDocument`): call `win->flashcard.studyDoc = FlashcardStudyLoad(tab->filePath.s)`.
+- Ensures correct `newCount`/`dueCount` after restart.
+- **Verify:** create card, study, close, reopen → counter keeps state.
 
-#### Passo 4 — Criação sem duplicação (Commands_Flashcard.cpp, CmdFlashcardAdd) [FC-D/G]
+#### Step 4 — Creation without duplication (Commands_Flashcard.cpp, CmdFlashcardAdd) [FC-D/G]
 
-- Parar de gravar `content = "Q: <texto>"` → content vazio (highlight é só máscara).
-- Ajustar `FlashcardLoadFromDocument` para carregar por `author == TumatraPDF-Flashcard` (sem depender do prefixo `Q:`), com retrocompat para cartas antigas com `Q:`.
-- Após criar, **recarregar `cards`** (FC-G) para contador/lista refletirem a nova carta.
-- Decidir persistência: salvar o PDF após adicionar (paridade com AddTip) OU depender do save automático do leitor — alinhar os dois caminhos.
+- Stop writing `content = "Q: <text>"` → empty content (highlight is just a mask).
+- Adjust `FlashcardLoadFromDocument` to load by `author == TumatraPDF-Flashcard` (without depending on the `Q:` prefix), with retrocompat for old cards with `Q:`.
+- After creating, **reload `cards`** (FC-G) so counter/list reflect the new card.
+- Decide persistence: save the PDF after adding (parity with AddTip) OR rely on the reader auto-save — align both paths.
 
-#### Passo 5 — SRS real: filtrar por due (Commands_Flashcard.cpp, BuildFilteredStudyOrder) [FC-C]
+#### Step 5 — Real SRS: filter by due (Commands_Flashcard.cpp, BuildFilteredStudyOrder) [FC-C]
 
-- `studyOrder` = cartas com `rating==0` (novas) OU `nextReviewAt <= now` (devidas).
-- rating==1 (Again): **reinserir a carta na fila atual** (relearn, igual NoteAnki) em vez de descartar.
-- `FlashcardSm2Update` (Flashcard.cpp): cap `easeFactor` em `[1.3, 2.5]`.
+- `studyOrder` = cards with `rating==0` (new) OR `nextReviewAt <= now` (due).
+- rating==1 (Again): **reinsert the card into the current queue** (relearn, like NoteAnki) instead of discarding.
+- `FlashcardSm2Update` (Flashcard.cpp): clamp `easeFactor` to `[1.3, 2.5]`.
 
-#### Passo 6 — Atalhos de teclado (Accelerators.cpp) [alinhar NoteAnki]
+#### Step 6 — Keyboard shortcuts (Accelerators.cpp) [align NoteAnki]
 
-- `Space`/`Enter` = CmdFlashcardReveal (Space já revela; confirmar/acrescentar Enter).
-- `1`-`4` = CmdFlashcardRate1-4 (rating; hoje só via toolbar).
-- Manter `S` = Add (já existe, L148-149).
+- `Space`/`Enter` = CmdFlashcardReveal (Space already reveals; confirm/add Enter).
+- `1`-`4` = CmdFlashcardRate1-4 (rating; today toolbar-only).
+- Keep `S` = Add (already exists, L148-149).
 
-#### Passo 7 — Podar código morto [FC-H]
+#### Step 7 — Prune dead code [FC-H]
 
-- Remover `hwndCardCount` de `FlashcardState` (contador virou botão idx 0).
-- Remover/implementar `CmdFlashcardNext` (no-op), `studyModeType`, `history` (decidir undo real ou remover).
-- Remover parse de `T:`/`tip` se o modelo position-only não usar (CmdFlashcardAddTip placeholder `(hint)`).
+- Remove `hwndCardCount` from `FlashcardState` (counter became button idx 0).
+- Remove/implement `CmdFlashcardNext` (no-op), `studyModeType`, `history` (decide real undo or remove).
+- Remove `T:`/`tip` parsing if the position-only model does not use it (CmdFlashcardAddTip `(hint)` placeholder).
 
-#### Passo 8 — Testes (tests/ + test_util)
+#### Step 8 — Tests (tests/ + test_util)
 
-- `FlashcardSm2Update`: intervalos, cap ease, relearn rating==1.
-- Parser JSON study (save/load roundtrip).
-- Filtro due (novas + devidas).
-- (GUI opcional) máscara some no reveal via screenshot.
+- `FlashcardSm2Update`: intervals, ease cap, relearn rating==1.
+- Study JSON parser (save/load roundtrip).
+- Due filter (new + due).
+- (Optional GUI) mask disappears on reveal via screenshot.
 
-#### Passo 9 — Build + deploy + LOG
+#### Step 9 — Build + deploy + LOG
 
 - `bun cmd/build.ts` → `Compiled/TumatraPDF.exe` (0 err / 0 warn).
-- Atualizar LOG.md + README (matriz de render, modelo cloze).
+- Update LOG.md + README (render matrix, cloze model).
 
-### Arquivos a Modificar
+### Files to Modify
 
-| Arquivo                      | Mudança                                                              |
+| File                         | Change                                                               |
 | ---------------------------- | -------------------------------------------------------------------- |
-| `src/Canvas.cpp`             | Matriz render study/reveal (Passo 1)                                 |
-| `src/Flashcard.h`            | Campo `key` estável; remover `tip`/`text` se não usar                |
-| `src/Flashcard.cpp`          | Load por author sem `Q:`; key hash; SM-2 cap/relearn                 |
-| `src/Commands_Flashcard.cpp` | Add sem duplicação; load studyDoc; due filter; relearn; podar mortos |
-| `src/MainWindow.h`           | Remover `hwndCardCount`/mortos                                       |
+| `src/Canvas.cpp`             | study/reveal render matrix (Step 1)                                  |
+| `src/Flashcard.h`            | stable `key` field; remove `tip`/`text` if unused                    |
+| `src/Flashcard.cpp`          | Load by author without `Q:`; key hash; SM-2 cap/relearn              |
+| `src/Commands_Flashcard.cpp` | Add without duplication; load studyDoc; due filter; relearn; prune dead |
+| `src/MainWindow.h`           | Remove `hwndCardCount`/dead                                          |
 | `src/Accelerators.cpp`       | Space/Enter reveal + 1-4 rating                                      |
-| `src/FlashcardToolbar.cpp`   | (se aplicável) ajustes de contador                                   |
+| `src/FlashcardToolbar.cpp`   | (if applicable) counter adjustments                                  |
 
-### Referências
+### References
 
-- NoteAnki Cloze system: `D:\1 Principal\4 Trabalhos\1 Projetos\00 EXECUTANDO\APPS\NoteAnki\CLOZE.md` (máscara sobre texto-fonte, sem duplicação)
+- NoteAnki Cloze system: `D:\1 Principal\4 Trabalhos\1 Projetos\00 EXECUTANDO\APPS\NoteAnki\CLOZE.md` (mask over source text, no duplication)
 - AnnotCreateArgs: `src/Annotation.h:72-93` (opacity 0-100, col, bgColor)

@@ -190,6 +190,11 @@ class MarkdownHtmlWindowHandler : public HtmlWindowCallback {
     void DownloadData(Str url, Str data) override { mm->DownloadData(url, data); }
     void OnFindResult(int gen, int current, int total) override { mm->OnFindResult(gen, current, total); }
     void OnFindAllResult(Str payload) override { mm->OnFindAllResult(payload); }
+    // autoscroll ETA/bottom arrive from the page's JS (rAF loop) via
+    // BrowserDocView; without these forwards they hit the HtmlWindowCallback
+    // no-op and the .md ETA never updates (and the bottom stop desyncs)
+    void OnAutoScrollBottom() override { mm->OnAutoScrollBottom(); }
+    void OnAutoScrollProgress(int remainingPx) override { mm->OnAutoScrollProgress(remainingPx); }
 };
 
 MarkdownModel::MarkdownModel(DocControllerCallback* cb) : DocController(cb) {

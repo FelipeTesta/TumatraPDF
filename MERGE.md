@@ -27,7 +27,7 @@ TumatraPDF is a direct fork of SumatraPDF (upstream baseline ~912ecf2, August 20
    - `premake5.lua` / `premake5.files.lua` — build system
 6. Adapt fork patches to upstream changes
 7. Build and test: `bun cmd/build.ts` and `bun cmd/run-unit-tests.ts -dbg`
-8. Update docs: `README.md`, `LOG.md`, `FLOW/tumatrapdf.dot`
+8. Update docs: `README.md`, `LOG.md`, `FLOW/tumatrapdf.dot` (English + caveman, AGENTS.md §13)
 9. Commit and merge to master
 
 ## Useful Commands

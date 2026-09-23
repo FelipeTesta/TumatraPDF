@@ -1175,9 +1175,12 @@ void ControllerCallbackHandler::OnAutoScrollProgress(int remainingPx) {
     if (win->autoScroll.active) {
         float pxPerSec = AutoScrollPxPerSec(win);
         if (pxPerSec > 0) {
+            // webview (markdown) ETA: same reader-friendly rule as the
+            // fixed-page path - never display "0min" while still scrolling;
+            // the 'autoscrollBottom' notify ends the run and hides the label
             win->autoScroll.etaMinutes = (int)(((float)remainingPx / pxPerSec) / 60.0f);
-            if (win->autoScroll.etaMinutes < 0) {
-                win->autoScroll.etaMinutes = 0;
+            if (win->autoScroll.etaMinutes < 1) {
+                win->autoScroll.etaMinutes = 1;
             }
             UpdateToolbarEtaText(win, win->autoScroll.etaMinutes);
         }
@@ -2341,7 +2344,17 @@ static void ReplaceDocumentInCurrentTab(LoadArgs* args, DocController* ctrl, Fil
                     page = 1;
                 }
                 ss.page = page;
-                win->ctrl->GoToPage(page, false);
+                if (fs && fs->scrollPos.y > 0) {
+                    // reopening a partially-read .md: fs is keyed by this file's
+                    // path, so scrollPos is the reading height saved at exit.
+                    // ScrollTo seeds htmlScrollPos so OnDocumentComplete
+                    // applies it once the webview finishes loading (same
+                    // mechanism CHM uses below)
+                    RectF r(fs->scrollPos.x, fs->scrollPos.y, 0, 0);
+                    win->AsMarkdown()->ScrollTo(page, r, kInvalidZoom);
+                } else {
+                    win->ctrl->GoToPage(page, false);
+                }
             } else {
                 ss.page = limitValue(ss.page, 1, win->ctrl->PageCount());
                 if (fs) {
@@ -2473,7 +2486,17 @@ static void ReplaceDocumentInCurrentTab(LoadArgs* args, DocController* ctrl, Fil
     SetSidebarVisibility(win, showToc, gGlobalPrefs->showFavorites);
     // restore scroll state after the canvas size has been restored
     if ((args->showWin || ss.page != 1) && win->AsFixed()) {
-        win->AsFixed()->SetScrollState(ss);
+        DisplayModel* dm = win->AsFixed();
+        // fs->pageNo is persisted PHYSICAL; if a two-column v2 crop is
+        // active, open at the left column of that page = the start of its
+        // reading sequence
+        if (dm->IsViewportCropV2Active() && ss.page >= 1) {
+            int virtualPageNo = 2 * ss.page - 1;
+            if (dm->ValidPageNo(virtualPageNo)) {
+                ss.page = virtualPageNo;
+            }
+        }
+        dm->SetScrollState(ss);
     }
 
     tab->canvasRc = win->canvasRc;
@@ -11228,6 +11251,10 @@ static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, L
                         // ApplyViewportCropV2 rebuilds pagesInfo + relayouts
                         v2Dm->ApplyViewportCropV2();
                     }
+                    // the page domain changed (physical N <-> virtual 2N):
+                    // remap nav history so Back/Forward stay on the same
+                    // physical pages
+                    v2Dm->RemapNavHistoryForV2(v2Dm->viewportCropV2Enabled);
                     v2Dm->RestoreViewportAfterV2Toggle(physAnchor, dyInPage);
                     logfa("[v2] toggle post: enabled=%d curPageNo(virtual)=%d viewPortY=%d\n",
                           (int)v2Dm->viewportCropV2Enabled, v2Dm->CurrentPageNo(), v2Dm->viewPort.y);

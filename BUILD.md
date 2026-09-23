@@ -1,34 +1,34 @@
 # Build — TumatraPDF
 
-Guia de compilação. **Leia antes de tentar buildar.**
+Build guide. **Read before attempting any build.**
 
-## Método correto (CRÍTICO)
+## Correct method (CRITICAL)
 
-O build DEVE rodar de DENTRO de `sumatrapdf-src`. NÃO da raiz do repo (`TumatraPDF\`).
+Build MUST run from INSIDE `sumatrapdf-src`. NOT from repo root (`TumatraPDF\`).
 
 ```powershell
 cd sumatrapdf-src
 bun cmd/build.ts
 ```
 
-Saída: `sumatrapdf-src\out\dbg64\TumatraPDF.exe`
+Output: `sumatrapdf-src\out\dbg64\TumatraPDF.exe`
 
-### Por que
-`cmd/build.ts` (linha 37) usa `vs2022\TumatraPDF.sln` (versão comitada/correta). Esse
-caminho é relativo ao cwd. Rodando de `sumatrapdf-src` → `sumatrapdf-src\vs2022\TumatraPDF.sln` ✓.
+### Why
+`cmd/build.ts` (line 37) uses `vs2022\TumatraPDF.sln` (committed/correct version). Path
+relative to cwd. Running from `sumatrapdf-src` → `sumatrapdf-src\vs2022\TumatraPDF.sln` ✓.
 
-Um agente introduziu regressão mudando para `..\vs2022\TumatraPDF.sln` (relativo a cwd=sumatrapdf-src
-→ pasta pai de sumatrapdf-src = arquivo inexistente → MSB1009). Revertido para `vs2022\TumatraPDF.sln`.
+An agent regressed it to `..\vs2022\TumatraPDF.sln` (cwd-relative: parent
+of sumatrapdf-src = missing file → MSB1009). Reverted to `vs2022\TumatraPDF.sln`.
 
-Rodar `bun cmd/build.ts` da raiz do repo (`TumatraPDF\`) dá:
-`bun : error: Module not found "cmd/build.ts"` (o script está em `sumatrapdf-src\cmd\`, não `TumatraPDF\cmd\`).
+Running `bun cmd/build.ts` from repo root (`TumatraPDF\`):
+`bun : error: Module not found "cmd/build.ts"` (script lives in `sumatrapdf-src\cmd\`, not `TumatraPDF\cmd\`).
 
-O build copia o exe automaticamente p/ `..\Compiled\TumatraPDF.exe` (finalExeDir = join("..","Compiled")).
-O passo de deploy manual abaixo é redundante mas seguro.
+Build auto-copies exe to `..\Compiled\TumatraPDF.exe` (finalExeDir = join("..","Compiled")).
+Manual deploy step below redundant but safe.
 
-Subagentes falham o build por rodar da raiz ou por timeout. O arquiteto (bash) sempre faz `cd sumatrapdf-src` primeiro.
+Subagents fail builds from root or by timeout. Architect (bash) always `cd sumatrapdf-src` first.
 
-## Deploy (copiar pro Compiled)
+## Deploy (copy to Compiled)
 ```powershell
 Copy-Item -Path sumatrapdf-src\out\dbg64\TumatraPDF.exe -Destination Compiled\TumatraPDF.exe -Force
 ```
@@ -37,24 +37,26 @@ Copy-Item -Path sumatrapdf-src\out\dbg64\TumatraPDF.exe -Destination Compiled\Tu
 ```powershell
 Compiled\TumatraPDF.exe -for-testing -console
 ```
-Fechar janela → saída limpa, sem crash dump em `%LOCALAPPDATA%\SumatraPDF-data\<hash>\crashinfo`.
+Close window → clean exit, no crash dump under `%LOCALAPPDATA%\SumatraPDF-data\<hash>\crashinfo`.
 
-## Fallback: MSBuild direto
+## Fallback: direct MSBuild
 ```powershell
 & "C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe" sumatrapdf-src\vs2022\TumatraPDF.sln /t:TumatraPDF /p:Configuration=Debug /p:Platform=x64 /m
 ```
 
-## Arquivos novos em src/
-Se adicionar .cpp/.h, rodar `bun cmd/premake.ts` antes (regenera `vs2022/*.vcxproj`).
+## New files in src/
+Adding .cpp/.h → run `bun cmd/premake.ts` first (regenerates `vs2022/*.vcxproj`).
 
-## Comandos/settings gerados
-Ao adicionar command ID: editar `cmd/gen-commands.ts` e rodar `bun cmd/gen-commands.ts`
-(regenera `src/Commands.h`). Ao adicionar setting: editar `cmd/gen-settings.ts` e rodar
-`bun cmd/gen-settings.ts` (regenera `src/Settings.h`). NUNCA editar à mão os arquivos `@gen`.
+## Generated commands/settings
+New command ID: edit `cmd/gen-commands.ts`, run `bun cmd/gen-commands.ts`
+(regenerates `src/Commands.h`). New setting: edit `cmd/gen-settings.ts`, run
+`bun cmd/gen-settings.ts` (regenerates `src/Settings.h`). NEVER hand-edit `@gen` files.
 
-## Problemas conhecidos
-- **LNK1201 (PDB lock)**: `libsumatrapdf.pdb` travado por VS Code/OneDrive. Renomear o PDB e rebuildar.
-- **build-asan.ts / .vscode F5 quebrados**: referem `SumatraPDF.sln` antigo. Não usar.
-- **build_log.txt**: erro `Module not found` = cwd errado (raiz do repo). Usar `cd sumatrapdf-src`.
-- **MSB1009 (sln não encontrado)**: `build.ts:37` com `..\vs2022` é regressão. Deve ser `vs2022\TumatraPDF.sln`. Reverter se aparecer.
-```
+## Known issues
+- **LNK1201 (PDB lock)**: `libsumatrapdf.pdb` locked by VS Code/OneDrive. Rename PDB, rebuild.
+- **build-asan.ts / .vscode F5 broken**: reference old `SumatraPDF.sln`. Do not use.
+- **build_log.txt**: `Module not found` error = wrong cwd (repo root). Use `cd sumatrapdf-src`.
+- **MSB1009 (sln not found)**: `build.ts:37` with `..\vs2022` is a regression. Must read `vs2022\TumatraPDF.sln`. Revert on sight.
+
+## Docs rule
+Informativos stay English + caveman (AGENTS.md §13).

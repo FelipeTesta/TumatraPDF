@@ -58,7 +58,7 @@ The features below were developed on top of SumatraPDF and **do not exist in the
 
 **Markdown (.md):** Works in WebView2 mode (default) via `window.scrollBy(0,dy)` JS injection; stop-at-bottom via JS `autoscrollBottom` → native `DocController::OnAutoScrollBottom`; ETA via JS `autoscrollProgress` → `OnAutoScrollProgress` → ETA `remainingPx / AutoScrollPxPerSec`. MuPDF fallback (`useFixedPageUI=true`) unchanged. F7/F8 multiplier shared. Toolbar buttons (toggle/±) now visible/enabled for .md — fixed 2026-08-25 (was `AsChm()||AsMarkdown()` CHM blacklist → `AsChm()` only + `removeIfMarkdown[]` for fixed-page cmds). PDF ETA path untouched — no regression.
 
-> **Timer UI (Fase 15):** controle `[checkbox][Timer:][input]` adicionado à toolbar antes do botão Autoscroll — **BUILD OK** (aguardando teste prático do usuário — ver `LOG.md` Fase 15).
+> **Timer UI (Phase 15):** `[checkbox][Timer:][input]` control added to toolbar before Autoscroll button — **BUILD OK** (awaiting user practical test — see `LOG.md` Phase 15).
 
 ---
 
@@ -157,7 +157,7 @@ The script compares the version in `sumatrapdf-src/src/Version.h` with the pre-r
 
 ### 5. 📐 Arch Tools (Scale + Measure)
 
-**Status:** 🟡 Build-verified, runtime validation in progress (2026-08-29, Fase 12)
+**Status:** 🟡 Build-verified, runtime validation in progress (2026-08-29, Phase 12)
 
 **What it does:** For architecture PDFs (vector drawings). Define a scale by drawing/selecting a line and entering its real length; then measure any line to get real-world x / y / length.
 
@@ -185,7 +185,7 @@ The script compares the version in `sumatrapdf-src/src/Version.h` with the pre-r
 ---
 ### 6. 🎨 Own Visual Identity
 
-- **Binary name:** `TumraPDF.exe` (allows side-by-side installation with original SumatraPDF)
+- **Binary name:** `TumatraPDF.exe` (allows side-by-side installation with original SumatraPDF)
 - **Window:** Title "TumatraPDF" instead of "SumatraPDF"
 - **Settings file:** `TumatraPDF-settings.txt` (does not conflict with `SumatraPDF-settings.txt`)
 - **Icons:** Logos with inverted colors for visual distinction
@@ -209,12 +209,12 @@ The script compares the version in `sumatrapdf-src/src/Version.h` with the pre-r
 
 ### 🗺️ Roadmap
 
-- [x] Setup do projeto e build base
-- [x] Rename binário + logos invertidos
+- [x] Project setup and base build
+- [x] Binary rename + inverted logos
 - [x] AutoScroll + ETA + toolbar
 - [x] Filtro de contraste + toolbar
-- [x] Temas: Light+Dark apenas, Dark padrão
-- [x] Menu "New Tools" com comandos TumatraPDF
+- [x] Themes: Light+Dark only, Dark default
+- [x] "New Tools" menu with TumatraPDF commands
 - [x] Viewport crop + margin trim (zoom bug fixed)
 - [x] Arch Tools (Scale + Measure) — 2nd toolbar, scale/measure/erase, build-verified
 - [x] Modularização: design tokens (16A), structs (16B), command dispatch C2-C5 (16C)
@@ -225,7 +225,7 @@ The script compares the version in `sumatrapdf-src/src/Version.h` with the pre-r
 - [x] Toolbar wrapping (TBSTYLE_WRAPABLE) — buttons wrap to 2nd row on narrow windows
 - [x] Flashcard MVP — core toggle, study mode, SM-2, card creation from selection
 - [x] Flashcard cloze (positional) — highlight = mask over existing text, no duplication; reveal, SRS by due, stable key, 1-4 shortcuts
-- [ ] Testes automatizados para novas funcionalidades
+- [ ] Automated tests for new features
 
 ---
 
@@ -252,6 +252,7 @@ TumatraPDF/
 - Upstream code in `sumatrapdf-src/` is the baseline; patches applied directly
 - New features added as standalone modules in `sumatrapdf-src/src/` (AutoScroll, ContrastOverlay, TrimConfigDialog)
 - `MERGE.md` documents the upstream update process (fork point ~912ecf2, Aug 2026)
+- Informativos (`README.md`, `LOG.md`, `TODO.md`, `BUILD.md`, `MERGE.md`, `FLOW/*.dot`): English + caveman, always (AGENTS.md §13)
 
 ## Update Check System
 
@@ -280,22 +281,22 @@ Inventory of debug tooling in `sumatrapdf-src/` (research 2026-08-16):
 - `-dbg-control` lacks commands for custom feature state (crop rect, trim, autoscroll ETA, contrast/invert)
 - Scroll delay 3.7.20958 vs 3.6.17065: root cause = upstream smooth-scroll (default TRUE since 2026-07-29); `smoothScroll=false` → instant scroll. Residual delay: `uitask::Post` deferral + async render thread. trim=on intensifies it (fix separate)
 
-## Análise de código com tree-sitter (MCP)
+## Code analysis with tree-sitter (MCP)
 
-O servidor MCP `tree-sitter` fornece análise estrutural do código-fonte sem necessidade de manter arquivos `.dot` manuais de arquitetura.
+The `tree-sitter` MCP server provides structural source analysis with no need for hand-maintained architecture `.dot` files.
 
-Fluxo recomendado (sempre registrar o projeto antes de consultar):
-1. **Registrar projeto**: `tree-sitter_register_project_tool` (path = raiz do repo, ex.: `sumatrapdf-src`).
-2. **Visão geral**: `tree-sitter_analyze_project` (detecta linguagens e layout de diretórios).
-3. **Símbolos de um arquivo**: `tree-sitter_get_symbols` (funções, classes, imports).
-4. **AST**: `tree-sitter_get_ast` (árvore sintática de um arquivo).
-5. **Dependências/includes**: `tree-sitter_get_dependencies` (grafo de includes).
-6. **Uso de símbolo**: `tree-sitter_find_usage` (onde uma função/classe é usada no projeto).
-7. **Busca de texto**: `tree-sitter_find_text` — **EVITAR** em repositórios C++ grandes com subpastas vendor/ext (ex.: `mupdf/`), pois causa timeout do MCP (-32001). Nesses casos usar `grep` direcionado.
-8. **Queries**: `tree-sitter_run_query` (queries tree-sitter avançadas).
-9. **Listar**: `tree-sitter_list_projects_tool`, `tree-sitter_list_languages`, `tree-sitter_list_files`.
+Recommended flow (always register project before querying):
+1. **Register project**: `tree-sitter_register_project_tool` (path = repo root, e.g.: `sumatrapdf-src`).
+2. **Overview**: `tree-sitter_analyze_project` (detects languages and directory layout).
+3. **File symbols**: `tree-sitter_get_symbols` (functions, classes, imports).
+4. **AST**: `tree-sitter_get_ast` (syntax tree of a file).
+5. **Dependencies/includes**: `tree-sitter_get_dependencies` (include graph).
+6. **Symbol usage**: `tree-sitter_find_usage` (where a function/class is used in project).
+7. **Text search**: `tree-sitter_find_text` — **AVOID** in large C++ repos with vendor/ext subfolders (e.g.: `mupdf/`), MCP timeout (-32001). Use targeted `grep` instead.
+8. **Queries**: `tree-sitter_run_query` (advanced tree-sitter queries).
+9. **List**: `tree-sitter_list_projects_tool`, `tree-sitter_list_languages`, `tree-sitter_list_files`.
 
-Regra: `FLOW/*.dot` são mapas de **PROCESSO** (fluxo de trabalho), NÃO arquitetura de código. Não manter `.dot` manual de arquitetura — usar tree-sitter para entender estrutura (símbolos + grafo de dependências) antes de planejar.
+Rule: `FLOW/*.dot` are **PROCESS** maps (workflow), NOT code architecture. Never hand-maintain architecture `.dot` — use tree-sitter for structure (symbols + dependency graph) before planning.
 
 ## Architecture
 

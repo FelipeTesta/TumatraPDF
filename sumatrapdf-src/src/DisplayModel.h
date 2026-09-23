@@ -223,6 +223,10 @@ struct DisplayModel : DocController {
     // two column v2 (stacked virtual columns, independent of v1)
     void ApplyViewportCropV2();
     void QuickToggleViewportCropV2();
+    // remap nav history entries between the physical (N) and virtual (2N)
+    // page domains when the v2 mode is toggled (Back/Forward keep pointing
+    // at the same physical page)
+    void RemapNavHistoryForV2(bool enabled);
     // true when the v2 column view is actually active (v2 on AND not quick-
     // toggled off via shift-hold AND continuous mode). All the virtual<->physical
     // conversions gate on this so shift-hold shows full physical pages.
