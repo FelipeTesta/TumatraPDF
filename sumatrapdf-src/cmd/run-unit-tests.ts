@@ -98,7 +98,12 @@ async function main() {
   const { config, platform, outDir, logName } = configFor(kind);
   const { msbuildPath, vsRoot } = detectVisualStudio();
 
-  await runLogged(join("bin", "premake5.exe"), ["vs2022"]);
+  // NOTE: do NOT run bin/premake5.exe here. It regenerates vs2022/*.vcxproj
+  // from the upstream premake5.lua, which doesn't know the fork-added source
+  // files, silently stripping them (app release link then fails with LNK1120
+  // unresolved externals). The committed vs2022/ projects are used as-is.
+  // Regenerate with premake only when adding/removing source files, and re-add
+  // the fork sources to the generated projects (or premake5.lua) afterwards.
   await runLogged(msbuildPath, [
     String.raw`vs2022\TumatraPDF.sln`,
     // Nested under the "tools" solution folder → MSBuild target is tools\test_util

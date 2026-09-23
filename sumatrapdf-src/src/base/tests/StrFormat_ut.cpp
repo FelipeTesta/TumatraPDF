@@ -16,7 +16,11 @@ using str::FormatTemp;
 
 #if defined(_MSC_VER)
 static _locale_t GetUtf8FormatLocale() {
-    static _locale_t loc = _create_locale(LC_ALL, ".UTF-8");
+    // "C.UTF-8" not ".UTF-8": keep the invariant "C" number formatting
+    // (decimal point) instead of inheriting the user's OS locale, so the
+    // reference output is machine-locale independent (matches the
+    // str::VsnprintfUtf8 in StrUtf8.cpp)
+    static _locale_t loc = _create_locale(LC_ALL, "C.UTF-8");
     return loc;
 }
 #endif

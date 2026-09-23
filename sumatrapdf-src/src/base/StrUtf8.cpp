@@ -10,7 +10,11 @@ static _locale_t GetUtf8FormatLocale() {
     // detectors quiet); after the destructor runs, callers see nullptr
     // and fall back to plain vsnprintf
     struct Locale {
-        _locale_t loc = _create_locale(LC_ALL, ".UTF-8");
+        // "C.UTF-8": invariant "C" locale (decimal point, so float formatting
+        // is machine-locale independent) with a UTF-8 codepage (the reason this
+        // wrapper exists). Plain ".UTF-8" inherits the user's OS locale for
+        // lang/country, which on e.g. pt-BR turns "%f" into "3,45" (comma).
+        _locale_t loc = _create_locale(LC_ALL, "C.UTF-8");
         ~Locale() {
             if (loc) {
                 _free_locale(loc);

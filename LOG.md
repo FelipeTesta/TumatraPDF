@@ -1,5 +1,20 @@
 # TumatraPDF — Development Log
 
+## 2026-09-23 (s13) — Hardening: unit tests ALL PASS (locale root cause), premake fix, gen audit (BUILD OK, deployed)
+
+### Fixed
+- **8 "pre-existing" base/tests failures RESOLVED — root cause: locale decimal comma.** `str::VsnprintfUtf8` (StrUtf8.cpp) formatted via `_create_locale(LC_ALL, ".UTF-8")` — `.UTF-8` leaves lang/country unspecified so UCRT inherits the USER'S OS locale (pt-BR here) → `%f` emits "3,45" (comma). English machines get "." → why upstream CI never saw it. `_vsnprintf_l` uses the locale object, so `setlocale(LC_ALL,"C")` couldn't help (tested, no effect). Fix: `"C.UTF-8"` (invariant C numbers + UTF-8 codepage) in StrUtf8.cpp (production path — also fixes latent APP float-formatting bug on comma-locale machines) + the test-local reference copy in StrFormat_ut.cpp. **test_util: Passed all 102,685** (first fully green run).
+- **premake TRAP permanently defused (option b)**: `run-unit-tests.ts` no longer runs `bin/premake5.exe` (it regenerates vcxproj from upstream premake5.lua → strips 10 fork sources → LNK1120 later). Committed vs2022/ projects used as-is; comment explains when manual regen is legitimate. AGENTS §6b documents the trap + stash-recovery recipe.
+
+### Verified
+- **gen-settings coverage audit PASSED**: full regen (`vcvars64.bat` env required — bare PATH: cl.exe dies at virt-keys) → `git diff` on Settings.h/Settings.cpp = EMPTY → no hand-added fields outside the generator (archScaleStates was the only historical gap, fixed in gen at FASE 7). Reusable audit: regen + git diff.
+- Harness builds+runs without premake (14s, no vcxproj damage); app debug 0/0 (42.8s incremental), release linked clean; deployed `Compiled\TumatraPDF.exe` (19:54) + `TumatraPDF-debug.exe` (19:46); smoke `-for-testing` OK.
+- Hygiene: `OnAutoScrollProgress(int /*remainingPx*/)` unnamed default param (test build was the only TU warning C4100; app always 0/0).
+
+### Notes
+- Audit script scratch: `tests/tmp/audit-gen-settings.ts` (gitignored; naive name-lowercasing yields false positives `URL`→`url`, `AIChatSidebarDx` — generator has its own name-mapping table; the regen+diff method is authoritative).
+- `build.ts` printed 11 transient warnings on first post-edit run (stale sibling projects); Rebuild + rerun = 0/0.
+
 ## 2026-09-23 (s12) — FASE 7: v2 persistence + auto-continuous + favorites physical (BUILD OK)
 
 ### Added

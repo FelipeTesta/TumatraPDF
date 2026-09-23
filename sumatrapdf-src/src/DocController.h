@@ -56,7 +56,7 @@ struct DocControllerCallback {
     virtual void OnAutoScrollBottom() {}
 
     // called periodically during webview auto-scroll with remaining pixels to bottom
-    virtual void OnAutoScrollProgress(int remainingPx) {}
+    virtual void OnAutoScrollProgress(int /*remainingPx*/) {}
 
     // get contrast overlay state for webview documents
     virtual bool GetContrastEnabled() const { return false; }
