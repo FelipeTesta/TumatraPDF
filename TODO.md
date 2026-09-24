@@ -418,6 +418,23 @@ Two functions, INDEPENDENT PER DOCUMENT (each tab/doc keeps its own state):
 
 ## Flashcard System (Cloze over existing text)
 
+exemplo:
+
+texto texto texto texto texto texto 
+texto texto texto texto texto texto 
+↓
+seleção
+texto texto [texto texto texto texto 
+texto texto texto] texto texto texto
+↓
+resultado esperado:
+texto texto [______________________ 
+________________] texto texto texto 
+
+resultado incorreto:
+[_________________________________
+__________________________________]
+
 ### Model (decided 2026-09-16)
 
 - **1 highlight = 1 cloze card.** A text selection becomes a MuPDF Highlight = positional mask over the ORIGINAL PDF text.
@@ -522,3 +539,39 @@ Two functions, INDEPENDENT PER DOCUMENT (each tab/doc keeps its own state):
 
 - NoteAnki Cloze system: `D:\1 Principal\4 Trabalhos\1 Projetos\00 EXECUTANDO\APPS\NoteAnki\CLOZE.md` (mask over source text, no duplication)
 - AnnotCreateArgs: `src/Annotation.h:72-93` (opacity 0-100, col, bgColor)
+
+### Review 2026-09-23 — agent audit findings (triage AFTER user reports observed errors)
+
+#### Confirmed bugs
+
+- [x] **FC-R1 TC2 routing gap in navigation** — FIXED 2026-09-23 (s14): all study navigation now goes through `FlashcardNavigateToCard` (routes `PhysicalToVirtualForRect`; used by study-first, rate-advance, Next). Back intentionally keeps scroll position (post-reveal spec).
+- [ ] **FC-R2 Mojibake**: FlashcardSidebar.cpp:274 `"Card %d â€” Page %d"` — double-encoded em-dash renders as `â€”` in the UI.
+- [ ] **FC-R3 Sidebar orphaned on flashcard OFF**: `CmdFlashcardToggle` OFF destroys the toolbar but NOT the sidebar → floating popup with stale list (clicks fail the bounds guard silently).
+- [ ] **FC-R4 Duplicate control IDs**: FlashcardToolbar.cpp:36/:52 reuses `IDC_REBAR`/`IDC_TOOLBAR` (same as main toolbar); sidebar reuses `IDC_FAV_LABEL_WITH_CLOSE`. Latent `GetDlgItem` landmine — no callers today; ArchTools pattern uses dedicated IDs. Fix: add `IDC_FLASHCARD_REBAR`/`IDC_FLASHCARD_TOOLBAR` to resource.h.
+- [ ] **FC-R5 dwStyle/exStyle mix**: FlashcardSidebar.cpp:162 passes `WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE` as STYLE flags; `WS_EX_NOACTIVATE` is never applied (exStyle param only carries WS_EX_TOOLWINDOW).
+- [ ] **FC-R6 Leftover `[fc-paint]` diagnostic logs**: Canvas.cpp:3422-3457 (first-10-paints geometry logs from the trim-offset investigation — that bug was fixed via the central CvtToScreen trim offset; strip the logs).
+
+#### Decisions pending (user)
+
+- [x] **FC-D1 Reveal key binding** — RESOLVED 2026-09-23 (s14, user spec): Space + Enter + numpad Enter → Reveal (no-op outside study mode; Enter's scroll bindings removed so the key family never scrolls).
+- [ ] **FC-D2 Card persistence policy**: cards are MuPDF annots in memory; PDF written only on user save (Ctrl+S / exit prompt). Close-without-save = cards lost. Options: auto-save after Add (silent file modification), prompt, or keep current behavior.
+
+#### Missing vs plan
+
+- [ ] **FC-M1 Step 8 tests**: none — Sm2Update (intervals, ease cap, relearn), study-JSON roundtrip, due filter.
+- [ ] **FC-M2 Sidebar not refreshed after `CmdFlashcardAdd`** (stale list until sidebar re-toggle).
+- [ ] **FC-M3 No availability gating**: flashcard commands absent from `removeIfChm`/`removeIfMarkdown` (toggle ON on CHM/MD shows 0/0/0 toolbar); no menu-bar entry (toolbar/palette/selection only).
+- [ ] **FC-M4 Filter dialog UX**: two sequential GoToPage dialogs; compares PHYSICAL pageNo while TC2 shows "3L" labels; filter not re-applied to an active studyOrder.
+- [ ] **FC-M5 Rate keys 1-4 have no visual hint** (no rate buttons/tooltips on the toolbar).
+
+#### Robustness / hygiene (low)
+
+- [x] **FC-H1** FIXED 2026-09-23 (s14): `HandleFlashcardRate` now range-checks `currentCardIdx` (both bounds) before indexing; `FlashcardNavigateToCard` guards `cardIdx` too.
+- [ ] **FC-H2** Full-document scan under `docLock` on Toggle ON (UI freeze on huge PDFs; could pre-check /Annots per page before `fz_load_page`).
+- [ ] **FC-H3** Study JSON: locale-dependent float write (`fprintf %.4f` + `strtof` — non-portable across locales), no atomic write (temp+rename), deleted-card states never pruned.
+- [ ] **FC-H4** Stray `#include "Flashcard.h"` at end of Flashcard.cpp:420 (belongs with the include block at top).
+- [ ] **FC-H5** Doc drift: TODO render matrix says mask alpha 200 (code = 255 opaque); MainWindow.h:439 comment "(Space pressed)"; FLOW/flashcard.dot "Reveal (Space/Enter)".
+
+#### Verified OK (no action)
+
+Steps 1-5, 7 implemented; render matrix correct in Canvas (per-quad + PhysicalToVirtualForRect + central trim offset); stable key; `fz_try/fz_catch` scan; toolbar checked states; SM-2 ease cap + relearn reinsert.

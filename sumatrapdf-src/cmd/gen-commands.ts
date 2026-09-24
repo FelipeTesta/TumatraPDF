@@ -318,6 +318,9 @@ export const commands = [
     "CmdFlashcardRate3", "Rate Card: Good",
     "CmdFlashcardRate4", "Rate Card: Easy",
     "CmdFlashcardLista", "Toggle Flashcard List Sidebar",
+    "CmdFlashcardNext", "Skip To Next Card (No Rating)",
+    "CmdFlashcardOrderToggle", "Toggle Study Order Sequential/Random",
+    "CmdFlashcardCleanHistory", "Clear Flashcard Review History",
     "CmdViewportCropV2Toggle", "Toggle Two Column (v2, stacked columns)",
     "CmdNone", "Do nothing",
 ];

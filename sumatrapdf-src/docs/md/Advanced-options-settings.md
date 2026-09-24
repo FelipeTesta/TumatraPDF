@@ -350,6 +350,9 @@ ViewportCrop = 0 0 0 0 0 false false false
 ; margin trim settings (top/bottom elimination) (introduced in version 3.7)
 Trim = 0 0 false
 
+; flashcard study settings (introduced in version 3.7)
+FlashcardSettings = false
+
 ; customization options for PDF, XPS, DjVu and PostScript UI
 FixedPageUI [
     ; color used instead of black for the document's text

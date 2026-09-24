@@ -36,12 +36,13 @@ static ACCEL gBuiltInAccelerators[] = {
     {FVIRTKEY, VK_NEXT, CmdScrollDownPage},
     {FVIRTKEY, VK_PRIOR, CmdScrollUpPage},
 
-    // spacebar intentionally unbound (user request 2026-09-22: it made the
-    // page jump a small interval while reading)
-    {FVIRTKEY, VK_RETURN, CmdScrollDownPage},
+    // Space/Enter family = flashcard Reveal (user request 2026-09-23). They
+    // never scroll: the reveal handler is a no-op outside study mode. VK_RETURN
+    // covers both main Enter and numpad Enter.
+    {FVIRTKEY, VK_SPACE, CmdFlashcardReveal},
+    {FVIRTKEY, VK_RETURN, CmdFlashcardReveal},
     {FCONTROL | FVIRTKEY, VK_DOWN, CmdScrollDownPage},
 
-    {FSHIFT | FVIRTKEY, VK_RETURN, CmdScrollUpPage},
     {FCONTROL | FVIRTKEY, VK_UP, CmdScrollUpPage},
 
     {FVIRTKEY, 'N', CmdGoToNextPage},
@@ -149,11 +150,16 @@ static ACCEL gBuiltInAccelerators[] = {
     {FVIRTKEY | FSHIFT, 'S', CmdFlashcardAdd},
 
     // Flashcard study: rate the current card (1=Again, 2=Hard, 3=Good, 4=Easy).
-    // Bare 1-4 are free (Ctrl+1-4 are zoom); handlers are no-ops outside study mode.
+    // Bare 1-4 and numpad 1-4 are free (Ctrl+1-4 are zoom); handlers are no-ops
+    // outside study mode.
     {FVIRTKEY, '1', CmdFlashcardRate1},
     {FVIRTKEY, '2', CmdFlashcardRate2},
     {FVIRTKEY, '3', CmdFlashcardRate3},
     {FVIRTKEY, '4', CmdFlashcardRate4},
+    {FVIRTKEY, VK_NUMPAD1, CmdFlashcardRate1},
+    {FVIRTKEY, VK_NUMPAD2, CmdFlashcardRate2},
+    {FVIRTKEY, VK_NUMPAD3, CmdFlashcardRate3},
+    {FVIRTKEY, VK_NUMPAD4, CmdFlashcardRate4},
 
     {FVIRTKEY | FSHIFT, 'I', CmdInvertColors},
     {FVIRTKEY, 'I', CmdTogglePageInfo},

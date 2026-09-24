@@ -86,15 +86,17 @@ Vec<Flashcard> FlashcardLoadFromDocument(EngineMupdf* engine) {
                 fz_rect rect = pdf_bound_annot(ctx, annot);
                 card.bounds = RectF(PointF(rect.x0, rect.y0), PointF(rect.x1, rect.y1));
                 // Per-quad subrects so a multi-line cloze masks exactly the
-                // highlighted text (not the union bbox). Quads come in
-                // untransformed page space; apply the page matrix to land in
-                // the same coordinate space as pdf_bound_annot.
-                fz_matrix pageCtm;
-                pdf_page_transform(ctx, pdf_annot_page(ctx, annot), NULL, &pageCtm);
+                // highlighted text (not the union bbox). pdf_annot_quad_point
+                // ALREADY applies the page transform (cropbox + rotation) —
+                // same space as pdf_bound_annot. Do NOT transform again: the
+                // former extra pageCtm here double-transformed the rects and
+                // displaced the mask on pages whose ctm isn't identity
+                // (cropbox offset / rotation), while the native highlight
+                // rendered correctly.
                 int nQuads = pdf_annot_quad_point_count(ctx, annot);
                 for (int i = 0; i < nQuads; i++) {
                     fz_quad q = pdf_annot_quad_point(ctx, annot, i);
-                    fz_rect qr = fz_transform_rect(fz_rect_from_quad(q), pageCtm);
+                    fz_rect qr = fz_rect_from_quad(q);
                     card.rects.Append(RectF(PointF(qr.x0, qr.y0), PointF(qr.x1, qr.y1)));
                 }
                 if (len(card.rects) == 0) {

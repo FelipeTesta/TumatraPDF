@@ -4,18 +4,27 @@ digraph Flashcard {
 
     create [label="Create card (CmdFlashcardAdd)\nselection -> MuPDF Highlight (author=TumatraPDF-Flashcard)\ncontent EMPTY (positional mask, no text duplication)\nkey = hash(pageNo, bounds) - stable across saves", fillcolor="#c8e6c9", style=filled];
     load [label="CmdFlashcardToggle ON\nFlashcardLoadFromDocument (by author, not 'Q:' prefix)\n+ FlashcardStudyLoad (studyDoc persistence)", fillcolor="#bbdefb", style=filled];
-    filter [label="BuildFilteredStudyOrder\nnew (rating==0) OR due (nextReviewAt <= now)", fillcolor="#bbdefb", style=filled];
-    study [label="Study mode\nopaque mask ONLY on current card (studyMode && !revealMode)\nothers translucent marker", fillcolor="#e1bee7", style=filled];
-    reveal [label="Reveal (Space/Enter)\nmask removed on current card - original text visible", fillcolor="#fff9c4", style=filled];
-    rate [label="Rate 1-4 (keys 1..4)\nSM-2 update, easeFactor capped [1.3, 2.5]\nrating==1 (Again): reinsert into current queue (relearn)", fillcolor="#e1bee7", style=filled];
+    filter [label="BuildFilteredStudyOrder\nnew (rating==0) OR due (nextReviewAt <= now)\norder: sequential (default) | random (Fisher-Yates,\nFlashcardSettings.RandomOrder pref, Order btn toggles)", fillcolor="#bbdefb", style=filled];
+    study [label="Study mode\nopaque mask ONLY on current card (studyMode && !revealMode)\nfirst card: vertically CENTERED, instant scroll\n(FlashcardNavigateToCard: viewport-relative delta\nScrollYBy(screenRect.y + dy/2 - vpdy/2))", fillcolor="#e1bee7", style=filled];
+    reveal [label="Reveal (Space/Enter/numpad Enter -> CmdFlashcardReveal)\nmask removed on current card - original text visible\nno-op outside study mode (keys never scroll)", fillcolor="#fff9c4", style=filled];
+    rate [label="Rate 1-4 (keys 1..4 + numpad)\nSM-2 update, easeFactor capped [1.3, 2.5]\nrating==1 (Again): reinsert into current queue (relearn)\nadvance: next card MASKED + centered", fillcolor="#e1bee7", style=filled];
+    next [label="Next (CmdFlashcardNext toolbar btn)\nskip WITHOUT reveal/rate (no SM-2, no save)\narrives masked + centered; grayed when no next", fillcolor="#e1bee7", style=filled];
+    back [label="Back (CmdFlashcardBack)\nprevious card arrives REVEALED (post-reveal)\nscroll position KEPT (no auto-center)", fillcolor="#fff9c4", style=filled];
     persist [label="FlashcardStudySave\nJSON per doc; reload restores counts", fillcolor="#c8e6c9", style=filled];
 
     create -> load -> filter -> study -> reveal -> rate -> persist;
     rate -> study [style=dashed, label="next card"];
+    study -> next [style=dashed, label="skip"];
+    study -> back [style=dashed];
 
-    dead [label="Dead code to prune:\nhwndCardCount, CmdFlashcardNext (no-op),\nstudyModeType, history (TODO Flashcard Step 7)", shape=note, fillcolor="#ffcdd2", style=filled];
+    clean [label="Clean History (CmdFlashcardCleanHistory, toolbar Clean btn)\ndialog: 'limpar o historico?' No/Yes\nHOLD Yes 2s to confirm (red line drains under text;\nrelease early = reset). Clears studyDoc.states -> all cards\n'new'; rewrites JSON states:{} (portable app-data per exe)", fillcolor="#fff9c4", style=filled];
+    persist -> clean [style=dashed, label="reset"];
+    pending [label="TOMORROW (user report): Order/Filter/Lista\nbuttons INCORRECT - redo/fix", shape=note, fillcolor="#ffcdd2", style=filled];
+    clean -> pending [style=dotted];
+
+    dead [label="Dead code to prune:\nhwndCardCount, studyModeType,\nhistory (TODO Flashcard Step 7)", shape=note, fillcolor="#ffcdd2", style=filled];
     filter -> dead [style=dotted];
 
-    ui [label="UI: FlashcardToolbar (Study/Back/List/Filter + counter btn idx 0)\nFlashcardSidebar (floating list, click->navigate)", shape=box, fillcolor="#e3f2fd", style=filled];
+    ui [label="UI: FlashcardToolbar (Study/Reveal/Back/Next/Order/Lista/Filter/Clean\n+ counter btn idx 0; Next grayed w/o next, Order checked=random)\nFlashcardSidebar (floating list, click->navigate)", shape=box, fillcolor="#e3f2fd", style=filled];
     study -> ui [style=dotted];
 }

@@ -58,6 +58,13 @@ struct Trim {
     bool enabled;
 };
 
+// flashcard study settings
+struct FlashcardSettings {
+    // if true, flashcard study presents cards in random order instead of
+    // document order
+    bool randomOrder;
+};
+
 // top, right, bottom and left margin (in that order) between window and
 // document
 struct WindowMargin {
@@ -920,6 +927,8 @@ struct GlobalPrefs {
     ViewportCrop viewportCrop;
     // margin trim settings (top/bottom elimination)
     Trim trim;
+    // flashcard study settings
+    FlashcardSettings flashcardSettings;
     // customization options for PDF, XPS, DjVu and PostScript UI
     FixedPageUI fixedPageUI;
     // customization options for the ebook UI (EPUB, MOBI, FB2, PDB and
@@ -1063,6 +1072,17 @@ static const StructInfo gTrimInfo = {sizeof(Trim),
                                      "top trim margin in pixels at 100% display scaling\0bottom trim margin in pixels "
                                      "at 100% display scaling\0if true, margin trim is enabled",
                                      false};
+
+static const FieldInfo gFlashcardSettingsFields[] = {
+    {offsetof(FlashcardSettings, randomOrder), SettingType::Bool, false},
+};
+static const StructInfo gFlashcardSettingsInfo = {
+    sizeof(FlashcardSettings),
+    1,
+    gFlashcardSettingsFields,
+    "RandomOrder",
+    "if true, flashcard study presents cards in random order instead of document order",
+    false};
 
 static const FieldInfo gWindowMarginFields[] = {
     {offsetof(WindowMargin, top), SettingType::Int, 2},
@@ -1823,6 +1843,7 @@ static const FieldInfo gGlobalPrefsFields[] = {
     {(size_t)-1, SettingType::Comment, 0},
     {offsetof(GlobalPrefs, viewportCrop), SettingType::Compact, (intptr_t)&gViewportCropInfo},
     {offsetof(GlobalPrefs, trim), SettingType::Compact, (intptr_t)&gTrimInfo},
+    {offsetof(GlobalPrefs, flashcardSettings), SettingType::Compact, (intptr_t)&gFlashcardSettingsInfo},
     {(size_t)-1, SettingType::Comment, 0},
     {offsetof(GlobalPrefs, fixedPageUI), SettingType::Struct, (intptr_t)&gFixedPageUIInfo},
     {(size_t)-1, SettingType::Comment, 0},
@@ -1891,7 +1912,7 @@ static const FieldInfo gGlobalPrefsFields[] = {
 };
 static const StructInfo gGlobalPrefsInfo = {
     sizeof(GlobalPrefs),
-    145,
+    146,
     gGlobalPrefsFields,
     "\0\0DefaultDisplayMode\0DefaultZoom\0DisableJavaScript\0AllowExternalImages\0EnableTeXEnhancements\0EscToExit\0Ful"
     "lPathInTitle\0InverseSearchCmdLine\0LazyLoading\0MainWindowBackground\0NoHomeTab\0HomePageSortByFrequentlyRead\0Ho"
@@ -1904,12 +1925,12 @@ static const StructInfo gGlobalPrefsInfo = {
     "ArchDecimalSeparator\0FastScrollOverScrollbar\0PreventSleepInFullscreen\0TabWidth\0Theme\0LastLightTheme\0LastDark"
     "Theme\0DocumentColorsFollowTheme\0TocDy\0ToolbarShowReadAloud\0ToolbarSize\0TreeFontName\0TreeFontSize\0UIFontSize"
     "\0DisableAntiAlias\0EngineeringDrawingEnhance\0DisableAutoLinks\0UseSysColors\0UseTabs\0SelectionToolbar\0TabsMru"
-    "\0CtrlTabPre36Behavior\0ZoomLevels\0ZoomIncrement\0\0ViewportCrop\0Trim\0\0FixedPageUI\0\0EBookUI\0\0ComicBookUI\0"
-    "\0ImageUI\0\0ChmUI\0\0MarkdownUI\0\0HtmlUI\0\0ClaudeCode\0\0GrokBuild\0\0CodexBuild\0\0AntiGravity\0\0AIChatSideba"
-    "rDx\0\0TranslateToLang\0TranslateFromLang\0TranslateEngine\0\0Annotations\0\0ExternalViewers\0\0ForwardSearch\0\0P"
-    "rinterDefaults\0\0Fullscreen\0\0SelectionHandlers\0\0Shortcuts\0\0Themes\0\0TabGroups\0\0CustomScreenDPI\0\0\0Defa"
-    "ultPasswords\0UiLanguage\0VersionToSkip\0WindowState\0WindowPos\0SearchUIWindowPos\0FileStates\0SessionData\0Reope"
-    "nOnce\0TimeOfLastUpdateCheck\0OpenCountWeek\0PropWinPos\0CheckForUpdates\0\0",
+    "\0CtrlTabPre36Behavior\0ZoomLevels\0ZoomIncrement\0\0ViewportCrop\0Trim\0FlashcardSettings\0\0FixedPageUI\0\0EBook"
+    "UI\0\0ComicBookUI\0\0ImageUI\0\0ChmUI\0\0MarkdownUI\0\0HtmlUI\0\0ClaudeCode\0\0GrokBuild\0\0CodexBuild\0\0AntiGrav"
+    "ity\0\0AIChatSidebarDx\0\0TranslateToLang\0TranslateFromLang\0TranslateEngine\0\0Annotations\0\0ExternalViewers\0"
+    "\0ForwardSearch\0\0PrinterDefaults\0\0Fullscreen\0\0SelectionHandlers\0\0Shortcuts\0\0Themes\0\0TabGroups\0\0Custo"
+    "mScreenDPI\0\0\0DefaultPasswords\0UiLanguage\0VersionToSkip\0WindowState\0WindowPos\0SearchUIWindowPos\0FileStates"
+    "\0SessionData\0ReopenOnce\0TimeOfLastUpdateCheck\0OpenCountWeek\0PropWinPos\0CheckForUpdates\0\0",
     "\0\0default layout of pages. valid values: automatic, single page, facing, book view, continuous, continuous "
     "facing, continuous book view\0default zoom. valid values: fit page, fit width, fit height, fit content or percent "
     "like 100%\0if true, JavaScript in PDF documents is disabled (e.g. form-field calculations won't run)\0if true, a "
@@ -1986,19 +2007,19 @@ static const StructInfo gGlobalPrefsInfo = {
     "before version 3.6) instead of showing the tab switcher\0sequence of zoom levels when zooming in/out; all values "
     "must lie between 8.33 and 6400\0how much a single zoom in / zoom out step changes the zoom, as a percentage of "
     "the current zoom level. If 0 or negative, zooming steps through ZoomLevels instead\0\0viewport crop settings for "
-    "two-column reading\0margin trim settings (top/bottom elimination)\0\0customization options for PDF, XPS, DjVu and "
-    "PostScript UI\0\0customization options for the ebook UI (EPUB, MOBI, FB2, PDB and plain text)\0\0customization "
-    "options for Comic Book UI\0\0customization options for image files UI\0\0customization options for CHM UI. If "
-    "UseFixedPageUI is true, FixedPageUI settings apply instead\0\0customization options for Markdown UI. If "
-    "UseFixedPageUI is true, MuPDF is used; otherwise WebView2 browser view is used when available\0\0customization "
-    "options for HTML UI. If UseFixedPageUI is true, MuPDF is used; otherwise WebView2 browser view is used when "
-    "available\0\0settings for the Claude Code chat sidebar\0\0settings for the Grok Build chat sidebar\0\0settings "
-    "for the OpenAI Codex chat sidebar\0\0settings for the Antigravity chat sidebar\0\0width of the AI chat sidebar (0 "
-    "= use default); shared by Claude Code, Grok Build, and OpenAI Codex (internal)\0\0remembered destination language "
-    "for selection translation; empty uses OS UI language\0remembered source language for selection translation; empty "
-    "means Auto\0remembered engine for Translate Selection: Google, DeepL, Grok Build, Claude Code or OpenAI "
-    "Codex\0\0default values for annotations in PDF documents\0\0list of additional external viewers for various file "
-    "types. See [docs for more "
+    "two-column reading\0margin trim settings (top/bottom elimination)\0flashcard study settings\0\0customization "
+    "options for PDF, XPS, DjVu and PostScript UI\0\0customization options for the ebook UI (EPUB, MOBI, FB2, PDB and "
+    "plain text)\0\0customization options for Comic Book UI\0\0customization options for image files "
+    "UI\0\0customization options for CHM UI. If UseFixedPageUI is true, FixedPageUI settings apply "
+    "instead\0\0customization options for Markdown UI. If UseFixedPageUI is true, MuPDF is used; otherwise WebView2 "
+    "browser view is used when available\0\0customization options for HTML UI. If UseFixedPageUI is true, MuPDF is "
+    "used; otherwise WebView2 browser view is used when available\0\0settings for the Claude Code chat "
+    "sidebar\0\0settings for the Grok Build chat sidebar\0\0settings for the OpenAI Codex chat sidebar\0\0settings for "
+    "the Antigravity chat sidebar\0\0width of the AI chat sidebar (0 = use default); shared by Claude Code, Grok "
+    "Build, and OpenAI Codex (internal)\0\0remembered destination language for selection translation; empty uses OS UI "
+    "language\0remembered source language for selection translation; empty means Auto\0remembered engine for Translate "
+    "Selection: Google, DeepL, Grok Build, Claude Code or OpenAI Codex\0\0default values for annotations in PDF "
+    "documents\0\0list of additional external viewers for various file types. See [docs for more "
     "information](https://www.sumatrapdfreader.org/docs/Customize-external-viewers)\0\0customization options for how "
     "forward search results are shown (used from LaTeX editors)\0\0these override the default settings in the Print "
     "dialog\0\0options for fullscreen mode\0\0list of handlers for selected text, shown in context menu when text "

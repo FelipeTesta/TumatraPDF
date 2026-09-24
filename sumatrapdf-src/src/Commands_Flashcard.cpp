@@ -65,12 +65,66 @@ static void BuildFilteredStudyOrder(MainWindow* win) {
             }
         }
     }
-    logf("[fc] BuildFilteredStudyOrder - %d due cards (from=%d, to=%d)\n", len(win->flashcard.studyOrder),
-         win->flashcard.filterPageFrom, win->flashcard.filterPageTo);
+    // random order (user setting): shuffle the queue in place once, when it is
+    // built. Next / rate-advance / back then all follow this shuffled order.
+    if (gGlobalPrefs->flashcardSettings.randomOrder) {
+        Vec<int>& order = win->flashcard.studyOrder;
+        for (int i = len(order) - 1; i > 0; i--) {
+            int j = rand() % (i + 1);
+            int tmp = order[i];
+            order[i] = order[j];
+            order[j] = tmp;
+        }
+    }
+    logf("[fc] BuildFilteredStudyOrder - %d due cards (from=%d, to=%d, order=%s)\n", len(win->flashcard.studyOrder),
+         win->flashcard.filterPageFrom, win->flashcard.filterPageTo,
+         gGlobalPrefs->flashcardSettings.randomOrder ? StrL("random") : StrL("sequential"));
+}
+
+// Navigate the view to a study card. Under TC2 the display uses virtual pages,
+// so route the physical card rect through PhysicalToVirtualForRect first (raw
+// pageNo + CvtToScreen lands on the wrong page/column). When centerVertically
+// is set, scroll so the card sits in the middle of the viewport (instant, no
+// animation — ScrollYTo jumps); otherwise keep the current scroll position.
+static void FlashcardNavigateToCard(MainWindow* win, int cardIdx, bool centerVertically) {
+    if (cardIdx < 0 || cardIdx >= len(win->flashcard.cards)) {
+        return;
+    }
+    Flashcard& card = win->flashcard.cards[cardIdx];
+    WindowTab* tab = win->CurrentTab();
+    if (!tab) {
+        return;
+    }
+    DisplayModel* dm = tab->AsFixed();
+    if (!dm) {
+        return;
+    }
+    RectF vr;
+    int vPage = dm->PhysicalToVirtualForRect(card.pageNo, card.bounds, &vr);
+    if (!dm->ValidPageNo(vPage)) {
+        return;
+    }
+    // CvtToScreen returns VIEWPORT-RELATIVE coords (it adds pageOnScreen,
+    // which moves with the scroll). Same idiom as ScrollScreenToRect: compute
+    // the delta from the current view and scroll by it (ScrollYBy clamps).
+    Rect screenRect = dm->CvtToScreen(vPage, vr);
+    if (!centerVertically) {
+        return;
+    }
+    int dy = screenRect.y + screenRect.dy / 2 - dm->viewPort.dy / 2;
+    logf("[fc] FlashcardNavigateToCard - card %d vPage=%d screen=(%d,%d %dx%d) vpdy=%d dy=%d\n", cardIdx, vPage,
+         screenRect.x, screenRect.y, screenRect.dx, screenRect.dy, dm->viewPort.dy, dy);
+    if (dy != 0) {
+        dm->ScrollYBy(dy, false);
+    }
 }
 
 static void HandleFlashcardRate(MainWindow* win, int rating) {
-    int cardIdx = win->flashcard.studyOrder[win->flashcard.currentCardIdx];
+    int curIdx = win->flashcard.currentCardIdx;
+    if (curIdx < 0 || curIdx >= len(win->flashcard.studyOrder)) {
+        return; // defensive: no valid current card
+    }
+    int cardIdx = win->flashcard.studyOrder[curIdx];
     Flashcard& card = win->flashcard.cards[cardIdx];
 
     // Find or create study state for this card
@@ -113,7 +167,8 @@ static void HandleFlashcardRate(MainWindow* win, int rating) {
 
     FlashcardToolbarUpdateCount(win);
 
-    // Advance to next card
+    // Advance to next card: it arrives masked (front / pre-reveal state) and
+    // vertically centered in the viewport
     win->flashcard.revealMode = false;
     FlashcardToolbarUpdateState(win);
     win->flashcard.currentCardIdx++;
@@ -124,17 +179,7 @@ static void HandleFlashcardRate(MainWindow* win, int rating) {
     } else {
         logf("[fc] HandleFlashcardRate - advancing to card %d/%d\n", win->flashcard.currentCardIdx + 1,
              len(win->flashcard.studyOrder));
-        // Navigate to next card position
-        int nextCardIdx = win->flashcard.studyOrder[win->flashcard.currentCardIdx];
-        Flashcard& nextCard = win->flashcard.cards[nextCardIdx];
-        WindowTab* tab2 = win->CurrentTab();
-        if (tab2) {
-            DisplayModel* dm2 = tab2->AsFixed();
-            if (dm2) {
-                Rect screenRect = dm2->CvtToScreen(nextCard.pageNo, nextCard.bounds);
-                dm2->ScrollScreenToRect(nextCard.pageNo, screenRect);
-            }
-        }
+        FlashcardNavigateToCard(win, win->flashcard.studyOrder[win->flashcard.currentCardIdx], true);
     }
     MainWindowRerender(win);
 }
@@ -144,7 +189,9 @@ bool HandleCommandFlashcard(MainWindow* win, int cmd) {
         case CmdFlashcardToggle: {
             logf("[fc] CmdFlashcardToggle - toggling flashcard mode\n");
             win->flashcard.on = !win->flashcard.on;
-            logf("[fc] CmdFlashcardToggle - mode %s\n", StrL(win->flashcard.on ? "ON" : "OFF"));
+            // StrL only takes literals: wrap each branch separately, else the
+            // ternary inside the macro computes the length from the wrong type
+            logf("[fc] CmdFlashcardToggle - mode %s\n", win->flashcard.on ? StrL("ON") : StrL("OFF"));
             if (win->flashcard.on) {
                 FlashcardToolbarCreate(win);
                 RelayoutFrame(win, true, -1);
@@ -276,21 +323,10 @@ bool HandleCommandFlashcard(MainWindow* win, int cmd) {
                 logf("[fc] CmdFlashcardStudy - study ON, %d cards\n", len(win->flashcard.studyOrder));
                 // Build filtered study order
                 BuildFilteredStudyOrder(win);
-                // Navigate to first card
+                // Navigate to first card: masked (front state), vertically centered
                 if (len(win->flashcard.studyOrder) > 0) {
                     win->flashcard.currentCardIdx = 0;
-                    int cardIdx = win->flashcard.studyOrder[0];
-                    Flashcard& card = win->flashcard.cards[cardIdx];
-                    WindowTab* tab = win->CurrentTab();
-                    if (tab) {
-                        DisplayModel* dm = tab->AsFixed();
-                        if (dm) {
-                            RectF vr;
-                            int vPage = dm->PhysicalToVirtualForRect(card.pageNo, card.bounds, &vr);
-                            Rect screenRect = dm->CvtToScreen(vPage, vr);
-                            dm->ScrollScreenToRect(vPage, screenRect);
-                        }
-                    }
+                    FlashcardNavigateToCard(win, win->flashcard.studyOrder[0], true);
                 }
             } else {
                 logf("[fc] CmdFlashcardStudy - study OFF\n");
@@ -335,23 +371,56 @@ bool HandleCommandFlashcard(MainWindow* win, int cmd) {
         case CmdFlashcardBack: {
             logf("[fc] CmdFlashcardBack - going back\n");
             if (win->flashcard.studyMode && win->flashcard.currentCardIdx > 0) {
-                win->flashcard.revealMode = false;
+                // Post-reveal back: the card arrives REVEALED (the answer was
+                // already seen) and the scroll position is KEPT — no
+                // auto-centering on the way back
                 win->flashcard.currentCardIdx--;
-                // Navigate to previous card position
-                int prevCardIdx = win->flashcard.studyOrder[win->flashcard.currentCardIdx];
-                Flashcard& prevCard = win->flashcard.cards[prevCardIdx];
-                WindowTab* tab3 = win->CurrentTab();
-                if (tab3) {
-                    DisplayModel* dm3 = tab3->AsFixed();
-                    if (dm3) {
-                        Rect screenRect = dm3->CvtToScreen(prevCard.pageNo, prevCard.bounds);
-                        dm3->ScrollScreenToRect(prevCard.pageNo, screenRect);
-                    }
-                }
+                win->flashcard.revealMode = true;
+                FlashcardToolbarUpdateState(win);
                 MainWindowRerender(win);
             } else {
                 logf("[fc] CmdFlashcardBack - no previous card\n");
             }
+            return true;
+        }
+        case CmdFlashcardNext: {
+            logf("[fc] CmdFlashcardNext - skipping to next card\n");
+            if (!win->flashcard.studyMode) {
+                return true;
+            }
+            int next = win->flashcard.currentCardIdx + 1;
+            if (next >= len(win->flashcard.studyOrder)) {
+                logf("[fc] CmdFlashcardNext - no next card\n");
+                return true;
+            }
+            // skip WITHOUT revealing or rating: the next card arrives masked
+            // (front state), vertically centered; no SM-2 update, no save
+            win->flashcard.currentCardIdx = next;
+            win->flashcard.revealMode = false;
+            FlashcardToolbarUpdateState(win);
+            FlashcardNavigateToCard(win, win->flashcard.studyOrder[next], true);
+            MainWindowRerender(win);
+            return true;
+        }
+        case CmdFlashcardOrderToggle: {
+            gGlobalPrefs->flashcardSettings.randomOrder = !gGlobalPrefs->flashcardSettings.randomOrder;
+            logf("[fc] CmdFlashcardOrderToggle - randomOrder=%s\n",
+                 gGlobalPrefs->flashcardSettings.randomOrder ? StrL("ON") : StrL("OFF"));
+            if (win->flashcard.studyMode) {
+                // rebuild the queue in the new order and restart from its first
+                // card, so Next / advance / back stay coherent with the order
+                // the user configured
+                BuildFilteredStudyOrder(win);
+                win->flashcard.revealMode = false;
+                if (len(win->flashcard.studyOrder) > 0) {
+                    win->flashcard.currentCardIdx = 0;
+                    FlashcardNavigateToCard(win, win->flashcard.studyOrder[0], true);
+                } else {
+                    win->flashcard.currentCardIdx = -1;
+                }
+                MainWindowRerender(win);
+            }
+            FlashcardToolbarUpdateState(win);
             return true;
         }
         case CmdFlashcardLista:
@@ -405,6 +474,31 @@ bool HandleCommandFlashcard(MainWindow* win, int cmd) {
             }
             logf("[fc] CmdFlashcardFilter - filter set: from=%d, to=%d\n", win->flashcard.filterPageFrom,
                  win->flashcard.filterPageTo);
+            return true;
+        }
+        case CmdFlashcardCleanHistory: {
+            logf("[fc] CmdFlashcardCleanHistory - opening confirm dialog\n");
+            WindowTab* tab = win->CurrentTab();
+            if (!tab || !tab->filePath) {
+                logf("[fc] CmdFlashcardCleanHistory - ERROR: no document loaded\n");
+                return true;
+            }
+            // the dialog holds "Yes" for 2s (draining-line animation) before
+            // confirming this destructive action
+            if (FlashcardCleanHistoryDialog(win->hwndFrame)) {
+                win->flashcard.studyDoc.states.Reset();
+                // stop any active session: every card becomes "new" again
+                win->flashcard.studyMode = false;
+                win->flashcard.currentCardIdx = -1;
+                win->flashcard.revealMode = false;
+                FlashcardStudySave(tab->filePath.s, win->flashcard.studyDoc);
+                FlashcardToolbarUpdateCount(win);
+                FlashcardToolbarUpdateState(win);
+                MainWindowRerender(win);
+                logf("[fc] CmdFlashcardCleanHistory - review history cleared for this doc\n");
+            } else {
+                logf("[fc] CmdFlashcardCleanHistory - cancelled by user\n");
+            }
             return true;
         }
         default:

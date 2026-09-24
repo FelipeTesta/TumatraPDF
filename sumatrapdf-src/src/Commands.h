@@ -318,8 +318,11 @@ enum {
     CmdFlashcardRate3 = 507,
     CmdFlashcardRate4 = 508,
     CmdFlashcardLista = 509,
-    CmdViewportCropV2Toggle = 510,
-    CmdNone = 511,
+    CmdFlashcardNext = 510,
+    CmdFlashcardOrderToggle = 511,
+    CmdFlashcardCleanHistory = 512,
+    CmdViewportCropV2Toggle = 513,
+    CmdNone = 514,
 
     /* range for file history */
     CmdFileHistoryFirst,

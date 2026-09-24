@@ -1,5 +1,39 @@
 # TumatraPDF — Development Log
 
+## 2026-09-23 (s15) — Flashcard Clean History (hold-to-confirm dialog) (BUILD OK, deployed)
+
+### Added
+- **`Clean History`** (toolbar "Clean" button + `CmdFlashcardCleanHistory`): clears THIS document's review history (SM-2 states → all cards become "new"; stops an active study session; rewrites the study JSON with `states: {}`).
+- **Hold-to-confirm dialog** (`FlashcardCleanHistoryDialog`, FlashcardToolbar.cpp, raw Win32 + modal pump — no Dialog Manager): "tem certeza que deseja limpar o histórico de revisões?" with No / Yes. "Yes" must be clicked AND HELD 2s: while holding, a red line under the "Yes" text drains right-to-left (15ms WM_TIMER repaint); releasing early resets it (mouse capture + WM_CAPTURECHANGED safety). No / Esc / close = cancel. Question text verbatim per user spec (PT).
+- Repro: `tests/ad-hoc-flashcard-cloze.ts` extended — finds the dialog by title via `enumWindows`, clicks Yes at DPI-proportional client fractions (0.648/0.762), tests early-release (600ms → stays open) and full hold (2.3s → confirmed, dialog gone, `"states": {}` written).
+
+### Verified
+- Log sequence: `hold start` → `hold released early` (dialog stays) → `hold start` → `hold CONFIRMED (2s)` → `saved 0 entries` → `history cleared`. JSON after: `states: {}` (39 B). User's REAL history in `Compiled\FlashcardStudy\` untouched — the repro runs the DBG64 exe whose portable app-data is `out\dbg64\FlashcardStudy\` (each exe instance has its own study data dir; portable mode = app-data next to the exe).
+
+### Notes (for TOMORROW, user report)
+- **Order / Filter / Lista toolbar buttons are INCORRECT** (user: "vamos refazer/corrigir amanhã") — do not touch today; symptoms to clarify with user first (suspects: Next/Order state graying via `TB_SETSTATE 0`? Lista/Filter handlers?). Clean button added alongside; verify all together tomorrow.
+- The 6 cards in the test PDF are ALL the user's test cards (they misspoke earlier about "5 more").
+
+## 2026-09-23 (s14) — Flashcard study flow rework: keys, Next button, order setting (BUILD OK, deployed)
+
+### Added
+- **Study keyboard flow (user spec)**: Space/Enter/numpad-Enter → Reveal (VK_RETURN covers both Enters; removed Enter's old CmdScrollDownPage binding + Shift+Enter scroll-up — the key family now NEVER scrolls, reveal is a no-op outside study mode). 1-4 + numpad 1-4 → rate (numpad bindings new). Rate advance: next card arrives MASKED (front state) and vertically CENTERED, instant (no animation).
+- **Next Card button** (`CmdFlashcardNext`): skip to next card WITHOUT revealing or rating — no SM-2 update, no save; arrives masked + centered; grayed out when no next card. Toolbar: `{Study, Reveal, Back, Next, Order, Lista, Filter}`.
+- **Study order setting** (`CmdFlashcardOrderToggle` + `FlashcardSettings.RandomOrder` pref, persisted): sequential (default) or random (Fisher-Yates shuffle at BuildFilteredStudyOrder). Next/advance/Back all follow the configured order coherently; toggling mid-session rebuilds the queue and restarts from its first card (centered). Toolbar Order button checked-when-random.
+
+### Fixed
+- **Rate-advance/back used RAW physical pageNo (FC-R1)** — new `FlashcardNavigateToCard(win, cardIdx, center)`: routes via `PhysicalToVirtualForRect` (TC2-correct), centering via the canonical viewport-relative delta idiom `ScrollYBy(screenRect.y + dy/2 - viewPort.dy/2, false)` (CvtToScreen returns viewport-RELATIVE coords; the first cut mixed spaces — ScrollYTo with canvas math landed off-center).
+- **Back (user spec)**: previous card arrives REVEALED (post-reveal state), scroll position KEPT (no auto-centering).
+- Rate handler bounds guard (FC-H1 part): `currentCardIdx` range-checked before indexing.
+
+### Verified
+- Repro `tests/ad-hoc-flashcard-cloze.ts` on user's book: centering math confirmed in all directions (study-first dy=-394 → card at vpdy/2; advance dy=15502 across ~20 pages; Next no-op dy=0 when already centered; order-toggle recenters ±277). Random order picked card 5 first (not sequential card 1) ✓. Study JSON saved on rate ✓.
+- NOTE: user's 5 manually-created cards not in the PDF file yet (found 6 cards) — cards persist to the document only on save (FC-D2 policy).
+
+### Notes
+- Gen-name collision: settings struct must NOT be named `Flashcard` (clashes with the card struct in Flashcard.h → C2011) → `FlashcardSettings` / `gGlobalPrefs->flashcardSettings.randomOrder`. Rule for future gen structs: check against existing src/ type names before regen.
+- Reveal/Next/Order are PDF-only by nature (AsFixed gates); toolbar shows for CHM/MD but commands no-op (FC-M3 still pending).
+
 ## 2026-09-23 (s13) — Hardening: unit tests ALL PASS (locale root cause), premake fix, gen audit (BUILD OK, deployed)
 
 ### Fixed

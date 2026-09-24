@@ -325,6 +325,9 @@ static SeqStrings gCommandNames =
     "CmdFlashcardRate3\0"
     "CmdFlashcardRate4\0"
     "CmdFlashcardLista\0"
+    "CmdFlashcardNext\0"
+    "CmdFlashcardOrderToggle\0"
+    "CmdFlashcardCleanHistory\0"
     "CmdViewportCropV2Toggle\0"
     "CmdNone\0"
     "\0";
@@ -639,6 +642,9 @@ static i32 gCommandIds[] = {
     CmdFlashcardRate3,
     CmdFlashcardRate4,
     CmdFlashcardLista,
+    CmdFlashcardNext,
+    CmdFlashcardOrderToggle,
+    CmdFlashcardCleanHistory,
     CmdViewportCropV2Toggle,
     CmdNone,
 };
@@ -953,6 +959,9 @@ SeqStrings gCommandDescriptions =
     "Rate Card: Good\0"
     "Rate Card: Easy\0"
     "Toggle Flashcard List Sidebar\0"
+    "Skip To Next Card (No Rating)\0"
+    "Toggle Study Order Sequential/Random\0"
+    "Clear Flashcard Review History\0"
     "Toggle Two Column (v2, stacked columns)\0"
     "Do nothing\0"
     "\0";

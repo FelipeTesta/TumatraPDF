@@ -61,6 +61,9 @@ void FlashcardToolbarCreate(MainWindow* win);
 void FlashcardToolbarDestroy(MainWindow* win);
 void FlashcardToolbarUpdateCount(MainWindow* win);
 void FlashcardToolbarUpdateState(MainWindow* win);
+// Clean History confirmation dialog: "Yes" must be held for 2 seconds
+// (draining line animation under the text). Returns true when confirmed.
+bool FlashcardCleanHistoryDialog(HWND hwndParent);
 
 // FlashcardSidebar (in FlashcardSidebar.cpp)
 void FlashcardSidebarCreate(MainWindow* win);

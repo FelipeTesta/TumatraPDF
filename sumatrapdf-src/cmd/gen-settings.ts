@@ -856,6 +856,10 @@ const trim: Field[] = [
   field("Enabled", Bool, false, "if true, margin trim is enabled"),
 ];
 
+const flashcard: Field[] = [
+  field("RandomOrder", Bool, false, "if true, flashcard study presents cards in random order instead of document order"),
+];
+
 const globalPrefs: Field[] = [
   comment(""),
   emptyLine(),
@@ -1277,6 +1281,7 @@ const globalPrefs: Field[] = [
 
   compactStruct("ViewportCrop", viewportCrop, "viewport crop settings for two-column reading").ver("3.7"),
   compactStruct("Trim", trim, "margin trim settings (top/bottom elimination)").ver("3.7"),
+  compactStruct("FlashcardSettings", flashcard, "flashcard study settings").ver("3.7"),
 
   emptyLine(),
 
