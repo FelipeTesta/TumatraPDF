@@ -6078,9 +6078,16 @@ bool EngineMupdfSaveUpdated(EngineBase* engine, Str path, const ShowErrorCb& sho
     // TODO: if saving to a new file, don't do incremental and linearlize?
     // save_opts.do_linear = 1;
     save_opts.do_incremental = pdf_can_be_saved_incrementally(ctx, epdf->pdfdoc);
-    save_opts.do_compress = 1;
-    save_opts.do_compress_images = 1;
-    save_opts.do_compress_fonts = 1;
+    // Same-path saves (Ctrl+S / save-on-close) must stay FAST: never
+    // re-compress streams there. do_compress_images on a full rewrite of a
+    // large scanned PDF re-deflates every image stream — minutes of UI
+    // freeze; incremental saves only append new objects so it wouldn't
+    // matter there anyway. Only a Save As to a DIFFERENT file pays the
+    // one-time compression to produce a smaller export.
+    bool sameFile = str::Eq(path, currPath);
+    save_opts.do_compress = sameFile ? 0 : 1;
+    save_opts.do_compress_images = sameFile ? 0 : 1;
+    save_opts.do_compress_fonts = sameFile ? 0 : 1;
     if (epdf->pdfdoc->redacted) {
         save_opts.do_garbage = 1;
     }
@@ -6091,7 +6098,8 @@ bool EngineMupdfSaveUpdated(EngineBase* engine, Str path, const ShowErrorCb& sho
         pdf_save_document(ctx, epdf->pdfdoc, CStrTemp(path), &save_opts);
         ok = true;
         auto dur = TimeSinceInMs(timeStart);
-        logf("Saved annotations to '%s' in  %.2f ms, incremental: %d\n", path, dur, save_opts.do_incremental);
+        logf("Saved annotations to '%s' in  %.2f ms, incremental: %d, compress: %d\n", path, dur,
+             save_opts.do_incremental, save_opts.do_compress);
     }
     fz_catch(ctx) {
         fz_report_error(ctx);

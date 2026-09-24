@@ -2107,6 +2107,7 @@ static float ArchPointSegDist(float px, float py, float ax, float ay, float bx, 
 
 static void OnMouseLeftButtonDown(MainWindow* win, int x, int y, WPARAM key) {
     // lf("Left button clicked on %d %d", x, y);
+    logf("OnMouseLeftButtonDown: wp=0x%x at (%d,%d)\n", (int)key, x, y);
     if (win->trimConfigMode != 0) {
         auto* dm = win->AsFixed();
         if (dm) {

@@ -1,5 +1,34 @@
 # TumatraPDF — Development Log
 
+## 2026-09-24 (s17) — Multi-select: Alt+drag sums selections → ONE grouped flashcard (BUILD OK, deployed, USER-VERIFIED)
+
+### Added
+- **Alt+drag additive text selection** (user spec): holding Alt while dragging a disjoint text region SUMS it into the current selection — repeatable (3rd, 4th... Alt+drag keeps accumulating). `S` then creates **ONE flashcard with N mask blocks** (one annot with N quads; loader + per-quad mask painting + union-bounds centering already handled disjoint rects).
+- Implementation: `SelectionState` gained `altAccum` (Vec<SelectionOnPage>*) + `altSelecting` (MainWindow.h; `struct SelectionOnPage;` forward-declared at FILE scope — nested fwd-decl would shadow the global type). `OnSelectionStart`: Alt (GetKeyState OR `MK_ALT` wParam bit — the bit enables synthetic input since posted WM_KEYDOWN doesn't update GetKeyState) parks the current selection into `altAccum` before the standard clear; `UpdateTextSelection` merges accum entries into every drag update; `OnSelectionStop` restores `altAccum` if the Alt drag aborted (stray Alt+click loses nothing); plain drag resets to normal single selection.
+- Edge semantics: cross-PAGE selections produce one card PER PAGE (annots are page-bound — by design).
+
+### Verified
+- Log-proven (`alt merge: 1 accumulated entries -> 2 total` + `Cloze card added ... 1 page(s) covered`) then **user-verified live** ("parece que funcionou!").
+- `tests/ad-hoc-flashcard-multiselect.ts` kept for reference; synthetic mouse input proved flaky (DPI ×1.25 scaling of posted coords, MK_ALT requirement, pan-corruption from missed probes) — human test is the right tool for mouse features.
+
+### Notes
+- Permanent logs: `OnSelectionStart: alt=%d at (%d,%d)` (Selection.cpp), `OnMouseLeftButtonDown: wp=0x%x at (%d,%d)` (Canvas.cpp entry).
+- Save-mechanism fix (s16) + this feature both deployed: release `Compiled\TumatraPDF.exe` + debug `Compiled\TumatraPDF-debug.exe` (2026-09-24).
+
+## 2026-09-24 (s16) — Save mechanism: no re-compression on same-file saves (BUILD OK, deployed)
+
+### Changed
+- **`EngineMupdfSaveUpdated`** (EngineMupdf.cpp): `do_compress`/`do_compress_images`/`do_compress_fonts` now **0 for same-file saves** (Ctrl+S / save-on-close / annotation edits) — only a Save As to a DIFFERENT file pays the one-time compression for a smaller export. Rationale: `pdf_can_be_saved_incrementally` returns 0 whenever the xref was repaired at load (`repair_attempted`) — common in older scanned books — forcing a FULL rewrite; with `do_compress_images=1` that re-deflated every image stream in the document = minutes of UI freeze on large scans. Incremental saves only append new objects, so the flags never mattered there anyway.
+- Log line now includes the compress flag: `Saved annotations ... incremental: N, compress: M`.
+
+### Verified (tests/ad-hoc-save-timing.ts — new ad-hoc, saves a COPY of the book, never the real file)
+- User's main test book (30 MB scan): same-file save is already incremental — 204 ms (no repair at load; incremental chains kept working even with a corrupted startxref keyword — mupdf falls back to the previous xref).
+- **Worst case reproduced**: truncated trailer (%%EOF removed) → `repair_attempted` → `incremental: 0` → full rewrite: 478 ms compressed vs **245 ms uncompressed** after the fix (30 MB book; delta scales with file size × compressible content — the minutes-class freezes live here, and on Drive-synced paths I/O stalls add more).
+- FC-D2 closed (user decision): keep current card persistence — the app's existing dirty-on-close prompt covers it.
+
+### Notes
+- User reports saves "often very slow, freezing for minutes" — main test book measures fast; the freeze class = other books (bigger / repaired xref / Google Drive I-O). Next step: user names the specific book+action that froze so the fix can be validated on the real case.
+
 ## 2026-09-23 (s15) — Flashcard Clean History (hold-to-confirm dialog) (BUILD OK, deployed)
 
 ### Added

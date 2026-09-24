@@ -554,7 +554,7 @@ __________________________________]
 #### Decisions pending (user)
 
 - [x] **FC-D1 Reveal key binding** — RESOLVED 2026-09-23 (s14, user spec): Space + Enter + numpad Enter → Reveal (no-op outside study mode; Enter's scroll bindings removed so the key family never scrolls).
-- [ ] **FC-D2 Card persistence policy**: cards are MuPDF annots in memory; PDF written only on user save (Ctrl+S / exit prompt). Close-without-save = cards lost. Options: auto-save after Add (silent file modification), prompt, or keep current behavior.
+- [x] **FC-D2 Card persistence policy** — RESOLVED 2026-09-24 (user): keep current behavior — the app already prompts on close for unsaved changes (Ctrl+S / exit prompt). Related fix: same-file saves no longer re-compress (EngineMupdfSaveUpdated, LOG s16) — saves are fast again even on repaired-xref scans.
 
 #### Missing vs plan
 

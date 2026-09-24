@@ -6,6 +6,7 @@ struct Edit;
 struct WebviewWnd;
 struct LinkHandler;
 struct StressTest;
+struct SelectionOnPage;
 class SumatraUIAutomationProvider;
 struct FrameRateWnd;
 struct ReadAloudPlaybackBar;
@@ -492,6 +493,13 @@ struct MainWindow {
         SelectionDragEdge selectionDragEdge = SelectionDragEdge::None;
         // screen rect when the move/resize started (normalized)
         Rect selectionEditOrig;
+        // Alt+drag additive selection: regions accumulated from earlier
+        // selections, parked here at drag start so each in-flight update can
+        // merge them into selectionOnPage (disjoint selections render
+        // together and S groups them into one flashcard)
+        Vec<SelectionOnPage>* altAccum = nullptr;
+        // true while the current drag is an Alt+drag (additive selection)
+        bool altSelecting = false;
     } selection;
     // --- end selection & touch input state ---
 

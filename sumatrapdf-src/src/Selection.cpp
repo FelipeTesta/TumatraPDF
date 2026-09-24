@@ -116,6 +116,12 @@ void DeleteOldSelectionInfo(MainWindow* win, bool alsoTextSel) {
     if (alsoTextSel && tab->AsFixed()) {
         tab->AsFixed()->textSelection->Reset();
     }
+    // an Alt+drag parks the previous regions in altAccum before clearing the
+    // live selection — don't wipe the accumulation mid-drag
+    if (!win->selection.altSelecting) {
+        delete win->selection.altAccum;
+        win->selection.altAccum = nullptr;
+    }
 }
 
 // Rectangular (Ctrl+drag) selection: move/resize after it exists.
@@ -517,6 +523,21 @@ void UpdateTextSelection(MainWindow* win, bool select) {
 
     DeleteOldSelectionInfo(win);
     win->CurrentTab()->selectionOnPage = SelectionOnPage::FromTextSelect(&dm->textSelection->result);
+    // Alt-additive drag: merge the accumulated regions into the live
+    // selection so all disjoint regions render together (and S groups them
+    // into one flashcard). altAccum stays alive until the drag ends.
+    if (win->selection.altSelecting && win->selection.altAccum) {
+        Vec<SelectionOnPage>* merged = win->CurrentTab()->selectionOnPage;
+        if (!merged) {
+            merged = new Vec<SelectionOnPage>();
+            win->CurrentTab()->selectionOnPage = merged;
+        }
+        for (auto& accum : *win->selection.altAccum) {
+            merged->Append(accum);
+        }
+        logf("UpdateTextSelection: alt merge: %d accumulated entries -> %d total\n", len(*win->selection.altAccum),
+             len(*merged));
+    }
     win->selection.showSelection = win->CurrentTab()->selectionOnPage != nullptr;
 
     if (win->uiaProvider) {
@@ -765,8 +786,28 @@ void OnSelectionEdgeAutoscroll(MainWindow* win, int x, int y) {
     }
 }
 
-void OnSelectionStart(MainWindow* win, int x, int y, WPARAM /*key*/) {
+void OnSelectionStart(MainWindow* win, int x, int y, WPARAM key) {
     ReportIf(!win->AsFixed());
+    bool isShift = IsShiftPressed();
+    bool isCtrl = IsCtrlPressed();
+    // Alt+drag: ADDITIVE text selection — the regions selected before are
+    // kept and merged with the new drag (multiple disjoint selections, e.g.
+    // to group into one flashcard with S). Alt alone: Ctrl still forces the
+    // rectangular selection. Physical Alt via GetKeyState; the MK_ALT wParam
+    // bit mirrors Canvas.cpp and enables synthetic (test) input.
+    bool isAlt = (IsAltPressed() || (LOWORD(key) & MK_ALT)) && !isCtrl;
+    logf("OnSelectionStart: alt=%d at (%d,%d)\n", (int)isAlt, x, y);
+    win->selection.altSelecting = isAlt;
+    if (isAlt) {
+        // park the current selection entries before the wipe below frees
+        // them; each drag update merges them back into selectionOnPage
+        WindowTab* tabAlt = win->CurrentTab();
+        delete win->selection.altAccum; // drop any stale accumulation
+        win->selection.altAccum = tabAlt ? tabAlt->selectionOnPage : nullptr;
+        if (tabAlt) {
+            tabAlt->selectionOnPage = nullptr;
+        }
+    }
     // selecting with the mouse takes over: leave keyboard selection mode so its
     // caret and help bar don't linger over a mouse selection
     StopSelectTextWithKeyboard(win);
@@ -777,9 +818,6 @@ void OnSelectionStart(MainWindow* win, int x, int y, WPARAM /*key*/) {
     win->selection.showSelection = true;
     win->selection.selectingByWord = false;
     win->mouseAction = MouseAction::Selecting;
-
-    bool isShift = IsShiftPressed();
-    bool isCtrl = IsCtrlPressed();
 
     // Ctrl+drag forces a rectangular selection
     if (!isCtrl || isShift) {
@@ -839,7 +877,16 @@ void OnSelectionStop(MainWindow* win, int x, int y, bool aborted) {
             Rect::FromXY(win->selection.selectionRect.x, win->selection.selectionRect.y, x, y);
         if (aborted || (MouseAction::Selecting == win->mouseAction ? win->selection.selectionRect.IsEmpty()
                                                                    : !win->CurrentTab()->selectionOnPage)) {
-            DeleteOldSelectionInfo(win, true);
+            if (win->selection.altSelecting && win->selection.altAccum) {
+                // Alt+click without a drag: restore the regions parked at
+                // drag start instead of losing the accumulated selection
+                delete win->CurrentTab()->selectionOnPage;
+                win->CurrentTab()->selectionOnPage = win->selection.altAccum;
+                win->selection.altAccum = nullptr;
+                win->selection.showSelection = true;
+            } else {
+                DeleteOldSelectionInfo(win, true);
+            }
         } else if (win->mouseAction == MouseAction::Selecting) {
             win->selection.selectionRect = NormalizeScreenRect(win->selection.selectionRect);
             win->CurrentTab()->selectionOnPage =
@@ -849,6 +896,11 @@ void OnSelectionStop(MainWindow* win, int x, int y, bool aborted) {
         win->selection.selectionDragEdge = SelectionDragEdge::None;
     }
     win->selection.selectingByWord = false;
+    // the additive drag ended: the accumulated regions are already merged
+    // into selectionOnPage — release the parking buffer
+    win->selection.altSelecting = false;
+    delete win->selection.altAccum;
+    win->selection.altAccum = nullptr;
     // refresh selection-dependent toolbar buttons once, when the selection is
     // finalized, rather than on every repaint while dragging (UpdateTextSelection
     // runs from PaintSelection on each frame, which flickered the toolbar)

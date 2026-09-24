@@ -2,7 +2,7 @@ digraph Flashcard {
     rankdir=TB;
     node [shape=box, style=rounded];
 
-    create [label="Create card (CmdFlashcardAdd)\nselection -> MuPDF Highlight (author=TumatraPDF-Flashcard)\ncontent EMPTY (positional mask, no text duplication)\nkey = hash(pageNo, bounds) - stable across saves", fillcolor="#c8e6c9", style=filled];
+    create [label="Create card (CmdFlashcardAdd)\nselection -> MuPDF Highlight (author=TumatraPDF-Flashcard)\ncontent EMPTY (positional mask, no text duplication)\nkey = hash(pageNo, bounds) - stable across saves\nMULTI-SELECT: Alt+drag sums disjoint selections\n(SelectionState.altAccum; Alt+click abort = restore)\n-> ONE annot with N quads = ONE card, N mask rects\n(cross-page: one card per page, annots are page-bound)", fillcolor="#c8e6c9", style=filled];
     load [label="CmdFlashcardToggle ON\nFlashcardLoadFromDocument (by author, not 'Q:' prefix)\n+ FlashcardStudyLoad (studyDoc persistence)", fillcolor="#bbdefb", style=filled];
     filter [label="BuildFilteredStudyOrder\nnew (rating==0) OR due (nextReviewAt <= now)\norder: sequential (default) | random (Fisher-Yates,\nFlashcardSettings.RandomOrder pref, Order btn toggles)", fillcolor="#bbdefb", style=filled];
     study [label="Study mode\nopaque mask ONLY on current card (studyMode && !revealMode)\nfirst card: vertically CENTERED, instant scroll\n(FlashcardNavigateToCard: viewport-relative delta\nScrollYBy(screenRect.y + dy/2 - vpdy/2))", fillcolor="#e1bee7", style=filled];
