@@ -85,6 +85,10 @@
 #define IDC_TOC_LABEL_WITH_CLOSE 1101
 #define IDC_FAV_LABEL_WITH_CLOSE 1106
 #define IDC_ARCH_LABEL_WITH_CLOSE 1107
+// flashcard UI (dedicated IDs - don't reuse the main toolbar's)
+#define IDC_FLASHCARD_REBAR 1108
+#define IDC_FLASHCARD_TOOLBAR 1109
+#define IDC_FLASHCARD_LABEL_WITH_CLOSE 1110
 #define IDB_RELOADING_CUE 2010
 
 #define IDC_STATIC (-1)

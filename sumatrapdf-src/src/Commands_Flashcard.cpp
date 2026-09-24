@@ -223,6 +223,9 @@ bool HandleCommandFlashcard(MainWindow* win, int cmd) {
                 }
             } else {
                 FlashcardToolbarDestroy(win);
+                // sidebar is owned by flashcard mode: destroy it too, or it
+                // stays floating with a stale list (FC-R3)
+                FlashcardSidebarDestroy(win);
                 RelayoutFrame(win, true, -1);
                 win->flashcard.studyMode = false;
                 win->flashcard.revealMode = false;
@@ -309,6 +312,8 @@ bool HandleCommandFlashcard(MainWindow* win, int cmd) {
                 MainWindowRerender(win);
                 ToolbarUpdateStateForWindow(win, true);
                 FlashcardToolbarUpdateCount(win);
+                // keep an open sidebar's list in sync with the new card (FC-M2)
+                FlashcardSidebarPopulate(win);
                 logf("[fc] Cloze card added (positional mask, no duplicated content), %d page(s) covered\n",
                      len(pageNos));
             }

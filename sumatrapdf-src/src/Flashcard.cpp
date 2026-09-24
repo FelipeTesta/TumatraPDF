@@ -172,10 +172,14 @@ void FlashcardStudySave(const char* filePath, const FlashcardStudyDoc& doc) {
         dir::CreateAll(Str(dir));
     }
 
-    FILE* f = fopen(path.s, "wb");
+    // atomic write: serialize into a temp file next to the target, then
+    // replace in one move — a crash / Drive-sync stall mid-write can never
+    // leave a truncated JSON behind
+    TempStr tmpPath = str::JoinTemp(path, StrL(".tmp"));
+    FILE* f = fopen(tmpPath.s, "wb");
     if (!f) {
         logf("[fc] FlashcardStudySave - ERROR: failed to open file %s\n", Str(filePath));
-        logf("FlashcardStudySave: failed to open '%s' for writing\n", path);
+        logf("FlashcardStudySave: failed to open '%s' for writing\n", tmpPath);
         return;
     }
 
@@ -200,9 +204,23 @@ void FlashcardStudySave(const char* filePath, const FlashcardStudyDoc& doc) {
             "\n  }\n"
             "}\n");
 
-    logf("[fc] FlashcardStudySave - saved %d entries\n", len(doc.states));
-
     fclose(f);
+
+    // MOVEFILE_REPLACE_EXISTING makes the swap single-step; fall back to
+    // remove+rename if the replace fails (e.g. antivirus holding a handle)
+    WCHAR* tmpW = CWStrTemp(ToWStrTemp(tmpPath));
+    WCHAR* dstW = CWStrTemp(ToWStrTemp(Str(path)));
+    BOOL ok = MoveFileExW(tmpW, dstW, MOVEFILE_REPLACE_EXISTING);
+    if (!ok) {
+        remove(path.s);
+        ok = rename(tmpPath.s, path.s) == 0;
+    }
+    if (!ok) {
+        logf("[fc] FlashcardStudySave - ERROR: failed to replace '%s'\n", Str(path));
+        return;
+    }
+
+    logf("[fc] FlashcardStudySave - saved %d entries\n", len(doc.states));
 }
 
 // Simple JSON parser for the flashcard study file.
@@ -418,5 +436,3 @@ void FlashcardSm2Update(FlashcardStudyState& state, int rating) {
 
     logf("[fc] FlashcardSm2Update - new interval=%d ease=%.2f\n", state.interval, state.easeFactor);
 }
-
-#include "Flashcard.h"

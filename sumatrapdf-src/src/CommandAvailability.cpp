@@ -254,6 +254,21 @@ static UINT_PTR removeIfChm[] = {
     CmdAutoScrollToggle,
     CmdAutoScrollSpeedUp,
     CmdAutoScrollSpeedDown,
+    // flashcards are PDF-only (annotation-based; need DisplayModel)
+    CmdFlashcardToggle,
+    CmdFlashcardStudy,
+    CmdFlashcardAdd,
+    CmdFlashcardBack,
+    CmdFlashcardNext,
+    CmdFlashcardOrderToggle,
+    CmdFlashcardCleanHistory,
+    CmdFlashcardFilter,
+    CmdFlashcardReveal,
+    CmdFlashcardRate1,
+    CmdFlashcardRate2,
+    CmdFlashcardRate3,
+    CmdFlashcardRate4,
+    CmdFlashcardLista,
     0,
 };
 
@@ -267,6 +282,21 @@ static UINT_PTR removeIfMarkdown[] = {
     CmdArchMeasure,
     CmdArchClear,
     CmdArchResetScale,
+    // flashcards are PDF-only (annotation-based; need DisplayModel)
+    CmdFlashcardToggle,
+    CmdFlashcardStudy,
+    CmdFlashcardAdd,
+    CmdFlashcardBack,
+    CmdFlashcardNext,
+    CmdFlashcardOrderToggle,
+    CmdFlashcardCleanHistory,
+    CmdFlashcardFilter,
+    CmdFlashcardReveal,
+    CmdFlashcardRate1,
+    CmdFlashcardRate2,
+    CmdFlashcardRate3,
+    CmdFlashcardRate4,
+    CmdFlashcardLista,
     0,
 };
 

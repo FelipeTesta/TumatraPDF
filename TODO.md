@@ -449,7 +449,7 @@ __________________________________]
 | ------------- | ------------ | --------- | ---------- | ---------------------------------------------------------------------------- |
 | Off           | false        | —         | —          | nothing (zero cost)                                                        |
 | Reading       | true         | false     | false      | subtle translucent marker (`30,128,128,128`) on ALL — text visible         |
-| Study         | true         | true      | false      | opaque mask (`200,100,100,100`) ONLY on current card — text hidden         |
+| Study         | true         | true      | false      | opaque mask (`255,100,100,100`) ONLY on current card — text hidden         |
 | Study+Reveal  | true         | true      | true       | NO mask on current card — original text visible (PDF 40% highlight stays)  |
 
 > Rule: **opaque mask only in `studyMode && !revealMode` and only on the current card rect.** Otherwise, never cover text. The current bug (FC-A) draws the mask on all cards and does not remove it on reveal.
@@ -545,11 +545,11 @@ __________________________________]
 #### Confirmed bugs
 
 - [x] **FC-R1 TC2 routing gap in navigation** — FIXED 2026-09-23 (s14): all study navigation now goes through `FlashcardNavigateToCard` (routes `PhysicalToVirtualForRect`; used by study-first, rate-advance, Next). Back intentionally keeps scroll position (post-reveal spec).
-- [ ] **FC-R2 Mojibake**: FlashcardSidebar.cpp:274 `"Card %d â€” Page %d"` — double-encoded em-dash renders as `â€”` in the UI.
-- [ ] **FC-R3 Sidebar orphaned on flashcard OFF**: `CmdFlashcardToggle` OFF destroys the toolbar but NOT the sidebar → floating popup with stale list (clicks fail the bounds guard silently).
-- [ ] **FC-R4 Duplicate control IDs**: FlashcardToolbar.cpp:36/:52 reuses `IDC_REBAR`/`IDC_TOOLBAR` (same as main toolbar); sidebar reuses `IDC_FAV_LABEL_WITH_CLOSE`. Latent `GetDlgItem` landmine — no callers today; ArchTools pattern uses dedicated IDs. Fix: add `IDC_FLASHCARD_REBAR`/`IDC_FLASHCARD_TOOLBAR` to resource.h.
-- [ ] **FC-R5 dwStyle/exStyle mix**: FlashcardSidebar.cpp:162 passes `WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE` as STYLE flags; `WS_EX_NOACTIVATE` is never applied (exStyle param only carries WS_EX_TOOLWINDOW).
-- [ ] **FC-R6 Leftover `[fc-paint]` diagnostic logs**: Canvas.cpp:3422-3457 (first-10-paints geometry logs from the trim-offset investigation — that bug was fixed via the central CvtToScreen trim offset; strip the logs).
+- [x] **FC-R2 Mojibake** — FIXED 2026-09-24: proper UTF-8 em-dash in FlashcardSidebar.cpp card label (compiled with /utf-8).
+- [x] **FC-R3 Sidebar orphaned on flashcard OFF** — FIXED 2026-09-24: `CmdFlashcardToggle` OFF now calls `FlashcardSidebarDestroy` next to `FlashcardToolbarDestroy`.
+- [x] **FC-R4 Duplicate control IDs** — FIXED 2026-09-24 (s19): dedicated `IDC_FLASHCARD_REBAR`/`IDC_FLASHCARD_TOOLBAR`/`IDC_FLASHCARD_LABEL_WITH_CLOSE` (resource.h 1108-1110); toolbar rebar/toolbar + sidebar label no longer reuse the main toolbar's / favorites' IDs.
+- [x] **FC-R5 dwStyle/exStyle mix** — FIXED 2026-09-24 (s19): sidebar popup now passes `WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE` in the exStyle PARAM (they were silently ignored inside dwStyle) — NOACTIVATE actually applies now: clicking the floating list doesn't steal focus from the canvas.
+- [x] **FC-R6 Leftover `[fc-paint]` diagnostic logs** — STRIPPED 2026-09-24 from Canvas.cpp (both the first-10-paints header block and the per-rect log; paint logic untouched).
 
 #### Decisions pending (user)
 
@@ -559,8 +559,8 @@ __________________________________]
 #### Missing vs plan
 
 - [ ] **FC-M1 Step 8 tests**: none — Sm2Update (intervals, ease cap, relearn), study-JSON roundtrip, due filter.
-- [ ] **FC-M2 Sidebar not refreshed after `CmdFlashcardAdd`** (stale list until sidebar re-toggle).
-- [ ] **FC-M3 No availability gating**: flashcard commands absent from `removeIfChm`/`removeIfMarkdown` (toggle ON on CHM/MD shows 0/0/0 toolbar); no menu-bar entry (toolbar/palette/selection only).
+- [x] **FC-M2 Sidebar not refreshed after `CmdFlashcardAdd`** — FIXED 2026-09-24: `FlashcardSidebarPopulate(win)` called after Add (self-guards when sidebar is closed).
+- [x] **FC-M3 No availability gating** — FIXED 2026-09-24 (s19): all 14 flashcard commands added to `removeIfChm` + `removeIfMarkdown` (CommandAvailability.cpp) — no more flashcard toolbar/no-op commands on CHM/MD docs. (Menu-bar entry intentionally absent — toolbar/palette UX by design.)
 - [ ] **FC-M4 Filter dialog UX**: two sequential GoToPage dialogs; compares PHYSICAL pageNo while TC2 shows "3L" labels; filter not re-applied to an active studyOrder.
 - [ ] **FC-M5 Rate keys 1-4 have no visual hint** (no rate buttons/tooltips on the toolbar).
 
@@ -568,10 +568,36 @@ __________________________________]
 
 - [x] **FC-H1** FIXED 2026-09-23 (s14): `HandleFlashcardRate` now range-checks `currentCardIdx` (both bounds) before indexing; `FlashcardNavigateToCard` guards `cardIdx` too.
 - [ ] **FC-H2** Full-document scan under `docLock` on Toggle ON (UI freeze on huge PDFs; could pre-check /Annots per page before `fz_load_page`).
-- [ ] **FC-H3** Study JSON: locale-dependent float write (`fprintf %.4f` + `strtof` — non-portable across locales), no atomic write (temp+rename), deleted-card states never pruned.
-- [ ] **FC-H4** Stray `#include "Flashcard.h"` at end of Flashcard.cpp:420 (belongs with the include block at top).
-- [ ] **FC-H5** Doc drift: TODO render matrix says mask alpha 200 (code = 255 opaque); MainWindow.h:439 comment "(Space pressed)"; FLOW/flashcard.dot "Reveal (Space/Enter)".
+- [ ] **FC-H3 Study JSON**: ~~locale-dependent float~~ (NON-ISSUE 2026-09-24: CRT fprintf uses the default "C" locale — app never calls setlocale; the decimal-comma bug was in str::VsnprintfUtf8's `_create_locale`, fixed in eaad4e6) — ~~atomic write~~ DONE 2026-09-24 (s19: tmp + MoveFileExW REPLACE_EXISTING, remove+rename fallback, verified via repro); **REMAINING**: prune states of deleted cards (save only entries whose key matches an existing card).
+- [x] **FC-H4** FIXED 2026-09-24: stray trailing `#include "Flashcard.h"` removed from Flashcard.cpp (top include block already has it).
+- [x] **FC-H5** FIXED 2026-09-24: TODO render matrix alpha 200→255 (matches code); MainWindow.h comment "(Space pressed)"→"(Space/Enter)"; FLOW dot was already correct.
 
 #### Verified OK (no action)
 
 Steps 1-5, 7 implemented; render matrix correct in Canvas (per-quad + PhysicalToVirtualForRect + central trim offset); stable key; `fz_try/fz_catch` scan; toolbar checked states; SM-2 ease cap + relearn reinsert.
+
+### Feature (PLANNED, awaiting user decisions): Image Occlusion cards (boxes over images/diagrams)
+
+Requested 2026-09-24 ("cards por criação de boxes, integrada ao sistema atual").
+
+**Integration insight**: a card = `{pageNo, bounds, rects[]}` from a Highlight annot with N quads — a box over an image is just a page-space rect. SAME annot, SAME loader, SAME mask painting / reveal / rate / SM-2 / Clean History / centering: ZERO study-pipeline changes. Only the DRAWING MODE at creation is new.
+
+**Plan (4 steps):**
+- [ ] **IO-1 State**: `FlashcardState` (MainWindow.h) gains `boxMode` (bool) + `Vec<RectF> pendingBoxes` (drawing session on the current page).
+- [ ] **IO-2 Canvas drawing**: "Box" toolbar button (checked state) toggles boxMode; hook in `OnMouseLeftButtonDown` BEFORE text-selection/pan branches: drag = rubber band; boxes accumulate; existing flashcard paint renders pending boxes translucent.
+- [ ] **IO-3 Coordinate conversion**: screen→page via pageNo-from-point + `CvtFromScreen` (same math as cloze; TC2/trim-aware); rects stored in PHYSICAL page space (like text-cloze rects).
+- [ ] **IO-4 Creation**: `S` (CmdFlashcardAdd) branches: if pendingBoxes → create ONE Highlight annot with boxes as quads (same author/color path) → 1 card with N masks. Esc or Box-toggle-off discards pending boxes. Mouse feature → USER tests live (no automation).
+
+**Design decisions PENDING (user thinking):**
+- [ ] **IO-D1 Grouping**: boxes session → 1 grouped card (consistent with Alt+multi-select; recommended) vs 1 card per box (Anki default)?
+- [ ] **IO-D2 Mode entry**: toolbar "Box" button only? key 'B'? both?
+- [ ] **IO-D3 Scope**: boxes may cover image/diagram regions (NO text selection involved) — confirm.
+
+**Queue triage (2026-09-24, high gain / low effort):**
+- [x] **FC-M3 gating** — DONE 2026-09-24 (s19): all flashcard commands in `removeIfChm`/`removeIfMarkdown`.
+- [x] **FC-H3 atomic write** — DONE 2026-09-24 (s19): tmp + MoveFileExW REPLACE_EXISTING (remove+rename fallback), verified via repro. Locale float = non-issue (CRT default "C"; see FC-H3 above).
+- [x] FC-R4/FC-R5 hygiene bundle — DONE 2026-09-24 (s19): dedicated IDs + exStyle properly applied.
+- [ ] FC-H3 prune (save only states with existing cards) — medium, defer.
+- [ ] FC-M1 tests (SM-2/JSON roundtrip/due filter) — after image occlusion.
+- [ ] FC-H2 scan perf, FC-M4 filter UX, FC-M5 rate hints — later.
+- [ ] LAST (user-ordered): Order/Filter/Lista button redo.

@@ -437,7 +437,7 @@ struct MainWindow {
     struct FlashcardState {
         bool on = false;            // flashcard mode active
         bool studyMode = false;     // true when actively studying
-        bool revealMode = false;    // true when answer is revealed (Space pressed)
+        bool revealMode = false;    // true when answer is revealed (Space/Enter)
         int currentCardIdx = -1;    // index in study order
         Vec<int> studyOrder;        // filtered/due card indices (session queue)
         int filterPageFrom = -1;    // filter: start page (-1 = all)

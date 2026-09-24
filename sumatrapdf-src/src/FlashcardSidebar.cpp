@@ -159,19 +159,23 @@ void FlashcardSidebarCreate(MainWindow* win) {
     logf("[fc] FlashcardSidebarCreate - creating sidebar popup\n");
 
     HMODULE h = GetModuleHandleW(nullptr);
-    DWORD dwStyle = WS_POPUP | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE;
+    // WS_EX_* flags belong in the exStyle PARAM, not in dwStyle (they were
+    // silently ignored there); WS_EX_NOACTIVATE keeps clicks on the floating
+    // list from stealing focus from the canvas
+    DWORD dwStyle = WS_POPUP;
+    DWORD exStyle = WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE;
     int dx = DpiScale(win->hwndFrame, 280);
     int dy = DpiScale(win->hwndFrame, 400);
 
-    win->flashcard.hwndListaBox = CreateWindowExW(WS_EX_TOOLWINDOW, WC_STATIC, L"Flashcards", dwStyle, 0, 0, dx, dy,
-                                                  win->hwndFrame, nullptr, h, nullptr);
+    win->flashcard.hwndListaBox =
+        CreateWindowExW(exStyle, WC_STATIC, L"Flashcards", dwStyle, 0, 0, dx, dy, win->hwndFrame, nullptr, h, nullptr);
     if (!win->flashcard.hwndListaBox) return;
 
     auto* l = new LabelWithCloseWnd();
     {
         LabelWithCloseWnd::CreateArgs args;
         args.parent = win->flashcard.hwndListaBox;
-        args.cmdId = IDC_FAV_LABEL_WITH_CLOSE;
+        args.cmdId = IDC_FLASHCARD_LABEL_WITH_CLOSE;
         args.font = GetAppSidebarLabelFont(win->hwndFrame);
         args.isRtl = IsUIRtl();
         l->Create(args);
@@ -271,7 +275,7 @@ void FlashcardSidebarPopulate(MainWindow* win) {
     for (int i = 0; i < len(win->flashcard.cards); i++) {
         Flashcard& card = win->flashcard.cards[i];
         auto* item = new ListaTreeModel::ListaTreeItem();
-        item->text = fmt("Card %d â€” Page %d", i + 1, card.pageNo);
+        item->text = fmt("Card %d — Page %d", i + 1, card.pageNo);
         item->cardIdx = i;
         item->parent = model->rootItem;
         model->rootItem->children.Append(item);

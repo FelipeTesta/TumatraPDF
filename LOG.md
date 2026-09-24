@@ -1,5 +1,32 @@
 # TumatraPDF — Development Log
 
+## 2026-09-24 (s19) — High-gain mini-batch: M3 gating, atomic JSON save, R4/R5 (BUILD OK, deployed)
+
+### Added
+- **FC-M3 availability gating**: all 14 flashcard commands added to `removeIfChm` + `removeIfMarkdown` (CommandAvailability.cpp) — no more flashcard toolbar / no-op commands on CHM and Markdown docs (flashcards are annotation-based, PDF-only).
+- **FC-H3 atomic study-JSON save**: `FlashcardStudySave` now serializes to `<path>.tmp` then swaps with `MoveFileExW(MOVEFILE_REPLACE_EXISTING)` (fallback: remove+rename for antivirus-handle cases) — a crash or Drive-sync stall mid-write can never leave a truncated history file. Verified end-to-end via the cloze repro (saved 1 → Clean → saved 0, no replace errors, JSON valid).
+
+### Fixed
+- **FC-R4 duplicate control IDs**: dedicated `IDC_FLASHCARD_REBAR` (1108) / `IDC_FLASHCARD_TOOLBAR` (1109) / `IDC_FLASHCARD_LABEL_WITH_CLOSE` (1110) in resource.h; flashcard rebar/toolbar/sidebar-label no longer reuse the main toolbar's / favorites' IDs (latent GetDlgItem landmine removed).
+- **FC-R5 style/exStyle mix**: sidebar popup's `WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE` moved from dwStyle (silently ignored there) into the exStyle PARAM — NOACTIVATE now actually applies: clicking the floating card list no longer steals focus from the canvas.
+
+### Notes
+- **FC-H3 locale sub-item = NON-ISSUE** (verified): CRT `fprintf %.4f` uses the default "C" locale — the app never calls `setlocale` (only EngineDump sets "C" explicitly); the decimal-comma bug lived in `str::VsnprintfUtf8`'s `_create_locale(".UTF-8")`, fixed in eaad4e6. Remaining FC-H3 part: prune states of deleted cards (defer).
+- Image-occlusion feature PLANNED (TODO section IO-1..IO-4); design decisions IO-D1/D2/D3 pending user.
+
+## 2026-09-24 (s18) — Flashcard mechanical batch: R2/R3/R6, M2, H4/H5 (BUILD OK, deployed)
+
+### Fixed
+- **FC-R2 Mojibake**: sidebar card label `"Card %d â€” Page %d"` (double-encoded em-dash) → proper UTF-8 em-dash (project compiles with /utf-8).
+- **FC-R3 Sidebar orphaned**: `CmdFlashcardToggle` OFF now destroys the sidebar along with the toolbar — no more floating popup with a stale list.
+- **FC-M2 Sidebar stale after Add**: `FlashcardSidebarPopulate(win)` called after `CmdFlashcardAdd` (self-guards when closed).
+- **FC-R6**: stripped the `[fc-paint]` first-10-paints diagnostic logs from Canvas.cpp (header block + per-rect block + counter; paint logic untouched).
+- **FC-H4**: stray trailing `#include "Flashcard.h"` removed from Flashcard.cpp (top block already includes it).
+- **FC-H5 doc drift**: TODO render matrix mask alpha 200→255 (matches code); MainWindow.h comment "(Space pressed)"→"(Space/Enter)"; FLOW dot already correct.
+
+### Remaining flashcard queue
+- FC-M1 Step-8 tests (SM-2/JSON/due-filter) · FC-R4 duplicate control IDs · FC-R5 dwStyle/exStyle mix · FC-H2 scan under lock · FC-H3 JSON robustness (atomic write, prune) · FC-M3 CHM/MD gating · FC-M4 filter UX · FC-M5 rate hints · LAST: Order/Filter/Lista button redo (user-reported incorrect).
+
 ## 2026-09-24 (s17) — Multi-select: Alt+drag sums selections → ONE grouped flashcard (BUILD OK, deployed, USER-VERIFIED)
 
 ### Added

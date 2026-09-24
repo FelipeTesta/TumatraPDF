@@ -33,8 +33,8 @@ void FlashcardToolbarCreate(MainWindow* win) {
         style |= WS_BORDER | RBS_BANDBORDERS;
     }
     DWORD exStyle = WS_EX_TOOLWINDOW;
-    HWND hwndRebar = CreateWindowExW(exStyle, REBARCLASSNAME, nullptr, style, 0, 0, 0, 0, hwndParent, (HMENU)IDC_REBAR,
-                                     hinst, nullptr);
+    HWND hwndRebar = CreateWindowExW(exStyle, REBARCLASSNAME, nullptr, style, 0, 0, 0, 0, hwndParent,
+                                     (HMENU)IDC_FLASHCARD_REBAR, hinst, nullptr);
 
     REBARINFO rbi{};
     rbi.cbSize = sizeof(REBARINFO);
@@ -49,7 +49,7 @@ void FlashcardToolbarCreate(MainWindow* win) {
     bool isRtl = (GetWindowLong(hwndParent, GWL_EXSTYLE) & WS_EX_LAYOUTRTL) != 0;
     if (isRtl) exStyle |= WS_EX_LAYOUTRTL;
     HWND hwndToolbar = CreateWindowExW(exStyle, TOOLBARCLASSNAME, nullptr, style, 0, 0, 0, 0, hwndRebar,
-                                       (HMENU)IDC_TOOLBAR, hinst, nullptr);
+                                       (HMENU)IDC_FLASHCARD_TOOLBAR, hinst, nullptr);
     TbSetButtonStructSize(hwndToolbar, sizeofi(TBBUTTON));
 
     // Add study-control buttons (text-only, no icons)

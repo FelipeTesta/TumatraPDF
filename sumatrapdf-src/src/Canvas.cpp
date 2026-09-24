@@ -3420,21 +3420,6 @@ static bool DrawDocument(MainWindow* win, HDC hdc, Rect rcArea) {
         if (win->flashcard.studyMode && win->flashcard.currentCardIdx >= 0 && len(win->flashcard.studyOrder) > 0) {
             studyCardIdx = win->flashcard.studyOrder[win->flashcard.currentCardIdx];
         }
-        // Temp debug logging: first paints only, to verify cloze rect mapping
-        static int fcPaintLogCount = 0;
-        int cardN = len(win->flashcard.cards);
-        if (fcPaintLogCount < 10) {
-            Rect canvasRc(Point(), dm->GetCanvasSize());
-            PageInfo* piDbg = cardN > 0 ? dm->GetPageInfo(win->flashcard.cards[0].pageNo) : nullptr;
-            logf(
-                "[fc-paint] studyMode=%d reveal=%d studyCardIdx=%d nCards=%d trim=%d canvas=%dx%d "
-                "pi->pageOnScreen=%s\n",
-                (int)win->flashcard.studyMode, (int)win->flashcard.revealMode, studyCardIdx, cardN,
-                (int)dm->marginTrimEnabled, canvasRc.dx, canvasRc.dy,
-                piDbg ? fmt("(x=%d y=%d dx=%d dy=%d)", piDbg->pageOnScreen.x, piDbg->pageOnScreen.y,
-                            piDbg->pageOnScreen.dx, piDbg->pageOnScreen.dy)
-                      : StrL("null"));
-        }
         for (int i = 0; i < len(win->flashcard.cards); i++) {
             const Flashcard& card = win->flashcard.cards[i];
             if (card.pageNo < 1) continue;
@@ -3448,14 +3433,6 @@ static bool DrawDocument(MainWindow* win, HDC hdc, Rect rcArea) {
                 int vPage = dm->PhysicalToVirtualForRect(card.pageNo, card.rects[rIdx], &vr);
                 if (!dm->ValidPageNo(vPage)) continue;
                 Rect rc = dm->CvtToScreen(vPage, vr);
-                if (fcPaintLogCount < 10) {
-                    logf(
-                        "[fc-paint]   card %d rect[%d] page=%d phys y=%.1f..%.1f x=%.1f..%.1f -> vPage=%d screen x=%d "
-                        "y=%d dx=%d dy=%d\n",
-                        i, rIdx, card.pageNo, (double)card.rects[rIdx].y,
-                        (double)(card.rects[rIdx].y + card.rects[rIdx].dy), (double)card.rects[rIdx].x,
-                        (double)(card.rects[rIdx].x + card.rects[rIdx].dx), vPage, rc.x, rc.y, rc.dx, rc.dy);
-                }
                 if (i == studyCardIdx && !win->flashcard.revealMode) {
                     // Studying this card: opaque mask hides the cloze text ([_____])
                     Gdiplus::Color col(255, 100, 100, 100); // dark gray, fully opaque
@@ -3470,7 +3447,6 @@ static bool DrawDocument(MainWindow* win, HDC hdc, Rect rcArea) {
                 }
             }
         }
-        fcPaintLogCount++;
     }
     // keep the floating selection toolbar aligned with the selection while
     // scrolling/zooming; hides itself when the selection is gone or off-screen
