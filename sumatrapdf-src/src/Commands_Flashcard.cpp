@@ -266,6 +266,18 @@ static void FlashcardNavigateToEntry(MainWindow* win, const FlashcardQueueEntry&
     }
 }
 
+// public wrapper for the Lista panel: navigate the CURRENT tab to one of its
+// cards (tab switch is a no-op here — the list shows the current document)
+void FlashcardNavigateToCardInCurrentTab(MainWindow* win, int cardIdx) {
+    WindowTab* tab = win->CurrentTab();
+    if (!tab) {
+        return;
+    }
+    FlashcardQueueEntry e{tab, cardIdx};
+    logf("[fc] Lista - navigating to card %d of '%s'\n", cardIdx, FlashcardTabLogName(tab));
+    FlashcardNavigateToEntry(win, e, true);
+}
+
 static void HandleFlashcardRate(MainWindow* win, int rating) {
     int curIdx = win->flashcard.currentCardIdx;
     if (curIdx < 0 || curIdx >= len(win->flashcard.studyOrder)) {
@@ -316,6 +328,8 @@ static void HandleFlashcardRate(MainWindow* win, int rating) {
     logf("[fc] HandleFlashcardRate - rated %d card %d of '%s'\n", rating, e.cardIdx, FlashcardTabLogName(e.tab));
 
     FlashcardToolbarUpdateCount(win);
+    // the Lista panel's Due/Status columns changed for this card
+    FlashcardSidebarPopulate(win);
 
     // Advance to next card: it arrives masked (front / pre-reveal state) and
     // vertically centered in the viewport (switching tabs when the next card
@@ -607,6 +621,7 @@ bool HandleCommandFlashcard(MainWindow* win, int cmd) {
                 FlashcardStudySave(tab->filePath.s, tab->flashcard.studyDoc);
                 FlashcardToolbarUpdateCount(win);
                 FlashcardToolbarUpdateState(win);
+                FlashcardSidebarPopulate(win); // every card is "new" now
                 MainWindowRerender(win);
                 logf("[fc] CmdFlashcardCleanHistory - review history cleared for this doc\n");
             } else if (res == kFlashcardCleanAllBooks) {

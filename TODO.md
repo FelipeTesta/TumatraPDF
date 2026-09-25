@@ -604,6 +604,6 @@ Requested 2026-09-24 ("cards por criação de boxes, integrada ao sistema atual"
 - [x] **Clean History rework** — DONE 2026-09-24 (s21): dialog reworked — "Clear current book" 2s hold (orange) / "Clear ALL books" 5s hold (red, deletes study JSONs + resets every tab's state); "No" button removed, X/Esc cancels. See LOG s21.
 - [x] **Filter button redo** — DONE 2026-09-25 (s22): Filter window — page-set expression, TOC bookmark mirror (checkbox injects chapter range), Filtros ON/OFF, Limpar filtros (2s hold), cross-doc session checkbox in same window. See LOG s22.
 - [x] **Cross-document study sessions** — DONE 2026-09-25 (s22): scope=global-session queue over all PDF tabs of same window, auto tab-switch on advance, SM-2 saved per book; per-tab cards/studyDoc/filter state (fixes stale cards on tab switch).
-- [ ] (user-ordered queue): **Lista button redo** — LAST, after image occlusion.
+- [x] **Lista button redo** — DONE 2026-09-25 (s23): floating popup replaced by docked RIGHT panel (AI-chat pattern, own splitter) with 4-column owner-drawn list: Flashcard (masked-text label via ExtractPageText, no stored text) | Pág | Due (fresh countdown at draw time) | Status (new=blue/due=orange/learn=purple/ok=green); click row → navigate; toggle via button/label-close; refresh after rate + clean. See LOG s23.
 - [ ] Bookmark-mirror live check on user's real TOC books (test PDF has no TOC — automated test auto-skipped mirror).
-- [ ] User live tests: Filter window + global session (checkbox, cross-tab jumping, per-book saves).
+- [ ] User live tests: Filter window + global session (checkbox, cross-tab jumping, per-book saves); Lista panel visual check (columns/colors/labels on real books).

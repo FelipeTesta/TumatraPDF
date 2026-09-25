@@ -208,7 +208,7 @@ The script compares the version in `sumatrapdf-src/src/Version.h` with the pre-r
 - **Filter window** (Filter button): page-set expression `1-15;20-25;-22-23;` (ranges add, `-` prefix removes, sequential eval) + bookmark mirror (checkbox per TOC item injects the chapter's range; chapter = first bookmark page → page before next flat bookmark, sublevels included) + Filtros ON/OFF (keeps expression) + Limpar filtros (2s hold). Filter is per-book; Aplicar/Enter applies.
 - **Cross-document sessions:** checkbox "Estudar de todos os PDFs abertos (sessão)" — study queue over ALL PDF tabs in the SAME window; advancing auto-switches tab and centers the card; SM-2 saved to each book's own JSON. Two distinct study modes: current document × global session.
 - **Per-tab state:** cards, study history and filter live on the tab (`WindowTab::flashcard`) — switching tabs reloads each book's cards; session/queue lives on the window.
-- **Lista sidebar:** floating list of the book's cards, click → navigate.
+- **Lista panel** (Lista button): docked right-side panel (resizable via splitter) listing the book's cards in 4 columns — Flashcard (the masked text, extracted live; nothing stored in the PDF), Pág, Due (countdown to next review, "0min" when due), Status with colors (new = blue, due = orange, learn = purple, ok = green). Click a row → navigate to the card; refreshed after rating and history wipes.
 
 **Controls:**
 | Shortcut | Action |
@@ -260,6 +260,7 @@ The script compares the version in `sumatrapdf-src/src/Version.h` with the pre-r
 - [x] Flashcard Clean History — per-book (2s) / ALL books (5s) hold-to-confirm buttons
 - [x] Flashcard Filter window — page-set expr + bookmark mirror + ON/OFF + clear (2s hold), per-book filter
 - [x] Flashcard cross-doc study — session checkbox: queue over all PDF tabs of the window, auto tab-switch, per-book SM-2 save
+- [x] Flashcard Lista panel — docked right sidebar, 4 columns (masked-text label, Pág, Due countdown, colored Status), click-to-navigate
 - [ ] Automated tests for new features
 
 ---

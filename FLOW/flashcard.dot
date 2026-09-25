@@ -21,13 +21,15 @@ digraph Flashcard {
 
     clean [label="Clean History (CmdFlashcardCleanHistory, toolbar Clean btn)\ndialog (s21): 'limpar o historico?' + two HOLD buttons, no No (X/Esc cancels)\n'Clear current book' 2s orange drain -> rewrites THIS doc's JSON states:{}\n'Clear ALL books' 5s red drain -> FlashcardDeleteAllStudyFiles() deletes\nevery FlashcardStudy/*.json + resets EVERY tab's in-memory studyDoc (s22)"];
     persist -> clean [style=dashed, label="reset"];
-    pending [label="REMAINING (user-ordered LAST): Lista button redo\n+ bookmark-mirror live check on user's real books;\nimage-occlusion IO-1..IO-4\n(decisions IO-D1/D2/D3 pending)", shape=note, fillcolor="#ffcdd2", style=filled];
+    lista [label="LISTA PANEL (Lista btn -> CmdFlashcardLista, s23)\ndocked RIGHT panel (AI-chat pattern; own width + splitter;\ncanvas shrinks via RelayoutFrame; toggle/label-close hides)\nowner-drawn listbox 4 cols: Flashcard (masked text via\nExtractPageText at populate - NOTHING stored in the PDF) |\nPag | Due (countdown AT DRAW TIME: 0min/Nmin/Nh/Nd/'—') |\nStatus colored: new=blue due=orange learn=purple ok=green\n(rows: FcListRow{cardIdx,pageNo,rating,interval,nextReviewAt})\nclick row -> FlashcardNavigateToCardInCurrentTab\nrefresh after rate + clean-current (FlashcardSidebarPopulate)", fillcolor="#e1bee7", style=filled];
+    pertab -> lista [style=dotted, label="current tab's cards"];
+    pending [label="REMAINING: bookmark-mirror live check on user's real books;\nimage-occlusion IO-1..IO-4\n(decisions IO-D1/D2/D3 pending);\nuser live tests: filter/global-session/Lista visual", shape=note, fillcolor="#ffcdd2", style=filled];
     clean -> pending [style=dotted];
 
     dead [label="Dead code to prune:\nhwndCardCount, studyModeType,\nhistory (TODO Flashcard Step 7)", shape=note, fillcolor="#ffcdd2", style=filled];
     filter -> dead [style=dotted];
 
-    ui [label="UI: FlashcardToolbar (Study/Reveal/Back/Next/Order/Lista/Filter/Clean\n+ counter btn idx 0 (scope-aware: global = sum over tabs);\nNext grayed w/o next;\nOrder opens Study Order options dialog;\nFilter opens Filter window (checked while filter active)", shape=box, fillcolor="#e3f2fd", style=filled];
+    ui [label="UI: FlashcardToolbar (Study/Reveal/Back/Next/Order/Lista/Filter/Clean\n+ counter btn idx 0 (scope-aware: global = sum over tabs);\nNext grayed w/o next;\nOrder opens Study Order options dialog;\nFilter opens Filter window (checked while filter active);\nLista opens docked panel (checked while open)", shape=box, fillcolor="#e3f2fd", style=filled];
     study -> ui [style=dotted];
 
     pertab [label="PER-TAB STATE (s22 foundation): WindowTab::flashcard\n= FlashcardTabState{cards, studyDoc, filterExpr,\nfilterEnabled, cardsLoaded(lazy)}\nFlashcardOnTabChanged hook in LoadModelIntoTab\n(ensures new tab's cards; fixes cross-tab mask bleed)", fillcolor="#c8e6c9", style=filled];

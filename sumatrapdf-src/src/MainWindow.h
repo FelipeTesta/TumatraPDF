@@ -452,10 +452,14 @@ struct MainWindow {
         // Secondary toolbar
         HWND hwndReBarFlashcard = nullptr;
         HWND hwndToolbarFlashcard = nullptr;
-        // Lista sidebar
+        // Lista sidebar (docked right panel, AI-chat pattern)
         HWND hwndListaBox = nullptr;
-        ILayout* listaLayout = nullptr;
-        TreeView* listaTreeView = nullptr;
+        LabelWithCloseWnd* listaLabel = nullptr; // title strip (owned)
+        HWND hwndListaView = nullptr;            // owner-drawn listbox with 4 columns
+        HWND hwndListaHeader = nullptr;          // column-title strip above the list
+        Splitter* listaSplitter = nullptr;       // drags the panel width
+        int listaDx = 0;                         // applied panel width (0 = default)
+        Vec<FcListRow> listaRows;                // per-row state backing the listbox
     } flashcard;
     // --- end flashcard state ---
 
@@ -574,6 +578,8 @@ struct MainWindow {
             int aiChatDx = 0;
             bool archToolsOn = false;
             bool flashcardOn = false;
+            bool fcListVisible = false;
+            int fcListDx = 0;
         };
         Layout layout; // last applied layout state
         // desired visibility of the sidebar / AI chat panels; applied
@@ -581,6 +587,9 @@ struct MainWindow {
         bool tocVisible = false;
         bool favVisible = false;
         bool aiChatVisible = false;
+        // desired visibility of the flashcard Lista panel (applied by
+        // RelayoutFrame; the panel only exists while flashcard mode is on)
+        bool fcListVisible = false;
         bool updatePending = false; // a WM_UPDATE_UI is queued
         bool toolbarDirty = false;  // repaint the toolbar on the next update
         bool tabsDirty = false;     // repaint the tab bar on the next update

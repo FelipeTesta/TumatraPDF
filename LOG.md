@@ -1,5 +1,30 @@
 # TumatraPDF — Development Log
 
+## 2026-09-25 (s23) — Lista redo: docked right panel with 4-column flashcard list (BUILD OK, deployed)
+
+### Changed
+- **Lista button redo** (the last "incorrect button"): the floating popup (TreeView "Card N — Page N") is GONE. New panel follows the **AI-chat sidebar architecture** — docked child of `hwndFrame` on the RIGHT (own width + own vertical splitter; not entangled with the ToC/Favorites shared left column), canvas shrinks via `RelayoutFrame`. Title strip (LabelWithClose, `IDC_FLASHCARD_LABEL_WITH_CLOSE`) hides the panel; toolbar Lista button checked while open.
+- **4 columns per row** (user spec `|flashcard|pag|due|status|`): **Flashcard** = the masked text itself, extracted on the fly (no stored text — cloze purity kept: `EngineBase::ExtractPageText(pageNo)` per unique page, walk UTF-8 codepoints via `Utf8CodepointAtByte`, keep those whose per-codepoint rect hits a mask rect (inflated 1.5pt), whitespace collapsed, 250-cp cap + ellipsis; fallback "Card N"); **Pág** = physical page; **Due** = countdown computed AT DRAW TIME ("0min" when due, `Nmin`/`Nh`/`Nd`, em dash for new — stays fresh without repopulating); **Status** = colored word.
+- **Status model** (SM-2 fields): `new` = rating 0 (blue), `due` = nextReviewAt ≤ now (orange), `learn` = scheduled but interval ≤ 1 day (purple), `ok` = matured (green) — 4th state required by the data; selection row keeps a readable status color (orange-on-dark / dark-orange-on-light).
+
+### Added
+- `FlashcardSidebar.cpp` REWRITTEN: `WC_STATIC` box (subclass: WM_SIZE → manual layout of label/header/list — AI-chat webview-slot pattern, no VBox) + owner-drawn listbox (`LBS_OWNERDRAWFIXED|LBS_HASSTRINGS|LBS_NOTIFY|WS_VSCROLL`, id `IDC_FLASHCARD_LIST` 1111); label strings live in the listbox items, numeric state in NEW `Vec<FcListRow>{cardIdx,pageNo,rating,interval,nextReviewAt}` (FlashcardState) so draw stays allocation-free. Custom column-header strip (`IDC_FLASHCARD_LIST_HEADER`, subclassed paint) shares `FcListColumnAnchors()` with row drawing (right-aligned Pág/Due at DPI-scaled offsets from the right edge). `FlashcardSidebarCreate/Destroy/Toggle/Populate` + `RelayoutFlashcardListPanel` (called from RelayoutFrame after aiChat) + `OnFcListSplitterMove` (guards the AI-chat width when both panels are open).
+- `MainWindow::UIState`: `fcListVisible` (desired + `Layout` snapshot field `fcListVisible`/`fcListDx` → IsUiLayoutEq + RelayoutFrame geometry block, inner of aiChat). `FlashcardState`: hwndListaBox/listaLabel/listaView/listaHeader/listaSplitter/listaDx/listaRows; `WindowTab`-backed rows.
+- `FlashcardNavigateToCardInCurrentTab(win, cardIdx)` (Commands_Flashcard.cpp, public): wraps `FlashcardNavigateToEntry` for the row-click navigate; log line `[fc] Lista - navigating to card N of 'book'`.
+- Refresh hooks: rate + Clean-current-book now call `FlashcardSidebarPopulate` (Due/Status columns update after a review or a history wipe).
+- `tests/ad-hoc-flashcard-lista.ts` (NEW): log-slice assertions — populate counts (`2 cards (new=2 due=0 learn=0 ok=0)`), docked-right geometry (listbox right edge gap 1px, canvas shrunk left of panel), row-click navigate, toggle off hides + toggle on repopulates. Card creation reuses the retry loop from the filter test (8 attempts, "Cloze card added" log polling).
+
+### Verified (ad-hoc-flashcard-lista.ts — ALL CHECKS PASSED)
+2 cards created (retry loop) ✓ panel populated new=2 ✓ listbox visible + docked right (gap 1px) ✓ canvas shrunk ✓ row click → `Lista - navigating to card 0` ✓ toggle off → hidden ✓ toggle on → visible + repopulated ✓. Visual check (column alignment, colors, masked-text labels on real books) = user tests live.
+
+### Notes / traps
+- **WM_MEASUREITEM for an owner-draw-FIXED listbox fires at window creation — BEFORE our box subclass exists** (and never again): measure in Create AFTER subclassing and force with `LB_SETITEMHEIGHT` (re-measures internally). MEASUREITEM handler kept as fallback with the same formula.
+- `Wnd(HWND)` (wingui) SUBCLASSES on attach + `~Wnd()` destroys the window — never wrap raw HWNDs we manage ourselves (header/list) for layout; position them manually instead (AI-chat webview pattern).
+- `WStr` has NO implicit conversion to `WCHAR*` — DrawTextW/LB_ADDSTRING need `.s` (fmt/logf args need the object; Win32 needs the pointer).
+- `enumChildWindows` enumerates ALL descendants (recursive) — finding the listbox by class from the frame works.
+- Guard: `FlashcardSidebarToggle` no-ops when flashcard mode is OFF (palette-invoked without toolbar).
+- MSBuild release x64 via hard path (build.ts overwrites `Compiled\TumatraPDF.exe` with the DEBUG exe — re-copied `out\rel64` after: 11.1 MB 18:59).
+
 ## 2026-09-25 (s22) — Study Filter window (page-set expr + bookmark mirror) + cross-document sessions (BUILD OK, deployed)
 
 ### Changed

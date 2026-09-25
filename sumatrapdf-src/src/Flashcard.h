@@ -65,6 +65,16 @@ struct FlashcardTabState {
     bool cardsLoaded = false;  // lazy: true once FlashcardLoadFromDocument ran
 };
 
+// FcListRow — backing data for one row of the Lista panel (the label string
+// itself lives in the listbox item; this carries the numeric per-card state)
+struct FcListRow {
+    int cardIdx = -1;
+    int pageNo = -1;
+    int rating = 0;       // last rating 1-4 (0 = new)
+    int interval = 0;     // SM-2 interval in days
+    i64 nextReviewAt = 0; // timestamp (ms)
+};
+
 // Load flashcards from PDF annotations in the current document
 Vec<Flashcard> FlashcardLoadFromDocument(EngineMupdf* engine);
 
@@ -132,5 +142,9 @@ void FlashcardSidebarCreate(MainWindow* win);
 void FlashcardSidebarDestroy(MainWindow* win);
 void FlashcardSidebarToggle(MainWindow* win);
 void FlashcardSidebarPopulate(MainWindow* win);
+// re-lay out + repaint the Lista panel after RelayoutFrame moved it
+void RelayoutFlashcardListPanel(MainWindow* win);
+// scroll the current tab to a card (used by the Lista panel's click)
+void FlashcardNavigateToCardInCurrentTab(MainWindow* win, int cardIdx);
 
 #endif

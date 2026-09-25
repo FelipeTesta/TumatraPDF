@@ -6261,7 +6261,8 @@ static bool IsUiLayoutEq(UILayout* s1, UILayout* s2) {
            s1->isToolbarVisible == s2->isToolbarVisible && s1->tocVisible == s2->tocVisible &&
            s1->showFavorites == s2->showFavorites && s1->favoritesAsTab == s2->favoritesAsTab &&
            s1->showMenuBarRebar == s2->showMenuBarRebar && s1->aiChatVisible == s2->aiChatVisible &&
-           s1->aiChatDx == s2->aiChatDx && s1->archToolsOn == s2->archToolsOn && s1->flashcardOn == s2->flashcardOn;
+           s1->aiChatDx == s2->aiChatDx && s1->archToolsOn == s2->archToolsOn && s1->flashcardOn == s2->flashcardOn &&
+           s1->fcListVisible == s2->fcListVisible && s1->fcListDx == s2->fcListDx;
 }
 
 bool RelayoutFrame(MainWindow* win, bool updateToolbars, int sidebarDx) {
@@ -6290,6 +6291,8 @@ bool RelayoutFrame(MainWindow* win, bool updateToolbars, int sidebarDx) {
     curState.aiChatDx = win->aiChatDx;
     curState.archToolsOn = win->archTools.on;
     curState.flashcardOn = win->flashcard.on;
+    curState.fcListVisible = win->uiState.fcListVisible;
+    curState.fcListDx = win->flashcard.listaDx;
 
     if (IsCurrentDocMarkdown(win) && win->archTools.hwndReBar2) ShowWindow(win->archTools.hwndReBar2, SW_HIDE);
     if (IsCurrentDocMarkdown(win) && win->flashcard.hwndReBarFlashcard)
@@ -6323,6 +6326,11 @@ bool RelayoutFrame(MainWindow* win, bool updateToolbars, int sidebarDx) {
         if (win->hwndAiChatBox) {
             HwndSetVisible(win->hwndAiChatBox, ui.aiChatVisible);
             HwndSetVisible(win->aiChatSplitter->hwnd, ui.aiChatVisible);
+        }
+        if (win->flashcard.hwndListaBox) {
+            bool fcVis = ui.fcListVisible && win->flashcard.on;
+            HwndSetVisible(win->flashcard.hwndListaBox, fcVis);
+            HwndSetVisible(win->flashcard.listaSplitter->hwnd, fcVis);
         }
     }
 
@@ -6602,6 +6610,24 @@ bool RelayoutFrame(MainWindow* win, bool updateToolbars, int sidebarDx) {
         rc.dx -= aiChatDx + kSplitterDx;
     }
 
+    // flashcard Lista panel: docked right, inner of the AI chat panel (both
+    // can be open at once; the Lista panel gets the remaining right edge)
+    if (win->flashcard.on && win->uiState.fcListVisible && win->flashcard.hwndListaBox) {
+        int fcDx = win->flashcard.listaDx;
+        if (fcDx <= 0) {
+            fcDx = DpiScale(win->hwndFrame, 460);
+        }
+        int maxFcDx = std::max(kSidebarMinDx, rc.dx - kMinDocCanvasDx);
+        fcDx = limitValue(fcDx, DpiScale(win->hwndFrame, 260), maxFcDx);
+        win->flashcard.listaDx = fcDx; // remember what's applied
+
+        Rect rSplit(rc.x + rc.dx - fcDx - kSplitterDx, rc.y, kSplitterDx, rc.dy);
+        dh.MoveWindow(win->flashcard.listaSplitter->hwnd, rSplit);
+        Rect rList(rc.x + rc.dx - fcDx, rc.y, fcDx, rc.dy);
+        dh.MoveWindow(win->flashcard.hwndListaBox, rList);
+        rc.dx -= fcDx + kSplitterDx;
+    }
+
     dh.MoveWindow(win->hwndCanvas, rc);
 
     dh.End();
@@ -6638,6 +6664,9 @@ bool RelayoutFrame(MainWindow* win, bool updateToolbars, int sidebarDx) {
     }
     if (win->uiState.aiChatVisible && win->hwndAiChatBox) {
         RelayoutAIChatPanel(win);
+    }
+    if (win->uiState.fcListVisible && win->flashcard.hwndListaBox) {
+        RelayoutFlashcardListPanel(win);
     }
     if (tocVisible || favVisible) {
         HwndInvalidate(win->sidebarSplitter->hwnd, true);

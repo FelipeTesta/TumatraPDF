@@ -220,6 +220,10 @@ void FlashcardToolbarUpdateState(MainWindow* win) {
     bool filterActive = tab && tab->flashcard.filterEnabled && tab->flashcard.filterExpr;
     WPARAM filterState = filterActive ? (TBSTATE_ENABLED | TBSTATE_CHECKED) : TBSTATE_ENABLED;
     SendMessageW(hwnd, TB_SETSTATE, (WPARAM)CmdFlashcardFilter, MAKELONG(filterState, 0));
+    // Lista button: checked while the Lista panel is open
+    bool listaVisible = win->flashcard.hwndListaBox && win->uiState.fcListVisible;
+    WPARAM listaState = listaVisible ? (TBSTATE_ENABLED | TBSTATE_CHECKED) : TBSTATE_ENABLED;
+    SendMessageW(hwnd, TB_SETSTATE, (WPARAM)CmdFlashcardLista, MAKELONG(listaState, 0));
 }
 
 // ---- Clean History confirmation dialog -----------------------------------
