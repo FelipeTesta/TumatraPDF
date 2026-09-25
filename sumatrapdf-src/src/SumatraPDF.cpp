@@ -4113,6 +4113,10 @@ void LoadModelIntoTab(WindowTab* tab) {
     // Restore arch tools measurements for the new tab
     win->ArchRestoreMeasurementsForTab(tab);
 
+    // Flashcard mode: refresh per-tab state (cards/studyDoc are per-document;
+    // without this the previous book's masks would paint over the new doc)
+    FlashcardOnTabChanged(win);
+
     // Restore arch tools scale calibration from FileState for the new tab (tab-switch case)
     if (gGlobalPrefs->archToolsEnabled) {
         Str fp = tab->filePath;

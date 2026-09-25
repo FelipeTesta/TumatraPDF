@@ -858,6 +858,12 @@ const trim: Field[] = [
 
 const flashcard: Field[] = [
   field("RandomOrder", Bool, false, "if true, flashcard study presents cards in random order instead of document order"),
+  field(
+    "NewCardsPosition",
+    Int,
+    2,
+    "where new (never rated) cards go relative to due reviews in the study queue: 0 = new first, 1 = new last, 2 = mixed (interleaved proportionally)",
+  ),
 ];
 
 const globalPrefs: Field[] = [

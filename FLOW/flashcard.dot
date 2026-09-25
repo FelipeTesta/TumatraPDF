@@ -4,7 +4,9 @@ digraph Flashcard {
 
     create [label="Create card (CmdFlashcardAdd)\nselection -> MuPDF Highlight (author=TumatraPDF-Flashcard)\ncontent EMPTY (positional mask, no text duplication)\nkey = hash(pageNo, bounds) - stable across saves\nMULTI-SELECT: Alt+drag sums disjoint selections\n(SelectionState.altAccum; Alt+click abort = restore)\n-> ONE annot with N quads = ONE card, N mask rects\n(cross-page: one card per page, annots are page-bound)", fillcolor="#c8e6c9", style=filled];
     load [label="CmdFlashcardToggle ON\nFlashcardLoadFromDocument (by author, not 'Q:' prefix)\n+ FlashcardStudyLoad (studyDoc persistence)", fillcolor="#bbdefb", style=filled];
-    filter [label="BuildFilteredStudyOrder\nnew (rating==0) OR due (nextReviewAt <= now)\norder: sequential (default) | random (Fisher-Yates,\nFlashcardSettings.RandomOrder pref, Order btn toggles)", fillcolor="#bbdefb", style=filled];
+    filter [label="BuildFilteredStudyOrder\nqueue = Vec<FlashcardQueueEntry>{tab, cardIdx}> (s22)\nnew (rating==0) OR due (nextReviewAt <= now)\ncollected SEPARATELY, combined per NewCardsPosition:\n0=newFirst | 1=newLast | 2=mixed (proportional interleave, default)\nrandom = shuffle WITHIN each group (position stays meaningful)\nSCOPE (s22): current-doc (default) | GLOBAL SESSION = all PDF tabs\nof THIS window (crossDocSession; other windows never count)\nPER-TAB page filter applied independently (FlashcardTabState)\nORDER DIALOG (Order btn): Sequential/Random + Before/After/Mixed, instant apply\n(rebuild + restart from first card, centered)", fillcolor="#bbdefb", style=filled];
+    filterdlg [label="FILTER WINDOW (Filter btn -> CmdFlashcardFilter, s22)\n'Filtro de Estudo' 560x500, class TUMATRA_FLASHCARD_FILTER\nEDIT expr: set syntax 1-15;20-25;-22-23; (add/remove, sequential,\nclamped; FlashcardFilterEval; apply = Aplicar btn / Enter)\nBOOKMARK MIRROR: owner-drawn listbox, checkbox per TOC item,\nrange = page..page-before-next-in-flat-DFS (sublevels covered);\ncheck injects a-b; token + applies instantly, uncheck removes\nFiltros: ON/OFF instant (keeps expr) | Limpar filtros = hold 2s\ncross-doc checkbox row = window-level session scope\nfilter state PER-TAB (tab->flashcard.filterExpr)", fillcolor="#bbdefb", style=filled];
+    filterdlg -> filter [style=dashed, label="rebuild"];
     study [label="Study mode\nopaque mask ONLY on current card (studyMode && !revealMode)\nfirst card: vertically CENTERED, instant scroll\n(FlashcardNavigateToCard: viewport-relative delta\nScrollYBy(screenRect.y + dy/2 - vpdy/2))", fillcolor="#e1bee7", style=filled];
     reveal [label="Reveal (Space/Enter/numpad Enter -> CmdFlashcardReveal)\nmask removed on current card - original text visible\nno-op outside study mode (keys never scroll)", fillcolor="#fff9c4", style=filled];
     rate [label="Rate 1-4 (keys 1..4 + numpad)\nSM-2 update, easeFactor capped [1.3, 2.5]\nrating==1 (Again): reinsert into current queue (relearn)\nadvance: next card MASKED + centered", fillcolor="#e1bee7", style=filled];
@@ -17,14 +19,17 @@ digraph Flashcard {
     study -> next [style=dashed, label="skip"];
     study -> back [style=dashed];
 
-    clean [label="Clean History (CmdFlashcardCleanHistory, toolbar Clean btn)\ndialog: 'limpar o historico?' No/Yes\nHOLD Yes 2s to confirm (red line drains under text;\nrelease early = reset). Clears studyDoc.states -> all cards\n'new'; rewrites JSON states:{} (portable app-data per exe)", fillcolor="#fff9c4", style=filled];
+    clean [label="Clean History (CmdFlashcardCleanHistory, toolbar Clean btn)\ndialog (s21): 'limpar o historico?' + two HOLD buttons, no No (X/Esc cancels)\n'Clear current book' 2s orange drain -> rewrites THIS doc's JSON states:{}\n'Clear ALL books' 5s red drain -> FlashcardDeleteAllStudyFiles() deletes\nevery FlashcardStudy/*.json + resets EVERY tab's in-memory studyDoc (s22)"];
     persist -> clean [style=dashed, label="reset"];
-    pending [label="TOMORROW (user report): Order/Filter/Lista\nbuttons INCORRECT - redo/fix", shape=note, fillcolor="#ffcdd2", style=filled];
+    pending [label="REMAINING (user-ordered LAST): Lista button redo\n+ bookmark-mirror live check on user's real books;\nimage-occlusion IO-1..IO-4\n(decisions IO-D1/D2/D3 pending)", shape=note, fillcolor="#ffcdd2", style=filled];
     clean -> pending [style=dotted];
 
     dead [label="Dead code to prune:\nhwndCardCount, studyModeType,\nhistory (TODO Flashcard Step 7)", shape=note, fillcolor="#ffcdd2", style=filled];
     filter -> dead [style=dotted];
 
-    ui [label="UI: FlashcardToolbar (Study/Reveal/Back/Next/Order/Lista/Filter/Clean\n+ counter btn idx 0; Next grayed w/o next, Order checked=random)\nFlashcardSidebar (floating list, click->navigate)", shape=box, fillcolor="#e3f2fd", style=filled];
+    ui [label="UI: FlashcardToolbar (Study/Reveal/Back/Next/Order/Lista/Filter/Clean\n+ counter btn idx 0 (scope-aware: global = sum over tabs);\nNext grayed w/o next;\nOrder opens Study Order options dialog;\nFilter opens Filter window (checked while filter active)", shape=box, fillcolor="#e3f2fd", style=filled];
     study -> ui [style=dotted];
+
+    pertab [label="PER-TAB STATE (s22 foundation): WindowTab::flashcard\n= FlashcardTabState{cards, studyDoc, filterExpr,\nfilterEnabled, cardsLoaded(lazy)}\nFlashcardOnTabChanged hook in LoadModelIntoTab\n(ensures new tab's cards; fixes cross-tab mask bleed)", fillcolor="#c8e6c9", style=filled];
+    load -> pertab [style=dotted];
 }

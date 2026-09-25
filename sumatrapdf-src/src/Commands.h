@@ -319,7 +319,7 @@ enum {
     CmdFlashcardRate4 = 508,
     CmdFlashcardLista = 509,
     CmdFlashcardNext = 510,
-    CmdFlashcardOrderToggle = 511,
+    CmdFlashcardOrderOptions = 511,
     CmdFlashcardCleanHistory = 512,
     CmdViewportCropV2Toggle = 513,
     CmdNone = 514,

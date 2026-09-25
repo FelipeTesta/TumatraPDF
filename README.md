@@ -193,6 +193,34 @@ The script compares the version in `sumatrapdf-src/src/Version.h` with the pre-r
 
 ---
 
+### 7. 🃏 Flashcards — Cloze SRS over PDF text
+
+**Status:** 🟢 Complete (study flow, filter window, cross-doc sessions deployed 2026-09-25; user live tests pending)
+
+**What it does:** Turns text selections into cloze flashcards — a gray highlight annotation acts as an occlusion mask over the PDF's own text (no content duplicated). Spaced repetition (SM-2) schedules reviews per book.
+
+**How it works:**
+- **Create:** select text → `S` (or `Shift+S`). `Alt+drag` accumulates disjoint selections → ONE grouped card (N masks).
+- **Study:** toolbar Study button. Card arrives masked, vertically centered (TC2 column-aware). `Space`/`Enter` reveals → `1`–`4` rate (Again/Hard/Good/Easy, numpad too) → auto-advance. Again reinserts the card (relearn). Back = previous card, arrives revealed, keeps scroll. Next = skip without rating.
+- **SM-2 state:** per-book JSON in portable app-data dir next to the exe, keyed by MD5(filePath) — per-exe, per-book isolation.
+- **Order dialog** (Order button): Sequential/Random (shuffle within new/due groups) + new-cards position — before due / after due / mixed (proportional interleave, default). Instant apply.
+- **Clean History:** hold-to-confirm — "Clear current book" (2s, orange) / "Clear ALL books" (5s, red, deletes every study JSON). X/Esc cancels.
+- **Filter window** (Filter button): page-set expression `1-15;20-25;-22-23;` (ranges add, `-` prefix removes, sequential eval) + bookmark mirror (checkbox per TOC item injects the chapter's range; chapter = first bookmark page → page before next flat bookmark, sublevels included) + Filtros ON/OFF (keeps expression) + Limpar filtros (2s hold). Filter is per-book; Aplicar/Enter applies.
+- **Cross-document sessions:** checkbox "Estudar de todos os PDFs abertos (sessão)" — study queue over ALL PDF tabs in the SAME window; advancing auto-switches tab and centers the card; SM-2 saved to each book's own JSON. Two distinct study modes: current document × global session.
+- **Per-tab state:** cards, study history and filter live on the tab (`WindowTab::flashcard`) — switching tabs reloads each book's cards; session/queue lives on the window.
+- **Lista sidebar:** floating list of the book's cards, click → navigate.
+
+**Controls:**
+| Shortcut | Action |
+|---|---|
+| `S` / `Shift+S` | Create card from selection |
+| `Space` / `Enter` | Reveal answer |
+| `1`–`4` (numpad too) | Rate Again / Hard / Good / Easy |
+
+**Technical:** `src/Flashcard.{h,cpp}` (loader, SM-2, study JSON, filter parser), `src/Commands_Flashcard.cpp` (session queue `{tab, cardIdx}`, navigation, rating), `src/FlashcardToolbar.cpp` (2nd toolbar + Order/Clean/Filter dialogs), `src/FlashcardSidebar.cpp`, `src/Canvas.cpp` (mask paint), `src/WindowTab.h` (per-tab `FlashcardTabState`). Rich `[fc]` logging for bug diagnosis.
+
+---
+
 ### 📋 Technical Summary for Developers
 
 | Feature | Main files | Hook point |
@@ -202,6 +230,7 @@ The script compares the version in `sumatrapdf-src/src/Version.h` with the pre-r
 | Viewport Crop | `src/DisplayModel.cpp`, `src/SumatraPDF.cpp` | `GetViewPort()`, `ScrollYBy()` |
 | Update | `scripts/check-updates.ps1`, `MERGE.md` | N/A (external tool) |
 | Arch Tools (Scale+Measure) | `src/ArchScaleDialog.{h,cpp}`, `src/ArchVector.{h,cpp}`, `src/Canvas.cpp`, `src/Toolbar.cpp`, `src/SumatraPDF.cpp` | `CmdArchToolsToggle`/`CmdArchScale`/`CmdArchMeasure`, `OnPaintDocument`, `UpdateToolbar2State` |
+| Flashcards (Cloze SRS) | `src/Flashcard.{h,cpp}`, `src/Commands_Flashcard.cpp`, `src/FlashcardToolbar.cpp`, `src/FlashcardSidebar.cpp`, `src/WindowTab.h` | `FrameOnCommand()` flashcard branch, `LoadModelIntoTab` (per-tab state), `OnPaintDocument` (mask paint) |
 
 **How to build:** See "Build" section below.
 
@@ -225,6 +254,12 @@ The script compares the version in `sumatrapdf-src/src/Version.h` with the pre-r
 - [x] Toolbar wrapping (TBSTYLE_WRAPABLE) — buttons wrap to 2nd row on narrow windows
 - [x] Flashcard MVP — core toggle, study mode, SM-2, card creation from selection
 - [x] Flashcard cloze (positional) — highlight = mask over existing text, no duplication; reveal, SRS by due, stable key, 1-4 shortcuts
+- [x] Flashcard study flow — Space/Enter reveal, 1-4 rate (numpad too), Next/Back, auto-center, TC2-aware navigation
+- [x] Flashcard multi-select — Alt+drag accumulates selections → ONE grouped card (N masks)
+- [x] Flashcard Order dialog — sequential/random (shuffle within groups) + new-cards position (before/after/mixed)
+- [x] Flashcard Clean History — per-book (2s) / ALL books (5s) hold-to-confirm buttons
+- [x] Flashcard Filter window — page-set expr + bookmark mirror + ON/OFF + clear (2s hold), per-book filter
+- [x] Flashcard cross-doc study — session checkbox: queue over all PDF tabs of the window, auto tab-switch, per-book SM-2 save
 - [ ] Automated tests for new features
 
 ---
@@ -274,7 +309,7 @@ Based on SumatraPDF:
 
 ## Status
 
-🟢 Core features complete. Modularization in progress: 16A-16C ✅, 16C-F6 ✅, Design system ✅, Autoscroll ✅, Toolbar wrapping ✅, ToolbarLayout ✅, Flashcard MVP ✅. SumatraPDF.cpp: 14,212 → ~13,830 lines. Next: 16D (FileState struct) or Canvas.cpp extraction.
+🟢 Core features complete. Modularization in progress: 16A-16C ✅, 16C-F6 ✅, Design system ✅, Autoscroll ✅, Toolbar wrapping ✅, ToolbarLayout ✅, Flashcards ✅ (MVP + cloze SRS + study flow + filter window + cross-doc sessions). SumatraPDF.cpp: 14,212 → ~13,830 lines. Next: 16D (FileState struct) or Canvas.cpp extraction.
 
 ## 2026-08-17 - Trim Cache + ETA Option Visibility
 

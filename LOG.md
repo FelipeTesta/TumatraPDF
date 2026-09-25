@@ -1,5 +1,66 @@
 # TumatraPDF — Development Log
 
+## 2026-09-25 (s22) — Study Filter window (page-set expr + bookmark mirror) + cross-document sessions (BUILD OK, deployed)
+
+### Changed
+- **Per-tab flashcard state (foundation)**: cards / studyDoc / filter moved from `MainWindow::flashcard` into NEW `FlashcardTabState` inside `WindowTab` (cards, studyDoc, `filterExpr` Str, `filterEnabled`, `cardsLoaded` lazy flag). MainWindow keeps session-level state only: on/studyMode/revealMode/currentCardIdx/`studyOrder` (now `Vec<FlashcardQueueEntry>{tab, cardIdx}`)/`crossDocSession`. **Fixes latent bug**: switching tabs with flashcard ON kept the previous book's cards/studyDoc painted over the new doc — `FlashcardOnTabChanged(win)` hook in `LoadModelIntoTab` (SumatraPDF.cpp, next to ArchRestoreMeasurementsForTab) now lazy-ensures the new tab's cards + refreshes count/sidebar.
+- **Two distinct study modes** (user spec): **documento atual** (default) vs **global sessão** — checkbox "Estudar de todos os PDFs abertos (sessão)" in the Filter window. Scope = all PDF tabs of THIS window only; tabs dragged to another window stop counting (per user). `FlashcardToolbarUpdateCount` scope-aware (global = sum over tabs).
+- **Cross-document queue**: `BuildFilteredStudyOrder` collects `{tab, cardIdx}` entries from current tab (or every loaded PDF tab in global mode); each tab's OWN page filter applied independently; advance/Back/Rate navigate via `FlashcardNavigateToEntry` — `TabsSelect` auto-switch when the card belongs to another tab (`FindTabIndex` validates the tab still lives in this window; closed/moved tabs skipped + logged); rating writes SM-2 state + saves to the CARD'S OWN tab JSON (per-book MD5 path); "Again" reinserts the entry. Clean ALL books now resets EVERY tab's in-memory studyDoc (was current-only).
+- `CmdFlashcardFilter` no longer opens two sequential `Dialog_GoToPage` prompts (the "incorrect" report) — opens the new Filter window. Old `filterPageFrom/To` ints replaced by `filterExpr`.
+
+### Added
+- **`FlashcardFilterEval(expr, pageCount, pages)`** (Flashcard.cpp): page-set parser — tokens split on `;`, `N`/`N-M` adds, leading `-` removes, evaluated SEQUENTIALLY (`1-15;20-25;-22-23;` = 1-15 + 20-25 − 22-23); clamps to [1,pageCount]; garbage tokens skipped + counted in log; empty/all-garbage → returns false = all pages. Full `[fc]` logging.
+- **Filter window** (FlashcardToolbar.cpp, class `TUMATRA_FLASHCARD_FILTER`, 560×500, Clean/Order raw-Win32 + modal-pump pattern): EDIT expression input (apply on "Aplicar" btn or Enter via edit subclass; Esc closes); **bookmark mirror** = owner-drawn listbox (LBS_OWNERDRAWFIXED + WS_VSCROLL, 24px rows) with a checkbox per TOC item, indented by depth; chapter range = item's page → page BEFORE the next bookmark in FLATTENED DFS order (parent covers all sub-levels; last extends to page count); checking injects `a-b;` token into the edit AND applies instantly, uncheck removes the token; `LB_SETCURSEL(-1)` after each toggle so re-clicking the same row re-fires LBN_SELCHANGE. **"Filtros: ON/OFF"** instant toggle (disables filter, KEEPS the expression). **"Limpar filtros"** hold 2s red draining line (Clean pattern). Cross-doc checkbox row on top. Filter is PER-BOOK (stored in the tab); toolbar Filter button shows checked while the current tab's filter is active (enabled + non-empty).
+- **`FlashcardTabLogName(tab)`**: log-safe tab name — `displayName` is EMPTY for cmdline-loaded docs until the UI sets it; falls back to `path::GetBaseNameTemp(filePath)`. Used by all [fc] tab logs.
+- **`tests/ad-hoc-flashcard-filter.ts`** (NEW): 2× zlib.3.pdf (local, no Drive), 2 cards per tab created via keyboard selection with RETRY driven by "Cloze card added" log polling (fflush-per-line); navigates tabs BY FRAME TITLE (this fork starts with an About tab at index 0 — index math unstable); log-slice assertions (only this run's lines, rotation-safe offset).
+
+### Verified (ad-hoc-flashcard-filter.ts — ALL ASSERTIONS PASSED)
+- Remove-all expr `-1-99999;` → `'zlib.3.pdf': 0 cards pass (of 2)` + `BuildFilteredStudyOrder - 0 cards (scope=current-doc)` ✓; ON/OFF toggle keeps expr ✓; clear-hold 600ms stays open + 2.3s → `CLEARED` ✓.
+- Global session: `'zlib.3.pdf': 0 cards pass (of 2)` (per-book filter respected!) + `'fc-crossdoc-copy.pdf': 2 cards pass (of 2)` → `2 cards (scope=global-session, tabsUsed=2)` ✓; `switching to tab` + frame title changed ✓; Rate 3 → `rated 3 card 0 of 'fc-crossdoc-copy.pdf'` + `FlashcardStudySave - saving to ...fc-crossdoc-copy.pdf` (card's OWN book JSON) ✓; advance to 2/2 ✓.
+- Bookmark mirror auto-skips with log `no TOC, bookmark mirror empty` (zlib has no TOC) — mirror interaction = user tests live on real books.
+
+### Notes / traps
+- `Vec() = default` is **explicit** → `Foo dlg{};` with Vec members = C2512 (copy-list-init can't call explicit default ctor) → declare `Foo dlg;`.
+- WindowTab.h is NOT self-sufficient: including it from Flashcard.cpp required the full chain first (Settings → DisplayMode → DocController → DocProperties → TreeModel → EngineBase → EngineMupdf → **base/GuessFileType.h** → EngineAll.h) — EngineAll.h itself uses `FileType` (undefined without GuessFileType). path helper = `path::GetBaseNameTemp` (no GetNameTemp).
+- MSBuild/vswhere NOT in this shell's PATH — release x64 built via hard path `C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe` (build.ts only offers Debug x64 / Release Win32).
+- Extra About tab at index 0 with `-for-testing` multi-doc launches → tab indices shift by +1; tests must not assume [0,1].
+- User queue remaining: **Lista redo** (user-ordered LAST), bookmark-mirror live check on user's books, image-occlusion IO-1..IO-4 (IO-D1/D2/D3 pending), FC-M1 tests, FC-H2, FC-H3-prune, FC-M4/M5.
+
+## 2026-09-24 (s21) — Clean History rework: per-book + ALL-books hold-to-confirm buttons (BUILD OK, deployed)
+
+### Changed
+- **Clean dialog reworked** (user spec): "No" button REMOVED (cancel = X/Esc only); ex-"Yes" is now **"Clear current book"** (hold 2s, orange draining line); new **"Clear ALL books"** (hold 5s, red draining line — longer hold for the more destructive action). Window 460×200, two 170px buttons. `FlashcardCleanResult` enum (Flashcard.h); dialog returns 0/1/2.
+- **Per-book isolation confirmed**: each book's review history is its own JSON keyed by MD5(filePath) — "Clear current book" rewrites only the current book's file (states:{}); other books never touched.
+
+### Added
+- **`FlashcardDeleteAllStudyFiles()`** (Flashcard.cpp): FindFirstFileW/FindNextFileW over `FlashcardStudy\*.json` in the app-data dir + DeleteFileW each; returns count. "Clear ALL books" path: delete all + reset current in-memory studyDoc + stop session — **no FlashcardSave afterwards** (don't recreate the deleted file). `ToUtf8Temp(WStr(fd.cFileName))` for the wide→narrow filename.
+
+### Verified (ad-hoc-flashcard-cloze.ts full pass; ad-hoc-clean-iso.ts isolation)
+- Order dialog open/close ✓; Clean dialog: 600ms early release keeps it open ✓; 2.3s current-book hold → confirmed + current doc cleared ✓; reopen + 5.4s ALL-books hold → confirmed + `deleted 2 study file(s)` + FlashcardStudy dir left EMPTY ✓.
+- One full-repro run failed once mid-flow (commands after Back unprocessed) — one-off: Google-Drive (G:\) stall suspected; isolation test (`tests/ad-hoc-clean-iso.ts`, NEW: launch → Toggle → Clean → verify + logs) proved the binary sound; immediate re-run passed everything.
+
+### Notes
+- Repro Clean-section geometry: two buttons at client fractions x≈0.30/0.70, y≈0.78 (DPI-proportional).
+- User queue remaining: **Lista + Filter** button redo (user-ordered LAST); FC-M1 tests, FC-H2, FC-H3-prune, FC-M4/M5; image-occlusion plan (IO-1..IO-4, decisions IO-D1/D2/D3 pending).
+
+## 2026-09-24 (s20) — Order button → Study Order options dialog (sequential/random + new-cards position) (BUILD OK, deployed)
+
+### Added
+- **Study Order options dialog** (toolbar "Order" button, renamed `CmdFlashcardOrderToggle` → `CmdFlashcardOrderOptions`, same numeric id): "Review order" **[Sequential] [Random]** + "New cards" **[Before due] [After due] [Mixed]** — radio-style owner-drawn options (accent border + filled dot when checked). Every click **applies instantly**: persists the setting, rebuilds the study order and restarts from the first card (centered) when a session is active. No OK button; close with X/Esc. CleanHistory raw-Win32 + modal-pump pattern reused (window class `TUMATRA_FLASHCARD_ORDER`).
+- **New setting** `FlashcardSettings.NewCardsPosition` (Int, **default 2 = mixed**): 0 = new first, 1 = new last, 2 = mixed. `RandomOrder` (Bool) kept — settings-file compatible.
+
+### Changed
+- **`BuildFilteredStudyOrder` reworked**: collects NEW (rating==0) and DUE cards separately → combines per position (first/last/**proportional interleave** — hand-verified 3:6 → N D D N D D N D D) → **random shuffles WITHIN each group** (position stays meaningful; was a flat shuffle before). Log extended: `n cards (order=%s, new=%s, nNew=%d, nDue=%d)`.
+- New public `FlashcardApplyStudyOrder(win)` (Commands_Flashcard.cpp): rebuild + restart-from-first (centered) after any order/position change; used by the dialog per click.
+- Toolbar: Order button no longer shows checked-when-random (dialog communicates state; it is not a toggle anymore).
+
+### Verified
+- Repro: dialog opens (log `OrderOptions - dialog opened`), WM_CLOSE closes it; Clean-History flow unaffected; new build log format confirmed (`order=sequential, new=mixed, nNew=1, nDue=0`). Full option behavior = mouse UI → user tests live.
+
+### Notes
+- **Trap re-learned the hard way**: using PowerShell `[IO.File]::WriteAllText` for the CommandAvailability rename corrupted the `…` (U+2026) in a comment (Get-Content ANSI-decodes BOM-less UTF-8). Repaired via Edit tool; git diff verified clean (2 rename lines only). The AGENTS.md "never Set-Content/WriteAllText" rule applies to ANY text re-encoding, not just Set-Content.
+- Remaining from user's "incorrect buttons" report: Filter + Lista (later); queue also has FC-M1 tests, FC-H2 scan perf, FC-H3 prune, FC-M4/M5.
+
 ## 2026-09-24 (s19) — High-gain mini-batch: M3 gating, atomic JSON save, R4/R5 (BUILD OK, deployed)
 
 ### Added

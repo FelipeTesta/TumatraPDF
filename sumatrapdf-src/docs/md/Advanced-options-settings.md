@@ -351,7 +351,7 @@ ViewportCrop = 0 0 0 0 0 false false false
 Trim = 0 0 false
 
 ; flashcard study settings (introduced in version 3.7)
-FlashcardSettings = false
+FlashcardSettings = false 2
 
 ; customization options for PDF, XPS, DjVu and PostScript UI
 FixedPageUI [

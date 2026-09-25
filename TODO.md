@@ -561,7 +561,7 @@ __________________________________]
 - [ ] **FC-M1 Step 8 tests**: none — Sm2Update (intervals, ease cap, relearn), study-JSON roundtrip, due filter.
 - [x] **FC-M2 Sidebar not refreshed after `CmdFlashcardAdd`** — FIXED 2026-09-24: `FlashcardSidebarPopulate(win)` called after Add (self-guards when sidebar is closed).
 - [x] **FC-M3 No availability gating** — FIXED 2026-09-24 (s19): all 14 flashcard commands added to `removeIfChm` + `removeIfMarkdown` (CommandAvailability.cpp) — no more flashcard toolbar/no-op commands on CHM/MD docs. (Menu-bar entry intentionally absent — toolbar/palette UX by design.)
-- [ ] **FC-M4 Filter dialog UX**: two sequential GoToPage dialogs; compares PHYSICAL pageNo while TC2 shows "3L" labels; filter not re-applied to an active studyOrder.
+- [x] **FC-M4 Filter dialog UX** — REDONE 2026-09-25 (s22): two GoToPage prompts replaced by Filter window (page-set expr `1-15;20-25;-22-23;` + bookmark mirror + ON/OFF + clear w/ 2s hold); filter now re-applies to active session (`FlashcardApplyStudyOrder`). REMAINS: expression compares PHYSICAL pageNo while TC2 shows virtual "3L" labels — decide hint in dialog or virtual-input mapping.
 - [ ] **FC-M5 Rate keys 1-4 have no visual hint** (no rate buttons/tooltips on the toolbar).
 
 #### Robustness / hygiene (low)
@@ -599,5 +599,11 @@ Requested 2026-09-24 ("cards por criação de boxes, integrada ao sistema atual"
 - [x] FC-R4/FC-R5 hygiene bundle — DONE 2026-09-24 (s19): dedicated IDs + exStyle properly applied.
 - [ ] FC-H3 prune (save only states with existing cards) — medium, defer.
 - [ ] FC-M1 tests (SM-2/JSON roundtrip/due filter) — after image occlusion.
-- [ ] FC-H2 scan perf, FC-M4 filter UX, FC-M5 rate hints — later.
-- [ ] LAST (user-ordered): Order/Filter/Lista button redo.
+- [ ] FC-H2 scan perf, FC-M5 rate hints — later. (FC-M4 done s22 — see queue triage above.)
+- [x] **Order button redo** — DONE 2026-09-24 (s20): opens Study Order options dialog (Sequential/Random + new-cards Before due/After due/Mixed, default mixed, instant apply, shuffle-within-groups). See LOG s20.
+- [x] **Clean History rework** — DONE 2026-09-24 (s21): dialog reworked — "Clear current book" 2s hold (orange) / "Clear ALL books" 5s hold (red, deletes study JSONs + resets every tab's state); "No" button removed, X/Esc cancels. See LOG s21.
+- [x] **Filter button redo** — DONE 2026-09-25 (s22): Filter window — page-set expression, TOC bookmark mirror (checkbox injects chapter range), Filtros ON/OFF, Limpar filtros (2s hold), cross-doc session checkbox in same window. See LOG s22.
+- [x] **Cross-document study sessions** — DONE 2026-09-25 (s22): scope=global-session queue over all PDF tabs of same window, auto tab-switch on advance, SM-2 saved per book; per-tab cards/studyDoc/filter state (fixes stale cards on tab switch).
+- [ ] (user-ordered queue): **Lista button redo** — LAST, after image occlusion.
+- [ ] Bookmark-mirror live check on user's real TOC books (test PDF has no TOC — automated test auto-skipped mirror).
+- [ ] User live tests: Filter window + global session (checkbox, cross-tab jumping, per-book saves).

@@ -434,17 +434,22 @@ struct MainWindow {
     // --- end arch tools state ---
 
     // --- flashcard state ---
+    // Window/session-level state. Per-document data (cards, study states,
+    // page filter) lives in WindowTab::flashcard (FlashcardTabState).
     struct FlashcardState {
-        bool on = false;            // flashcard mode active
-        bool studyMode = false;     // true when actively studying
-        bool revealMode = false;    // true when answer is revealed (Space/Enter)
-        int currentCardIdx = -1;    // index in study order
-        Vec<int> studyOrder;        // filtered/due card indices (session queue)
-        int filterPageFrom = -1;    // filter: start page (-1 = all)
-        int filterPageTo = -1;      // filter: end page (-1 = all)
-        Vec<Flashcard> cards;       // loaded cards from document
-        FlashcardStudyDoc studyDoc; // loaded study state
-                                    // Secondary toolbar
+        bool on = false;         // flashcard mode active
+        bool studyMode = false;  // true when actively studying
+        bool revealMode = false; // true when answer is revealed (Space/Enter)
+        int currentCardIdx = -1; // index in studyOrder
+        // session queue: {tab, cardIdx} entries; single-doc sessions carry
+        // only the current tab, cross-document sessions carry all this
+        // window's PDF tabs
+        Vec<FlashcardQueueEntry> studyOrder;
+        // study scope: false = current document only, true = all PDF tabs
+        // of THIS window (the "global session" mode — tabs of other windows
+        // never count)
+        bool crossDocSession = false;
+        // Secondary toolbar
         HWND hwndReBarFlashcard = nullptr;
         HWND hwndToolbarFlashcard = nullptr;
         // Lista sidebar

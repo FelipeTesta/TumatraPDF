@@ -11,6 +11,8 @@ struct Builder;
 }
 struct ReadAloudHighlightMap;
 
+#include "Flashcard.h"
+
 // per-tab state of one AI chat provider (see AIChatPanel.cpp)
 struct AIChatTabState {
     Str sessionId;
@@ -121,6 +123,10 @@ struct WindowTab {
     // within it where the user stopped reading; enables "Continue reading"
     // (reset when the document is closed or reloaded)
     Str readAloudText;
+
+    // per-document flashcard state (cards/studyDoc/page filter belong to
+    // the document, not the window)
+    FlashcardTabState flashcard;
     int readAloudResumePos = -1;
     ReadAloudHighlightMap* readAloudHighlight = nullptr;
     // utf8 offset in the highlight map where readAloudText[0] maps to

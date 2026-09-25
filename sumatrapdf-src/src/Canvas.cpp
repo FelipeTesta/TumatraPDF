@@ -3415,13 +3415,24 @@ static bool DrawDocument(MainWindow* win, HDC hdc, Rect rcArea) {
     //   studying           (on, study, !reveal)      -> opaque mask ONLY on current card
     //   studying + reveal  (on, study,  reveal)      -> no opaque mask (original text shows)
     if (win->flashcard.on) {
-        // Index (into cards) of the card currently being studied, -1 if none.
+        // Cards live per-tab: paint only the CURRENT tab's cards (masks from
+        // another book must never appear over this document)
+        WindowTab* fcTab = win->CurrentTab();
+        Vec<Flashcard>* cards = fcTab ? &fcTab->flashcard.cards : nullptr;
+        // Index (into the current tab's cards) of the card currently being
+        // studied, -1 if none. In a cross-document session the current card
+        // may belong to another tab — its mask is only painted when that tab
+        // is the one on screen.
         int studyCardIdx = -1;
-        if (win->flashcard.studyMode && win->flashcard.currentCardIdx >= 0 && len(win->flashcard.studyOrder) > 0) {
-            studyCardIdx = win->flashcard.studyOrder[win->flashcard.currentCardIdx];
+        if (cards && win->flashcard.studyMode && win->flashcard.currentCardIdx >= 0 &&
+            win->flashcard.currentCardIdx < len(win->flashcard.studyOrder)) {
+            const FlashcardQueueEntry& e = win->flashcard.studyOrder[win->flashcard.currentCardIdx];
+            if (e.tab == fcTab) {
+                studyCardIdx = e.cardIdx;
+            }
         }
-        for (int i = 0; i < len(win->flashcard.cards); i++) {
-            const Flashcard& card = win->flashcard.cards[i];
+        for (int i = 0; cards && i < len(*cards); i++) {
+            const Flashcard& card = (*cards)[i];
             if (card.pageNo < 1) continue;
             Gdiplus::Graphics gs(hdc);
             // Paint each quad subrect separately so a multi-line cloze covers

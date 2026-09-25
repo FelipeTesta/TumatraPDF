@@ -21,6 +21,7 @@ extern "C" {
 #include "SumatraPDF.h"
 #include "MainWindow.h"
 #include "WindowTab.h"
+#include "Tabs.h"
 #include "Toolbar.h"
 #include "SumatraDialogs.h"
 #include "AppSettings.h"
@@ -38,67 +39,212 @@ static void AddUniquePageNo(Vec<int>& pageNos, int pageNo) {
     pageNos.Append(pageNo);
 }
 
-static void BuildFilteredStudyOrder(MainWindow* win) {
-    win->flashcard.studyOrder.Reset();
-    i64 now = (i64)time(nullptr) * 1000;
-    for (int i = 0; i < len(win->flashcard.cards); i++) {
-        Flashcard& card = win->flashcard.cards[i];
-        int from = win->flashcard.filterPageFrom;
-        int to = win->flashcard.filterPageTo;
-        bool passFilter = true;
-        if (from > 0 && card.pageNo < from) passFilter = false;
-        if (to > 0 && card.pageNo > to) passFilter = false;
-        if (passFilter) {
-            // SRS: include only cards that are new (never rated) or due for review
-            bool isNew = true;
-            bool isDue = false;
-            for (int j = 0; j < len(win->flashcard.studyDoc.states); j++) {
-                if (win->flashcard.studyDoc.states[j].key == card.key) {
-                    const FlashcardStudyState& s = win->flashcard.studyDoc.states[j].state;
-                    isNew = (s.rating == 0);
-                    isDue = (!isNew && s.nextReviewAt <= now);
-                    break;
-                }
-            }
-            if (isNew || isDue) {
-                win->flashcard.studyOrder.Append(i);
-            }
-        }
+template <typename T>
+static void ShuffleVecInPlace(Vec<T>& v) {
+    for (int i = len(v) - 1; i > 0; i--) {
+        int j = rand() % (i + 1);
+        T tmp = v[i];
+        v[i] = v[j];
+        v[j] = tmp;
     }
-    // random order (user setting): shuffle the queue in place once, when it is
-    // built. Next / rate-advance / back then all follow this shuffled order.
-    if (gGlobalPrefs->flashcardSettings.randomOrder) {
-        Vec<int>& order = win->flashcard.studyOrder;
-        for (int i = len(order) - 1; i > 0; i--) {
-            int j = rand() % (i + 1);
-            int tmp = order[i];
-            order[i] = order[j];
-            order[j] = tmp;
-        }
-    }
-    logf("[fc] BuildFilteredStudyOrder - %d due cards (from=%d, to=%d, order=%s)\n", len(win->flashcard.studyOrder),
-         win->flashcard.filterPageFrom, win->flashcard.filterPageTo,
-         gGlobalPrefs->flashcardSettings.randomOrder ? StrL("random") : StrL("sequential"));
 }
 
-// Navigate the view to a study card. Under TC2 the display uses virtual pages,
-// so route the physical card rect through PhysicalToVirtualForRect first (raw
-// pageNo + CvtToScreen lands on the wrong page/column). When centerVertically
-// is set, scroll so the card sits in the middle of the viewport (instant, no
-// animation — ScrollYTo jumps); otherwise keep the current scroll position.
-static void FlashcardNavigateToCard(MainWindow* win, int cardIdx, bool centerVertically) {
-    if (cardIdx < 0 || cardIdx >= len(win->flashcard.cards)) {
-        return;
+// Lazy-load a tab's flashcard cards + study states. Returns true when the tab
+// is a loaded PDF document (cards ready to use, even if it has 0 cards);
+// false for non-document tabs, non-PDF engines or not-yet-loaded tabs.
+bool FlashcardEnsureTabCards(WindowTab* tab) {
+    if (!tab || tab->IsNonDocumentTab()) {
+        return false;
     }
-    Flashcard& card = win->flashcard.cards[cardIdx];
-    WindowTab* tab = win->CurrentTab();
-    if (!tab) {
-        return;
+    DisplayModel* dm = tab->AsFixed();
+    if (!dm) {
+        return false;
     }
+    if (!tab->flashcard.cardsLoaded) {
+        auto* engine = AsEngineMupdf(dm->GetEngine());
+        if (!engine) {
+            return false;
+        }
+        tab->flashcard.cards = FlashcardLoadFromDocument(engine);
+        tab->flashcard.cardsLoaded = true;
+        if (tab->filePath) {
+            tab->flashcard.studyDoc = FlashcardStudyLoad(tab->filePath.s);
+        }
+        logf("[fc] EnsureTabCards - '%s': loaded %d cards, %d study states\n", FlashcardTabLogName(tab),
+             len(tab->flashcard.cards), len(tab->flashcard.studyDoc.states));
+    }
+    return true;
+}
+
+// Index of a tab inside win->tabs, -1 when the tab is no longer in this
+// window (closed, or dragged out to another window — global sessions only
+// count tabs that live in THIS window)
+static int FindTabIndex(MainWindow* win, WindowTab* tab) {
+    auto tabs = win->Tabs();
+    for (int i = 0; i < len(tabs); i++) {
+        if (tabs[i] == tab) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+// Collect this tab's new/due cards into the group vectors, applying the tab's
+// own page filter (each book keeps its own filter — a global session respects
+// every book's filter independently).
+static void CollectTabCards(MainWindow* win, WindowTab* tab, i64 now, Vec<FlashcardQueueEntry>& newCards,
+                            Vec<FlashcardQueueEntry>& dueCards) {
     DisplayModel* dm = tab->AsFixed();
     if (!dm) {
         return;
     }
+    int pageCount = dm->PageCount();
+    // evaluate the page filter once per tab: pages[i-1] = 1 when included
+    Vec<u8> pages;
+    bool filtered = false;
+    if (tab->flashcard.filterEnabled && tab->flashcard.filterExpr) {
+        filtered = FlashcardFilterEval(tab->flashcard.filterExpr, pageCount, pages);
+        logf("[fc] CollectTabCards - '%s': filter '%s' -> %s\n", FlashcardTabLogName(tab), tab->flashcard.filterExpr,
+             filtered ? StrL("active") : StrL("inactive (empty/invalid)"));
+    }
+    int nBefore = len(newCards) + len(dueCards);
+    for (int i = 0; i < len(tab->flashcard.cards); i++) {
+        Flashcard& card = tab->flashcard.cards[i];
+        if (filtered && (card.pageNo < 1 || card.pageNo > len(pages) || !pages[card.pageNo - 1])) {
+            continue;
+        }
+        // SRS: include only cards that are new (never rated) or due for review
+        bool isNew = true;
+        bool isDue = false;
+        for (int j = 0; j < len(tab->flashcard.studyDoc.states); j++) {
+            if (tab->flashcard.studyDoc.states[j].key == card.key) {
+                const FlashcardStudyState& s = tab->flashcard.studyDoc.states[j].state;
+                isNew = (s.rating == 0);
+                isDue = (!isNew && s.nextReviewAt <= now);
+                break;
+            }
+        }
+        FlashcardQueueEntry entry;
+        entry.tab = tab;
+        entry.cardIdx = i;
+        if (isNew) {
+            newCards.Append(entry);
+        } else if (isDue) {
+            dueCards.Append(entry);
+        }
+    }
+    logf("[fc] CollectTabCards - '%s': %d cards pass (of %d)\n", FlashcardTabLogName(tab),
+         len(newCards) + len(dueCards) - nBefore, len(tab->flashcard.cards));
+}
+
+static void BuildFilteredStudyOrder(MainWindow* win) {
+    win->flashcard.studyOrder.Reset();
+    i64 now = (i64)time(nullptr) * 1000;
+    // collect new (never rated) and due cards SEPARATELY so the NewCardsPosition
+    // setting can order them relative to each other
+    Vec<FlashcardQueueEntry> newCards;
+    Vec<FlashcardQueueEntry> dueCards;
+    int nTabsUsed = 0;
+    if (win->flashcard.crossDocSession) {
+        // global session: all PDF tabs of THIS window (other windows never count)
+        auto tabs = win->Tabs();
+        for (WindowTab* tab : tabs) {
+            if (FlashcardEnsureTabCards(tab)) {
+                nTabsUsed++;
+                CollectTabCards(win, tab, now, newCards, dueCards);
+            }
+        }
+    } else {
+        WindowTab* tab = win->CurrentTab();
+        if (tab && FlashcardEnsureTabCards(tab)) {
+            nTabsUsed = 1;
+            CollectTabCards(win, tab, now, newCards, dueCards);
+        }
+    }
+    // random order (user setting): shuffle WITHIN each group, so the
+    // new-cards position keeps its meaning (position = group order,
+    // random = inside-group order)
+    if (gGlobalPrefs->flashcardSettings.randomOrder) {
+        ShuffleVecInPlace(newCards);
+        ShuffleVecInPlace(dueCards);
+    }
+    // combine per NewCardsPosition: 0 = new first, 1 = new last,
+    // 2 = mixed (proportional interleave, like Anki's "mix")
+    int pos = gGlobalPrefs->flashcardSettings.newCardsPosition;
+    int nNew = len(newCards);
+    int nDue = len(dueCards);
+    if (pos == 0) {
+        win->flashcard.studyOrder.Append(newCards);
+        win->flashcard.studyOrder.Append(dueCards);
+    } else if (pos == 1) {
+        win->flashcard.studyOrder.Append(dueCards);
+        win->flashcard.studyOrder.Append(newCards);
+    } else {
+        int total = nNew + nDue;
+        int iNew = 0, iDue = 0;
+        for (int k = 0; k < total; k++) {
+            // proportional stepping: take a new card when its "share" of the
+            // queue has not been consumed yet; else the next due card
+            if (iNew < nNew && (iDue >= nDue || (k * nNew) / total >= iNew)) {
+                win->flashcard.studyOrder.Append(newCards[iNew++]);
+            } else {
+                win->flashcard.studyOrder.Append(dueCards[iDue++]);
+            }
+        }
+    }
+    TempStr posStr = pos == 0 ? StrL("newFirst") : (pos == 1 ? StrL("newLast") : StrL("mixed"));
+    logf("[fc] BuildFilteredStudyOrder - %d cards (scope=%s, tabsUsed=%d, order=%s, new=%s, nNew=%d, nDue=%d)\n",
+         len(win->flashcard.studyOrder), win->flashcard.crossDocSession ? StrL("global-session") : StrL("current-doc"),
+         nTabsUsed, gGlobalPrefs->flashcardSettings.randomOrder ? StrL("random") : StrL("sequential"), posStr, nNew,
+         nDue);
+}
+
+// Called after study-order settings changed (Order dialog), after the page
+// filter changed (Filter dialog) or after the study scope toggled: rebuild
+// the queue and restart from its first card (centered) when a session is
+// active, so Next / advance / back stay coherent with the configuration
+static void FlashcardNavigateToEntry(MainWindow* win, const FlashcardQueueEntry& e, bool centerVertically);
+void FlashcardApplyStudyOrder(MainWindow* win) {
+    if (win->flashcard.studyMode) {
+        BuildFilteredStudyOrder(win);
+        win->flashcard.revealMode = false;
+        if (len(win->flashcard.studyOrder) > 0) {
+            win->flashcard.currentCardIdx = 0;
+            FlashcardNavigateToEntry(win, win->flashcard.studyOrder[0], true);
+        } else {
+            win->flashcard.currentCardIdx = -1;
+        }
+        MainWindowRerender(win);
+    }
+    FlashcardToolbarUpdateState(win);
+}
+
+// Navigate the view to a study queue entry. When the card belongs to another
+// tab (global session), switch to that tab first (TabsSelect — synchronous);
+// the entry's tab may have been closed or dragged to another window, in
+// which case the jump is skipped (the caller's queue rebuild drops it).
+// Under TC2 the display uses virtual pages, so route the physical card rect
+// through PhysicalToVirtualForRect first. When centerVertically is set,
+// scroll so the card sits in the middle of the viewport (instant).
+static void FlashcardNavigateToEntry(MainWindow* win, const FlashcardQueueEntry& e, bool centerVertically) {
+    if (!e.tab || e.cardIdx < 0 || e.cardIdx >= len(e.tab->flashcard.cards)) {
+        logf("[fc] NavigateToEntry - invalid entry (tab=%p cardIdx=%d)\n", (void*)e.tab, e.cardIdx);
+        return;
+    }
+    if (win->CurrentTab() != e.tab) {
+        int idx = FindTabIndex(win, e.tab);
+        if (idx < 0) {
+            logf("[fc] NavigateToEntry - entry tab no longer in this window, skipping\n");
+            return;
+        }
+        logf("[fc] NavigateToEntry - global session: switching to tab %d ('%s')\n", idx, FlashcardTabLogName(e.tab));
+        TabsSelect(win, idx);
+    }
+    DisplayModel* dm = e.tab->AsFixed();
+    if (!dm) {
+        return;
+    }
+    Flashcard& card = e.tab->flashcard.cards[e.cardIdx];
     RectF vr;
     int vPage = dm->PhysicalToVirtualForRect(card.pageNo, card.bounds, &vr);
     if (!dm->ValidPageNo(vPage)) {
@@ -112,8 +258,9 @@ static void FlashcardNavigateToCard(MainWindow* win, int cardIdx, bool centerVer
         return;
     }
     int dy = screenRect.y + screenRect.dy / 2 - dm->viewPort.dy / 2;
-    logf("[fc] FlashcardNavigateToCard - card %d vPage=%d screen=(%d,%d %dx%d) vpdy=%d dy=%d\n", cardIdx, vPage,
-         screenRect.x, screenRect.y, screenRect.dx, screenRect.dy, dm->viewPort.dy, dy);
+    logf("[fc] NavigateToEntry - card %d '%s' vPage=%d screen=(%d,%d %dx%d) vpdy=%d dy=%d\n", e.cardIdx,
+         FlashcardTabLogName(e.tab), vPage, screenRect.x, screenRect.y, screenRect.dx, screenRect.dy, dm->viewPort.dy,
+         dy);
     if (dy != 0) {
         dm->ScrollYBy(dy, false);
     }
@@ -124,14 +271,17 @@ static void HandleFlashcardRate(MainWindow* win, int rating) {
     if (curIdx < 0 || curIdx >= len(win->flashcard.studyOrder)) {
         return; // defensive: no valid current card
     }
-    int cardIdx = win->flashcard.studyOrder[curIdx];
-    Flashcard& card = win->flashcard.cards[cardIdx];
+    FlashcardQueueEntry e = win->flashcard.studyOrder[curIdx];
+    if (!e.tab || e.cardIdx < 0 || e.cardIdx >= len(e.tab->flashcard.cards)) {
+        return;
+    }
+    Flashcard& card = e.tab->flashcard.cards[e.cardIdx];
 
-    // Find or create study state for this card
+    // Find or create study state for this card in ITS OWN document's doc
     FlashcardStudyState state = {};
-    for (int i = 0; i < len(win->flashcard.studyDoc.states); i++) {
-        if (win->flashcard.studyDoc.states[i].key == card.key) {
-            state = win->flashcard.studyDoc.states[i].state;
+    for (int i = 0; i < len(e.tab->flashcard.studyDoc.states); i++) {
+        if (e.tab->flashcard.studyDoc.states[i].key == card.key) {
+            state = e.tab->flashcard.studyDoc.states[i].state;
             break;
         }
     }
@@ -140,14 +290,14 @@ static void HandleFlashcardRate(MainWindow* win, int rating) {
     // Relearn: rating 1 (Again) reinserts this card at the end of the session
     // queue so it is presented again (matching Anki's relearning behavior).
     if (rating == 1) {
-        win->flashcard.studyOrder.Append(cardIdx);
+        win->flashcard.studyOrder.Append(e);
     }
 
-    // Save/update study state
+    // Save/update study state in the card's document
     bool found = false;
-    for (int i = 0; i < len(win->flashcard.studyDoc.states); i++) {
-        if (win->flashcard.studyDoc.states[i].key == card.key) {
-            win->flashcard.studyDoc.states[i].state = state;
+    for (int i = 0; i < len(e.tab->flashcard.studyDoc.states); i++) {
+        if (e.tab->flashcard.studyDoc.states[i].key == card.key) {
+            e.tab->flashcard.studyDoc.states[i].state = state;
             found = true;
             break;
         }
@@ -156,19 +306,20 @@ static void HandleFlashcardRate(MainWindow* win, int rating) {
         FlashcardStudyDoc::StateEntry entry;
         entry.key = card.key;
         entry.state = state;
-        win->flashcard.studyDoc.states.Append(entry);
+        e.tab->flashcard.studyDoc.states.Append(entry);
     }
 
-    // Save to disk
-    WindowTab* tab = win->CurrentTab();
-    if (tab && tab->filePath) {
-        FlashcardStudySave(tab->filePath.s, win->flashcard.studyDoc);
+    // Save to disk — the card's own book's JSON (per-book, keyed by MD5 of path)
+    if (e.tab->filePath) {
+        FlashcardStudySave(e.tab->filePath.s, e.tab->flashcard.studyDoc);
     }
+    logf("[fc] HandleFlashcardRate - rated %d card %d of '%s'\n", rating, e.cardIdx, FlashcardTabLogName(e.tab));
 
     FlashcardToolbarUpdateCount(win);
 
     // Advance to next card: it arrives masked (front / pre-reveal state) and
-    // vertically centered in the viewport
+    // vertically centered in the viewport (switching tabs when the next card
+    // lives in another document)
     win->flashcard.revealMode = false;
     FlashcardToolbarUpdateState(win);
     win->flashcard.currentCardIdx++;
@@ -179,9 +330,38 @@ static void HandleFlashcardRate(MainWindow* win, int rating) {
     } else {
         logf("[fc] HandleFlashcardRate - advancing to card %d/%d\n", win->flashcard.currentCardIdx + 1,
              len(win->flashcard.studyOrder));
-        FlashcardNavigateToCard(win, win->flashcard.studyOrder[win->flashcard.currentCardIdx], true);
+        FlashcardNavigateToEntry(win, win->flashcard.studyOrder[win->flashcard.currentCardIdx], true);
     }
     MainWindowRerender(win);
+}
+
+// Stop the active study session (queue, index, modes) — per-tab caches
+// (cards/states/filter) are kept: they belong to the documents.
+static void FlashcardStopSession(MainWindow* win) {
+    win->flashcard.studyMode = false;
+    win->flashcard.revealMode = false;
+    win->flashcard.currentCardIdx = -1;
+    win->flashcard.studyOrder.Reset();
+}
+
+// Called from LoadModelIntoTab: after a tab switch, refresh flashcard state —
+// lazy-load the new tab's cards if flashcard mode is on (fixes masks from the
+// previous book being painted over the new document) and refresh count/list.
+void FlashcardOnTabChanged(MainWindow* win) {
+    if (!win->flashcard.on) {
+        return;
+    }
+    WindowTab* tab = win->CurrentTab();
+    if (tab && FlashcardEnsureTabCards(tab)) {
+        logf("[fc] OnTabChanged - '%s': cards ready (%d cards)\n", FlashcardTabLogName(tab), len(tab->flashcard.cards));
+    } else if (tab) {
+        logf("[fc] OnTabChanged - '%s': skipped (not a loaded PDF)\n", FlashcardTabLogName(tab));
+    } else {
+        logf("[fc] OnTabChanged - no current tab\n");
+    }
+    FlashcardToolbarUpdateCount(win);
+    FlashcardToolbarUpdateState(win);
+    FlashcardSidebarPopulate(win);
 }
 
 bool HandleCommandFlashcard(MainWindow* win, int cmd) {
@@ -203,23 +383,11 @@ bool HandleCommandFlashcard(MainWindow* win, int cmd) {
                     }
                     SetToolbarButtonCheckedState(win, CmdArchToolsToggle, false);
                 }
-                // Load flashcards from current document
+                // Lazy-load the current tab's cards + study states
                 WindowTab* tab = win->CurrentTab();
                 if (tab) {
-                    DisplayModel* dm = tab->AsFixed();
-                    if (dm) {
-                        auto* engine = AsEngineMupdf(dm->GetEngine());
-                        if (engine) {
-                            win->flashcard.cards = FlashcardLoadFromDocument(engine);
-                            logf("Flashcard: loaded %d cards\n", len(win->flashcard.cards));
-                            // Load persisted study state so new/due counts are correct
-                            if (tab->filePath) {
-                                win->flashcard.studyDoc = FlashcardStudyLoad(tab->filePath.s);
-                                logf("Flashcard: loaded %d study states\n", len(win->flashcard.studyDoc.states));
-                            }
-                            FlashcardToolbarUpdateCount(win);
-                        }
-                    }
+                    FlashcardEnsureTabCards(tab);
+                    FlashcardToolbarUpdateCount(win);
                 }
             } else {
                 FlashcardToolbarDestroy(win);
@@ -227,15 +395,8 @@ bool HandleCommandFlashcard(MainWindow* win, int cmd) {
                 // stays floating with a stale list (FC-R3)
                 FlashcardSidebarDestroy(win);
                 RelayoutFrame(win, true, -1);
-                win->flashcard.studyMode = false;
-                win->flashcard.revealMode = false;
-                win->flashcard.currentCardIdx = -1;
-                win->flashcard.cards.Reset();
-                win->flashcard.studyDoc.states.Reset();
-                win->flashcard.studyOrder.Reset();
-                win->flashcard.filterPageFrom = -1;
-                win->flashcard.filterPageTo = -1;
-                logf("[fc] CmdFlashcardToggle - flashcard OFF, state cleared\n");
+                FlashcardStopSession(win);
+                logf("[fc] CmdFlashcardToggle - flashcard OFF, session cleared (per-tab caches kept)\n");
             }
             MainWindowRerender(win);
             ToolbarUpdateStateForWindow(win, true);
@@ -305,9 +466,10 @@ bool HandleCommandFlashcard(MainWindow* win, int cmd) {
             if (annot) {
                 DeleteOldSelectionInfo(win, true);
                 // Reload cards so count/order reflect the new cloze immediately
-                win->flashcard.cards = FlashcardLoadFromDocument(AsEngineMupdf(engine));
+                tab->flashcard.cards = FlashcardLoadFromDocument(AsEngineMupdf(engine));
+                tab->flashcard.cardsLoaded = true;
                 if (tab->filePath) {
-                    win->flashcard.studyDoc = FlashcardStudyLoad(tab->filePath.s);
+                    tab->flashcard.studyDoc = FlashcardStudyLoad(tab->filePath.s);
                 }
                 MainWindowRerender(win);
                 ToolbarUpdateStateForWindow(win, true);
@@ -325,13 +487,12 @@ bool HandleCommandFlashcard(MainWindow* win, int cmd) {
             win->flashcard.revealMode = false;
             win->flashcard.currentCardIdx = -1;
             if (win->flashcard.studyMode) {
-                logf("[fc] CmdFlashcardStudy - study ON, %d cards\n", len(win->flashcard.studyOrder));
-                // Build filtered study order
+                // Build filtered study order (respects scope + per-tab filters)
                 BuildFilteredStudyOrder(win);
                 // Navigate to first card: masked (front state), vertically centered
                 if (len(win->flashcard.studyOrder) > 0) {
                     win->flashcard.currentCardIdx = 0;
-                    FlashcardNavigateToCard(win, win->flashcard.studyOrder[0], true);
+                    FlashcardNavigateToEntry(win, win->flashcard.studyOrder[0], true);
                 }
             } else {
                 logf("[fc] CmdFlashcardStudy - study OFF\n");
@@ -378,9 +539,11 @@ bool HandleCommandFlashcard(MainWindow* win, int cmd) {
             if (win->flashcard.studyMode && win->flashcard.currentCardIdx > 0) {
                 // Post-reveal back: the card arrives REVEALED (the answer was
                 // already seen) and the scroll position is KEPT — no
-                // auto-centering on the way back
+                // auto-centering on the way back (still switches tabs when the
+                // previous card lives in another document)
                 win->flashcard.currentCardIdx--;
                 win->flashcard.revealMode = true;
+                FlashcardNavigateToEntry(win, win->flashcard.studyOrder[win->flashcard.currentCardIdx], false);
                 FlashcardToolbarUpdateState(win);
                 MainWindowRerender(win);
             } else {
@@ -403,29 +566,13 @@ bool HandleCommandFlashcard(MainWindow* win, int cmd) {
             win->flashcard.currentCardIdx = next;
             win->flashcard.revealMode = false;
             FlashcardToolbarUpdateState(win);
-            FlashcardNavigateToCard(win, win->flashcard.studyOrder[next], true);
+            FlashcardNavigateToEntry(win, win->flashcard.studyOrder[next], true);
             MainWindowRerender(win);
             return true;
         }
-        case CmdFlashcardOrderToggle: {
-            gGlobalPrefs->flashcardSettings.randomOrder = !gGlobalPrefs->flashcardSettings.randomOrder;
-            logf("[fc] CmdFlashcardOrderToggle - randomOrder=%s\n",
-                 gGlobalPrefs->flashcardSettings.randomOrder ? StrL("ON") : StrL("OFF"));
-            if (win->flashcard.studyMode) {
-                // rebuild the queue in the new order and restart from its first
-                // card, so Next / advance / back stay coherent with the order
-                // the user configured
-                BuildFilteredStudyOrder(win);
-                win->flashcard.revealMode = false;
-                if (len(win->flashcard.studyOrder) > 0) {
-                    win->flashcard.currentCardIdx = 0;
-                    FlashcardNavigateToCard(win, win->flashcard.studyOrder[0], true);
-                } else {
-                    win->flashcard.currentCardIdx = -1;
-                }
-                MainWindowRerender(win);
-            }
-            FlashcardToolbarUpdateState(win);
+        case CmdFlashcardOrderOptions: {
+            logf("[fc] CmdFlashcardOrderOptions - opening order options dialog\n");
+            FlashcardOrderOptionsDialog(win);
             return true;
         }
         case CmdFlashcardLista:
@@ -433,52 +580,13 @@ bool HandleCommandFlashcard(MainWindow* win, int cmd) {
             FlashcardSidebarToggle(win);
             return true;
         case CmdFlashcardFilter: {
-            logf("[fc] CmdFlashcardFilter - opening page filter dialog\n");
-            // Get current page count
-            int pageCount = 0;
+            logf("[fc] CmdFlashcardFilter - opening filter dialog\n");
             WindowTab* tab = win->CurrentTab();
-            if (tab) {
-                DisplayModel* dm = tab->AsFixed();
-                if (dm) {
-                    pageCount = dm->PageCount();
-                }
-            }
-            if (pageCount <= 0) {
-                logf("[fc] CmdFlashcardFilter - ERROR: no document loaded\n");
+            if (!tab || !tab->AsFixed()) {
+                logf("[fc] CmdFlashcardFilter - ERROR: no PDF document loaded\n");
                 return true;
             }
-            // Show simple filter dialog using GoToPage pattern
-            TempStr fromStr = nullptr;
-            TempStr toStr = nullptr;
-            if (win->flashcard.filterPageFrom > 0) {
-                fromStr = fmt("%d", win->flashcard.filterPageFrom);
-            }
-            if (win->flashcard.filterPageTo > 0) {
-                toStr = fmt("%d", win->flashcard.filterPageTo);
-            }
-            // Use two sequential GoToPage dialogs
-            TempStr result1 = Dialog_GoToPage(win->hwndFrame, fromStr ? fromStr : StrL(""), pageCount, true);
-            if (result1 && len(result1) > 0) {
-                int from = ParseInt(result1);
-                if (from >= 1 && from <= pageCount) {
-                    win->flashcard.filterPageFrom = from;
-                }
-            } else if (result1 && len(result1) == 0) {
-                // Empty = clear filter from
-                win->flashcard.filterPageFrom = -1;
-            }
-            TempStr result2 = Dialog_GoToPage(win->hwndFrame, toStr ? toStr : StrL(""), pageCount, true);
-            if (result2 && len(result2) > 0) {
-                int to = ParseInt(result2);
-                if (to >= 1 && to <= pageCount) {
-                    win->flashcard.filterPageTo = to;
-                }
-            } else if (result2 && len(result2) == 0) {
-                // Empty = clear filter to
-                win->flashcard.filterPageTo = -1;
-            }
-            logf("[fc] CmdFlashcardFilter - filter set: from=%d, to=%d\n", win->flashcard.filterPageFrom,
-                 win->flashcard.filterPageTo);
+            FlashcardFilterOptionsDialog(win);
             return true;
         }
         case CmdFlashcardCleanHistory: {
@@ -488,19 +596,33 @@ bool HandleCommandFlashcard(MainWindow* win, int cmd) {
                 logf("[fc] CmdFlashcardCleanHistory - ERROR: no document loaded\n");
                 return true;
             }
-            // the dialog holds "Yes" for 2s (draining-line animation) before
-            // confirming this destructive action
-            if (FlashcardCleanHistoryDialog(win->hwndFrame)) {
-                win->flashcard.studyDoc.states.Reset();
-                // stop any active session: every card becomes "new" again
-                win->flashcard.studyMode = false;
-                win->flashcard.currentCardIdx = -1;
-                win->flashcard.revealMode = false;
-                FlashcardStudySave(tab->filePath.s, win->flashcard.studyDoc);
+            // hold-to-confirm: "Clear current book" 2s, "Clear ALL books" 5s;
+            // X/Esc cancels
+            int res = FlashcardCleanHistoryDialog(win->hwndFrame);
+            if (res == kFlashcardCleanCurrentBook) {
+                // current book only: other books' histories are untouched
+                // (each book has its own JSON, keyed by MD5 of its path)
+                tab->flashcard.studyDoc.states.Reset();
+                FlashcardStopSession(win);
+                FlashcardStudySave(tab->filePath.s, tab->flashcard.studyDoc);
                 FlashcardToolbarUpdateCount(win);
                 FlashcardToolbarUpdateState(win);
                 MainWindowRerender(win);
                 logf("[fc] CmdFlashcardCleanHistory - review history cleared for this doc\n");
+            } else if (res == kFlashcardCleanAllBooks) {
+                // ALL books: delete every study JSON in the app-data dir and
+                // reset the in-memory state of every tab of this window. No
+                // FlashcardStudySave afterwards — don't recreate deleted files
+                int nDeleted = FlashcardDeleteAllStudyFiles();
+                auto tabs = win->Tabs();
+                for (WindowTab* t : tabs) {
+                    t->flashcard.studyDoc.states.Reset();
+                }
+                FlashcardStopSession(win);
+                FlashcardToolbarUpdateCount(win);
+                FlashcardToolbarUpdateState(win);
+                MainWindowRerender(win);
+                logf("[fc] CmdFlashcardCleanHistory - review history cleared for ALL books (%d files)\n", nDeleted);
             } else {
                 logf("[fc] CmdFlashcardCleanHistory - cancelled by user\n");
             }

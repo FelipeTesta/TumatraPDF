@@ -10,10 +10,16 @@ extern "C" {
 }
 
 #include "Annotation.h"
+#include "Settings.h"
+#include "DisplayMode.h"
+#include "DocController.h"
 #include "DocProperties.h"
 #include "TreeModel.h"
 #include "EngineBase.h"
 #include "EngineMupdf.h"
+#include "base/GuessFileType.h"
+#include "EngineAll.h"
+#include "WindowTab.h"
 #include "AppTools.h"
 #include "Flashcard.h"
 
@@ -221,6 +227,139 @@ void FlashcardStudySave(const char* filePath, const FlashcardStudyDoc& doc) {
     }
 
     logf("[fc] FlashcardStudySave - saved %d entries\n", len(doc.states));
+}
+
+// Delete every FlashcardStudy/*.json in the app-data dir — the review
+// histories of ALL books. Called by the Clean History dialog's 5s-hold
+// "Clear ALL books" action. Returns the number of files deleted.
+int FlashcardDeleteAllStudyFiles() {
+    TempStr dir = GetPathInAppDataDirTemp(StrL("FlashcardStudy"));
+    TempStr pattern = path::JoinTemp(dir, StrL("*.json"));
+    WIN32_FIND_DATAW fd{};
+    HANDLE h = FindFirstFileW(CWStrTemp(ToWStrTemp(Str(pattern))), &fd);
+    if (h == INVALID_HANDLE_VALUE) {
+        return 0;
+    }
+    int deleted = 0;
+    do {
+        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+            continue;
+        }
+        TempStr file = path::JoinTemp(dir, ToUtf8Temp(WStr(fd.cFileName)));
+        if (DeleteFileW(CWStrTemp(ToWStrTemp(Str(file))))) {
+            deleted++;
+        } else {
+            logf("[fc] FlashcardDeleteAllStudyFiles - ERROR: failed to delete '%s'\n", Str(file));
+        }
+    } while (FindNextFileW(h, &fd));
+    FindClose(h);
+    logf("[fc] FlashcardDeleteAllStudyFiles - deleted %d study file(s)\n", deleted);
+    return deleted;
+}
+
+// Stable per-tab name for [fc] logs: displayName is empty for cmdline-loaded
+// docs until the UI assigns it — falls back to the file's base name
+TempStr FlashcardTabLogName(WindowTab* tab) {
+    if (!tab) {
+        return StrL("(no tab)");
+    }
+    if (tab->displayName) {
+        return tab->displayName;
+    }
+    if (tab->filePath) {
+        return path::GetBaseNameTemp(tab->filePath);
+    }
+    return StrL("(no name)");
+}
+
+// Evaluate a page-filter expression into a per-page membership vector
+// (pages[p-1] = 1 when page p is included). Syntax: tokens separated by ';'.
+// A token is "N" or "N-M" (add pages) with an optional leading '-' to REMOVE
+// pages instead. Tokens apply in order, so a later removal carves holes in an
+// earlier range: "1-15;20-25;-22-23;" = pages 1-15 plus 20-25, minus 22-23.
+// Values are clamped to [1, pageCount]; out-of-range tokens are ignored.
+// Returns false when no valid token was found (caller treats that as "all
+// pages" — an empty or garbage expression never hides every card).
+bool FlashcardFilterEval(Str expr, int pageCount, Vec<u8>& pages) {
+    pages.Reset();
+    for (int i = 0; i < pageCount; i++) {
+        pages.Append(0);
+    }
+    if (pageCount <= 0) {
+        return false;
+    }
+    bool anyValid = false;
+    int nSkipped = 0;
+    int i = 0;
+    int n = len(expr);
+    while (i < n) {
+        // skip separators / whitespace before a token
+        while (i < n && (expr.s[i] == ';' || expr.s[i] == ' ' || expr.s[i] == '\t')) {
+            i++;
+        }
+        if (i >= n) {
+            break;
+        }
+        bool remove = false;
+        if (expr.s[i] == '-') {
+            remove = true;
+            i++;
+        }
+        int v = 0;
+        bool hasDigit = false;
+        while (i < n && expr.s[i] >= '0' && expr.s[i] <= '9') {
+            v = v * 10 + (expr.s[i] - '0');
+            hasDigit = true;
+            i++;
+        }
+        if (!hasDigit) {
+            // garbage between separators: skip to the next ';' and continue
+            nSkipped++;
+            while (i < n && expr.s[i] != ';') {
+                i++;
+            }
+            continue;
+        }
+        int from = v;
+        int to = v;
+        // optional "-M" range end ('-' right after the first number)
+        if (i < n && expr.s[i] == '-') {
+            i++;
+            int w = 0;
+            hasDigit = false;
+            while (i < n && expr.s[i] >= '0' && expr.s[i] <= '9') {
+                w = w * 10 + (expr.s[i] - '0');
+                hasDigit = true;
+                i++;
+            }
+            if (hasDigit) {
+                to = w;
+            }
+        }
+        if (from > to) {
+            int t = from;
+            from = to;
+            to = t;
+        }
+        int lo = std::max(1, from);
+        int hi = std::min(pageCount, to);
+        if (hi >= lo) {
+            for (int p = lo; p <= hi; p++) {
+                pages[p - 1] = remove ? (u8)0 : (u8)1;
+            }
+        }
+        anyValid = true;
+        // skip trailing junk until the next separator
+        while (i < n && expr.s[i] != ';') {
+            if (expr.s[i] != ' ' && expr.s[i] != '\t') {
+                nSkipped++;
+            }
+            i++;
+        }
+    }
+    logf("[fc] FlashcardFilterEval - '%s' pageCount=%d -> %s (%d skipped)\n", expr, pageCount,
+         anyValid ? StrL("valid") : StrL("no valid token"), nSkipped);
+    return anyValid;
 }
 
 // Simple JSON parser for the flashcard study file.

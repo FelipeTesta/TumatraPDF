@@ -139,12 +139,10 @@ static void ListaTreeSelectionChanged(TreeView::SelectionChangedEvent* args) {
     if (!model || item->cardIdx < 0) return;
 
     int cardIdx = item->cardIdx;
-    if (cardIdx >= len(win->flashcard.cards)) return;
-
-    Flashcard& card = win->flashcard.cards[cardIdx];
     WindowTab* tab = win->CurrentTab();
-    if (!tab) return;
+    if (!tab || cardIdx >= len(tab->flashcard.cards)) return;
 
+    Flashcard& card = tab->flashcard.cards[cardIdx];
     DisplayModel* dm = tab->AsFixed();
     if (!dm) return;
 
@@ -262,7 +260,13 @@ void FlashcardSidebarToggle(MainWindow* win) {
 void FlashcardSidebarPopulate(MainWindow* win) {
     if (!win->flashcard.hwndListaBox || !win->flashcard.listaTreeView) return;
 
-    logf("[fc] FlashcardSidebarPopulate - adding %d cards to list\n", len(win->flashcard.cards));
+    // the list shows the CURRENT tab's cards (lazy-load if needed)
+    WindowTab* tab = win->CurrentTab();
+    if (!tab || !FlashcardEnsureTabCards(tab)) {
+        logf("[fc] FlashcardSidebarPopulate - no PDF loaded, list empty\n");
+    }
+
+    logf("[fc] FlashcardSidebarPopulate - adding %d cards to list\n", tab ? len(tab->flashcard.cards) : 0);
 
     TreeView* treeView = win->flashcard.listaTreeView;
     auto* model = (ListaTreeModel*)treeView->treeModel;
@@ -272,8 +276,9 @@ void FlashcardSidebarPopulate(MainWindow* win) {
     DeleteVecMembers(model->items);
     model->items.Reset();
 
-    for (int i = 0; i < len(win->flashcard.cards); i++) {
-        Flashcard& card = win->flashcard.cards[i];
+    int nCards = tab ? len(tab->flashcard.cards) : 0;
+    for (int i = 0; i < nCards; i++) {
+        Flashcard& card = tab->flashcard.cards[i];
         auto* item = new ListaTreeModel::ListaTreeItem();
         item->text = fmt("Card %d — Page %d", i + 1, card.pageNo);
         item->cardIdx = i;

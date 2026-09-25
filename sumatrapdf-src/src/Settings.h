@@ -63,6 +63,10 @@ struct FlashcardSettings {
     // if true, flashcard study presents cards in random order instead of
     // document order
     bool randomOrder;
+    // where new (never rated) cards go relative to due reviews in the
+    // study queue: 0 = new first, 1 = new last, 2 = mixed (interleaved
+    // proportionally)
+    int newCardsPosition;
 };
 
 // top, right, bottom and left margin (in that order) between window and
@@ -1075,13 +1079,16 @@ static const StructInfo gTrimInfo = {sizeof(Trim),
 
 static const FieldInfo gFlashcardSettingsFields[] = {
     {offsetof(FlashcardSettings, randomOrder), SettingType::Bool, false},
+    {offsetof(FlashcardSettings, newCardsPosition), SettingType::Int, 2},
 };
 static const StructInfo gFlashcardSettingsInfo = {
     sizeof(FlashcardSettings),
-    1,
+    2,
     gFlashcardSettingsFields,
-    "RandomOrder",
-    "if true, flashcard study presents cards in random order instead of document order",
+    "RandomOrder\0NewCardsPosition",
+    "if true, flashcard study presents cards in random order instead of document order\0where new (never rated) cards "
+    "go relative to due reviews in the study queue: 0 = new first, 1 = new last, 2 = mixed (interleaved "
+    "proportionally)",
     false};
 
 static const FieldInfo gWindowMarginFields[] = {

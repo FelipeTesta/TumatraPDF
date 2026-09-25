@@ -93,13 +93,30 @@ export async function testit(): Promise<void> {
     await sleep(1200);
     captureWindowToPng(canvas, tmpPath("fc2-next.png"));
 
-    // Order toggle ON (random): rebuild + restart from first card; toggle ON
-    // again — second NavigateToCard for the same card must show dy ~= 0,
-    // proving the vertical centering landed
-    sendCommand(frame, cmdId("CmdFlashcardOrderToggle"));
-    await sleep(1200);
-    sendCommand(frame, cmdId("CmdFlashcardOrderToggle"));
-    await sleep(1200);
+    // Order options dialog: opens as a MODAL window now (sequential/random +
+    // new-cards position, instant apply); open + close via WM_CLOSE. The
+    // full option behavior is a mouse feature -> user tests live.
+    sendCommand(frame, cmdId("CmdFlashcardOrderOptions"));
+    await sleep(800);
+    const findOrderDialog = (): number => {
+        let found = 0;
+        winapi.enumWindows((h: number) => {
+            if (winapi.getWindowText(h) === "Study Order") {
+                found = h;
+                return false;
+            }
+            return true;
+        });
+        return found;
+    };
+    const orderDlg = findOrderDialog();
+    console.log("order dialog open:", !!orderDlg);
+    if (orderDlg) {
+        captureWindowToPng(orderDlg, tmpPath("fc2-order.png"));
+        postMessage(orderDlg, 0x0010, 0, 0); // WM_CLOSE
+        await sleep(400);
+        console.log("order dialog closed:", !findOrderDialog());
+    }
     captureWindowToPng(canvas, tmpPath("fc2-random.png"));
 
     // ---- Clean History: hold-to-confirm dialog ----
@@ -120,22 +137,40 @@ export async function testit(): Promise<void> {
     console.log("clean dialog open:", !!dlg);
     if (dlg) {
         const cr = winapi.getClientRect(dlg);
-        // layout is DPI-proportional: Yes center at ~0.648/0.762 of client
-        const yesX = Math.round(cr.right * 0.648);
-        const yesY = Math.round(cr.bottom * 0.762);
+        // layout is DPI-proportional: two buttons, centers at ~0.30/0.70 of
+        // client width, ~0.78 of client height
+        const curX = Math.round(cr.right * 0.3);
+        const allX = Math.round(cr.right * 0.7);
+        const btnY = Math.round(cr.bottom * 0.78);
         captureWindowToPng(dlg, tmpPath("fc2-clean1.png"));
-        // early release (600ms hold): must NOT confirm, dialog stays open
-        postMessage(dlg, WM_LBUTTONDOWN, 0, packCoords(yesX, yesY));
+        // early release on "Clear current book" (600ms): must NOT confirm
+        postMessage(dlg, WM_LBUTTONDOWN, 0, packCoords(curX, btnY));
         await sleep(600);
-        postMessage(dlg, WM_LBUTTONUP, 0, packCoords(yesX, yesY));
+        postMessage(dlg, WM_LBUTTONUP, 0, packCoords(curX, btnY));
         await sleep(300);
         captureWindowToPng(dlg, tmpPath("fc2-clean2.png"));
         console.log("after 600ms hold + release, still open:", !!findCleanDialog());
-        // full hold (2.3s): confirms, dialog closes, history cleared
-        postMessage(dlg, WM_LBUTTONDOWN, 0, packCoords(yesX, yesY));
+        // full hold "Clear current book" (2.3s): confirms, dialog closes,
+        // current book's history cleared only
+        postMessage(dlg, WM_LBUTTONDOWN, 0, packCoords(curX, btnY));
         await sleep(2300);
         await sleep(400);
-        console.log("after 2.3s hold, gone:", !findCleanDialog());
+        console.log("after 2.3s hold current-book, gone:", !findCleanDialog());
+        // reopen: full hold "Clear ALL books" (5.4s): confirms, every study
+        // JSON in the app-data dir is deleted
+        sendCommand(frame, cmdId("CmdFlashcardCleanHistory"));
+        await sleep(800);
+        const dlg2 = findCleanDialog();
+        if (dlg2) {
+            const cr2 = winapi.getClientRect(dlg2);
+            const allX2 = Math.round(cr2.right * 0.7);
+            const btnY2 = Math.round(cr2.bottom * 0.78);
+            captureWindowToPng(dlg2, tmpPath("fc2-clean3.png"));
+            postMessage(dlg2, WM_LBUTTONDOWN, 0, packCoords(allX2, btnY2));
+            await sleep(5400);
+            await sleep(400);
+            console.log("after 5.4s hold all-books, gone:", !findCleanDialog());
+        }
     }
 
     proc.kill();

@@ -103,7 +103,7 @@ void HandleCmdArchToolsToggle(MainWindow* win) {
             win->flashcard.studyMode = false;
             win->flashcard.revealMode = false;
             win->flashcard.currentCardIdx = -1;
-            win->flashcard.cards.Reset();
+            win->flashcard.studyOrder.Reset();
         }
         UpdateToolbar2State(win);
     } else {
