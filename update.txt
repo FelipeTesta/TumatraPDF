@@ -1,4 +1,4 @@
 [TumatraPDF]
-Latest: 1.0.7
+Latest: 1.0.8
 PortableExe64: https://github.com/FelipeTesta/TumatraPDF/releases/latest/download/TumatraPDF-portable-win64.exe
 Installer64: https://github.com/FelipeTesta/TumatraPDF/releases/latest/download/TumatraPDF-portable-win64.exe
