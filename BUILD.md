@@ -49,11 +49,42 @@ Close window → clean exit, no crash dump under `%LOCALAPPDATA%\SumatraPDF-data
 & "C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe" sumatrapdf-src\vs2022\TumatraPDF.sln /t:TumatraPDF /p:Configuration=Debug /p:Platform=x64 /m
 ```
 
-## Release + auto-update (s26)
+## Release + auto-update (s26/s29)
 
-- **Pipeline**: `.github/workflows/release.yml` — push tag `v*` → windows-2022 runner (setup-bun + setup-msbuild) → Release x64 → bumps + commits repo-root `update.txt` → GitHub Release with `TumatraPDF.exe`.
-- **Version source**: `src/BuildConfig.h` (`CURR_VERSION 1.0`). Tag version (e.g. `v1.0.1`) must be > running app's `Latest`/`CURR_VERSION` semantics: update.txt `Latest: 1.0.1` > app `1.0` triggers prompt.
-- **Update flow in-app**: UpdateCheck.cpp pulls `update.txt` daily (setting `CheckForUpdates`), downloads `releases/latest/download/TumatraPDF-portable-win64.exe`, validates MZ header + ≥1 MiB (unsigned, no cert), then `SelfUpdateViaBatch`: detached cmd batch waits for exit → `move /Y` over running exe → relaunch.
+### How to ship a new release (copy-paste)
+
+```powershell
+# 0. sanity: worktree clean-ish, latest main pulled
+git pull --rebase origin main
+
+# 1. bump the version baked into the exe
+#    edit sumatrapdf-src/src/BuildConfig.h: CURR_VERSION 1.0 -> next version (keep it lower-then-tag equal: tag matches)
+# 2. build + test release locally (recommended)
+cd sumatrapdf-src
+& "C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe" vs2022\TumatraPDF.sln /t:TumatraPDF /p:Configuration=Release /p:Platform=x64 /m
+cd ..
+
+# 3. commit, tag, push tag (tag push triggers the workflow)
+git commit -am "release v1.0.8"
+git push origin HEAD:main
+git tag v1.0.8
+git push origin refs/tags/v1.0.8
+
+# 4. watch it
+gh run watch --exit-status
+```
+
+After ~3-4 min the workflow publishes `TumatraPDF-portable-win64.exe` to GitHub Releases and auto-commits the `update.txt` bump (`Latest: 1.0.8`) to `main` — so `git pull` BEFORE your next push, and running apps v1.0.x get the update dialog within a day (daily check; `update.txt` is checked against app version via `CompareProgramVersion`).
+
+Gotchas:
+- **Never delete/retag `v*`** — tags are protected (ruleset, admin-bypass only). Bump to the next patch instead.
+- CI needs: NASM step, WebView2 nuget restore, tracked `sumatrapdf-src/bin/` tools — all already in `.github/workflows/release.yml`; don't remove.
+- The workflow runs `gh`-style commit+push with GITHUB_TOKEN (`permissions: contents: write`) — repo default token is `read`; only this workflow may write.
+
+### How the system works
+- **Pipeline**: `.github/workflows/release.yml` — push tag `v*` → windows-2022 runner (setup-bun + setup-msbuild + setup-nasm + nuget WebView2) → Release x64 → renames exe to `TumatraPDF-portable-win64.exe` → bumps + commits repo-root `update.txt` → GitHub Release published.
+- **Version source**: `src/BuildConfig.h` (`CURR_VERSION`). update.txt `Latest:` must be numerically > the running app's version for the prompt to fire.
+- **Update flow in-app**: UpdateCheck.cpp pulls `update.txt` daily (setting `CheckForUpdates`), downloads `releases/latest/download/TumatraPDF-portable-win64.exe`, validates MZ header + ≥1 MiB (unsigned, no cert), then `SelfUpdateViaBatch`: detached cmd batch (ping-sleep, no `timeout` — fails console-less) waits for exit → `move /Y` over running exe → relaunch. E2E test: `tests/ad-hoc-update.ts` (registered in `before-release.ts`).
 - **Telemetry stance**: zero phone-home except the update-check GET against this repo. No crash upload (local dumps only).
 
 ## Why the exe shrank 22 MB → 11.7 MB
