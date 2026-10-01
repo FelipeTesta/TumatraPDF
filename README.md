@@ -257,7 +257,7 @@ The features below were developed on top of SumatraPDF and **do not exist in the
 
 ### 🗺️ What's new
 
-The per-version changelog (features + bug fixes, newest first) lives in **[RELEASE.md](RELEASE.md)**.
+The per-version changelog (features + bug fixes, newest first) lives in **[CHANGELOG.md](CHANGELOG.md)**.
 
 ---
 
@@ -307,4 +307,4 @@ Based on SumatraPDF:
 
 ## Status
 
-🟢 Core features complete. Modularization in progress: 16A-16C ✅, 16C-F6 ✅, Design system ✅, Autoscroll ✅, Toolbar wrapping ✅, ToolbarLayout ✅, Flashcards ✅ (full stack: cloze SRS + study flow + Order/Filter/Settings/List windows + cross-doc sessions + data tools). History + fixes: see [RELEASE.md](RELEASE.md).
+🟢 Core features complete. Modularization in progress: 16A-16C ✅, 16C-F6 ✅, Design system ✅, Autoscroll ✅, Toolbar wrapping ✅, ToolbarLayout ✅, Flashcards ✅ (full stack: cloze SRS + study flow + Order/Filter/Settings/List windows + cross-doc sessions + data tools). History + fixes: see [CHANGELOG.md](CHANGELOG.md).

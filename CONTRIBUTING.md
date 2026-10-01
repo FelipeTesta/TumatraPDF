@@ -20,7 +20,7 @@ ETA, contrast overlay...). Issues and pull requests are welcome.
 4. **Docs:** all project docs are English-only (README/LOG/TODO/BUILD/MERGE/
    RELEASE/AGENTS/Design_Guidelines, `FLOW/*.dot`).
 5. **Commits:** first line ends with `(fixes #N)` when fixing an issue;
-   describe features (not fixes) in `RELEASE.md` when readying a release.
+   describe features (not fixes) in `CHANGELOG.md` when readying a release.
 6. **License:** by contributing you license your changes under GPLv3 (the
    project's license, inherited from SumatraPDF).
 
@@ -29,7 +29,7 @@ ETA, contrast overlay...). Issues and pull requests are welcome.
 - `AGENTS.md` — repo rules + project map (start here)
 - `BUILD.md` — build/release (incl. the copy-paste release procedure)
 - `MERGE.md` — syncing with upstream SumatraPDF
-- `LOG.md` / `TODO.md` / `RELEASE.md` — session log / active backlog /
+- `LOG.md` / `TODO.md` / `CHANGELOG.md` — session log / active backlog /
   public per-version changelog
 - `Design_Guidelines.md` — conventions + known traps distilled from sessions
 - `FLOW/*.dot` — process diagrams
