@@ -6,6 +6,8 @@
 
 // Forward declarations
 class EngineMupdf;
+class EngineBase;
+struct Annotation;
 struct MainWindow;
 struct WindowTab;
 
@@ -77,6 +79,17 @@ struct FcListRow {
 
 // Load flashcards from PDF annotations in the current document
 Vec<Flashcard> FlashcardLoadFromDocument(EngineMupdf* engine);
+
+// Create a flashcard Highlight annotation for the given PAGE-space rects
+// (author/color/opacity per the flashcard recipe). Used by CmdFlashcardAdd
+// and the import merge.
+Annotation* FlashcardCreateHighlightAnnot(EngineBase* engine, int pageNo, Vec<RectF>& rects);
+
+// Import the NEW flashcards (Highlight annots) from another copy of the SAME
+// document into ours, merging with existing cards (duplicate = same page +
+// same mask within 1pt). Study history is NOT imported — new cards are "new".
+// Returns the number of cards created.
+int FlashcardImportFromPdf(EngineMupdf* dstEngine, Vec<Flashcard>& existing, const char* srcPath);
 
 // Save flashcard study state to external JSON file
 void FlashcardStudySave(const char* filePath, const FlashcardStudyDoc& doc);

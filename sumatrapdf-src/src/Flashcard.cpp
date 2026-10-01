@@ -131,6 +131,105 @@ Vec<Flashcard> FlashcardLoadFromDocument(EngineMupdf* engine) {
     return result;
 }
 
+// Create a flashcard Highlight annotation covering the given PAGE-space rects:
+// cloze is positional (content stays empty), author TumatraPDF-Flashcard, gray
+// 0.5 color, 0.4 opacity — the exact recipe of CmdFlashcardAdd, extracted so
+// the import merge can create cards the same way.
+Annotation* FlashcardCreateHighlightAnnot(EngineBase* engine, int pageNo, Vec<RectF>& rects) {
+    if (!engine || len(rects) == 0) {
+        return nullptr;
+    }
+    AnnotCreateArgs args{};
+    args.annotType = AnnotationType::Highlight;
+    Str content; // empty: the highlight rect IS the card (no text duplication)
+    args.content = content;
+    args.setContentToSelection = false;
+    Annotation* annot = EngineMupdfCreateAnnotation(engine, pageNo, PointF{}, &args);
+    if (!annot) {
+        logf("[fc] CreateHighlightAnnot - ERROR: EngineMupdfCreateAnnotation failed (page %d)\n", pageNo);
+        return nullptr;
+    }
+    SetQuadPointsAsRect(annot, rects);
+    annot->bounds = GetBounds(annot);
+    EngineMupdf* epdf = AsEngineMupdf(engine);
+    if (!epdf) {
+        return annot;
+    }
+    fz_context* ctx = epdf->Ctx();
+    ScopedRecursiveMutex cs(&epdf->docLock);
+    fz_try(ctx) {
+        pdf_set_annot_author(ctx, annot->pdfannot, CStrTemp(StrL("TumatraPDF-Flashcard")));
+        float gray[3] = {0.5f, 0.5f, 0.5f};
+        pdf_set_annot_color(ctx, annot->pdfannot, 3, gray);
+        pdf_set_annot_opacity(ctx, annot->pdfannot, 0.4f);
+    }
+    fz_catch(ctx) {
+        fz_report_error(ctx);
+    }
+    return annot;
+}
+
+// Import the NEW flashcards from another copy of the SAME document (e.g. a
+// study partner's PDF): loads the friend's card annotations, skips the ones
+// we already have (same page + same mask, 1pt tolerance — identical text
+// selections produce identical quads) and creates the missing ones in our
+// document. Study HISTORY is not touched: imported cards are "new" cards.
+// Returns the number of cards created.
+int FlashcardImportFromPdf(EngineMupdf* dstEngine, Vec<Flashcard>& existing, const char* srcPath) {
+    if (!dstEngine || !srcPath) {
+        return 0;
+    }
+    EngineBase* srcBase = CreateEngineMupdfFromFile(Str(srcPath), FileType::PDF, 0, nullptr);
+    if (!srcBase) {
+        logf("[fc] Import - ERROR: cannot open '%s'\n", Str(srcPath));
+        return 0;
+    }
+    EngineMupdf* srcEngine = AsEngineMupdf(srcBase);
+    if (!srcEngine || !srcEngine->pdfdoc) {
+        logf("[fc] Import - ERROR: '%s' is not a PDF (engine mismatch)\n", Str(srcPath));
+        delete srcBase;
+        return 0;
+    }
+    Vec<Flashcard> theirs = FlashcardLoadFromDocument(srcEngine);
+    logf("[fc] Import - source '%s' has %d card(s)\n", Str(srcPath), len(theirs));
+    int imported = 0;
+    int dupes = 0;
+    auto near = [](float a, float b) {
+        float d = a - b;
+        return d < 0 ? -d : d;
+    };
+    for (int i = 0; i < len(theirs); i++) {
+        Flashcard& tc = theirs[i];
+        // duplicate when one of OUR cards on the same page has (nearly) the
+        // same mask — the friend highlighted the same text we already have
+        bool dup = false;
+        for (int j = 0; j < len(existing); j++) {
+            const Flashcard& ec = existing[j];
+            if (ec.pageNo != tc.pageNo) {
+                continue;
+            }
+            if (near(ec.bounds.x, tc.bounds.x) < 1.0f && near(ec.bounds.y, tc.bounds.y) < 1.0f &&
+                near(ec.bounds.dx, tc.bounds.dx) < 1.0f && near(ec.bounds.dy, tc.bounds.dy) < 1.0f) {
+                dup = true;
+                break;
+            }
+        }
+        if (dup) {
+            dupes++;
+            continue;
+        }
+        Annotation* annot = FlashcardCreateHighlightAnnot(dstEngine, tc.pageNo, tc.rects);
+        if (annot) {
+            imported++;
+        } else {
+            logf("[fc] Import - ERROR: failed to create card on page %d\n", tc.pageNo);
+        }
+    }
+    delete srcBase;
+    logf("[fc] Import - imported %d new card(s), skipped %d duplicate(s)\n", imported, dupes);
+    return imported;
+}
+
 // Directory where the study-history JSONs are stored: the user-configured
 // flashcardSettings.studyDir when set (e.g. a Google Drive folder so the
 // histories are backed up / synced between machines), else the per-exe

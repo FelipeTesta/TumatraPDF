@@ -21,6 +21,11 @@ jobs:
       # NASM required by ext/libjpeg-turbo and ext/dav1d SIMD .asm custom build steps
       - uses: ilammy/setup-nasm@v1
 
+      # WebView2 SDK (nuget package referenced by vs2022/*.vcxproj, not tracked in git)
+      - name: Restore WebView2 nuget
+        working-directory: sumatrapdf-src
+        run: nuget install Microsoft.Web.WebView2 -Version 1.0.4022.49 -OutputDirectory packages -NonInteractive
+
       - name: Build (Release x64)
         working-directory: sumatrapdf-src
         run: msbuild vs2022\TumatraPDF.sln /t:TumatraPDF /p:Configuration=Release /p:Platform=x64 /m

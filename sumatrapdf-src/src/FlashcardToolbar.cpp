@@ -367,7 +367,7 @@ static void FlashcardDrawHoldButton(HWND hwnd, HDC hdc, const RECT& rc, const WC
 //   | other.pdf       5    0    2026-09-28 09:11 |     ~10 rows + scroll
 //   +---------------------------------------------+
 //   [Limpar livro selecionado (2s)] [Limpar TODOS os livros (5s)]
-//   [Vincular a um PDF...] [Recuperar backup (5s)]
+//   [Vincular a um PDF...] [Recuperar backup (5s)] [Importar de um PDF...]
 //
 // The clear buttons hold-to-confirm (orange 2s for the SELECTED book, red 5s
 // for ALL books). X / Esc closes. Actions execute inside the window (it owns
@@ -398,6 +398,7 @@ struct ConfigDialog {
     RECT rcClearAll{}; // "Limpar TODOS os livros" (5s hold)
     RECT rcLink{};     // "Vincular a um PDF..." (manual resync)
     RECT rcRecover{};  // "Recuperar backup" (5s hold)
+    RECT rcImport{};   // "Importar de um PDF..." (merge cards into current book)
     int holding = kFcConfigHoldNone;
     ULONGLONG holdStartTick = 0;
     int holdMs = 2000;
@@ -645,6 +646,36 @@ static void ConfigRecoverBackup(ConfigDialog* d) {
     ConfigReloadList(d);
 }
 
+// import the NEW flashcards from another copy of the SAME book (study
+// partner's PDF) into the CURRENT tab's document: creates the missing
+// highlight annotations, study history untouched (imported cards are "new")
+static void ConfigImportFromPdf(ConfigDialog* d) {
+    WindowTab* tab = d->win->CurrentTab();
+    if (!tab) {
+        logf("[fc] Import - ERROR: no current tab\n");
+        return;
+    }
+    DisplayModel* dm = tab->AsFixed();
+    EngineBase* engine = dm ? dm->GetEngine() : nullptr;
+    if (!engine || !EngineSupportsAnnotations(engine)) {
+        logf("[fc] Import - ERROR: current tab is not an annotation-capable PDF\n");
+        return;
+    }
+    TempStr src = nullptr;
+    if (!FcPickPdfFile(d->hwnd, src)) {
+        return; // cancelled — the picker is the confirmation
+    }
+    FlashcardEnsureTabCards(tab); // 'existing' must be loaded before the merge
+    int n = FlashcardImportFromPdf(AsEngineMupdf(engine), tab->flashcard.cards, CStrTemp(Str(src)));
+    if (n > 0) {
+        tab->flashcard.cards = FlashcardLoadFromDocument(AsEngineMupdf(engine));
+        FlashcardToolbarUpdateCount(d->win);
+        FlashcardToolbarUpdateState(d->win);
+        FlashcardSidebarPopulate(d->win);
+        MainWindowRerender(d->win);
+    }
+}
+
 static void ConfigLayout(ConfigDialog* d) {
     RECT rc;
     GetClientRect(d->hwnd, &rc);
@@ -683,16 +714,19 @@ static void ConfigLayout(ConfigDialog* d) {
     }
     d->rcClearSel = {x0, yBtn1, x0 + selW, yBtn1 + btnH};
     d->rcClearAll = {x0 + selW + gap, yBtn1, x0 + selW + gap + allW, yBtn1 + btnH};
-    // row 2: "Vincular a um PDF..." (instant) | "Recuperar backup" (5s hold)
-    int linkW = DpiScale(d->hwnd, 185);
-    int recW = DpiScale(d->hwnd, 185);
-    int totalW2 = linkW + recW + gap;
+    // row 2: "Vincular a um PDF..." | "Recuperar backup" | "Importar de um PDF..."
+    // (all instant or hold actions; the pickers confirm the file ones)
+    int linkW = DpiScale(d->hwnd, 165);
+    int recW = DpiScale(d->hwnd, 165);
+    int impW = DpiScale(d->hwnd, 165);
+    int totalW2 = linkW + recW + impW + 2 * gap;
     int x1 = (w - totalW2) / 2;
     if (x1 < 0) {
         x1 = 0;
     }
     d->rcLink = {x1, yBtn2, x1 + linkW, yBtn2 + btnH};
     d->rcRecover = {x1 + linkW + gap, yBtn2, x1 + linkW + gap + recW, yBtn2 + btnH};
+    d->rcImport = {x1 + linkW + recW + 2 * gap, yBtn2, x1 + linkW + recW + 2 * gap + impW, yBtn2 + btnH};
 }
 
 // owner-drawn one history row: |PDF |cartões|due|última revisão| — name
@@ -770,6 +804,8 @@ static void ConfigPaint(ConfigDialog* d) {
     // "Recuperar backup": red drain, 5s hold (overwrites current history)
     FlashcardDrawHoldButton(d->hwnd, hdc, d->rcRecover, L"Recuperar backup", d->holding == kFcConfigHoldRecover,
                             d->holding == kFcConfigHoldRecover ? d->progress : 1.0, RGB(229, 57, 53));
+    // "Importar de um PDF...": instant (the file picker is the confirmation)
+    FlashcardDrawButton(hdc, d->rcImport, L"Importar de um PDF...", false);
 
     SelectObject(hdc, oldFont);
     EndPaint(d->hwnd, &ps);
@@ -855,6 +891,8 @@ static LRESULT CALLBACK ConfigWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
                 }
             } else if (PtInRect(&d->rcLink, pt)) {
                 ConfigResyncSelected(d);
+            } else if (PtInRect(&d->rcImport, pt)) {
+                ConfigImportFromPdf(d);
             } else if (PtInRect(&d->rcClearSel, pt)) {
                 if (d->selIdx < 0) {
                     logf("[fc] Config - clear selected ignored: no row selected\n");

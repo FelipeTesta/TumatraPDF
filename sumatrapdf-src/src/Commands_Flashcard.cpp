@@ -451,15 +451,10 @@ bool HandleCommandFlashcard(MainWindow* win, int cmd) {
                 return true;
             }
 
-            // Cloze is positional: the highlight rect is the mask over existing PDF
-            // text. No duplicated content is stored in the annotation (content empty).
-            Str content;
-
-            // Create Highlight annotation that covers the selected text
-            AnnotCreateArgs args{};
-            args.annotType = AnnotationType::Highlight;
-            args.content = content;
-            args.setContentToSelection = false;
+            // Cloze is positional: the highlight rect is the mask over existing
+            // PDF text. No duplicated content is stored in the annotation
+            // (content empty). Creation lives in FlashcardCreateHighlightAnnot
+            // (shared with the import merge).
 
             // Collect pages from selection
             Vec<SelectionOnPage>* s = tab->selectionOnPage;
@@ -476,27 +471,7 @@ bool HandleCommandFlashcard(MainWindow* win, int cmd) {
                     if (pageNo != sel.pageNo) continue;
                     rects.Append(sel.rect);
                 }
-                annot = EngineMupdfCreateAnnotation(engine, pageNo, PointF{}, &args);
-                if (annot) {
-                    SetQuadPointsAsRect(annot, rects);
-                    annot->bounds = GetBounds(annot);
-
-                    // Set flashcard-specific properties: author, gray color, opacity
-                    {
-                        EngineMupdf* epdf = AsEngineMupdf(engine);
-                        fz_context* ctx = epdf->Ctx();
-                        ScopedRecursiveMutex cs(&epdf->docLock);
-                        fz_try(ctx) {
-                            pdf_set_annot_author(ctx, annot->pdfannot, CStrTemp(StrL("TumatraPDF-Flashcard")));
-                            float gray[3] = {0.5f, 0.5f, 0.5f};
-                            pdf_set_annot_color(ctx, annot->pdfannot, 3, gray);
-                            pdf_set_annot_opacity(ctx, annot->pdfannot, 0.4f);
-                        }
-                        fz_catch(ctx) {
-                            fz_report_error(ctx);
-                        }
-                    }
-                }
+                annot = FlashcardCreateHighlightAnnot(engine, pageNo, rects);
             }
 
             if (annot) {
