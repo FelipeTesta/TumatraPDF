@@ -1607,15 +1607,15 @@ Ternary (not std::max) to avoid include dependency. Any load path for persisted 
 ### Result
 - Build: MSBuild Debug x64 → 0 errors. Output: Compiled\TumatraPDF.exe (21,863,424 bytes).
 - Immediate workaround (before fix): one F7 press recovers (max(0×0.8, 0.1) = 0.1).
-## 2026-08-15 � TRIM Rework: Clip-Based Top/Bottom Elimination + Trim Config Dialog
+## 2026-08-15 — TRIM Rework: Clip-Based Top/Bottom Elimination + Trim Config Dialog
 
 ### What
-- Trim now ELIMINATES top/bottom strips from RENDER (RenderPageArgs.pageRect clip in RenderCache::Paint non-cached path) � old zoom hack (ApplyMarginTrim) deleted.
+- Trim now ELIMINATES top/bottom strips from RENDER (RenderPageArgs.pageRect clip in RenderCache::Paint non-cached path) — old zoom hack (ApplyMarginTrim) deleted.
 - New Trim Config dialog (modeless, ChangeThemeWnd pattern): buttons margin-top/margin-bottom show a draggable red 2px line on the page; drag auto-calculates distance; ? saves to gGlobalPrefs->trim.top/bottom.
 - New CmdTrimConfig command + "Trim Config" toolbar button + menu item.
 - Trim settings persisted: Trim struct (Top/Bottom/Enabled) in gen-settings.ts.
 - ShouldCacheRendering returns false when trim on (no stale cache tiles).
-- Scope: top/bottom only � left/right/column-gap NOT implemented (per user).
+- Scope: top/bottom only — left/right/column-gap NOT implemented (per user).
 
 ### Files
 - gen-settings.ts, gen-commands.ts (regenerated Settings.h/.cpp, Commands.h/.cpp)
@@ -1627,13 +1627,13 @@ Ternary (not std::max) to avoid include dependency. Any load path for persisted 
 ### Result
 - Build: MSBuild Debug x64 ? 0 errors. Output: Compiled\TumatraPDF.exe (21,875,200 bytes).
 
-## 2026-08-15 � TRIM Fixes: Dialog Persistence + Continuous Layout + Stretch Fix
+## 2026-08-15 — TRIM Fixes: Dialog Persistence + Continuous Layout + Stretch Fix
 
 ### What
 3 bugs fixed after clip-based trim implementation:
-1. Trim Config dialog disappeared when clicking/dragging red line on canvas � dialog was an unowned popup (args.parent = nullptr); canvas mouse capture dropped it behind the frame. Fix: own dialog to main window (args.parent = win->hwndFrame).
-2. Black gap in continuous mode � DocumentLayout computed page height from full mediaBox, ignoring trim. Fix: DocumentLayoutParams gained trimTop/trimBottom/trimEnabled; DisplayModel::Relayout populates them from gGlobalPrefs->trim + marginTrimEnabled; DocumentLayout::Relayout reduces pageSize.dy by top+bottom (pos.dy/canvasDy/canvasSize derive from it). CmdMarginTrimToggle + TrimConfigDialog OnSave/OnCancel now call RelayoutKeepingView() (keeps view, recalc visible parts, repaint). Trim line bottom Y (OnBottom + Canvas OnMouseMove clamp) uses reduced height so line starts at visible trimmed page bottom.
-3. Text stretch distortion when scrolling over trimmed region � RenderCache::Paint non-cached path clipped area AND shrank bounds (pixmap smaller than bounds ? BlitPixmap stretched). With layout now using reduced page height, pageOnScreen is already the trimmed rect: replaced clip+bounds-shrink with simple page-coord shift (area.y += t), no bounds adjustment ? 1:1 blit.
+1. Trim Config dialog disappeared when clicking/dragging red line on canvas — dialog was an unowned popup (args.parent = nullptr); canvas mouse capture dropped it behind the frame. Fix: own dialog to main window (args.parent = win->hwndFrame).
+2. Black gap in continuous mode — DocumentLayout computed page height from full mediaBox, ignoring trim. Fix: DocumentLayoutParams gained trimTop/trimBottom/trimEnabled; DisplayModel::Relayout populates them from gGlobalPrefs->trim + marginTrimEnabled; DocumentLayout::Relayout reduces pageSize.dy by top+bottom (pos.dy/canvasDy/canvasSize derive from it). CmdMarginTrimToggle + TrimConfigDialog OnSave/OnCancel now call RelayoutKeepingView() (keeps view, recalc visible parts, repaint). Trim line bottom Y (OnBottom + Canvas OnMouseMove clamp) uses reduced height so line starts at visible trimmed page bottom.
+3. Text stretch distortion when scrolling over trimmed region — RenderCache::Paint non-cached path clipped area AND shrank bounds (pixmap smaller than bounds ? BlitPixmap stretched). With layout now using reduced page height, pageOnScreen is already the trimmed rect: replaced clip+bounds-shrink with simple page-coord shift (area.y += t), no bounds adjustment ? 1:1 blit.
 
 ### Files
 - TrimConfigDialog.cpp (parent, OnSave/OnCancel relayout, OnBottom reduced height)
@@ -1856,7 +1856,7 @@ Polish round 2 for md autoscroll/contrast — speed visibility, md ETA parity, f
 
 ### Build
 `bun cmd/build.ts` — 0 err / 0 warn (20.7s). Deployed `Compiled\TumatraPDF.exe` 21,907,456 bytes @ 2026-08-25.
-## 2026-08-29 � Arch Tools Fase 12: Scale regression + Measure underline inversion + rename
+## 2026-08-29 — Arch Tools Fase 12: Scale regression + Measure underline inversion + rename
 - **Scale OnOk regression fix:** guard changed from !win->archScaleSet || win->archScaleFactor <= 0.0f to !(win->archScaleLineDefined || win->archScaleSet) so a freshly drawn scale line (archScaleSet still false until OnOk) is accepted; factor recomputed from stored archScaleLineP1/P2.
 - **Measure underline inverted:** removed BTNS_CHECK auto-toggle from CmdArchMeasure button in CreateToolbar2 (Toolbar.cpp:1958-1960); UpdateToolbar2State is now the sole manager of checked state (called from CmdArchMeasure handler, CmdArchToolsToggle, and ESC in FrameOnKeydown). Underline now tracks rchToolMode == 2 correctly (was appearing when OFF, hiding when ON).
 - **Rename:** 2nd-toolbar button Limpar linhas ? Clean lines (Toolbar.cpp:1942).

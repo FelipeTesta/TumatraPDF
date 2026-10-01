@@ -1,6 +1,8 @@
 # 0. Non-negotiables
 
 - NEVER use PowerShell `Set-Content` / `WriteAllText` for file content — corrupts UTF-8 accented characters. Use Edit tool.
+- Byte-safe text surgery if ever forced through shell: a `bun` script (`readFileSync`/`writeFileSync` in utf8) or the Edit tool — never PS text cmdlets. After ANY scripted write, verify with `git diff` that only the intended lines changed.
+- Mojibake scan after bulk edits: `git ls-files` + check for U+FFFD (0xEF 0xBF 0xBD) — historical damage lived in LOG.md/Version-history.md (all fixed s29b; remaining "?" chars like "saves to gGlobalPrefs" are pre-existing ANSI-era losses, not recoverable from git).
 - NEVER use `2>nul` (creates undeletable `nul` file on NTFS). Use `2>/dev/null`.
 - NEVER use `&&` in shell — PowerShell 5.1 doesn't support it. Use `;` or `cmd1; if ($?) { cmd2 }`.
 - NEVER hardcode command IDs — use `cmdId("CmdName")` from `tests/util.ts`. IDs shift when commands are added/removed.
@@ -43,6 +45,8 @@ TumatraPDF is a fork of SumatraPDF (upstream baseline ~912ecf2, Aug 2026) — Wi
 | `README.md` (root) | ONLY showcase — TumatraPDF features vs forked SumatraPDF | users/kjk |
 | `BUILD.md` / `MERGE.md` | working docs: build, upstream sync | agents |
 | `LOG.md` / `TODO.md` | changelog (append-only, never rewrite) / active backlog | agents |
+| `RELEASE.md` (root) | per-version public changelog (v1.0.x releases, release checklist) | agents/users |
+| `update.txt` (root) | update metadata served to running apps (`Latest:` + download URLs) — bumped by the release workflow, do NOT hand-edit except the URL keys | agents |
 | `FLOW/*.dot` | process maps only (never code architecture — §0b) | agents |
 | `TEMP/` | deprecated informativos (gitignored) | — |
 | `sumatrapdf-src/agents.md`, `sumatrapdf-src/docs/**` | upstream SumatraPDF reference, verbatim | upstream |
