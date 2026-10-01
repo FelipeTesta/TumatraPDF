@@ -297,6 +297,12 @@ export function getClassName(hwnd: number): string {
   return s;
 }
 
+export function getWindowThreadProcessId(hwnd: number): number {
+  const out = new Uint32Array(1);
+  user32.symbols.GetWindowThreadProcessId(hwnd, ptr(out));
+  return out[0];
+}
+
 export function getWindowPid(hwnd: number): number {
   const out = new Uint32Array(1);
   user32.symbols.GetWindowThreadProcessId(hwnd, ptr(out));
