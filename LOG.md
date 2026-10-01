@@ -17,7 +17,7 @@
 ## 2026-10-01 (s26) — Public-repo prep FASE 0-3: telemetry removal + own update system (BUILD OK, deployed)
 
 ### Added
-- **`update.txt` at repo root** — update metadata (`[TumatraPDF]` section, `Latest:` version, `PortableExe64:` = GitHub `releases/latest/download/TumatraPDF.exe`).
+- **`update.txt` at repo root** — update metadata (`[TumatraPDF]` section, `Latest:` version, `PortableExe64:` = GitHub `releases/latest/download/TumatraPDF-win64.exe`).
 - **`.github/workflows/release.yml`** — tag `v*` (or manual dispatch) → windows-2022 + bun + msbuild Release x64 → bumps+commits `update.txt` → publishes GitHub Release with `TumatraPDF.exe`.
 - **Portable auto-update self-replace** (UpdateCheck.cpp): unsigned portable exe no longer rejected — `SelfUpdateViaBatch()` writes a detached cmd batch in temp that waits for the PID to exit, `move /Y`s the downloaded exe over the running one, relaunches it, deletes itself. Download validation = PE "MZ" header + >=1 MiB (no code-signing cert in the fork).
 - **Version 1.0 fork track** (`src/BuildConfig.h`): `CURR_VERSION 1.0` / `1,0,0` — decoupled from upstream 3.7; `update.txt Latest: 1.0.x` triggers updates via existing numeric `CompareProgramVersion`.
