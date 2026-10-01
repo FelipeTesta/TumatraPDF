@@ -46,6 +46,7 @@ TumatraPDF is a fork of SumatraPDF (upstream baseline ~912ecf2, Aug 2026) — Wi
 | `BUILD.md` / `MERGE.md` | working docs: build, upstream sync | agents |
 | `LOG.md` / `TODO.md` | changelog (append-only, never rewrite) / active backlog | agents |
 | `RELEASE.md` (root) | per-version public changelog (v1.0.x releases, release checklist) | agents/users |
+| `LICENSE` / `SECURITY.md` / `CONTRIBUTING.md` (root) | GitHub community-health files: GPL-3.0 (verbatim text), vuln reporting, contributor ground rules | users |
 | `update.txt` (root) | update metadata served to running apps (`Latest:` + download URLs) — bumped by the release workflow, do NOT hand-edit except the URL keys | agents |
 | `FLOW/*.dot` | process maps only (never code architecture — §0b) | agents |
 | `TEMP/` | deprecated informativos (gitignored) | — |
