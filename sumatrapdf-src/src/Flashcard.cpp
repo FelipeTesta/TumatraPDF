@@ -187,14 +187,15 @@ int FlashcardImportFromPdf(EngineMupdf* dstEngine, Vec<Flashcard>& existing, con
     EngineMupdf* srcEngine = AsEngineMupdf(srcBase);
     if (!srcEngine || !srcEngine->pdfdoc) {
         logf("[fc] Import - ERROR: '%s' is not a PDF (engine mismatch)\n", Str(srcPath));
-        delete srcBase;
+        srcBase->Release();
         return 0;
     }
     Vec<Flashcard> theirs = FlashcardLoadFromDocument(srcEngine);
     logf("[fc] Import - source '%s' has %d card(s)\n", Str(srcPath), len(theirs));
     int imported = 0;
     int dupes = 0;
-    auto near = [](float a, float b) {
+    // 'near' is a legacy windows.h macro — name it nearF
+    auto nearF = [](float a, float b) {
         float d = a - b;
         return d < 0 ? -d : d;
     };
@@ -208,8 +209,8 @@ int FlashcardImportFromPdf(EngineMupdf* dstEngine, Vec<Flashcard>& existing, con
             if (ec.pageNo != tc.pageNo) {
                 continue;
             }
-            if (near(ec.bounds.x, tc.bounds.x) < 1.0f && near(ec.bounds.y, tc.bounds.y) < 1.0f &&
-                near(ec.bounds.dx, tc.bounds.dx) < 1.0f && near(ec.bounds.dy, tc.bounds.dy) < 1.0f) {
+            if (nearF(ec.bounds.x, tc.bounds.x) < 1.0f && nearF(ec.bounds.y, tc.bounds.y) < 1.0f &&
+                nearF(ec.bounds.dx, tc.bounds.dx) < 1.0f && nearF(ec.bounds.dy, tc.bounds.dy) < 1.0f) {
                 dup = true;
                 break;
             }
@@ -225,7 +226,7 @@ int FlashcardImportFromPdf(EngineMupdf* dstEngine, Vec<Flashcard>& existing, con
             logf("[fc] Import - ERROR: failed to create card on page %d\n", tc.pageNo);
         }
     }
-    delete srcBase;
+    srcBase->Release();
     logf("[fc] Import - imported %d new card(s), skipped %d duplicate(s)\n", imported, dupes);
     return imported;
 }

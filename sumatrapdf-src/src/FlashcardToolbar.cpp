@@ -13,7 +13,14 @@
 #include "resource.h"
 #include "DocController.h"
 #include "TreeModel.h"
+#include "Annotation.h"
 #include "EngineBase.h"
+extern "C" {
+#include <mupdf/pdf.h>
+}
+#include "EngineMupdf.h"
+#include "base/GuessFileType.h"
+#include "EngineAll.h"
 #include "DisplayModel.h"
 #include "SumatraPDF.h"
 #include "MainWindow.h"
