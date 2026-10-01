@@ -120,6 +120,8 @@ TempStr FlashcardStudyDir();
 struct FlashcardStudyDocInfo {
     char* fileName = nullptr; // owned (str::Dup): JSON file name inside the study dir
     char* docName = nullptr;  // owned (str::Dup): display name saved in the JSON ("" for legacy files)
+    char* docPath = nullptr;  // owned (str::Dup): full PDF path saved in the JSON (null/empty = legacy file)
+    int syncStatus = 0;       // 0 = unknown (legacy), 1 = synced (PDF exists at docPath), 2 = missing (moved/renamed)
     int totalCards = 0;       // entries in the JSON (cards that have study state)
     int dueCount = 0;         // entries with nextReviewAt <= now
     i64 lastReviewedAt = 0;   // most recent review timestamp (ms), 0 = never

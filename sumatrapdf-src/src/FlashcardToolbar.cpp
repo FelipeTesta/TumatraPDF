@@ -80,7 +80,7 @@ void FlashcardToolbarCreate(MainWindow* win) {
         {CmdFlashcardBack, _TRN("Back")},
         {CmdFlashcardNext, _TRN("Next")},
         {CmdFlashcardOrderOptions, _TRN("Order")},
-        {CmdFlashcardLista, _TRN("Lista")},
+        {CmdFlashcardLista, _TRN("List")},
         {CmdFlashcardFilter, _TRN("Filter")},
         {CmdFlashcardConfig, _TRN("Config")},
     };
@@ -373,8 +373,8 @@ static void FlashcardDrawHoldButton(HWND hwnd, HDC hdc, const RECT& rc, const WC
 //   | book.pdf       12    3    2026-09-30 14:05 |   — owner-drawn list,
 //   | other.pdf       5    0    2026-09-28 09:11 |     ~10 rows + scroll
 //   +---------------------------------------------+
-//   [Limpar livro selecionado (2s)] [Limpar TODOS os livros (5s)]
-//   [Vincular a um PDF...] [Recuperar backup (5s)] [Importar de um PDF...]
+//   [Clear Selected (2s)] [Clear All (5s)]
+//   [Link to PDF...] [Restore Backup (5s)] [Import from PDF...]
 //
 // The clear buttons hold-to-confirm (orange 2s for the SELECTED book, red 5s
 // for ALL books). X / Esc closes. Actions execute inside the window (it owns
@@ -389,7 +389,7 @@ enum {
     kFcConfigHoldNone = 0,
     kFcConfigHoldSelected = 1,
     kFcConfigHoldAll = 2,
-    kFcConfigHoldRecover = 3, // "Recuperar backup" (5s hold)
+    kFcConfigHoldRecover = 3, // "Restore Backup" (5s hold)
 };
 
 struct ConfigDialog {
@@ -401,11 +401,12 @@ struct ConfigDialog {
     int selIdx = -1; // selected row (-1 = none)
     RECT rcEditCaption{}, rcListCaption{};
     RECT rcBrowse{};   // 📂 folder button
-    RECT rcClearSel{}; // "Limpar livro selecionado" (2s hold)
-    RECT rcClearAll{}; // "Limpar TODOS os livros" (5s hold)
-    RECT rcLink{};     // "Vincular a um PDF..." (manual resync)
-    RECT rcRecover{};  // "Recuperar backup" (5s hold)
-    RECT rcImport{};   // "Importar de um PDF..." (merge cards into current book)
+    RECT rcClearSel{}; // "Clear Selected" (2s hold)
+    RECT rcClearAll{}; // "Clear All" (5s hold)
+    RECT rcLink{};     // "Link to PDF..." (manual resync)
+    RECT rcRecover{};  // "Restore Backup" (5s hold)
+    RECT rcImport{};   // "Import from PDF..." (merge cards into current book)
+    RECT rcRecheck{};  // "Re-check" (re-validate sync markers)
     int holding = kFcConfigHoldNone;
     ULONGLONG holdStartTick = 0;
     int holdMs = 2000;
@@ -420,6 +421,7 @@ static void ConfigFreeDocs(Vec<FlashcardStudyDocInfo>& docs) {
     for (int i = 0; i < len(docs); i++) {
         ::free(docs[i].fileName);
         ::free(docs[i].docName);
+        ::free(docs[i].docPath);
     }
     docs.Reset();
 }
@@ -481,7 +483,7 @@ static bool FcPickFolder(HWND hwndOwner, TempStr& outPath) {
 }
 
 // PDF file picker (IFileDialog in file mode) — used by the manual RESYNC
-// ("Vincular a um PDF...") so the user can point an orphaned history at the
+// ("Link to PDF...") so the user can point an orphaned history at the
 // renamed book on disk
 static bool FcPickPdfFile(HWND hwndOwner, TempStr& outPath) {
     IFileDialog* dlg = nullptr;
@@ -703,7 +705,12 @@ static void ConfigLayout(ConfigDialog* d) {
         d->rcBrowse = {w - pad - browseW, y, w - pad, y + editH};
     }
     y += editH + DpiScale(d->hwnd, 10);
-    d->rcListCaption = {pad, y, w - pad, y + capDy};
+    // "Re-check" (re-validate sync markers, e.g. after a Drive folder comes
+    // back online) shares the list-caption row, right-aligned; the caption
+    // text stops before it
+    int recheckW = DpiScale(d->hwnd, 92);
+    d->rcListCaption = {pad, y, w - pad - recheckW - gap, y + capDy};
+    d->rcRecheck = {w - pad - recheckW, y, w - pad, y + capDy};
     y += capDy + DpiScale(d->hwnd, 4);
     // two bottom rows of buttons: clears on top, resync/recover below
     int yBtn2 = h - pad - btnH;      // bottom row
@@ -711,7 +718,7 @@ static void ConfigLayout(ConfigDialog* d) {
     if (d->hwndList) {
         MoveWindow(d->hwndList, pad, y, w - 2 * pad, yBtn1 - gap - y, TRUE);
     }
-    // row 1: "Limpar livro selecionado" (2s) | "Limpar TODOS os livros" (5s)
+    // row 1: "Clear Selected" (2s) | "Clear All" (5s)
     int selW = DpiScale(d->hwnd, 185);
     int allW = DpiScale(d->hwnd, 185);
     int totalW = selW + allW + gap;
@@ -721,7 +728,7 @@ static void ConfigLayout(ConfigDialog* d) {
     }
     d->rcClearSel = {x0, yBtn1, x0 + selW, yBtn1 + btnH};
     d->rcClearAll = {x0 + selW + gap, yBtn1, x0 + selW + gap + allW, yBtn1 + btnH};
-    // row 2: "Vincular a um PDF..." | "Recuperar backup" | "Importar de um PDF..."
+    // row 2: "Link to PDF..." | "Restore Backup" | "Import from PDF..."
     // (all instant or hold actions; the pickers confirm the file ones)
     int linkW = DpiScale(d->hwnd, 165);
     int recW = DpiScale(d->hwnd, 165);
@@ -756,9 +763,29 @@ static void ConfigDrawListItem(ConfigDialog* d, const DRAWITEMSTRUCT* dis) {
     int gap = DpiScale(d->hwnd, 10);
     int cLastW = DpiScale(d->hwnd, 110);
     int cNumW = DpiScale(d->hwnd, 56);
+    int dotD = DpiScale(d->hwnd, 8);
+    // sync marker: green = PDF found at the saved path, red = missing
+    // (moved/renamed — resync needed), grey = legacy file (no path saved)
+    {
+        int dotX = rc.left + pad;
+        int dotY = (rc.top + rc.bottom - dotD) / 2;
+        COLORREF col = RGB(158, 158, 158);
+        if (info.syncStatus == 1) {
+            col = RGB(67, 160, 71);
+        } else if (info.syncStatus == 2) {
+            col = RGB(229, 57, 53);
+        }
+        HBRUSH br = CreateSolidBrush(col);
+        HGDIOBJ oldBr = SelectObject(hdc, br);
+        HGDIOBJ oldPen = SelectObject(hdc, GetStockObject(NULL_PEN));
+        Ellipse(hdc, dotX, dotY, dotX + dotD, dotY + dotD);
+        SelectObject(hdc, oldPen);
+        SelectObject(hdc, oldBr);
+        DeleteObject(br);
+    }
     // name on the left (ellipsized), up to where the numbers start
     RECT rcName = rc;
-    rcName.left += pad;
+    rcName.left += pad + dotD + pad;
     rcName.right = rc.right - pad - cLastW - 2 * (gap + cNumW);
     TempStr name = fmt("%s", Str(info.docName ? info.docName : "?"));
     DrawTextW(hdc, CWStrTemp(ToWStrTemp(Str(name))), -1, &rcName,
@@ -786,9 +813,9 @@ static void ConfigPaint(ConfigDialog* d) {
     HFONT oldFont = (HFONT)SelectObject(hdc, font);
 
     SetTextColor(hdc, ThemeWindowDarkerTextColor());
-    DrawTextW(hdc, L"Pasta do histórico de estudos (vazio = pasta padrão do app):", -1, &d->rcEditCaption,
+    DrawTextW(hdc, L"Study history folder (empty = app default):", -1, &d->rcEditCaption,
               DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-    DrawTextW(hdc, L"Documentos no histórico   |   cartões   |   due   |   última revisão:", -1, &d->rcListCaption,
+    DrawTextW(hdc, L"Documents in history   |   cards   |   due   |   last reviewed:", -1, &d->rcListCaption,
               DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
     // 📂 browse button: frame + emoji glyph (needs the emoji font)
@@ -799,20 +826,23 @@ static void ConfigPaint(ConfigDialog* d) {
     DrawTextW(hdc, L"📂", -1, &rcBrowse, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
     SelectObject(hdc, font);
 
-    // "Limpar livro selecionado": orange drain, 2s hold
-    FlashcardDrawHoldButton(d->hwnd, hdc, d->rcClearSel, L"Limpar livro selecionado",
+    // "Clear Selected": orange drain, 2s hold
+    FlashcardDrawHoldButton(d->hwnd, hdc, d->rcClearSel, L"Clear Selected",
                             d->holding == kFcConfigHoldSelected,
                             d->holding == kFcConfigHoldSelected ? d->progress : 1.0, RGB(255, 152, 0));
-    // "Limpar TODOS os livros": red drain, 5s hold
-    FlashcardDrawHoldButton(d->hwnd, hdc, d->rcClearAll, L"Limpar TODOS os livros", d->holding == kFcConfigHoldAll,
+    // "Clear All": red drain, 5s hold
+    FlashcardDrawHoldButton(d->hwnd, hdc, d->rcClearAll, L"Clear All", d->holding == kFcConfigHoldAll,
                             d->holding == kFcConfigHoldAll ? d->progress : 1.0, RGB(229, 57, 53));
-    // "Vincular a um PDF...": instant (the file picker is the confirmation)
-    FlashcardDrawButton(hdc, d->rcLink, L"Vincular a um PDF...", false);
-    // "Recuperar backup": red drain, 5s hold (overwrites current history)
-    FlashcardDrawHoldButton(d->hwnd, hdc, d->rcRecover, L"Recuperar backup", d->holding == kFcConfigHoldRecover,
+    // "Link to PDF...": instant (the file picker is the confirmation)
+    FlashcardDrawButton(hdc, d->rcLink, L"Link to PDF...", false);
+    // "Restore Backup": red drain, 5s hold (overwrites current history)
+    FlashcardDrawHoldButton(d->hwnd, hdc, d->rcRecover, L"Restore Backup", d->holding == kFcConfigHoldRecover,
                             d->holding == kFcConfigHoldRecover ? d->progress : 1.0, RGB(229, 57, 53));
-    // "Importar de um PDF...": instant (the file picker is the confirmation)
-    FlashcardDrawButton(hdc, d->rcImport, L"Importar de um PDF...", false);
+    // "Import from PDF...": instant (the file picker is the confirmation)
+    FlashcardDrawButton(hdc, d->rcImport, L"Import from PDF...", false);
+    // "Re-check": instant — re-validate every sync marker (e.g. a Drive
+    // folder that came back online)
+    FlashcardDrawButton(hdc, d->rcRecheck, L"Re-check", false);
 
     SelectObject(hdc, oldFont);
     EndPaint(d->hwnd, &ps);
@@ -873,7 +903,7 @@ static LRESULT CALLBACK ConfigWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             int code = HIWORD(wp);
             if (id == IDC_FC_CONFIG_LIST && code == LBN_SELCHANGE) {
                 // the selection PERSISTS (unlike the Filter's toggle list):
-                // "Limpar livro selecionado" acts on the selected row
+                // "Clear Selected" acts on the selected row
                 d->selIdx = (int)SendMessageW(d->hwndList, LB_GETCURSEL, 0, 0);
                 logf("[fc] Config - selected row %d\n", d->selIdx);
                 InvalidateRect(hwnd, nullptr, FALSE);
@@ -891,7 +921,12 @@ static LRESULT CALLBACK ConfigWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         }
         case WM_LBUTTONDOWN: {
             POINT pt{(short)LOWORD(lp), (short)HIWORD(lp)};
-            if (PtInRect(&d->rcBrowse, pt)) {
+            if (PtInRect(&d->rcRecheck, pt)) {
+                logf("[fc] Config - re-check: re-validating sync markers\n");
+                ConfigReloadList(d);
+                d->selIdx = -1;
+                InvalidateRect(hwnd, nullptr, FALSE);
+            } else if (PtInRect(&d->rcBrowse, pt)) {
                 TempStr path = nullptr;
                 if (FcPickFolder(hwnd, path)) {
                     ConfigApplyPath(d, Str(path));
@@ -995,7 +1030,7 @@ void FlashcardConfigDialog(MainWindow* win) {
     ConfigDialog dlg; // no {}: Vec's default ctor is explicit
     dlg.win = win;
     gConfigDialog = &dlg; // stack-local: safe, the modal pump below owns it
-    HWND hwnd = FlashcardCreateDialogWindow(L"TUMATRA_FLASHCARD_CONFIG", L"Configurações", 560, 506, hwndParent);
+    HWND hwnd = FlashcardCreateDialogWindow(L"TUMATRA_FLASHCARD_CONFIG", L"Settings", 560, 506, hwndParent);
     if (!hwnd) {
         gConfigDialog = nullptr;
         return;
@@ -1229,16 +1264,16 @@ void FlashcardOrderOptionsDialog(MainWindow* win) {
 
 // ---- Study Filter dialog ---------------------------------------------------
 // Opens from the toolbar "Filter" button. Layout (top to bottom):
-//   [x] Estudar de todos os PDFs abertos (sessão)  — cross-doc session toggle
-//   Filtro de páginas:  [EDIT expression]          — "1-15;20-25;-22-23;"
-//   Capítulos (bookmarks):                          — checkbox mirror of the
+//   [x] Study all open PDFs (session)   — cross-doc session toggle
+//   Page filter:       [EDIT expression] — "1-15;20-25;-22-23;"
+//   Chapters (bookmarks):                 — checkbox mirror of the
 //   +------------------------------------+           TOC; checking a bookmark
-//   | [ ] Capítulo 1 (1-15)              |           injects its page range
-//   | [ ] Capítulo 2 (16-30)             |           into the expression
+//   | [ ] Chapter 1 (1-15)               |           injects its page range
+//   | [ ] Chapter 2 (16-30)              |           into the expression
 //   +------------------------------------+
-//   [Aplicar] [Filtros: ON/OFF] [Limpar filtros]    — clear is a 2s hold
+//   [Apply] [Filters: ON/OFF] [Clear Filters]    — clear is a 2s hold
 //
-// Apply happens on: Aplicar button, Enter in the edit, every checkbox click,
+// Apply happens on: Apply button, Enter in the edit, every checkbox click,
 // the ON/OFF toggle, the cross-doc toggle and the Clear hold. X / Esc closes
 // and keeps the last APPLIED state (pending typed text is not applied).
 // Each book keeps its own filter (per-tab); the cross-doc checkbox is the
@@ -1334,7 +1369,7 @@ static void FilterSetEditText(HWND hwndEdit, Str text) {
 }
 
 // Save the edit's expression as the tab's filter and rebuild the session
-// queue (when a session is active). Called by Aplicar / Enter / checkbox.
+// queue (when a session is active). Called by Apply / Enter / checkbox.
 static void FilterApplyText(FilterOptionsDialog* d) {
     Str text = FcGetEditText(d->hwndEdit);
     str::ReplaceWithCopy(&d->tab->flashcard.filterExpr, text);
@@ -1441,7 +1476,7 @@ static void FilterOptionsLayout(FilterOptionsDialog* d) {
     if (d->hwndList) {
         MoveWindow(d->hwndList, pad, y, w - 2 * pad, yBtn - gap - y, TRUE);
     }
-    // bottom button row: Aplicar | Filtros ON/OFF | Limpar filtros (hold 2s)
+    // bottom button row: Apply | Filters ON/OFF | Clear Filters (hold 2s)
     int applyW = DpiScale(d->hwnd, 110);
     int toggleW = DpiScale(d->hwnd, 130);
     int clearW = DpiScale(d->hwnd, 170);
@@ -1491,21 +1526,20 @@ static void FilterOptionsPaint(FilterOptionsDialog* d) {
     SetTextColor(hdc, ThemeWindowTextColor());
     RECT rcCrossText = d->rcCrossDoc;
     rcCrossText.left += DpiScale(d->hwnd, 24);
-    DrawTextW(hdc, L"Estudar de todos os PDFs abertos (sessão)", -1, &rcCrossText,
-              DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    DrawTextW(hdc, L"Study all open PDFs (session)", -1, &rcCrossText, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
     SetTextColor(hdc, ThemeWindowDarkerTextColor());
-    DrawTextW(hdc, L"Filtro de páginas (ex.: 1-15;20-25;-22-23;)", -1, &d->rcEditCaption,
+    DrawTextW(hdc, L"Page filter (e.g. 1-15;20-25;-22-23;)", -1, &d->rcEditCaption,
               DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-    DrawTextW(hdc, L"Capítulos (bookmarks) — marcar injeta o intervalo no filtro", -1, &d->rcListCaption,
+    DrawTextW(hdc, L"Chapters (bookmarks) — checking injects the range into the filter", -1, &d->rcListCaption,
               DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
     // bottom buttons
     bool filterOn = d->tab->flashcard.filterEnabled;
-    FlashcardDrawButton(hdc, d->rcApply, L"Aplicar", false);
-    TempStr toggleLabel = filterOn ? StrL("Filtros: ON") : StrL("Filtros: OFF");
+    FlashcardDrawButton(hdc, d->rcApply, L"Apply", false);
+    TempStr toggleLabel = filterOn ? StrL("Filters: ON") : StrL("Filters: OFF");
     FlashcardDrawButton(hdc, d->rcToggle, (WCHAR*)CWStrTemp(ToWStrTemp(Str(toggleLabel))), false);
-    FlashcardDrawHoldButton(d->hwnd, hdc, d->rcClear, L"Limpar filtros", d->holdingClear == 1,
+    FlashcardDrawHoldButton(d->hwnd, hdc, d->rcClear, L"Clear Filters", d->holdingClear == 1,
                             d->holdingClear == 1 ? d->progress : 1.0, RGB(229, 57, 53));
 
     SelectObject(hdc, oldFont);
@@ -1688,7 +1722,7 @@ void FlashcardFilterOptionsDialog(MainWindow* win) {
     dlg.tab = tab;
     gFilterOptionsDialog = &dlg; // stack-local: safe, the modal pump below owns it
 
-    HWND hwnd = FlashcardCreateDialogWindow(L"TUMATRA_FLASHCARD_FILTER", L"Filtro de Estudo", 560, 500, hwndParent);
+    HWND hwnd = FlashcardCreateDialogWindow(L"TUMATRA_FLASHCARD_FILTER", L"Study Filter", 560, 500, hwndParent);
     if (!hwnd) {
         gFilterOptionsDialog = nullptr;
         return;

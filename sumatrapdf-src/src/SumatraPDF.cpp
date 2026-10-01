@@ -11226,6 +11226,14 @@ static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, L
 
         case CmdViewportCropToggle:
             if (ShouldToggle(cmd, gGlobalPrefs->viewportCrop.enabled)) {
+                bool scanTurningOn = !gGlobalPrefs->viewportCrop.enabled;
+                if (scanTurningOn) {
+                    // scan view ALWAYS starts from the full-width view: if the
+                    // user toggles with a zoom already applied, the crop would
+                    // divide an already-zoomed page (half of half). Fit-width
+                    // first so the base the crop divides is stable.
+                    HandleCmdZoomFitWidthAndContinuous(win);
+                }
                 gGlobalPrefs->viewportCrop.enabled = !gGlobalPrefs->viewportCrop.enabled;
                 auto cropDm = win->AsFixed();
                 if (cropDm) {

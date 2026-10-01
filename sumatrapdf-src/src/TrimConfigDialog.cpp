@@ -243,8 +243,9 @@ bool TrimConfigWnd::Create(MainWindow* mainWin) {
     savedColGap = gGlobalPrefs->viewportCrop.colGap;
     win->trimConfigTop = savedTop;
     win->trimConfigBottom = savedBottom;
-    win->trimConfigMode = 1; // dialog open → both lines visible
+    win->trimConfigMode = 1; // dialog open → visible margin lines (context-aware, s28)
     win->trimConfigDragLine = 0;
+    win->trimDragPageNo = 0;
     win->trimDragging = false;
 
     {

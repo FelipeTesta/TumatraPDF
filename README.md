@@ -99,6 +99,8 @@ The features below were developed on top of SumatraPDF and **do not exist in the
 
 **What it does:** Automatically trims margins and displays two-column pages one column at a time, maximizing screen space and optimizing auto-scroll reading flow.
 
+**Names (2026-09-30):** the column-by-column toggle is now **Scan Mode** (ex Viewport Crop / "Two Column"); the stacked-columns variant is **Two Columns** (ex "Two Column 2"). Toolbar + `New Tools` menu labels follow the new names. Turning Scan Mode on always first fits the page width, so toggling it from any zoom level is safe (no "half of half" division).
+
 **How it works:**
 
 - The viewport is cropped by user-defined margins (left, right, top, bottom, inter-column gap) in pixels
@@ -120,12 +122,12 @@ The features below were developed on top of SumatraPDF and **do not exist in the
 
 **Interface:**
 
-| Access                          | Action                      |
-| ------------------------------- | --------------------------- |
-| Menu: New Tools → Viewport Crop | Enable/disable              |
-| Toolbar button                  | Toggle on/off               |
-| Config button (gear icon)       | Open margin settings dialog |
-| Quick toggle                    | Temporarily show full page  |
+| Access                      | Action                      |
+| --------------------------- | --------------------------- |
+| Menu: New Tools → Scan Mode | Enable/disable              |
+| Toolbar button              | Toggle on/off               |
+| Config button (gear icon)   | Open margin settings dialog |
+| Quick toggle                | Temporarily show full page  |
 
 ---
 
@@ -140,6 +142,7 @@ The features below were developed on top of SumatraPDF and **do not exist in the
 - Clip-based render elimination (`RenderPageArgs.pageRect`) — NOT a zoom hack
 - Trim Config dialog with "margin-top" / "margin-bottom" buttons
 - Draggable red 2px horizontal line to set the trim distance
+- Context-aware lines: every margin line visible in the viewport is shown (near a page top you also get the previous page's bottom line; near a page bottom the next page's top line; a fully visible page shows its own two lines) — drag any of them
 - ✅ button saves the distances
 
 **Controls:**
@@ -220,11 +223,15 @@ The script compares the version in `sumatrapdf-src/src/Version.h` with the pre-r
 - **Study:** toolbar Study button. Card arrives masked, vertically centered (TC2 column-aware). `Space`/`Enter` reveals → `1`–`4` rate (Again/Hard/Good/Easy, numpad too) → auto-advance. Again reinserts the card (relearn). Back = previous card, arrives revealed, keeps scroll. Next = skip without rating.
 - **SM-2 state:** per-book JSON in the study-history folder (default: portable app-data dir next to the exe, configurable via Config window), keyed by MD5(filePath) — per-book isolation; files carry the book's name for the Config list. All flashcard windows are theme-aware (dark mode included).
 - **Order dialog** (Order button): Sequential/Random (shuffle within new/due groups) + new-cards position — before due / after due / mixed (proportional interleave, default). Instant apply.
-- **Config window** (Config button, ex-Clean): (1) **study-history folder** — shows the current dir, `📂` opens a folder picker; point it at a Google Drive folder to keep every book's history backed up/synced (empty = default app-data dir; existing JSONs are MIGRATED to the new folder — files already there are kept); (2) **history list** — every book in the study dir with `|PDF | cartões | due | última revisão|` (~10 rows + scroll); (3) **"Limpar livro selecionado"** (2s orange hold) — clears the SELECTED book's history; (4) **"Limpar TODOS os livros"** (5s red hold). Actions run inside the window; the list reloads live. X/Esc closes.
-- **Filter window** (Filter button): page-set expression `1-15;20-25;-22-23;` (ranges add, `-` prefix removes, sequential eval) + bookmark mirror (checkbox per TOC item injects the chapter's range; chapter = first bookmark page → page before next flat bookmark, sublevels included) + Filtros ON/OFF (keeps expression) + Limpar filtros (2s hold). Filter is per-book; Aplicar/Enter applies.
-- **Cross-document sessions:** checkbox "Estudar de todos os PDFs abertos (sessão)" — study queue over ALL PDF tabs in the SAME window; advancing auto-switches tab and centers the card; SM-2 saved to each book's own JSON. Two distinct study modes: current document × global session.
+- **Settings window** (Config button, ex-Clean): (1) **study-history folder** — shows the current dir, `📂` opens a folder picker; point it at a Google Drive folder to keep every book's history backed up/synced (empty = default app-data dir; existing JSONs are MIGRATED to the new folder — files already there are kept); (2) **history list** — every book in the study dir with `|PDF | cards | due | last reviewed|` (~10 rows + scroll); (3) **Clear Selected** (2s orange hold) — clears the SELECTED book's history; (4) **Clear All** (5s red hold); (5) **Link to PDF...** — manual resync: point an orphaned history at a renamed/moved book; (6) **Restore Backup** (5s red hold) — restores the newest snapshot; (7) **Import from PDF...** — merge another copy of the same book's NEW flashcards into the current book (duplicates skipped, study history NOT imported); (8) **sync markers** — a dot before each name: green = history linked to a PDF at a known location, red = PDF moved/renamed (use Link to PDF... to fix), grey = legacy file; the **Re-check** button re-validates all markers (e.g. after a Drive folder finishes loading). Actions run inside the window; the list reloads live. X/Esc closes.
+- **Resync:** history files are keyed by MD5(file path) — renaming/moving a PDF would orphan its history. Automatic: opening a moved book (same base name) ADOPTS its old history file. Manual: Settings → Link to PDF... for renames.
+- **Local backups:** rolling snapshots of the whole study dir in `backup\1d`, `backup\3d`, `backup\7d` (refreshed after each save when older than the slot's age). Restore via Settings → Restore Backup.
+- **Filter window** (Filter button): page-set expression `1-15;20-25;-22-23;` (ranges add, `-` prefix removes, sequential eval) + bookmark mirror (checkbox per TOC item injects the chapter's range; chapter = first bookmark page → page before next flat bookmark, sublevels included) + Filters ON/OFF (keeps expression) + Clear Filters (2s hold). Filter is per-book; Apply/Enter applies.
+- **Cross-document sessions:** checkbox "Study all open PDFs (session)" — study queue over ALL PDF tabs in the SAME window; advancing auto-switches tab and centers the card; SM-2 saved to each book's own JSON. Two distinct study modes: current document × global session.
 - **Per-tab state:** cards, study history and filter live on the tab (`WindowTab::flashcard`) — switching tabs reloads each book's cards; session/queue lives on the window.
-- **Lista panel** (Lista button): docked right-side panel (resizable via splitter) listing the book's cards in 4 columns — Flashcard (the masked text, extracted live; nothing stored in the PDF), Pág, Due (countdown to next review, "0min" when due), Status with colors (new = blue, due = orange, learn = purple, ok = green). Click a row → navigate to the card; refreshed after rating and history wipes.
+- **List panel** (List button, ex-"Lista"): docked right-side panel (resizable via splitter) listing the book's cards in 4 columns — Flashcard (the masked text, extracted live; nothing stored in the PDF), Page, Due (countdown to next review, "0min" when due), Status with colors (new = blue, due = orange, learn = purple, ok = green). Click a row → navigate to the card; refreshed after rating and history wipes.
+
+**Controls:** see [Shortcuts.md](Shortcuts.md) — flashcards (`S`, `Space`/`Enter`, `1`–`4`), autoscroll (`F7`–`F9`), contrast/invert and the upstream basics.
 
 **Controls:**
 
@@ -278,7 +285,10 @@ The script compares the version in `sumatrapdf-src/src/Version.h` with the pre-r
 - [x] Flashcard Filter window — page-set expr + bookmark mirror + ON/OFF + clear (2s hold), per-book filter
 - [x] Flashcard Config window — study-history folder picker (Drive backup), per-book history list, clear-selected/clear-ALL holds; all flashcard windows dark-theme aware; **study-state parser fix** (states loaded as all-zeros since the first release — cards came back as "new" on every relaunch)
 - [x] Flashcard cross-doc study — session checkbox: queue over all PDF tabs of the window, auto tab-switch, per-book SM-2 save
-- [x] Flashcard Lista panel — docked right sidebar, 4 columns (masked-text label, Pág, Due countdown, colored Status), click-to-navigate
+- [x] Flashcard Lista panel — docked right sidebar, 4 columns (masked-text label, Page, Due countdown, colored Status), click-to-navigate
+- [x] Flashcard data tools (Settings window) — study-folder migration (s25), RESYNC (auto adopt-by-docName on move + Link to PDF for renames), rolling local backups 1d/3d/7d + Restore Backup, Import from PDF (merge a study partner's new cards, history untouched)
+- [x] UI language: all fork-added window/button labels in English (public release); TC1/TC2 renamed Scan Mode / Two Columns; Shortcuts.md added
+- [x] Sync markers + Re-check (s27) — study JSONs persist the full PDF path; green/red/grey dots in the Settings list + Re-check button; Scan Mode always starts from fit-width; "Lista"→"List"
 - [ ] Automated tests for new features
 
 ---

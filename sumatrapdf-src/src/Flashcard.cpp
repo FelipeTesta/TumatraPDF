@@ -367,7 +367,7 @@ static void FlashcardStudyMaybeBackup() {
 
 // restore the NEWEST backup slot that has files (tries 1d -> 3d -> 7d) over
 // the study dir. Returns the number of restored files (0 = no backup found).
-// Called by the Config window's "Recuperar backup" hold action.
+// Called by the Config window's "Restore Backup" hold action.
 int FlashcardStudyRecoverBackup() {
     TempStr dir = FlashcardStudyDir();
     for (auto& s : kFcBackupSlots) {
@@ -429,9 +429,12 @@ void FlashcardStudySave(const char* filePath, const FlashcardStudyDoc& doc) {
     }
 
     // docName (base name of the book) lets the Config window list books by
-    // name; full path would leak machine layout and moves between machines
+    // name; docPath (full path) powers the sync markers (moved/renamed
+    // detection) and is re-validated by Re-check in that window
     fprintf(f, "{\n  \"version\": %d,\n  \"docName\": ", doc.version);
     WriteJsonStringLiteral(f, path::GetBaseNameTemp(Str(filePath)));
+    fprintf(f, ",\n  \"docPath\": ");
+    WriteJsonStringLiteral(f, filePath);
     fprintf(f, ",\n  \"states\": {\n");
 
     bool first = true;
@@ -844,15 +847,17 @@ FlashcardStudyDoc FlashcardStudyLoad(const char* filePath) {
     return doc;
 }
 
-// Extract the "docName": "..." value from a study JSON (unescape \" and \\).
-// Returns nullptr when the field is missing (legacy files written before the
-// field existed).
-static char* ParseJsonDocNameDup(Str json) {
-    int idx = str::IndexOf(json, StrL("\"docName\""));
+// Extract a "field": "..." string value from a study JSON (unescape \" and
+// \\). Returns nullptr when the field is missing (legacy files written before
+// the field existed).
+static char* ParseJsonStringFieldDup(Str json, Str fieldName) {
+    TempStr quotedT = fmt("\"%s\"", fieldName);
+    Str quoted = Str(quotedT);
+    int idx = str::IndexOf(json, quoted);
     if (idx < 0) {
         return nullptr;
     }
-    Str s = Str(json.s + idx + len(StrL("\"docName\"")));
+    Str s = Str(json.s + idx + len(quoted));
     str::TrimWSInPlace(s, str::TrimOpt::Left);
     if (!s || s.s[0] != ':') {
         return nullptr;
@@ -883,6 +888,10 @@ static char* ParseJsonDocNameDup(Str json) {
     }
     buf[n] = 0;
     return str::Dup(Str(buf, n)).s;
+}
+
+static char* ParseJsonDocNameDup(Str json) {
+    return ParseJsonStringFieldDup(json, StrL("docName"));
 }
 
 // RESYNC (automatic): no study JSON exists under filePath's md5, so the book
@@ -944,6 +953,16 @@ static Str FlashcardStudyAdoptByName(const char* filePath, Str dstPath) {
         return nullptr;
     }
     logf("[fc] StudyLoad - RESYNC: adopted '%s' for '%s' (book moved on disk)\n", Str(bestFile), Str(docName));
+    // re-save under the CURRENT path so the JSON's docPath (the sync-marker
+    // source) stops pointing at the old location
+    {
+        Str adoptedJson = file::ReadFile(dstPath);
+        if (adoptedJson) {
+            FlashcardStudyDoc adopted;
+            FlashcardStudyParseJson(adoptedJson, adopted);
+            FlashcardStudySave(filePath, adopted);
+        }
+    }
     return file::ReadFile(dstPath);
 }
 
@@ -1000,6 +1019,7 @@ int FlashcardStudyListDocs(Vec<FlashcardStudyDocInfo>& out) {
         FlashcardStudyDocInfo info{};
         info.fileName = str::Dup(ToUtf8Temp(WStr(fd.cFileName))).s;
         info.docName = ParseJsonDocNameDup(json);
+        info.docPath = ParseJsonStringFieldDup(json, StrL("docPath"));
         Vec<FlashcardStudyDoc::StateEntry> states;
         ParseJsonObject(json, &states);
         info.totalCards = len(states);
@@ -1017,8 +1037,15 @@ int FlashcardStudyListDocs(Vec<FlashcardStudyDocInfo>& out) {
             // still identifiable
             info.docName = str::Dup(Str(info.fileName ? info.fileName : "")).s;
         }
-        logf("[fc] StudyListDocs - %s: name='%s' cards=%d due=%d last=%lld\n", Str(info.fileName ? info.fileName : "?"),
-             Str(info.docName ? info.docName : "?"), info.totalCards, info.dueCount, info.lastReviewedAt);
+        // sync marker: 1 = PDF found at the saved path, 2 = missing
+        // (moved/renamed), 0 = legacy file without docPath (unknown)
+        if (info.docPath && len(info.docPath) > 0) {
+            info.syncStatus = file::Exists(Str(info.docPath)) ? 1 : 2;
+        }
+        TempStr syncStr = info.syncStatus == 1 ? StrL("ok") : (info.syncStatus == 2 ? StrL("MISSING") : StrL("unknown"));
+        logf("[fc] StudyListDocs - %s: name='%s' cards=%d due=%d last=%lld sync=%s\n",
+             Str(info.fileName ? info.fileName : "?"), Str(info.docName ? info.docName : "?"), info.totalCards,
+             info.dueCount, info.lastReviewedAt, Str(syncStr));
         out.Append(info);
     } while (FindNextFileW(h, &fd));
     FindClose(h);

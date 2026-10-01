@@ -65,7 +65,7 @@ export async function testit(): Promise<void> {
 
     let configDlg = 0;
     winapi.enumWindows((h: number) => {
-        if (winapi.getWindowText(h) === "Configurações") {
+        if (winapi.getWindowText(h) === "Settings") {
             configDlg = h;
             return false;
         }
@@ -143,12 +143,46 @@ export async function testit(): Promise<void> {
         }
     }
 
+    // ---- RESYNC auto-adopt: seed a JSON whose docName matches the book's
+    // base name (zlib.3.pdf) under a WRONG md5 file name — no file exists
+    // under the real md5, so the next StudyLoad (flashcard toggle) must
+    // ADOPT it: rename to the current md5 + load its states
+    fs.writeFileSync(
+        path.join(studyDir, "aaaa-adopt.json"),
+        `{"docName":"zlib.3.pdf","states":{"123":{"rating":3,"interval":1,"easeFactor":2.5,"lastReviewedAt":100,"nextReviewAt":200,"reviewCount":1}}}`
+    );
+    const proc2 = launchSumatra(["-for-testing", "-page", "3", pdf]);
+    const frame2 = await waitForFrame(proc2.pid);
+    await sleep(2500);
+    sendCommand(frame2, cmdId("CmdFlashcardToggle"));
+    await sleep(1500);
+    proc2.kill();
+    await sleep(800);
+    const log2 = readLog(sumlogPath);
+    const adoptedOk = log2.includes("RESYNC: adopted") && log2.includes("RESYNC candidate");
+    const loadedOk = log2.includes("loaded 1 entries");
+    const adoptFileGone = !fs.existsSync(path.join(studyDir, "aaaa-adopt.json"));
+    const remainingAfterAdopt = jsonsIn(studyDir);
+    check(adoptedOk, "log: RESYNC adopted the docName-matching JSON");
+    check(loadedOk, "log: adopted states loaded (1 entry)");
+    check(adoptFileGone && remainingAfterAdopt.length === 3, `adopt file renamed to the real md5 (3 files now: 2 fakes + adopted) (got ${remainingAfterAdopt.length})`);
+    const adoptedFiles = remainingAfterAdopt.filter((f) =>
+        fs.readFileSync(path.join(studyDir, f), "utf8").includes("zlib.3.pdf")
+    );
+    check(adoptedFiles.length === 1, "exactly one file carries the book's docName");
+    for (const l of log2.split(/\r?\n/)) {
+        if (l.includes("RESYNC")) {
+            console.log(l);
+        }
+    }
+
     // cleanup: remove the fakes + tmp dir (default dir back to pre-test state)
     for (const f of fs.readdirSync(studyDir)) {
-        if (f.startsWith("aaaa-migration-") && f.endsWith(".json")) {
+        if (f.endsWith(".json")) {
             fs.rmSync(path.join(studyDir, f));
         }
     }
+    fs.rmSync(path.join(studyDir, "backup"), { recursive: true, force: true });
     fs.rmSync(migDir, { recursive: true, force: true });
 }
 

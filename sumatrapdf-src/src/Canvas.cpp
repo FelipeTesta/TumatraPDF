@@ -1634,11 +1634,11 @@ static PointF ArchSnapScreenPoint(MainWindow* win, DisplayModel* dm, int pageNo,
     return dm->CvtFromScreen(screenPt, pageNo);
 }
 
-// Screen-space info about the two draggable trim config lines (top/bottom
-// margin) for the current page: the line y positions plus the page origin,
-// zoom, mediabox size and active trim-top reference used to derive them.
-// Shared by the drag hit-test, the drag move and the paint overlay so the
-// three copies of the math can never drift apart.
+// Screen-space info about one page's two draggable trim config lines (top/
+// bottom margin): the line y positions plus the page origin, zoom, mediabox
+// size and active trim-top reference used to derive them. Shared by the drag
+// hit-test, the drag move and the paint overlay so the copies of the math can
+// never drift apart.
 struct TrimLineInfo {
     int topLineY = 0;
     int bottomLineY = 0;
@@ -1649,8 +1649,16 @@ struct TrimLineInfo {
     int tRef = 0;
 };
 
-static void TrimComputeLineInfo(MainWindow* win, DisplayModel* dm, TrimLineInfo* out) {
-    int pageNo = dm->CurrentPageNo();
+// One visible, grabbable red line: which margin it is, its screen y and the
+// virtual page (plus that page's geometry) it belongs to.
+struct TrimLineCand {
+    int kind = 0;  // 1 = top margin line, 2 = bottom margin line
+    int y = 0;     // screen y of the line
+    int vPage = 0; // virtual page the line belongs to
+    TrimLineInfo info{};
+};
+
+static void TrimComputeLineInfoForPage(MainWindow* win, DisplayModel* dm, int pageNo, TrimLineInfo* out) {
     RectF mb = dm->GetEngine()->PageMediabox(dm->VirtualToPhysical(pageNo));
     float zoom = dm->GetZoomReal(pageNo);
     Point tl = dm->CvtToScreen(pageNo, PointF(0, 0));
@@ -1664,6 +1672,46 @@ static void TrimComputeLineInfo(MainWindow* win, DisplayModel* dm, TrimLineInfo*
     out->bottomLineY = tl.y + (int)((mb.dy - win->trimConfigBottom - tRef) * zoom);
 }
 
+// Collect the trim lines that are visible in the viewport, for the current
+// page and (in continuous modes) its neighbors. A line is collected when its
+// screen y falls inside the viewport, which is exactly the user's context
+// rule: near the current page's top, the previous page's bottom line shows
+// next to the current top line; near the bottom, the next page's top line
+// shows next to the current bottom line; a fully visible page shows its own
+// two lines.
+static int TrimCollectVisibleLines(MainWindow* win, DisplayModel* dm, TrimLineCand* out, int maxOut) {
+    int vh = dm->GetViewPort().dy;
+    bool continuous = IsContinuous(dm->GetDisplayMode());
+    int cur = dm->CurrentPageNo();
+    int n = 0;
+    for (int off = -2; off <= 2; off++) {
+        int pageNo = cur + off;
+        if (!dm->ValidPageNo(pageNo)) {
+            continue;
+        }
+        if (off != 0 && !continuous) {
+            continue; // neighbors can't be on screen in single-page modes
+        }
+        TrimLineInfo ti;
+        TrimComputeLineInfoForPage(win, dm, pageNo, &ti);
+        if (ti.topLineY >= 0 && ti.topLineY <= vh && n < maxOut) {
+            out[n].kind = 1;
+            out[n].y = ti.topLineY;
+            out[n].vPage = pageNo;
+            out[n].info = ti;
+            n++;
+        }
+        if (ti.bottomLineY >= 0 && ti.bottomLineY <= vh && n < maxOut) {
+            out[n].kind = 2;
+            out[n].y = ti.bottomLineY;
+            out[n].vPage = pageNo;
+            out[n].info = ti;
+            n++;
+        }
+    }
+    return n;
+}
+
 static void OnMouseMove(MainWindow* win, int x, int y, WPARAM /*key*/) {
     // Track mouse position for erase mode overlay
     win->archTools.mousePos = Point{x, y};
@@ -1671,8 +1719,11 @@ static void OnMouseMove(MainWindow* win, int x, int y, WPARAM /*key*/) {
     if (win->trimDragging) {
         auto* dm = win->AsFixed();
         if (dm) {
+            // the dragged line may belong to a neighbor page (context-aware
+            // lines): compute the geometry of the page it lives on
+            int dragPage = dm->ValidPageNo(win->trimDragPageNo) ? win->trimDragPageNo : dm->CurrentPageNo();
             TrimLineInfo ti;
-            TrimComputeLineInfo(win, dm, &ti);
+            TrimComputeLineInfoForPage(win, dm, dragPage, &ti);
             if (win->trimConfigDragLine == 1) {
                 int minY = ti.tl.y - (int)(ti.tRef * ti.zoom);
                 int lineY = y < minY ? minY : (y > ti.bottomLineY ? ti.bottomLineY : y);
@@ -2111,11 +2162,25 @@ static void OnMouseLeftButtonDown(MainWindow* win, int x, int y, WPARAM key) {
     if (win->trimConfigMode != 0) {
         auto* dm = win->AsFixed();
         if (dm) {
-            TrimLineInfo ti;
-            TrimComputeLineInfo(win, dm, &ti);
+            TrimLineCand cands[10];
+            int nCands = TrimCollectVisibleLines(win, dm, cands, 10);
             int tol = DpiScale(win->hwndFrame, 8);
-            if (abs(y - ti.topLineY) <= tol || abs(y - ti.bottomLineY) <= tol) {
-                win->trimConfigDragLine = abs(y - ti.topLineY) <= abs(y - ti.bottomLineY) ? 1 : 2;
+            int best = -1;
+            int bestDist = 1 << 30;
+            for (int i = 0; i < nCands; i++) {
+                int dist = abs(y - cands[i].y);
+                if (dist <= tol && dist < bestDist) {
+                    bestDist = dist;
+                    best = i;
+                }
+            }
+            if (best >= 0) {
+                win->trimConfigDragLine = cands[best].kind;
+                win->trimDragPageNo = cands[best].vPage;
+                // StrL only takes literals: wrap each branch separately, else
+                // the ternary inside the call degrades to const char* (C2280)
+                logf("[trim] drag start: %s line of vPage %d at y=%d\n",
+                     cands[best].kind == 1 ? StrL("top") : StrL("bottom"), cands[best].vPage, y);
                 SetCapture(win->hwndCanvas);
                 win->mouseAction = MouseAction::Dragging;
                 win->trimDragging = true;
@@ -2505,6 +2570,7 @@ static void OnMouseLeftButtonUp(MainWindow* win, int x, int y, WPARAM key) {
         if (GetCapture() == win->hwndCanvas) ReleaseCapture();
         win->trimDragging = false;
         win->trimConfigDragLine = 0;
+        win->trimDragPageNo = 0;
         win->mouseAction = MouseAction::None;
         return;
     }
@@ -3678,17 +3744,20 @@ static void OnPaintDocument(MainWindow* win) {
         }
     }
 
-    // trim config: draw both draggable red lines on top of the page (after Flush, on screen DC)
+    // trim config: draw the context-aware draggable red lines on top of the
+    // page (after Flush, on screen DC) — every margin line whose screen y is
+    // inside the viewport, for the current page and its visible neighbors
     if (win->trimConfigMode != 0) {
         auto* dm = win->AsFixed();
         if (dm) {
-            TrimLineInfo ti;
-            TrimComputeLineInfo(win, dm, &ti);
-            int pageW = (int)(ti.mbDx * ti.zoom);
+            TrimLineCand cands[10];
+            int nCands = TrimCollectVisibleLines(win, dm, cands, 10);
             Gdiplus::Graphics gs(hdc);
             Gdiplus::Pen pen(Gdiplus::Color(255, 255, 0, 0), 2); // red 2px
-            gs.DrawLine(&pen, ti.tl.x, ti.topLineY, ti.tl.x + pageW, ti.topLineY);
-            gs.DrawLine(&pen, ti.tl.x, ti.bottomLineY, ti.tl.x + pageW, ti.bottomLineY);
+            for (int i = 0; i < nCands; i++) {
+                int pageW = (int)(cands[i].info.mbDx * cands[i].info.zoom);
+                gs.DrawLine(&pen, cands[i].info.tl.x, cands[i].y, cands[i].info.tl.x + pageW, cands[i].y);
+            }
         }
     }
 

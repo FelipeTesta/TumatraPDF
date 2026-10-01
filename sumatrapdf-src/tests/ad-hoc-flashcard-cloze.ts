@@ -20,6 +20,10 @@ import * as os from "node:os";
 
 export async function testit(): Promise<void> {
     const pdf = process.argv[2] || path.resolve("ext", "a-zlib", "zlib.3.pdf");
+    const exeDir = path.dirname(EXE);
+    // backup slots: wipe at start so the "slot refreshed" logs are
+    // deterministic (a stale stamp would skip the refresh)
+    fs.rmSync(path.join(exeDir, "FlashcardStudy", "backup"), { recursive: true, force: true });
     const proc = launchSumatra(["-for-testing", "-page", "3", pdf]);
     const frame = await waitForFrame(proc.pid);
     await sleep(4000);
@@ -123,7 +127,7 @@ export async function testit(): Promise<void> {
     function findConfigDialog(): number {
         let found = 0;
         winapi.enumWindows((h: number) => {
-            if (winapi.getWindowText(h) === "Configurações") {
+            if (winapi.getWindowText(h) === "Settings") {
                 found = h;
                 return false;
             }
@@ -137,12 +141,13 @@ export async function testit(): Promise<void> {
     console.log("config window open:", !!dlg);
     if (dlg) {
         const cr = winapi.getClientRect(dlg);
-        // bottom row: "Limpar livro selecionado" center ~0.30, "Limpar TODOS
-        // os livros" center ~0.70 of client width; button centers ~0.90 of
-        // client height (layout is DPI-proportional)
-        const selX = Math.round(cr.right * 0.3);
-        const allX = Math.round(cr.right * 0.7);
-        const btnY = Math.round(cr.bottom * 0.9);
+        // TWO button rows now: row 1 (y ~0.81) = "Limpar livro selecionado"
+        // (~0.32 width) | "Limpar TODOS os livros" (~0.68); row 2 (~0.93) =
+        // Vincular | Recuperar backup | Importar. Fractions are
+        // DPI-proportional.
+        const selX = Math.round(cr.right * 0.32);
+        const allX = Math.round(cr.right * 0.68);
+        const btnY = Math.round(cr.bottom * 0.81);
         captureWindowToPng(dlg, tmpPath("fc2-config1.png"));
         // history listbox: probe children with LB_GETCOUNT; expect 1 doc
         // (the rated card above created the study JSON)
@@ -191,8 +196,8 @@ export async function testit(): Promise<void> {
         const dlg2 = findConfigDialog();
         if (dlg2) {
             const cr2 = winapi.getClientRect(dlg2);
-            const allX2 = Math.round(cr2.right * 0.7);
-            const btnY2 = Math.round(cr2.bottom * 0.9);
+            const allX2 = Math.round(cr2.right * 0.68);
+            const btnY2 = Math.round(cr2.bottom * 0.81);
             captureWindowToPng(dlg2, tmpPath("fc2-config3.png"));
             postMessage(dlg2, WM_LBUTTONDOWN, 0, packCoords(allX2, btnY2));
             await sleep(5400);
@@ -206,8 +211,18 @@ export async function testit(): Promise<void> {
     proc.kill();
     await sleep(1000);
 
+    // ---- backup assertions: the rate above triggered FlashcardStudySave ->
+    // rolling backups; all three slots refreshed + 1d holds files
+    const sumlogPath = path.join(exeDir, "sumlog.txt");
+    const sumlog = fs.existsSync(sumlogPath) ? fs.readFileSync(sumlogPath, "utf8") : "";
+    const backupOk = ["1d", "3d", "7d"].every((slot) => sumlog.includes(`Backup - slot '${slot}' refreshed`));
+    const bkDir = path.join(exeDir, "FlashcardStudy", "backup", "1d");
+    const backupFiles =
+        fs.existsSync(bkDir) ? fs.readdirSync(bkDir).filter((f) => f.endsWith(".json")).length : 0;
+    console.log("backup slots refreshed (1d/3d/7d):", backupOk);
+    console.log("backup 1d file count:", backupFiles);
+
     // dump every [fc] / [fc-paint] line from the debug log
-    const exeDir = path.dirname(EXE);
     const candidates = [
         path.join(exeDir, "sumlog.txt"),
         path.join(exeDir, "sumatra-log.txt"),

@@ -320,7 +320,7 @@ static LRESULT CALLBACK WndProcListaHeader(HWND hwnd, UINT msg, WPARAM wp, LPARA
                 DrawTextW(hdc, s, -1, &rcCol, fmt);
             };
             drawCol(L"Flashcard", cols.xLabel, false);
-            drawCol(L"Pág", cols.xPagR, true);
+            drawCol(L"Page", cols.xPagR, true);
             drawCol(L"Due", cols.xDueR, true);
             drawCol(L"Status", cols.xStatus, false);
 

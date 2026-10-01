@@ -355,8 +355,9 @@ struct MainWindow {
     // --- end auto-scroll feature ---
 
     // --- trim config dialog state ---
-    int trimConfigMode = 0;     // 0 = dialog closed (no lines), 1 = dialog open (both lines)
+    int trimConfigMode = 0; // 0 = dialog closed (no lines), 1 = dialog open (visible margin lines)
     int trimConfigDragLine = 0; // 0 = none, 1 = top line, 2 = bottom line
+    int trimDragPageNo = 0; // virtual page the dragged line belongs to (context lines, s28)
     int trimConfigTop = 0;      // pending top distance (page units)
     int trimConfigBottom = 0;   // pending bottom distance (page units)
     bool trimDragging = false;  // true while dragging a red line

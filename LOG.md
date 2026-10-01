@@ -1,5 +1,61 @@
 # TumatraPDF — Development Log
 
+## 2026-10-01 (s28) — Trim Config context-aware red lines (BUILD OK; local release deploy blocked by running app)
+
+### Changed
+- **Context-aware margin lines (user request)**: the Trim Config red lines are no longer always the current page's top+bottom — every margin line whose screen y is inside the viewport is drawn, for the current page and (continuous modes only) up to 2 neighbors each side. This is exactly the user's 3 context rules: near the current page's top the previous page's bottom line shows next to the current top line; near the bottom the next page's top line shows next to the current bottom line; a fully visible page shows its own two lines. In single-page modes only the current page's lines can appear (neighbors can't be on screen).
+- `TrimComputeLineInfo` → **`TrimComputeLineInfoForPage(win, dm, pageNo, out)`** (Canvas.cpp): same math, per virtual page (mediabox via `VirtualToPhysical`, per-page zoom, `CvtToScreen` origin, global `tRef`) — dual-namespace safe under Scan Mode/Two Columns. NEW `TrimCollectVisibleLines` fills a stack array of `TrimLineCand{kind, y, vPage, info}` (max 10, zero heap allocs — paint hot path) filtering by `dm->GetViewPort().dy`; single source shared by paint + hit-test.
+- **Drag across pages**: hit-test picks the NEAREST visible candidate (8px DpiScale tolerance) and records `win->trimDragPageNo` (NEW MainWindow field) — the drag move computes values against THAT page's geometry (per-page mediabox/zoom), so grabbing the previous page's bottom line updates the same global `trimConfigBottom` relative to the right page box. New `[trim] drag start` log (kind + vPage + y) for diagnosis. Mouse-up and dialog-open reset `trimDragPageNo`.
+
+### Verified
+- Build debug 0/0 + Release x64 OK (one C2280 round-trip: ternary of string literals degrades to `const char*` → `StrL("top") : StrL("bottom")` per-branch wrap, same trap as s26-data). Visual/drag behavior = user live-tests (app is running, blocking the local Compiled exe copy — release exe waits in `out\rel64`).
+
+## 2026-10-01 (s27) — Sync markers + Re-check + List rename + Scan Mode fit-width start (BUILD OK, tested)
+
+### Added
+- **Sync markers (Settings history list)**: colored dot before each book's name — **green** = synced, **red** = sync lost (PDF moved/renamed — use Link to PDF... to fix), **grey** = legacy file (no docPath). Backed by the NEW persisted `"docPath"` field in study JSONs (`FlashcardStudySave` writes the full PDF path — also the prerequisite for the upcoming Review Section / "Open Session" feature). `FlashcardStudyListDocs` reads docPath + `file::Exists` → `syncStatus` 0 unknown / 1 synced / 2 missing; per-item log line gained `sync=ok|MISSING|unknown`. Dots drawn as GDI ellipses (font-safe + theme-safe — GDI DrawTextW has no font fallback, emoji glyphs render as boxes).
+- **Re-check button** (Settings, right-aligned on the list-caption row): re-validates every sync marker. Use case: Drive folder not yet loaded → book shows red; user loads the drive → Re-check turns it green again.
+- **Adopt refreshes docPath**: after auto-resync (adopt-by-name), the moved JSON is re-parsed + re-saved so docPath stops pointing at the old location.
+
+### Changed
+- Toolbar button "Lista" → **"List"** (EN rule, public release).
+- **Scan Mode always starts from full width**: `CmdViewportCropToggle` now calls `HandleCmdZoomFitWidthAndContinuous` BEFORE flipping the flag — prevents the "half of half" page division when toggled with a zoom already applied. (Two Columns v2 toggle untouched.)
+- `ParseJsonDocNameDup` generalized into `ParseJsonStringFieldDup(json, fieldName)` — docName and docPath readers share it.
+
+### Verified
+- ad-hoc-config-iso.ts PASS (migration round-trip intact; adopt scenario incl. re-saved docPath; fakes correctly show `sync=unknown`). ad-hoc-flashcard-cloze.ts PASS (full flow, holds confirmed). Build 0 errors / 0 warnings.
+
+### Notes / traps
+- `str::Len` does NOT exist — use the free function `len()` (C2039 otherwise).
+- Config and Filter dialogs share caption-line patterns — Edit oldStrings must anchor on unique surrounding context (multi-match failure).
+
+## 2026-10-01 (s26-data) — Data tools: resync, backups, import + EN labels + renames (BUILD OK, tested; deploy + commit PENDING)
+
+### Changed
+- **Renames (user order, ids kept)**: TC1 "Toggle Viewport Crop" → **"Toggle Scan Mode"** (`CmdViewportCropToggle` id 486, gen-commands.ts + regen) and TC2 "Toggle Two Column (v2, stacked columns)" → **"Toggle Two Columns"** (`CmdViewportCropV2Toggle` id 512). Menu.cpp labels now `Scan &Mode` / `Two &Columns`; Toolbar.cpp buttons `Scan Mode` / `Two Columns` (were "Two Column" / "Two Column 2"). No call-site churn — identifiers untouched.
+- **UI language → English (user rule, public release)**: ALL fork-added PT labels converted. Settings window (ex "Configurações") now title **"Settings"**; buttons **Clear Selected** (was "Limpar livro selecionado"), **Clear All** ("Limpar TODOS os livros"), **Link to PDF...** ("Vincular a um PDF..."), **Restore Backup** ("Recuperar backup"), **Import from PDF...** ("Importar de um PDF..."); captions "Study history folder (empty = app default):" + "Documents in history | cards | due | last reviewed:". Filter window title **"Study Filter"** (was "Filtro de Estudo"); labels "Study all open PDFs (session)", "Page filter (e.g. 1-15;20-25;-22-23;)", "Chapters (bookmarks) — checking injects the range into the filter", buttons **Apply / Filters: ON|OFF / Clear Filters**. Lista header column `Pág` → `Page`. Tests updated to match window titles. Rule recorded: everything new from now on = English.
+
+### Added
+- **RESYNC (item 3)**: history JSONs are keyed by MD5(file path) — moving/renaming a PDF orphans its history. **Automatic**: `FlashcardStudyAdoptByName` (static, Flashcard.cpp) — when `FlashcardStudyLoad` finds no file under the current md5, it scans the study dir for a JSON whose saved `docName` equals the book's base name (str::EqI), newest mtime wins when several match (all candidates logged), renames it to the current md5 path and loads it (covers MOVED books). **Manual**: `FlashcardStudyResync(jsonPath, newPdfPath)` (public) — parses the old JSON via extracted `FlashcardStudyParseJson` (shared with StudyLoad), re-Saves under the new path (fresh md5 + fresh docName), deletes the old file; covers RENAMED books. Settings window button **Link to PDF...**: `FcPickPdfFile` (IFileOpenDialog file mode, FOS_FORCEFILESYSTEM|FOS_FILEMUSTEXIST, COMDLG_FILTERSPEC *.pdf) on the SELECTED row → resync → matching open tabs reload their studyDoc + counts/sidebar refresh.
+- **Backups (item 4)**: rolling local snapshots of the study dir in `backup\1d|3d|7d\` — `FlashcardStudyMaybeBackup()` at the tail of every successful `FlashcardStudySave` (stamp-file age guard per slot: refresh only when older than 1/3/7 days → 3 tiny reads per rating, one copy burst per day); `FlashcardStudyBackupRefreshSlot` wipes+copies the slot; **Restore Backup** (Settings, 5s red hold) = `FlashcardStudyRecoverBackup()` — restores the NEWEST slot with files (1d→3d→7d) over the study dir, then every open tab reloads + counts/sidebar/list refresh.
+- **Import (item 2)**: **Import from PDF...** (Settings) merges a study partner's NEW flashcards from another copy of the SAME book into the current tab's document. `FlashcardImportFromPdf(dstEngine, existing, srcPath)` (Flashcard.cpp): opens the source via `CreateEngineMupdfFromFile` (Unicode-safe, released with `srcBase->Release()` — EngineBase dtor is protected, Release() is the destroy pattern), reads its cards with `FlashcardLoadFromDocument`, dedupes against ours (same page + bounds within 1pt on all 4 coords — identical text selections produce identical quads), creates missing Highlight annots via NEW shared helper **`FlashcardCreateHighlightAnnot`** (extracted from CmdFlashcardAdd's inline recipe: empty content, author TumatraPDF-Flashcard, gray 0.5, opacity 0.4 — Add refactored to call it). Study HISTORY is not imported (user-confirmed): imported cards are "new". Then cards reload + count/state/sidebar/rerender.
+- **Shortcuts.md** (repo root, NEW): full key table — flashcards (S, Space/Enter, 1-4+numpad), autoscroll (F7/F8/F9), Shift+I invert, Ctrl+Shift+C contrast + upstream basics; linked from README flashcard section.
+- **BUILD.md**: "Why the exe shrank 22 MB → 11.7 MB" section (Debug /Od+/RTC1+IDL2 vs Release /O2 + /OPT:REF+/OPT:ICF; PDB not in exe; Compiled\TumatraPDF.exe = release rule).
+
+### Verified (debug build, both ad-hoc suites)
+- ad-hoc-config-iso.ts 20/20 PASS — migration round-trip intact + NEW RESYNC scenario: seeded `aaaa-adopt.json` (docName zlib.3.pdf, wrong md5) → 2nd launch + flashcard toggle → "RESYNC candidate" + "RESYNC: adopted" + "loaded 1 entries" + file renamed to real md5 (3 files: 2 fakes + adopted) + exactly one docName carrier.
+- ad-hoc-flashcard-cloze.ts PASS — NEW backup assertions: rate → `Backup - slot '1d|3d|7d' refreshed` ×3 + backup\1d holds 1 json (wiped at test start for determinism); clear-selected/clear-ALL holds re-aimed to the NEW two-row geometry (y fraction 0.90 → **0.81**; row 2 at ~0.93 = Link/Restore/Import — old fraction would now hit Restore Backup and open a picker!).
+- Settings window grew 560×440 → **560×506** (two button rows: clears on top, Link/Restore/Import below, list shrinks accordingly).
+
+### Notes / traps
+- **`near` is a legacy windows.h macro** (`auto near = ...` → C2513) — renamed nearF.
+- **EngineBase dtor is protected** — destroy engines with `engine->Release()` (refcount + delete this), never `delete`.
+- **EngineMupdf.h cold include** in FlashcardToolbar.cpp needed the full chain: Annotation.h (AnnotationChange at :217) + `extern "C" { <mupdf/pdf.h> }` before it; `EngineSupportsAnnotations` lives in **EngineAll.h** (which needs base/GuessFileType.h first).
+- **FmtArg deleted ctor**: `logf("...%s", s.slot)` with raw `const char*` → C2280; wrap `Str(s.slot)`. TempStr→const char* needs CStrTemp.
+- Config window edit-slip: replacing `ConfigReloadList(d);}` before ConfigLayout ate the function header — restored immediately (lesson: anchor edits on full surrounding blocks).
+- Foreign agent work identified in the tree (public-release prep, item 5): TipText/SumatraStartup/AdvancedSettingsDialog/HomePage/Installer/RegistryInstaller/UpdateCheck/Menu/SumatraPDF.cpp hunks + s26a/b/c LOG entries (.github release pipeline, v1.0.5 live) — URLs → github.com/FelipeTesta/TumatraPDF, update.txt via raw.githubusercontent. No conflicts with fork files; numbering for future sessions must avoid s26a/b/c collision (this entry uses s26-data).
+- Item 8 (Review Section window: search + multi-select books list |PDF|cards|due|last|tags| + "Open session" → new app window with all selected books) DEFERRED to next session — design noted in TODO.md incl. the prerequisite that study JSONs must start persisting `docPath` (full path, needed to relaunch books; today only docName is stored).
+
 ## 2026-10-01 (s26c) — Release asset renamed with platform: `TumatraPDF-win64.exe` (v1.0.5 LIVE)
 
 - Workflow renames exe before upload; update.txt + BUILD/README/LOG references repointed to `releases/latest/download/TumatraPDF-win64.exe`.
