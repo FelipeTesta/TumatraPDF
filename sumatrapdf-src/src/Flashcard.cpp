@@ -194,6 +194,111 @@ static void WriteJsonStringLiteral(FILE* f, Str s) {
     fputc('"', f);
 }
 
+// Local rolling backups of the study dir: full copies of every *.json in
+// backup\<slot>\ (1d / 3d / 7d). Refreshed after each successful save when the
+// snapshot is older than the slot's age (cheap stamp-file guard, so a normal
+// study session costs 3 tiny reads per rating, one copy burst per day).
+static const struct {
+    const char* slot;
+    int ageDays;
+} kFcBackupSlots[] = {
+    {"1d", 1},
+    {"3d", 3},
+    {"7d", 7},
+};
+
+// copy every *.json of the study dir into backup\<slot>\ (after wiping the
+// slot) and stamp it with the current time
+static void FlashcardStudyBackupRefreshSlot(Str dir, Str slotDir) {
+    dir::CreateAll(Str(slotDir));
+    WIN32_FIND_DATAW fd{};
+    // wipe the previous snapshot
+    TempStr wipePat = fmt("%s\\*.json", Str(slotDir));
+    HANDLE h = FindFirstFileW(CWStrTemp(ToWStrTemp(Str(wipePat))), &fd);
+    if (h != INVALID_HANDLE_VALUE) {
+        do {
+            if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+                continue;
+            }
+            TempStr old = fmt("%s\\%s", Str(slotDir), ToUtf8Temp(WStr(fd.cFileName)));
+            DeleteFileW(CWStrTemp(ToWStrTemp(Str(old))));
+        } while (FindNextFileW(h, &fd));
+        FindClose(h);
+    }
+    // copy the current files in
+    int copied = 0;
+    TempStr pat = fmt("%s\\*.json", Str(dir));
+    h = FindFirstFileW(CWStrTemp(ToWStrTemp(Str(pat))), &fd);
+    if (h != INVALID_HANDLE_VALUE) {
+        do {
+            if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+                continue; // backup\ itself is never matched here
+            }
+            TempStr src = fmt("%s\\%s", Str(dir), ToUtf8Temp(WStr(fd.cFileName)));
+            TempStr dst = fmt("%s\\%s", Str(slotDir), ToUtf8Temp(WStr(fd.cFileName)));
+            if (file::Copy(Str(dst), Str(src), false)) {
+                copied++;
+            }
+        } while (FindNextFileW(h, &fd));
+        FindClose(h);
+    }
+}
+
+static void FlashcardStudyMaybeBackup() {
+    TempStr dir = FlashcardStudyDir();
+    i64 now = (i64)time(nullptr) * 1000;
+    for (auto& s : kFcBackupSlots) {
+        TempStr slotDir = fmt("%s\\backup\\%s", Str(dir), Str(s.slot));
+        TempStr stampPath = fmt("%s\\stamp.txt", Str(slotDir));
+        i64 last = 0;
+        Str stamp = file::ReadFile(Str(stampPath));
+        if (stamp) {
+            last = ParseInt(stamp);
+        }
+        if (last > 0 && now - last < (i64)s.ageDays * 24 * 60 * 60 * 1000) {
+            continue; // snapshot still fresh enough
+        }
+        FlashcardStudyBackupRefreshSlot(dir, Str(slotDir));
+        TempStr txt = fmt("%lld", (long long)now);
+        file::WriteFile(Str(stampPath), Str(txt));
+        logf("[fc] Backup - slot '%s' refreshed\n", Str(s.slot));
+    }
+}
+
+// restore the NEWEST backup slot that has files (tries 1d -> 3d -> 7d) over
+// the study dir. Returns the number of restored files (0 = no backup found).
+// Called by the Config window's "Recuperar backup" hold action.
+int FlashcardStudyRecoverBackup() {
+    TempStr dir = FlashcardStudyDir();
+    for (auto& s : kFcBackupSlots) {
+        TempStr slotDir = fmt("%s\\backup\\%s", Str(dir), Str(s.slot));
+        int restored = 0;
+        WIN32_FIND_DATAW fd{};
+        TempStr pat = fmt("%s\\*.json", Str(slotDir));
+        HANDLE h = FindFirstFileW(CWStrTemp(ToWStrTemp(Str(pat))), &fd);
+        if (h == INVALID_HANDLE_VALUE) {
+            continue;
+        }
+        do {
+            if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+                continue;
+            }
+            TempStr src = fmt("%s\\%s", Str(slotDir), ToUtf8Temp(WStr(fd.cFileName)));
+            TempStr dst = fmt("%s\\%s", Str(dir), ToUtf8Temp(WStr(fd.cFileName)));
+            if (file::Copy(Str(dst), Str(src), false)) {
+                restored++;
+            }
+        } while (FindNextFileW(h, &fd));
+        FindClose(h);
+        if (restored > 0) {
+            logf("[fc] Backup - recovered %d file(s) from slot '%s'\n", restored, Str(s.slot));
+            return restored;
+        }
+    }
+    logf("[fc] Backup - recover: no backup slot has files\n");
+    return 0;
+}
+
 // Save flashcard study state to external JSON file
 void FlashcardStudySave(const char* filePath, const FlashcardStudyDoc& doc) {
     logf("[fc] FlashcardStudySave - saving to %s\n", Str(filePath));
@@ -261,6 +366,9 @@ void FlashcardStudySave(const char* filePath, const FlashcardStudyDoc& doc) {
     }
 
     logf("[fc] FlashcardStudySave - saved %d entries\n", len(doc.states));
+
+    // rolling local backups (1d / 3d / 7d slots) — cheap stamp guard inside
+    FlashcardStudyMaybeBackup();
 }
 
 // Delete every study-history JSON in the study dir — the review histories

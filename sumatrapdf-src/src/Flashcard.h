@@ -88,6 +88,10 @@ FlashcardStudyDoc FlashcardStudyLoad(const char* filePath);
 // path (book renamed on disk). Returns false when the JSON can't be read.
 bool FlashcardStudyResync(const char* jsonPath, const char* newPdfPath);
 
+// Restore the newest study-history backup slot over the study dir; returns
+// the number of restored files (0 = no backup found)
+int FlashcardStudyRecoverBackup();
+
 // SM-2 algorithm: compute next interval and ease factor
 void FlashcardSm2Update(FlashcardStudyState& state, int rating);
 

@@ -366,7 +366,8 @@ static void FlashcardDrawHoldButton(HWND hwnd, HDC hdc, const RECT& rc, const WC
 //   | book.pdf       12    3    2026-09-30 14:05 |   — owner-drawn list,
 //   | other.pdf       5    0    2026-09-28 09:11 |     ~10 rows + scroll
 //   +---------------------------------------------+
-//   [Limpar livro selecionado (2s)] [Limpar TODOS os livros (5s)] [Vincular a um PDF...]
+//   [Limpar livro selecionado (2s)] [Limpar TODOS os livros (5s)]
+//   [Vincular a um PDF...] [Recuperar backup (5s)]
 //
 // The clear buttons hold-to-confirm (orange 2s for the SELECTED book, red 5s
 // for ALL books). X / Esc closes. Actions execute inside the window (it owns
@@ -381,6 +382,7 @@ enum {
     kFcConfigHoldNone = 0,
     kFcConfigHoldSelected = 1,
     kFcConfigHoldAll = 2,
+    kFcConfigHoldRecover = 3, // "Recuperar backup" (5s hold)
 };
 
 struct ConfigDialog {
@@ -395,6 +397,7 @@ struct ConfigDialog {
     RECT rcClearSel{}; // "Limpar livro selecionado" (2s hold)
     RECT rcClearAll{}; // "Limpar TODOS os livros" (5s hold)
     RECT rcLink{};     // "Vincular a um PDF..." (manual resync)
+    RECT rcRecover{};  // "Recuperar backup" (5s hold)
     int holding = kFcConfigHoldNone;
     ULONGLONG holdStartTick = 0;
     int holdMs = 2000;
@@ -606,7 +609,7 @@ static void ConfigResyncSelected(ConfigDialog* d) {
     }
     TempStr dir = FlashcardStudyDir();
     TempStr jsonPath = path::JoinTemp(dir, Str(info.fileName ? info.fileName : ""));
-    if (!FlashcardStudyResync(jsonPath, Str(picked))) {
+    if (!FlashcardStudyResync(CStrTemp(Str(jsonPath)), CStrTemp(Str(picked)))) {
         logf("[fc] Config - resync FAILED for '%s'\n", Str(info.docName ? info.docName : "?"));
         return;
     }
@@ -619,6 +622,25 @@ static void ConfigResyncSelected(ConfigDialog* d) {
             FlashcardSidebarPopulate(d->win);
             MainWindowRerender(d->win);
         }
+    }
+    ConfigReloadList(d);
+}
+
+// restore the newest backup slot over the study dir (5s hold): every open
+// tab reloads its history from disk, then the list/counts/sidebar refresh
+static void ConfigRecoverBackup(ConfigDialog* d) {
+    int nRestored = FlashcardStudyRecoverBackup();
+    if (nRestored > 0) {
+        auto tabs = d->win->Tabs();
+        for (WindowTab* tab : tabs) {
+            if (tab->filePath) {
+                tab->flashcard.studyDoc = FlashcardStudyLoad(tab->filePath.s);
+            }
+        }
+        FlashcardToolbarUpdateCount(d->win);
+        FlashcardToolbarUpdateState(d->win);
+        FlashcardSidebarPopulate(d->win);
+        MainWindowRerender(d->win);
     }
     ConfigReloadList(d);
 }
@@ -645,23 +667,32 @@ static void ConfigLayout(ConfigDialog* d) {
     y += editH + DpiScale(d->hwnd, 10);
     d->rcListCaption = {pad, y, w - pad, y + capDy};
     y += capDy + DpiScale(d->hwnd, 4);
-    int yBtn = h - pad - btnH;
+    // two bottom rows of buttons: clears on top, resync/recover below
+    int yBtn2 = h - pad - btnH;      // bottom row
+    int yBtn1 = yBtn2 - gap - btnH;  // row above
     if (d->hwndList) {
-        MoveWindow(d->hwndList, pad, y, w - 2 * pad, yBtn - gap - y, TRUE);
+        MoveWindow(d->hwndList, pad, y, w - 2 * pad, yBtn1 - gap - y, TRUE);
     }
-    // bottom row: "Limpar livro selecionado" (2s) | "Limpar TODOS os livros"
-    // (5s) | "Vincular a um PDF..." (instant — the picker confirms)
+    // row 1: "Limpar livro selecionado" (2s) | "Limpar TODOS os livros" (5s)
     int selW = DpiScale(d->hwnd, 185);
     int allW = DpiScale(d->hwnd, 185);
-    int linkW = DpiScale(d->hwnd, 150);
-    int totalW = selW + allW + linkW + 2 * gap;
+    int totalW = selW + allW + gap;
     int x0 = (w - totalW) / 2;
     if (x0 < 0) {
         x0 = 0; // tiny window: left-align instead of center
     }
-    d->rcClearSel = {x0, yBtn, x0 + selW, yBtn + btnH};
-    d->rcClearAll = {x0 + selW + gap, yBtn, x0 + selW + gap + allW, yBtn + btnH};
-    d->rcLink = {x0 + selW + allW + 2 * gap, yBtn, x0 + selW + allW + 2 * gap + linkW, yBtn + btnH};
+    d->rcClearSel = {x0, yBtn1, x0 + selW, yBtn1 + btnH};
+    d->rcClearAll = {x0 + selW + gap, yBtn1, x0 + selW + gap + allW, yBtn1 + btnH};
+    // row 2: "Vincular a um PDF..." (instant) | "Recuperar backup" (5s hold)
+    int linkW = DpiScale(d->hwnd, 185);
+    int recW = DpiScale(d->hwnd, 185);
+    int totalW2 = linkW + recW + gap;
+    int x1 = (w - totalW2) / 2;
+    if (x1 < 0) {
+        x1 = 0;
+    }
+    d->rcLink = {x1, yBtn2, x1 + linkW, yBtn2 + btnH};
+    d->rcRecover = {x1 + linkW + gap, yBtn2, x1 + linkW + gap + recW, yBtn2 + btnH};
 }
 
 // owner-drawn one history row: |PDF |cartões|due|última revisão| — name
@@ -736,6 +767,9 @@ static void ConfigPaint(ConfigDialog* d) {
                             d->holding == kFcConfigHoldAll ? d->progress : 1.0, RGB(229, 57, 53));
     // "Vincular a um PDF...": instant (the file picker is the confirmation)
     FlashcardDrawButton(hdc, d->rcLink, L"Vincular a um PDF...", false);
+    // "Recuperar backup": red drain, 5s hold (overwrites current history)
+    FlashcardDrawHoldButton(d->hwnd, hdc, d->rcRecover, L"Recuperar backup", d->holding == kFcConfigHoldRecover,
+                            d->holding == kFcConfigHoldRecover ? d->progress : 1.0, RGB(229, 57, 53));
 
     SelectObject(hdc, oldFont);
     EndPaint(d->hwnd, &ps);
@@ -843,6 +877,15 @@ static LRESULT CALLBACK ConfigWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
                 SetTimer(hwnd, 1, 15, nullptr);
                 logf("[fc] Config - hold start (ALL books, %dms)\n", d->holdMs);
                 InvalidateRect(hwnd, nullptr, FALSE);
+            } else if (PtInRect(&d->rcRecover, pt)) {
+                d->holding = kFcConfigHoldRecover;
+                d->holdMs = 5000;
+                d->holdStartTick = GetTickCount64();
+                d->progress = 1.0;
+                SetCapture(hwnd);
+                SetTimer(hwnd, 1, 15, nullptr);
+                logf("[fc] Config - hold start (recover backup, %dms)\n", d->holdMs);
+                InvalidateRect(hwnd, nullptr, FALSE);
             }
             return 0;
         }
@@ -858,6 +901,8 @@ static LRESULT CALLBACK ConfigWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
                 logf("[fc] Config - hold CONFIRMED (action %d, %dms)\n", action, d->holdMs);
                 if (action == kFcConfigHoldSelected) {
                     ConfigClearSelected(d);
+                } else if (action == kFcConfigHoldRecover) {
+                    ConfigRecoverBackup(d);
                 } else {
                     ConfigClearAll(d);
                 }
@@ -905,7 +950,7 @@ void FlashcardConfigDialog(MainWindow* win) {
     ConfigDialog dlg; // no {}: Vec's default ctor is explicit
     dlg.win = win;
     gConfigDialog = &dlg; // stack-local: safe, the modal pump below owns it
-    HWND hwnd = FlashcardCreateDialogWindow(L"TUMATRA_FLASHCARD_CONFIG", L"Configurações", 560, 440, hwndParent);
+    HWND hwnd = FlashcardCreateDialogWindow(L"TUMATRA_FLASHCARD_CONFIG", L"Configurações", 560, 506, hwndParent);
     if (!hwnd) {
         gConfigDialog = nullptr;
         return;

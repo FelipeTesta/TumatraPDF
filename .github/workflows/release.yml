@@ -18,6 +18,9 @@ jobs:
 
       - uses: microsoft/setup-msbuild@v2
 
+      # NASM required by ext/libjpeg-turbo and ext/dav1d SIMD .asm custom build steps
+      - uses: ilammy/setup-nasm@v1
+
       - name: Build (Release x64)
         working-directory: sumatrapdf-src
         run: msbuild vs2022\TumatraPDF.sln /t:TumatraPDF /p:Configuration=Release /p:Platform=x64 /m
