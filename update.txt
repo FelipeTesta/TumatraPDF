@@ -1,3 +1,5 @@
 [TumatraPDF]
 Latest: 1.0.6
 PortableExe64: https://github.com/FelipeTesta/TumatraPDF/releases/latest/download/TumatraPDF-win64.exe
+; dll-mode builds (embedded libsumatrapdf) look up Installer64 — same portable asset serves both
+Installer64: https://github.com/FelipeTesta/TumatraPDF/releases/latest/download/TumatraPDF-win64.exe
