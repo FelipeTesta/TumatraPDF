@@ -1,5 +1,10 @@
 # TumatraPDF — Development Log
 
+## 2026-10-01 (s26c) — Release asset renamed with platform: `TumatraPDF-win64.exe` (v1.0.5 LIVE)
+
+- Workflow renames exe before upload; update.txt + BUILD/README/LOG references repointed to `releases/latest/download/TumatraPDF-win64.exe`.
+- v1.0.5 released green with the renamed single asset; update.txt auto-bumped to `Latest: 1.0.5` by the workflow. (v1.0.4 keeps old plain name — superseded.)
+
 ## 2026-10-01 (s26b) — Repo PUBLIC + first automated release v1.0.4 LIVE
 
 ### Done
