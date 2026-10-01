@@ -251,12 +251,16 @@ static void SelfUpdateViaBatch(Str newExePath) {
     DWORD pid = GetCurrentProcessId();
     Str content = fmt(
         "@echo off\r\n"
+        "setlocal\r\n"
+        "set tries=0\r\n"
         ":wait\r\n"
-        "tasklist /FI \"PID eq %d\" 2>NUL | find /I \" %d \" >NUL\r\n"
-        "if not errorlevel 1 (timeout /T 1 /NOBREAK >NUL & goto wait)\r\n"
-        "move /Y \"%s\" \"%s\"\r\n"
-        "if errorlevel 1 (goto wait)\r\n"
+        "ping 127.0.0.1 -n 2 >NUL\r\n"
+        "tasklist /FI \"PID eq %d\" 2>NUL | findstr /R /C:\" %d \" >NUL\r\n"
+        "if not errorlevel 1 goto wait\r\n"
+        "move /Y \"%s\" \"%s\" >NUL 2>&1\r\n"
+        "if errorlevel 1 (set /a tries+=1)&(if %%tries%% LSS 120 (goto wait) else (goto fail))\r\n"
         "start \"\" /D \"%s\" \"%s\"\r\n"
+        ":fail\r\n"
         "del \"%%~f0\"\r\n",
         pid, pid, newExePath, selfExe, path::GetDirTemp(selfExe), selfExe);
     bool ok = file::WriteFile(batPath, content);

@@ -56,9 +56,9 @@
 - Foreign agent work identified in the tree (public-release prep, item 5): TipText/SumatraStartup/AdvancedSettingsDialog/HomePage/Installer/RegistryInstaller/UpdateCheck/Menu/SumatraPDF.cpp hunks + s26a/b/c LOG entries (.github release pipeline, v1.0.5 live) — URLs → github.com/FelipeTesta/TumatraPDF, update.txt via raw.githubusercontent. No conflicts with fork files; numbering for future sessions must avoid s26a/b/c collision (this entry uses s26-data).
 - Item 8 (Review Section window: search + multi-select books list |PDF|cards|due|last|tags| + "Open session" → new app window with all selected books) DEFERRED to next session — design noted in TODO.md incl. the prerequisite that study JSONs must start persisting `docPath` (full path, needed to relaunch books; today only docName is stored).
 
-## 2026-10-01 (s26c) — Release asset renamed with platform: `TumatraPDF-win64.exe` (v1.0.5 LIVE)
+## 2026-10-01 (s26c) — Release asset renamed with platform: `TumatraPDF-portable-win64.exe` (v1.0.5 LIVE)
 
-- Workflow renames exe before upload; update.txt + BUILD/README/LOG references repointed to `releases/latest/download/TumatraPDF-win64.exe`.
+- Workflow renames exe before upload; update.txt + BUILD/README/LOG references repointed to `releases/latest/download/TumatraPDF-portable-win64.exe`.
 - v1.0.5 released green with the renamed single asset; update.txt auto-bumped to `Latest: 1.0.5` by the workflow. (v1.0.4 keeps old plain name — superseded.)
 
 ## 2026-10-01 (s26b) — Repo PUBLIC + first automated release v1.0.4 LIVE
@@ -78,7 +78,7 @@
 ## 2026-10-01 (s26) — Public-repo prep FASE 0-3: telemetry removal + own update system (BUILD OK, deployed)
 
 ### Added
-- **`update.txt` at repo root** — update metadata (`[TumatraPDF]` section, `Latest:` version, `PortableExe64:` = GitHub `releases/latest/download/TumatraPDF-win64.exe`).
+- **`update.txt` at repo root** — update metadata (`[TumatraPDF]` section, `Latest:` version, `PortableExe64:` = GitHub `releases/latest/download/TumatraPDF-portable-win64.exe`).
 - **`.github/workflows/release.yml`** — tag `v*` (or manual dispatch) → windows-2022 + bun + msbuild Release x64 → bumps+commits `update.txt` → publishes GitHub Release with `TumatraPDF.exe`.
 - **Portable auto-update self-replace** (UpdateCheck.cpp): unsigned portable exe no longer rejected — `SelfUpdateViaBatch()` writes a detached cmd batch in temp that waits for the PID to exit, `move /Y`s the downloaded exe over the running one, relaunches it, deletes itself. Download validation = PE "MZ" header + >=1 MiB (no code-signing cert in the fork).
 - **Version 1.0 fork track** (`src/BuildConfig.h`): `CURR_VERSION 1.0` / `1,0,0` — decoupled from upstream 3.7; `update.txt Latest: 1.0.x` triggers updates via existing numeric `CompareProgramVersion`.

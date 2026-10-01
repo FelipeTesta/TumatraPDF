@@ -53,7 +53,7 @@ Close window → clean exit, no crash dump under `%LOCALAPPDATA%\SumatraPDF-data
 
 - **Pipeline**: `.github/workflows/release.yml` — push tag `v*` → windows-2022 runner (setup-bun + setup-msbuild) → Release x64 → bumps + commits repo-root `update.txt` → GitHub Release with `TumatraPDF.exe`.
 - **Version source**: `src/BuildConfig.h` (`CURR_VERSION 1.0`). Tag version (e.g. `v1.0.1`) must be > running app's `Latest`/`CURR_VERSION` semantics: update.txt `Latest: 1.0.1` > app `1.0` triggers prompt.
-- **Update flow in-app**: UpdateCheck.cpp pulls `update.txt` daily (setting `CheckForUpdates`), downloads `releases/latest/download/TumatraPDF-win64.exe`, validates MZ header + ≥1 MiB (unsigned, no cert), then `SelfUpdateViaBatch`: detached cmd batch waits for exit → `move /Y` over running exe → relaunch.
+- **Update flow in-app**: UpdateCheck.cpp pulls `update.txt` daily (setting `CheckForUpdates`), downloads `releases/latest/download/TumatraPDF-portable-win64.exe`, validates MZ header + ≥1 MiB (unsigned, no cert), then `SelfUpdateViaBatch`: detached cmd batch waits for exit → `move /Y` over running exe → relaunch.
 - **Telemetry stance**: zero phone-home except the update-check GET against this repo. No crash upload (local dumps only).
 
 ## Why the exe shrank 22 MB → 11.7 MB

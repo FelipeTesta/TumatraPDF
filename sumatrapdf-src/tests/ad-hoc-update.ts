@@ -54,7 +54,7 @@ export async function testit(): Promise<void> {
   let before = Bun.file(EXE_REL).lastModified;
   console.log("[upd] exe mtime before:", new Date(before).toISOString());
 
-  const proc = Bun.spawn([EXE_REL, "-for-testing"], { stdout: "ignore", stderr: "ignore" });
+  const proc = Bun.spawn([EXE_REL, "-for-testing", "-console"], { stdout: "pipe", stderr: "pipe" });
   const frame = await waitFrameForPid(proc.pid);
   if (!frame) throw new Error("frame not found");
   console.log("[upd] frame found, pid", proc.pid);
@@ -83,9 +83,17 @@ export async function testit(): Promise<void> {
   }
   if (!dlg) throw new Error("update dialog never appeared (120s timeout)");
   console.log("[upd] dialog hwnd:", dlg);
+  const shot1 = process.env.TEMP + "\\upd-dialog-before.png";
+  const { captureWindowToPng } = await import("./winapi");
+  captureWindowToPng(dlg, shot1);
+  console.log("[upd] shot before:", shot1);
 
   await sleep(700);
   pressKey(dlg, 0x0d); // VK_RETURN -> default button
+  await sleep(3000);
+  const shot2 = process.env.TEMP + "\\upd-dialog-after.png";
+  captureWindowToPng(dlg, shot2);
+  console.log("[upd] shot after:", shot2);
 
   // app exits; helper batch waits pid exit, moves downloaded exe over self, relaunches
   let replaced = false;
@@ -98,7 +106,15 @@ export async function testit(): Promise<void> {
       break;
     }
   }
-  if (!replaced) throw new Error("exe was not replaced within 60s");
+  if (!replaced) {
+    const out = await new Response(proc.stdout).text();
+    console.log("=== console tail ===");
+    for (const l of out.split("\n").slice(-25)) console.log(l.trim());
+    try {
+      proc.kill();
+    } catch {}
+    throw new Error("exe was not replaced within 60s");
+  }
 
   // relaunched frame (new process)
   const frames2 = await findWindowMatching(/TumatraPDF|No document|Documents/, 30_000);

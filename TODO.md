@@ -1,4 +1,4 @@
-﻿# TODO
+# TODO
 
 ## Public Repo + Update System Plan (2026-10-01) — IN EXECUTION
 
@@ -26,7 +26,7 @@ User decisions: keep ALL upstream build/CI scripts in `cmd/` as backup (future c
 - [x] `updateInfoURLs[]` -> `raw.githubusercontent.com/FelipeTesta/TumatraPDF/main/update.txt`; parser accepts `[TumatraPDF]` (and `[SumatraPDF]`) sections.
 - [x] Signature gate replaced by PE-"MZ" + >=1 MiB sanity (unsigned portable exe accepted); `kExpectedDlHost` -> GitHub `/releases/`.
 - [x] `SelfUpdateViaBatch()`: detached cmd batch waits for PID exit -> `move /Y` new exe -> relaunch -> self-delete.
-- [x] `update.txt` at repo root (`Latest: 1.0` + `releases/latest/download/TumatraPDF-win64.exe`).
+- [x] `update.txt` at repo root (`Latest: 1.0` + `releases/latest/download/TumatraPDF-portable-win64.exe`).
 - [x] Fork version `1.0` via `src/BuildConfig.h` (upstream 3.7 abandoned; `Latest: 1.0.x` > 1.0 triggers).
 
 ### FASE 3 — Release pipeline (GitHub Actions) — DONE s26 (workflow, untested)

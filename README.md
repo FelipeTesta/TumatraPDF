@@ -93,13 +93,13 @@ The features below were developed on top of SumatraPDF and **do not exist in the
 
 ---
 
-### 3. 📖 Viewport Crop with Margin Trimming
+### 3. 📖 Scan Mode & Two Columns (ex Viewport Crop)
 
 **Status:** 🟢 Complete
 
-**What it does:** Automatically trims margins and displays two-column pages one column at a time, maximizing screen space and optimizing auto-scroll reading flow.
+**What it does:** Displays two-column pages one column at a time (Scan Mode) or as stacked narrow columns (Two Columns), maximizing screen space and optimizing auto-scroll reading flow.
 
-**Names (2026-09-30):** the column-by-column toggle is now **Scan Mode** (ex Viewport Crop / "Two Column"); the stacked-columns variant is **Two Columns** (ex "Two Column 2"). Toolbar + `New Tools` menu labels follow the new names. Turning Scan Mode on always first fits the page width, so toggling it from any zoom level is safe (no "half of half" division).
+**Names (2026-09-30):** the column-by-column toggle is **Scan Mode** (ex Viewport Crop / "Two Column"); the stacked-columns variant is **Two Columns** (ex "Two Column 2"). Toolbar + `New Tools` menu labels follow the new names. Turning Scan Mode on always first fits the page width, so toggling it from any zoom level is safe (no "half of half" division).
 
 **How it works:**
 
@@ -143,6 +143,7 @@ The features below were developed on top of SumatraPDF and **do not exist in the
 - Trim Config dialog with "margin-top" / "margin-bottom" buttons
 - Draggable red 2px horizontal line to set the trim distance
 - Context-aware lines: every margin line visible in the viewport is shown (near a page top you also get the previous page's bottom line; near a page bottom the next page's top line; a fully visible page shows its own two lines) — drag any of them
+- While the Trim Config dialog is open, trim is temporarily disabled so the FULL page is visible for placing the lines; it comes back on Save/Cancel
 - ✅ button saves the distances
 
 **Controls:**
@@ -154,19 +155,13 @@ The features below were developed on top of SumatraPDF and **do not exist in the
 
 ---
 
-### 4. 🔄 Upstream Update System
+### 4. 🔄 Own Update System (replaces upstream checks)
 
-**What it does:** PowerShell script to check for new SumatraPDF versions and generate merge instructions.
+**What it does:** The app checks for its OWN new versions (this repo's GitHub Releases) — upstream SumatraPDF update checks and all upstream data collection were removed.
 
-**How to use:**
-
-```powershell
-.\scripts\check-updates.ps1
-```
-
-The script compares the version in `sumatrapdf-src/src/Version.h` with the pre-release version available at `sumatrapdfreader.org/updatecheck-pre-release.txt`. If there is an update, it generates a step-by-step merge guide.
-
-**Merge architecture:** See `MERGE.md` for full documentation of the update process.
+- Daily check of the repo's `update.txt`; a newer version prompts, downloads the latest portable exe, validates it and replaces itself (no installer, no admin)
+- Releases are built by GitHub Actions from `v*` tags
+- Tracking/merging UPSTREAM SumatraPDF changes is a manual process documented in `MERGE.md`
 
 ---
 
@@ -231,7 +226,7 @@ The script compares the version in `sumatrapdf-src/src/Version.h` with the pre-r
 - **Per-tab state:** cards, study history and filter live on the tab (`WindowTab::flashcard`) — switching tabs reloads each book's cards; session/queue lives on the window.
 - **List panel** (List button, ex-"Lista"): docked right-side panel (resizable via splitter) listing the book's cards in 4 columns — Flashcard (the masked text, extracted live; nothing stored in the PDF), Page, Due (countdown to next review, "0min" when due), Status with colors (new = blue, due = orange, learn = purple, ok = green). Click a row → navigate to the card; refreshed after rating and history wipes.
 
-**Controls:** see [Shortcuts.md](Shortcuts.md) — flashcards (`S`, `Space`/`Enter`, `1`–`4`), autoscroll (`F7`–`F9`), contrast/invert and the upstream basics.
+**Controls:** press `?` (Shift+/) for the in-app keyboard shortcuts sheet — it lists the Flashcards and Auto-Scroll & Contrast sections too, and the sheet window is resizable. The Command Palette (`Ctrl+K`) also exposes every fork command.
 
 **Controls:**
 
@@ -260,36 +255,9 @@ The script compares the version in `sumatrapdf-src/src/Version.h` with the pre-r
 
 ---
 
-### 🗺️ Roadmap
+### 🗺️ What's new
 
-- [x] Project setup and base build
-- [x] Binary rename + inverted logos
-- [x] AutoScroll + ETA + toolbar
-- [x] Filtro de contraste + toolbar
-- [x] Themes: Light+Dark only, Dark default
-- [x] "New Tools" menu with TumatraPDF commands
-- [x] Viewport crop + margin trim (zoom bug fixed)
-- [x] Arch Tools (Scale + Measure) — 2nd toolbar, scale/measure/erase, build-verified
-- [x] Modularização: design tokens (16A), structs (16B), command dispatch C2-C5 (16C)
-- [x] ToolbarIds.h: placeholder IDs extraction
-- [x] 16C-F6: window lifecycle extraction (MainWindowCreate.{h,cpp})
-- [x] Design system: text centering (buttons/inputs), ToolbarLayout
-- [x] Autoscroll round-step speed table (25–1600 px/min)
-- [x] Toolbar wrapping (TBSTYLE_WRAPABLE) — buttons wrap to 2nd row on narrow windows
-- [x] Flashcard MVP — core toggle, study mode, SM-2, card creation from selection
-- [x] Flashcard cloze (positional) — highlight = mask over existing text, no duplication; reveal, SRS by due, stable key, 1-4 shortcuts
-- [x] Flashcard study flow — Space/Enter reveal, 1-4 rate (numpad too), Next/Back, auto-center, TC2-aware navigation
-- [x] Flashcard multi-select — Alt+drag accumulates selections → ONE grouped card (N masks)
-- [x] Flashcard Order dialog — sequential/random (shuffle within groups) + new-cards position (before/after/mixed)
-- [x] Flashcard Clean History — per-book (2s) / ALL books (5s) hold-to-confirm buttons
-- [x] Flashcard Filter window — page-set expr + bookmark mirror + ON/OFF + clear (2s hold), per-book filter
-- [x] Flashcard Config window — study-history folder picker (Drive backup), per-book history list, clear-selected/clear-ALL holds; all flashcard windows dark-theme aware; **study-state parser fix** (states loaded as all-zeros since the first release — cards came back as "new" on every relaunch)
-- [x] Flashcard cross-doc study — session checkbox: queue over all PDF tabs of the window, auto tab-switch, per-book SM-2 save
-- [x] Flashcard Lista panel — docked right sidebar, 4 columns (masked-text label, Page, Due countdown, colored Status), click-to-navigate
-- [x] Flashcard data tools (Settings window) — study-folder migration (s25), RESYNC (auto adopt-by-docName on move + Link to PDF for renames), rolling local backups 1d/3d/7d + Restore Backup, Import from PDF (merge a study partner's new cards, history untouched)
-- [x] UI language: all fork-added window/button labels in English (public release); TC1/TC2 renamed Scan Mode / Two Columns; Shortcuts.md added
-- [x] Sync markers + Re-check (s27) — study JSONs persist the full PDF path; green/red/grey dots in the Settings list + Re-check button; Scan Mode always starts from fit-width; "Lista"→"List"
-- [ ] Automated tests for new features
+The per-version changelog (features + bug fixes, newest first) lives in **[RELEASE.md](RELEASE.md)**.
 
 ---
 
@@ -339,15 +307,4 @@ Based on SumatraPDF:
 
 ## Status
 
-🟢 Core features complete. Modularization in progress: 16A-16C ✅, 16C-F6 ✅, Design system ✅, Autoscroll ✅, Toolbar wrapping ✅, ToolbarLayout ✅, Flashcards ✅ (MVP + cloze SRS + study flow + filter window + cross-doc sessions). SumatraPDF.cpp: 14,212 → ~13,830 lines. Next: 16D (FileState struct) or Canvas.cpp extraction.
-
-## 2026-08-17 - Trim Cache + ETA Option Visibility
-
-- **BUG1 fix:** AutoScrollShowEta now visible in Advanced Options dialog. Field was placed after the internalRest marker (comment "You're not expected to change those manually") in cmd/gen-settings.ts -> generated FieldInfo had 4th arg true (internal = hidden). Moved before marker (next to ShowLinks). Regenerated via bun cmd/gen-settings.ts: entry now 3-arg, fieldNames contains AutoScrollShowEta, fieldCount 139.
-- **BUG2 fix:** trim=on no longer forces non-cached render path. DisplayModel::ShouldCacheRendering returns true always; RenderCache GetTileRectDevice/GetTileRectUser/GetTileOnScreen take trimEnabled param (shrink mediabox by trim strips, shift user rect back by trim.top); cache invalidated via gRenderCache->FreeForDisplayModel on trim toggle (CmdMarginTrimToggle) and trim save (TrimConfigDialog OnSave). Autoscroll with trim now uses cached tiles -> no per-frame re-render lag.
-
-## 2026-08-17 - Trim Black-Space Fix + Tab Freeze + Per-Doc Invert/Contrast
-
-- **Trim fix:** black band at top of each page in trim mode = double top-shift. Removed `mediabox.y += t;` from `RenderCache::GetTileRectDevice` (~line 320); `GetTileRectUser`'s `rect.y += gGlobalPrefs->trim.top;` (line 336) kept as the single correct shift. Build OK, exe in `Compiled\TumatraPDF.exe`.
-- **Tab freeze:** `TabsCtrl::LayoutTabs` condition now `tabWidthFrozen && frozenTabDx > 0 && nTabs > 1`, else resets freeze; `CloseTab` adds `TrackMouseLeave(hwnd)`. ⚠️ Tab still small with 1 doc open — **RESOLVED 2026-08-24**: root cause was `TabWidth=60` in settings file + upstream freeze mechanism; freeze code deleted; Alt+Click close added, X icon removed.
-- **Per-doc invert/contrast persistence:** FileState gains `InvertColors` (false), `ContrastEnabled` (false), `ContrastOpacity` (50) via `cmd/gen-settings.ts` (fieldCount 22→25). Save in `UpdateTabFileDisplayStateForTab` (~L830-833); load in `LoadDocument` (~L2040-2043) + `CreateContrastOverlay` after `win->ctrl = tab->ctrl` (~L2093-2095). Reopen restores invert + contrast state.
+🟢 Core features complete. Modularization in progress: 16A-16C ✅, 16C-F6 ✅, Design system ✅, Autoscroll ✅, Toolbar wrapping ✅, ToolbarLayout ✅, Flashcards ✅ (full stack: cloze SRS + study flow + Order/Filter/Settings/List windows + cross-doc sessions + data tools). History + fixes: see [RELEASE.md](RELEASE.md).
