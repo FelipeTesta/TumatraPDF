@@ -1,5 +1,47 @@
 ﻿# TODO
 
+## Public Repo + Update System Plan (2026-10-01) — IN EXECUTION
+
+Goal: make repo public-ready, strip upstream Sumatra data-collection, add own release + auto-update.
+User decisions: keep ALL upstream build/CI scripts in `cmd/` as backup (future cross-platform builds); portable auto-replace update strategy (option A); audit git history first, decide rewrite later. Parallel agent works flashcards — DO NOT touch `Flashcard*`, `Commands_Flashcard.cpp`, flashcard LOG/TODO sections.
+
+### FASE 0 — Git history audit (DONE 2026-10-01)
+
+- [x] Secrets: none committed. `cmd/build-ci.ts` reads `R2_SECRET`/`BB_SECRET` from `../secrets/` (outside repo).
+- [x] No `C:\Users\Testa` paths in current tree or tracked files.
+- [x] `D:\1 Principal` + old FLOW labels only inside **historical** `FLOW/*.dot` blobs (commits d57d7f3, 0f548cd...). No credentials anywhere. Current tree clean.
+- [ ] USER DECISION PENDING: publish with history as-is (recommended — cosmetic paths only) vs fresh-start squash.
+
+### FASE 1 — Telemetry/data-collection removal (upstream Sumatra) — DONE s26
+
+- [x] `CrashHandler.cpp`: `UploadCrashReport`+`kCrashHandlerServer*`+symbol download (`BuildSymbolsUrl`/`DownloadAndUnzipSymbols`/`ExtractSymbols`) removed; `_uploadDebugReport` forced local-only (`shouldUpload=false`); `CrashHandlerDownloadSymbols()` no-op. KEEP local dump + `ShowCrashHandlerMessage`.
+- [x] `CmdContributeTranslation` removed (gen-commands + regen, Menu, SumatraPDF.cpp, CommandAvailability x3, docs/md/Commands.md).
+- [x] `HomePage.cpp` rows -> TumatraPDF website/manual/issues.
+- [x] `AdvancedSettingsDialog.cpp` `kSettingsDocsUrl` already -> repo docs.
+- [x] `Installer.cpp` + `RegistryInstaller.cpp` URLs -> repo.
+- [x] Comment URLs kept (attribution).
+
+### FASE 2 — Own update system (UpdateCheck.cpp repoint + portable auto-replace) — DONE s26
+
+- [x] `updateInfoURLs[]` -> `raw.githubusercontent.com/FelipeTesta/TumatraPDF/main/update.txt`; parser accepts `[TumatraPDF]` (and `[SumatraPDF]`) sections.
+- [x] Signature gate replaced by PE-"MZ" + >=1 MiB sanity (unsigned portable exe accepted); `kExpectedDlHost` -> GitHub `/releases/`.
+- [x] `SelfUpdateViaBatch()`: detached cmd batch waits for PID exit -> `move /Y` new exe -> relaunch -> self-delete.
+- [x] `update.txt` at repo root (`Latest: 1.0` + `releases/latest/download/TumatraPDF.exe`).
+- [x] Fork version `1.0` via `src/BuildConfig.h` (upstream 3.7 abandoned; `Latest: 1.0.x` > 1.0 triggers).
+
+### FASE 3 — Release pipeline (GitHub Actions) — DONE s26 (workflow, untested)
+
+- [x] `.github/workflows/release.yml`: tag `v*` -> windows-2022 + bun + msbuild Release x64 -> bump+commit update.txt -> softprops/action-gh-release with TumatraPDF.exe.
+- [ ] Flavor E2E after repo goes public: tag v1.0.0 -> verify release asset + update.txt bump -> in-app update prompt from v1.0 -> self-replace.
+- [ ] Document in BUILD.md + docs/md/Version-history.md (at first public release).
+
+### FASE 4 — Tests + docs
+
+- [x] Build dbg+rel 0 errors; smoke launch OK. No existing functional update test (all set CheckForUpdates=false) — e2e deferred to post-public.
+- [x] LOG.md + README pending user commit order.
+
+---
+
 ## Architectural Audit + Refactoring Plan (2026-09-21)
 
 Audit done with tree-sitter + explore agent over `sumatrapdf-src/src/`. Findings have file:line evidence. Process diagrams live in `FLOW/*.dot`.
@@ -17,15 +59,15 @@ Audit done with tree-sitter + explore agent over `sumatrapdf-src/src/`. Findings
 
 ### Execution phases (effort x result) — status 2026-09-22
 
-| Phase | Action | Files | Effort | Risk | Gain |
-|---|---|---|---|---|---|
-| R1 ✅ | TrimConfigDialog VirtualToPhysical bug + `dm->PageMediaBox()`; BONUS: RenderCache::Invalidate same class also routed | TrimConfigDialog, RenderCache | Low | Low | High (latent bug) — DONE |
-| R2 ✅ | Centralize `MarkdownContrastJs` (3 divergent copies killed) + PDF-parity filter semantics | ContrastOverlay, MarkdownModel, SumatraPDF | Low | Low | High (kills drift + PDF/MD parity) — DONE |
-| R3 ◐ | colX math unified → `DisplayModel::ColumnOffsetXForPage` (4 copies → 1). TrimRectPage/Inverse NOT done: site semantics differ (mediabox shrink vs area/pt shift + distinct guards), forcing helper = render-path risk, low value | DisplayModel, RenderCache | Medium | Medium (render path) | High (colX part done) |
-| R4 ✅ | `TrimComputeLineInfo(TrimLineInfo)` (3 copies) | Canvas.cpp | Low | Low | Medium — DONE |
-| R5 ◐ | Pruned: QuickToggleViewportCrop v1 (0 callers) + kEtaW. LEFT: v1 crop stack (v1 button still live), flashcard dead fields (flashcard agent ACTIVE) | DisplayModel, Toolbar | Low | Low | Medium |
-| R6 ◐ | Contrast JS → MarkdownModel done via R2; Commands_AutoScroll decouple NOT done | Commands_AutoScroll, ContrastOverlay, MarkdownModel | Low | Low | Low-Medium |
-| R7 | 16C continuation: SumatraPDF.cpp 14.2k -> ~10k or Canvas.cpp extraction | SumatraPDF.cpp | High | Medium-High | High |
+| Phase | Action                                                                                                                                                                                                                           | Files                                               | Effort | Risk                 | Gain                                      |
+| ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- | ------ | -------------------- | ----------------------------------------- |
+| R1 ✅ | TrimConfigDialog VirtualToPhysical bug + `dm->PageMediaBox()`; BONUS: RenderCache::Invalidate same class also routed                                                                                                             | TrimConfigDialog, RenderCache                       | Low    | Low                  | High (latent bug) — DONE                  |
+| R2 ✅ | Centralize `MarkdownContrastJs` (3 divergent copies killed) + PDF-parity filter semantics                                                                                                                                        | ContrastOverlay, MarkdownModel, SumatraPDF          | Low    | Low                  | High (kills drift + PDF/MD parity) — DONE |
+| R3 ◐  | colX math unified → `DisplayModel::ColumnOffsetXForPage` (4 copies → 1). TrimRectPage/Inverse NOT done: site semantics differ (mediabox shrink vs area/pt shift + distinct guards), forcing helper = render-path risk, low value | DisplayModel, RenderCache                           | Medium | Medium (render path) | High (colX part done)                     |
+| R4 ✅ | `TrimComputeLineInfo(TrimLineInfo)` (3 copies)                                                                                                                                                                                   | Canvas.cpp                                          | Low    | Low                  | Medium — DONE                             |
+| R5 ◐  | Pruned: QuickToggleViewportCrop v1 (0 callers) + kEtaW. LEFT: v1 crop stack (v1 button still live), flashcard dead fields (flashcard agent ACTIVE)                                                                               | DisplayModel, Toolbar                               | Low    | Low                  | Medium                                    |
+| R6 ◐  | Contrast JS → MarkdownModel done via R2; Commands_AutoScroll decouple NOT done                                                                                                                                                   | Commands_AutoScroll, ContrastOverlay, MarkdownModel | Low    | Low                  | Low-Medium                                |
+| R7    | 16C continuation: SumatraPDF.cpp 14.2k -> ~10k or Canvas.cpp extraction                                                                                                                                                          | SumatraPDF.cpp                                      | High   | Medium-High          | High                                      |
 
 ### Fixes 2026-09-22 (user-reported)
 
@@ -154,6 +196,7 @@ Create a **second mode** "Two Column v2" (`CmdViewportCropV2Toggle`) **fully ind
 - [x] Final build + deploy `Compiled/TumatraPDF.exe` (release 19:54 + debug 19:46, 2026-09-23, post s13).
 
 **Found-issues (2026-09-23):**
+
 - [x] **premake TRAP FIXED (option b, s13)**: run-unit-tests.ts no longer runs `premake5.exe` (strips 10 fork sources → LNK1120). AGENTS §6b documents the trap + `git stash push -- sumatrapdf-src/vs2022/` recovery. Residual: if premake must run manually (adding files), re-add fork sources afterwards; premake5.lua update = MERGE surface, deferred.
 - [x] **Unit test failures RESOLVED (s13)**: same root cause as above — locale, not code. All 102,685 pass.
 - [x] **gen-settings coverage audit PASSED (s13)**: full regen → `git diff` Settings.h/Settings.cpp = empty → no hand-added fields outside the generator. Reusable check: regen + git diff (NOT static name analysis — generator has its own name-mapping table: "URL"→url, "AIChatSidebarDx").
@@ -336,14 +379,14 @@ Two functions, INDEPENDENT PER DOCUMENT (each tab/doc keeps its own state):
 
 ### Decision Matrix
 
-| Action | Effort | Result | Risk | ROI | Priority |
-| -------------------------------------------------------------- | --------------------------------------------------------------- | -------------------------------------------------- | ------------------------------------------- | ----- | ---------- |
-| **16C-F6: Extract init/window creation from SumatraPDF.cpp**     | Medium (C2-C5 pattern already established)                      | High (-800~1200 lines, god file ~10k)              | Medium (static deps, but proven pattern)    | ????? | 1          |
-| **Canvas.cpp: Extract event handling**                         | High (5091 lines, mouse/keyboard interleaved with rendering)    | High (2nd largest file)                            | High (rendering code, no pattern)           | ????? | 2          |
-| **16D: Encapsulate gGlobalPrefs**                              | High (152 accesses in SumatraPDF.cpp, touches many files)       | High (reduces global coupling significantly)       | High (many files, easy to break)            | ????? | 3          |
-| **EngineMupdf.cpp: Decouple rendering helpers**                | Medium (extract helpers per format)                             | Medium (isolates MuPDF dependency)                 | Medium (deep coupling)                      | ????? | 4          |
-| ~~MainWindow.h: FileState struct~~ → **SelectionState struct** | Low (established pattern with AutoScrollState/ArchToolsState)   | Medium (organizes god class)                       | Low                                         | ????? | 5          |
-| **Toolbar.cpp: Refine further**                                | Low (2368 lines, already has design tokens)                     | Low (already modular enough)                       | Low                                         | ????? | 6          |
+| Action                                                         | Effort                                                        | Result                                       | Risk                                     | ROI   | Priority |
+| -------------------------------------------------------------- | ------------------------------------------------------------- | -------------------------------------------- | ---------------------------------------- | ----- | -------- |
+| **16C-F6: Extract init/window creation from SumatraPDF.cpp**   | Medium (C2-C5 pattern already established)                    | High (-800~1200 lines, god file ~10k)        | Medium (static deps, but proven pattern) | ????? | 1        |
+| **Canvas.cpp: Extract event handling**                         | High (5091 lines, mouse/keyboard interleaved with rendering)  | High (2nd largest file)                      | High (rendering code, no pattern)        | ????? | 2        |
+| **16D: Encapsulate gGlobalPrefs**                              | High (152 accesses in SumatraPDF.cpp, touches many files)     | High (reduces global coupling significantly) | High (many files, easy to break)         | ????? | 3        |
+| **EngineMupdf.cpp: Decouple rendering helpers**                | Medium (extract helpers per format)                           | Medium (isolates MuPDF dependency)           | Medium (deep coupling)                   | ????? | 4        |
+| ~~MainWindow.h: FileState struct~~ → **SelectionState struct** | Low (established pattern with AutoScrollState/ArchToolsState) | Medium (organizes god class)                 | Low                                      | ????? | 5        |
+| **Toolbar.cpp: Refine further**                                | Low (2368 lines, already has design tokens)                   | Low (already modular enough)                 | Low                                      | ????? | 6        |
 
 ### Recommendation: ideal path
 
@@ -420,16 +463,16 @@ Two functions, INDEPENDENT PER DOCUMENT (each tab/doc keeps its own state):
 
 exemplo:
 
-texto texto texto texto texto texto 
-texto texto texto texto texto texto 
+texto texto texto texto texto texto
+texto texto texto texto texto texto
 ↓
 seleção
-texto texto [texto texto texto texto 
+texto texto [texto texto texto texto
 texto texto texto] texto texto texto
 ↓
 resultado esperado:
-texto texto [______________________ 
-________________] texto texto texto 
+texto texto [______________________
+________________] texto texto texto
 
 resultado incorreto:
 [_________________________________
@@ -445,12 +488,12 @@ __________________________________]
 
 ### Render matrix (Canvas) — study on/off NEVER covers text at the wrong time
 
-| State         | flashcard.on | studyMode | revealMode | Action per card                                                              |
-| ------------- | ------------ | --------- | ---------- | ---------------------------------------------------------------------------- |
-| Off           | false        | —         | —          | nothing (zero cost)                                                        |
-| Reading       | true         | false     | false      | subtle translucent marker (`30,128,128,128`) on ALL — text visible         |
-| Study         | true         | true      | false      | opaque mask (`255,100,100,100`) ONLY on current card — text hidden         |
-| Study+Reveal  | true         | true      | true       | NO mask on current card — original text visible (PDF 40% highlight stays)  |
+| State        | flashcard.on | studyMode | revealMode | Action per card                                                           |
+| ------------ | ------------ | --------- | ---------- | ------------------------------------------------------------------------- |
+| Off          | false        | —         | —          | nothing (zero cost)                                                       |
+| Reading      | true         | false     | false      | subtle translucent marker (`30,128,128,128`) on ALL — text visible        |
+| Study        | true         | true      | false      | opaque mask (`255,100,100,100`) ONLY on current card — text hidden        |
+| Study+Reveal | true         | true      | true       | NO mask on current card — original text visible (PDF 40% highlight stays) |
 
 > Rule: **opaque mask only in `studyMode && !revealMode` and only on the current card rect.** Otherwise, never cover text. The current bug (FC-A) draws the mask on all cards and does not remove it on reveal.
 
@@ -525,15 +568,15 @@ __________________________________]
 
 ### Files to Modify
 
-| File                         | Change                                                               |
-| ---------------------------- | -------------------------------------------------------------------- |
-| `src/Canvas.cpp`             | study/reveal render matrix (Step 1)                                  |
-| `src/Flashcard.h`            | stable `key` field; remove `tip`/`text` if unused                    |
-| `src/Flashcard.cpp`          | Load by author without `Q:`; key hash; SM-2 cap/relearn              |
+| File                         | Change                                                                  |
+| ---------------------------- | ----------------------------------------------------------------------- |
+| `src/Canvas.cpp`             | study/reveal render matrix (Step 1)                                     |
+| `src/Flashcard.h`            | stable `key` field; remove `tip`/`text` if unused                       |
+| `src/Flashcard.cpp`          | Load by author without `Q:`; key hash; SM-2 cap/relearn                 |
 | `src/Commands_Flashcard.cpp` | Add without duplication; load studyDoc; due filter; relearn; prune dead |
-| `src/MainWindow.h`           | Remove `hwndCardCount`/dead                                          |
-| `src/Accelerators.cpp`       | Space/Enter reveal + 1-4 rating                                      |
-| `src/FlashcardToolbar.cpp`   | (if applicable) counter adjustments                                  |
+| `src/MainWindow.h`           | Remove `hwndCardCount`/dead                                             |
+| `src/Accelerators.cpp`       | Space/Enter reveal + 1-4 rating                                         |
+| `src/FlashcardToolbar.cpp`   | (if applicable) counter adjustments                                     |
 
 ### References
 
@@ -578,22 +621,25 @@ Steps 1-5, 7 implemented; render matrix correct in Canvas (per-quad + PhysicalTo
 
 ### Feature (PLANNED, awaiting user decisions): Image Occlusion cards (boxes over images/diagrams)
 
-Requested 2026-09-24 ("cards por criação de boxes, integrada ao sistema atual").
+Requested 2026-09-24 ("cards created by drawing boxes, integrated into the current system" — user spec, translated).
 
 **Integration insight**: a card = `{pageNo, bounds, rects[]}` from a Highlight annot with N quads — a box over an image is just a page-space rect. SAME annot, SAME loader, SAME mask painting / reveal / rate / SM-2 / Clean History / centering: ZERO study-pipeline changes. Only the DRAWING MODE at creation is new.
 
 **Plan (4 steps):**
+
 - [ ] **IO-1 State**: `FlashcardState` (MainWindow.h) gains `boxMode` (bool) + `Vec<RectF> pendingBoxes` (drawing session on the current page).
 - [ ] **IO-2 Canvas drawing**: "Box" toolbar button (checked state) toggles boxMode; hook in `OnMouseLeftButtonDown` BEFORE text-selection/pan branches: drag = rubber band; boxes accumulate; existing flashcard paint renders pending boxes translucent.
 - [ ] **IO-3 Coordinate conversion**: screen→page via pageNo-from-point + `CvtFromScreen` (same math as cloze; TC2/trim-aware); rects stored in PHYSICAL page space (like text-cloze rects).
 - [ ] **IO-4 Creation**: `S` (CmdFlashcardAdd) branches: if pendingBoxes → create ONE Highlight annot with boxes as quads (same author/color path) → 1 card with N masks. Esc or Box-toggle-off discards pending boxes. Mouse feature → USER tests live (no automation).
 
 **Design decisions PENDING (user thinking):**
+
 - [ ] **IO-D1 Grouping**: boxes session → 1 grouped card (consistent with Alt+multi-select; recommended) vs 1 card per box (Anki default)?
 - [ ] **IO-D2 Mode entry**: toolbar "Box" button only? key 'B'? both?
 - [ ] **IO-D3 Scope**: boxes may cover image/diagram regions (NO text selection involved) — confirm.
 
 **Queue triage (2026-09-24, high gain / low effort):**
+
 - [x] **FC-M3 gating** — DONE 2026-09-24 (s19): all flashcard commands in `removeIfChm`/`removeIfMarkdown`.
 - [x] **FC-H3 atomic write** — DONE 2026-09-24 (s19): tmp + MoveFileExW REPLACE_EXISTING (remove+rename fallback), verified via repro. Locale float = non-issue (CRT default "C"; see FC-H3 above).
 - [x] FC-R4/FC-R5 hygiene bundle — DONE 2026-09-24 (s19): dedicated IDs + exStyle properly applied.
@@ -601,9 +647,11 @@ Requested 2026-09-24 ("cards por criação de boxes, integrada ao sistema atual"
 - [ ] FC-M1 tests (SM-2/JSON roundtrip/due filter) — after image occlusion.
 - [ ] FC-H2 scan perf, FC-M5 rate hints — later. (FC-M4 done s22 — see queue triage above.)
 - [x] **Order button redo** — DONE 2026-09-24 (s20): opens Study Order options dialog (Sequential/Random + new-cards Before due/After due/Mixed, default mixed, instant apply, shuffle-within-groups). See LOG s20.
-- [x] **Clean History rework** — DONE 2026-09-24 (s21): dialog reworked — "Clear current book" 2s hold (orange) / "Clear ALL books" 5s hold (red, deletes study JSONs + resets every tab's state); "No" button removed, X/Esc cancels. See LOG s21.
+- [x] **Clean History rework** — DONE 2026-09-24 (s21): dialog reworked — "Clear current book" 2s hold (orange) / "Clear ALL books" 5s hold (red, deletes study JSONs + resets every tab's state); "No" button removed, X/Esc cancels. See LOG s21. **Superseded 2026-10-01 (s24)**: button renamed Clean → **Config**; the dialog became the Config window (folder picker + history list + clear-SELECTED/clear-ALL).
+- [x] **Config window (Clean → Config)** — DONE 2026-10-01 (s24): study-history folder row (EDIT + 📂 IFileDialog picker; `flashcardStudyDir` setting; Drive folder = backup; folder change MIGRATES existing JSONs — `FlashcardStudyMigrateFiles`, MOVEFILE_COPY_ALLOWED, target files kept — added s25) + per-book history list (|PDF|cartões|due|última revisão|, ~10 rows + scroll, `FlashcardStudyListDocs`, JSON stores `docName`) + "Limpar livro selecionado" (2s hold, deletes the selected book's JSON; md5-matched tabs reset) + "Limpar TODOS os livros" (5s hold). All flashcard windows now theme-aware (dark ok). **Study-state parser FIX (latent since s14)**: getField missed the key's closing quote → every StudyLoad returned all-zero states (studied cards came back as "new" on each relaunch). See LOG s24.
+- [x] **Design_Guidelines improvements** — DONE 2026-10-01 (s24): #1 dialog scaffolding extracted (3 windows), #3 refresh-hook fix (Clear-ALL populates Lista), #4 `PaintFlashcardMasks` extraction from Canvas, #5 xorshift128+ shuffle, #7 build.ts auto clang-format of modified files. NOT done (justified): #6 page-text cache generalization (no second consumer), #8 FC-H2 mtime cache (medium risk, dedicated session).
 - [x] **Filter button redo** — DONE 2026-09-25 (s22): Filter window — page-set expression, TOC bookmark mirror (checkbox injects chapter range), Filtros ON/OFF, Limpar filtros (2s hold), cross-doc session checkbox in same window. See LOG s22.
 - [x] **Cross-document study sessions** — DONE 2026-09-25 (s22): scope=global-session queue over all PDF tabs of same window, auto tab-switch on advance, SM-2 saved per book; per-tab cards/studyDoc/filter state (fixes stale cards on tab switch).
 - [x] **Lista button redo** — DONE 2026-09-25 (s23): floating popup replaced by docked RIGHT panel (AI-chat pattern, own splitter) with 4-column owner-drawn list: Flashcard (masked-text label via ExtractPageText, no stored text) | Pág | Due (fresh countdown at draw time) | Status (new=blue/due=orange/learn=purple/ok=green); click row → navigate; toggle via button/label-close; refresh after rate + clean. See LOG s23.
 - [ ] Bookmark-mirror live check on user's real TOC books (test PDF has no TOC — automated test auto-skipped mirror).
-- [ ] User live tests: Filter window + global session (checkbox, cross-tab jumping, per-book saves); Lista panel visual check (columns/colors/labels on real books).
+- [ ] User live tests: Filter window + global session (checkbox, cross-tab jumping, per-book saves); Lista panel visual check (columns/colors/labels on real books); Config window (folder picker + Drive backup, list columns, clear-selected, dark theme, 📂 glyph).

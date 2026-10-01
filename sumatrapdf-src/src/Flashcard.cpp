@@ -11,6 +11,7 @@ extern "C" {
 
 #include "Annotation.h"
 #include "Settings.h"
+#include "GlobalPrefs.h"
 #include "DisplayMode.h"
 #include "DocController.h"
 #include "DocProperties.h"
@@ -130,7 +131,21 @@ Vec<Flashcard> FlashcardLoadFromDocument(EngineMupdf* engine) {
     return result;
 }
 
-// Compute MD5 hash of filePath and return %APPDATA%\SumatraPDF\FlashcardStudy\<md5>.json
+// Directory where the study-history JSONs are stored: the user-configured
+// flashcardSettings.studyDir when set (e.g. a Google Drive folder so the
+// histories are backed up / synced between machines), else the per-exe
+// portable app-data "FlashcardStudy" dir. Changing the setting MIGRATES the
+// existing files to the new dir (see FlashcardStudyMigrateFiles; files
+// already in the target are kept).
+TempStr FlashcardStudyDir() {
+    Str custom = gGlobalPrefs->flashcardStudyDir;
+    if (custom && len(custom) > 0) {
+        return (TempStr)custom.s;
+    }
+    return GetPathInAppDataDirTemp(StrL("FlashcardStudy"));
+}
+
+// Compute MD5 hash of filePath and return <study dir>\<md5>.json
 TempStr FlashcardStudyPath(const char* filePath) {
     logf("[fc] FlashcardStudyPath - computing for %s\n", Str(filePath));
     if (!filePath) {
@@ -142,7 +157,7 @@ TempStr FlashcardStudyPath(const char* filePath) {
     CalcMD5Digest(pathStr, digest);
     TempStr md5Hex = str::MemToHexTemp(Str((const char*)digest, dimofi(digest)));
 
-    TempStr dir = GetPathInAppDataDirTemp(StrL("FlashcardStudy"));
+    TempStr dir = FlashcardStudyDir();
     return path::JoinTemp(dir, fmt("%s.json", md5Hex));
 }
 
@@ -158,6 +173,25 @@ static void WriteJsonValue(FILE* f, const FlashcardStudyState& state) {
             "      }",
             state.rating, state.interval, state.easeFactor, state.lastReviewedAt, state.nextReviewAt,
             state.reviewCount);
+}
+
+// Write s as a JSON string literal (escape backslash, quote and control
+// chars) so a book name with quotes round-trips safely
+static void WriteJsonStringLiteral(FILE* f, Str s) {
+    fputc('"', f);
+    for (int i = 0; i < len(s); i++) {
+        char c = s.s[i];
+        if (c == '\\' || c == '"') {
+            fputc('\\', f);
+        }
+        unsigned char u = (unsigned char)c;
+        if (u < 0x20) {
+            fprintf(f, "\\u%04x", u);
+        } else {
+            fputc(c, f);
+        }
+    }
+    fputc('"', f);
 }
 
 // Save flashcard study state to external JSON file
@@ -189,11 +223,11 @@ void FlashcardStudySave(const char* filePath, const FlashcardStudyDoc& doc) {
         return;
     }
 
-    fprintf(f,
-            "{\n"
-            "  \"version\": %d,\n"
-            "  \"states\": {\n",
-            doc.version);
+    // docName (base name of the book) lets the Config window list books by
+    // name; full path would leak machine layout and moves between machines
+    fprintf(f, "{\n  \"version\": %d,\n  \"docName\": ", doc.version);
+    WriteJsonStringLiteral(f, path::GetBaseNameTemp(Str(filePath)));
+    fprintf(f, ",\n  \"states\": {\n");
 
     bool first = true;
     for (int i = 0; i < doc.states.len; i++) {
@@ -229,11 +263,11 @@ void FlashcardStudySave(const char* filePath, const FlashcardStudyDoc& doc) {
     logf("[fc] FlashcardStudySave - saved %d entries\n", len(doc.states));
 }
 
-// Delete every FlashcardStudy/*.json in the app-data dir — the review
-// histories of ALL books. Called by the Clean History dialog's 5s-hold
-// "Clear ALL books" action. Returns the number of files deleted.
+// Delete every study-history JSON in the study dir — the review histories
+// of ALL books. Called by the Config window's 5s-hold "clear ALL books"
+// action. Returns the number of files deleted.
 int FlashcardDeleteAllStudyFiles() {
-    TempStr dir = GetPathInAppDataDirTemp(StrL("FlashcardStudy"));
+    TempStr dir = FlashcardStudyDir();
     TempStr pattern = path::JoinTemp(dir, StrL("*.json"));
     WIN32_FIND_DATAW fd{};
     HANDLE h = FindFirstFileW(CWStrTemp(ToWStrTemp(Str(pattern))), &fd);
@@ -255,6 +289,51 @@ int FlashcardDeleteAllStudyFiles() {
     FindClose(h);
     logf("[fc] FlashcardDeleteAllStudyFiles - deleted %d study file(s)\n", deleted);
     return deleted;
+}
+
+// Move every study-history JSON from fromDir to toDir (Config window folder
+// change). A file that already exists in toDir is KEPT there untouched (not
+// overwritten) — a cloud-synced target dir may already hold the book's file
+// from another machine, and the next FlashcardStudySave of an open book will
+// write the up-to-date state there anyway. Cross-volume moves (local disk →
+// cloud drive) need MOVEFILE_COPY_ALLOWED.
+int FlashcardStudyMigrateFiles(Str fromDir, Str toDir) {
+    if (!fromDir || !toDir || str::Eq(fromDir, toDir)) {
+        return 0;
+    }
+    TempStr pattern = path::JoinTemp(Str(fromDir), StrL("*.json"));
+    WIN32_FIND_DATAW fd{};
+    HANDLE h = FindFirstFileW(CWStrTemp(ToWStrTemp(Str(pattern))), &fd);
+    if (h == INVALID_HANDLE_VALUE) {
+        logf("[fc] FlashcardStudyMigrateFiles - nothing to move from '%s'\n", Str(fromDir));
+        return 0;
+    }
+    int moved = 0;
+    int kept = 0;
+    do {
+        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+            continue;
+        }
+        TempStr src = path::JoinTemp(Str(fromDir), ToUtf8Temp(WStr(fd.cFileName)));
+        TempStr dst = path::JoinTemp(Str(toDir), ToUtf8Temp(WStr(fd.cFileName)));
+        if (GetFileAttributesW(CWStrTemp(ToWStrTemp(Str(dst)))) != INVALID_FILE_ATTRIBUTES) {
+            kept++;
+            logf("[fc] FlashcardStudyMigrateFiles - kept existing '%s' in target\n", Str(dst));
+            continue;
+        }
+        if (MoveFileExW(CWStrTemp(ToWStrTemp(Str(src))), CWStrTemp(ToWStrTemp(Str(dst))),
+                        MOVEFILE_COPY_ALLOWED | MOVEFILE_WRITE_THROUGH)) {
+            moved++;
+            logf("[fc] FlashcardStudyMigrateFiles - moved '%s' -> '%s'\n", Str(src), Str(dst));
+        } else {
+            logf("[fc] FlashcardStudyMigrateFiles - ERROR: move '%s' failed (lastError=%u)\n", Str(src),
+                 (unsigned)GetLastError());
+        }
+    } while (FindNextFileW(h, &fd));
+    FindClose(h);
+    logf("[fc] FlashcardStudyMigrateFiles - moved %d, kept %d existing (from '%s' to '%s')\n", moved, kept,
+         Str(fromDir), Str(toDir));
+    return moved;
 }
 
 // Stable per-tab name for [fc] logs: displayName is empty for cmdline-loaded
@@ -448,6 +527,12 @@ static bool ParseJsonObject(Str json, Vec<FlashcardStudyDoc::StateEntry>* outSta
             if (fieldIdx < 0) return;
             Str afterField = Str(valueJson.s + fieldIdx + len(fieldName));
             str::TrimWSInPlace(afterField, str::TrimOpt::Left);
+            // skip the key's closing quote: we searched the field NAME only
+            // ("rating"), so s[0] is the '"' that ends the key, not the ':'
+            if (afterField && afterField.s[0] == '"') {
+                afterField = Str(afterField.s + 1);
+                str::TrimWSInPlace(afterField, str::TrimOpt::Left);
+            }
             if (!afterField || afterField.s[0] != ':') return;
             afterField = Str(afterField.s + 1);
             str::TrimWSInPlace(afterField, str::TrimOpt::Left);
@@ -485,25 +570,12 @@ static bool ParseJsonObject(Str json, Vec<FlashcardStudyDoc::StateEntry>* outSta
 }
 
 // Load flashcard study state from external JSON file
-FlashcardStudyDoc FlashcardStudyLoad(const char* filePath) {
-    logf("[fc] FlashcardStudyLoad - loading from %s\n", Str(filePath));
-    FlashcardStudyDoc doc;
-    doc.version = 1;
+static char* ParseJsonDocNameDup(Str json);
+static Str FlashcardStudyAdoptByName(const char* filePath, Str dstPath);
 
-    if (!filePath) {
-        return doc;
-    }
-
-    TempStr studyPath = FlashcardStudyPath(filePath);
-    if (!studyPath) {
-        return doc;
-    }
-
-    Str json = file::ReadFile(Str(studyPath));
-    if (!json) {
-        return doc;
-    }
-
+// parse a study JSON (version + states) into doc; shared by StudyLoad and the
+// manual resync
+static void FlashcardStudyParseJson(Str json, FlashcardStudyDoc& doc) {
     auto findAnyChar = [](Str s, Str chars) -> int {
         for (int i = 0; i < len(s); i++) {
             if (str::IndexOfChar(chars, s.s[i]) >= 0) {
@@ -531,9 +603,230 @@ FlashcardStudyDoc FlashcardStudyLoad(const char* filePath) {
     }
 
     ParseJsonObject(json, &doc.states);
+}
+
+FlashcardStudyDoc FlashcardStudyLoad(const char* filePath) {
+    logf("[fc] FlashcardStudyLoad - loading from %s\n", Str(filePath));
+    FlashcardStudyDoc doc;
+    doc.version = 1;
+
+    if (!filePath) {
+        return doc;
+    }
+
+    TempStr studyPath = FlashcardStudyPath(filePath);
+    if (!studyPath) {
+        return doc;
+    }
+
+    Str json = file::ReadFile(Str(studyPath));
+    if (!json) {
+        // no history under this md5: the book may have been MOVED on disk
+        // (path changed, base name kept). Try to ADOPT a study JSON saved
+        // under the old path that carries this book's base name
+        json = FlashcardStudyAdoptByName(filePath, Str(studyPath));
+        if (!json) {
+            return doc;
+        }
+    }
+
+    FlashcardStudyParseJson(json, doc);
 
     logf("[fc] FlashcardStudyLoad - loaded %d entries\n", len(doc.states));
     return doc;
+}
+
+// Extract the "docName": "..." value from a study JSON (unescape \" and \\).
+// Returns nullptr when the field is missing (legacy files written before the
+// field existed).
+static char* ParseJsonDocNameDup(Str json) {
+    int idx = str::IndexOf(json, StrL("\"docName\""));
+    if (idx < 0) {
+        return nullptr;
+    }
+    Str s = Str(json.s + idx + len(StrL("\"docName\"")));
+    str::TrimWSInPlace(s, str::TrimOpt::Left);
+    if (!s || s.s[0] != ':') {
+        return nullptr;
+    }
+    s = Str(s.s + 1);
+    str::TrimWSInPlace(s, str::TrimOpt::Left);
+    if (!s || s.s[0] != '"') {
+        return nullptr;
+    }
+    s = Str(s.s + 1);
+    char buf[512];
+    int n = 0;
+    while (n < dimofi(buf) - 1 && s.s[0] && s.s[0] != '"') {
+        char c = s.s[0];
+        if (c == '\\' && len(s) > 1) {
+            s = Str(s.s + 1);
+            char e = s.s[0];
+            if (e == 'n') {
+                c = '\n';
+            } else if (e == 't') {
+                c = '\t';
+            } else {
+                c = e; // covers \" and \\ (other escapes copied as-is)
+            }
+        }
+        buf[n++] = c;
+        s = Str(s.s + 1);
+    }
+    buf[n] = 0;
+    return str::Dup(Str(buf, n)).s;
+}
+
+// RESYNC (automatic): no study JSON exists under filePath's md5, so the book
+// was probably MOVED on disk (path changed, base name kept). Adopt the study
+// JSON whose saved docName equals this book's base name: rename it to the
+// current md5 path and hand its contents back to the caller. When several
+// files match (same base name in different folders), the newest wins and all
+// matches are logged.
+static Str FlashcardStudyAdoptByName(const char* filePath, Str dstPath) {
+    TempStr docName = path::GetBaseNameTemp(Str(filePath));
+    if (!docName || !dstPath) {
+        return nullptr;
+    }
+    TempStr dir = FlashcardStudyDir();
+    TempStr pattern = path::JoinTemp(dir, StrL("*.json"));
+    WIN32_FIND_DATAW fd{};
+    HANDLE h = FindFirstFileW(CWStrTemp(ToWStrTemp(Str(pattern))), &fd);
+    if (h == INVALID_HANDLE_VALUE) {
+        return nullptr;
+    }
+    TempStr bestFile = nullptr;
+    FILETIME bestTime{};
+    bool found = false;
+    do {
+        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+            continue;
+        }
+        TempStr file = path::JoinTemp(dir, ToUtf8Temp(WStr(fd.cFileName)));
+        Str json = file::ReadFile(Str(file));
+        if (!json) {
+            continue;
+        }
+        char* name = ParseJsonDocNameDup(json);
+        if (!name) {
+            continue;
+        }
+        bool match = str::EqI(Str(name), Str(docName));
+        ::free(name);
+        if (!match) {
+            continue;
+        }
+        logf("[fc] StudyLoad - RESYNC candidate: '%s' matches '%s'\n", Str(file), Str(docName));
+        if (!found || CompareFileTime(&fd.ftLastWriteTime, &bestTime) > 0) {
+            found = true;
+            bestTime = fd.ftLastWriteTime;
+            bestFile = file;
+        }
+    } while (FindNextFileW(h, &fd));
+    FindClose(h);
+    if (!found) {
+        return nullptr;
+    }
+    // rename the old-md5 file to the CURRENT md5 path, then read it back
+    BOOL ok =
+        MoveFileExW(CWStrTemp(ToWStrTemp(Str(bestFile))), CWStrTemp(ToWStrTemp(dstPath)), MOVEFILE_REPLACE_EXISTING);
+    if (!ok) {
+        logf("[fc] StudyLoad - RESYNC ERROR: failed to rename '%s' (lastError=%u)\n", Str(bestFile),
+             (unsigned)GetLastError());
+        return nullptr;
+    }
+    logf("[fc] StudyLoad - RESYNC: adopted '%s' for '%s' (book moved on disk)\n", Str(bestFile), Str(docName));
+    return file::ReadFile(dstPath);
+}
+
+// RESYNC (manual, from the Config window): re-point an existing study JSON
+// (its old md5 file name) at a new PDF path — the classic case is a book
+// RENAMED on disk, where even the base name changed and the automatic
+// adopt-by-docName cannot find it. Parses the old file, Save() rewrites it
+// under the new md5 with a fresh docName, then the old file is deleted.
+bool FlashcardStudyResync(const char* jsonPath, const char* newPdfPath) {
+    if (!jsonPath || !newPdfPath) {
+        return false;
+    }
+    Str json = file::ReadFile(Str(jsonPath));
+    if (!json) {
+        logf("[fc] RESYNC ERROR: cannot read '%s'\n", Str(jsonPath));
+        return false;
+    }
+    FlashcardStudyDoc doc;
+    FlashcardStudyParseJson(json, doc);
+    FlashcardStudySave(newPdfPath, doc);
+    // delete the old file unless Save() already replaced it in place
+    TempStr newPath = FlashcardStudyPath(newPdfPath);
+    if (newPath && !str::Eq(Str(jsonPath), Str(newPath))) {
+        DeleteFileW(CWStrTemp(ToWStrTemp(Str(jsonPath))));
+    }
+    logf("[fc] RESYNC: '%s' -> '%s' (%d states)\n", Str(jsonPath), Str(newPdfPath), len(doc.states));
+    return true;
+}
+
+// Scan the study dir and summarize every *.json into out: name, card count,
+// due count and last-review time. Sorted by lastReviewedAt (most recent
+// first) so the Config window leads with the book the user is actually
+// reviewing.
+int FlashcardStudyListDocs(Vec<FlashcardStudyDocInfo>& out) {
+    out.Reset();
+    TempStr dir = FlashcardStudyDir();
+    TempStr pattern = path::JoinTemp(dir, StrL("*.json"));
+    WIN32_FIND_DATAW fd{};
+    HANDLE h = FindFirstFileW(CWStrTemp(ToWStrTemp(Str(pattern))), &fd);
+    if (h == INVALID_HANDLE_VALUE) {
+        logf("[fc] FlashcardStudyListDocs - no study files in '%s'\n", Str(dir));
+        return 0;
+    }
+    i64 now = (i64)time(nullptr) * 1000;
+    do {
+        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+            continue;
+        }
+        TempStr file = path::JoinTemp(dir, ToUtf8Temp(WStr(fd.cFileName)));
+        Str json = file::ReadFile(Str(file));
+        if (!json) {
+            continue;
+        }
+        FlashcardStudyDocInfo info{};
+        info.fileName = str::Dup(ToUtf8Temp(WStr(fd.cFileName))).s;
+        info.docName = ParseJsonDocNameDup(json);
+        Vec<FlashcardStudyDoc::StateEntry> states;
+        ParseJsonObject(json, &states);
+        info.totalCards = len(states);
+        for (int i = 0; i < len(states); i++) {
+            const FlashcardStudyState& st = states[i].state;
+            if (st.rating != 0 && st.nextReviewAt <= now) {
+                info.dueCount++;
+            }
+            if (st.lastReviewedAt > info.lastReviewedAt) {
+                info.lastReviewedAt = st.lastReviewedAt;
+            }
+        }
+        if (!info.docName) {
+            // legacy JSON without docName: show the md5 base so the row is
+            // still identifiable
+            info.docName = str::Dup(Str(info.fileName ? info.fileName : "")).s;
+        }
+        logf("[fc] StudyListDocs - %s: name='%s' cards=%d due=%d last=%lld\n", Str(info.fileName ? info.fileName : "?"),
+             Str(info.docName ? info.docName : "?"), info.totalCards, info.dueCount, info.lastReviewedAt);
+        out.Append(info);
+    } while (FindNextFileW(h, &fd));
+    FindClose(h);
+
+    // sort by lastReviewedAt desc (insertion sort: the list is small)
+    for (int i = 1; i < len(out); i++) {
+        FlashcardStudyDocInfo key = out[i];
+        int j = i - 1;
+        while (j >= 0 && out[j].lastReviewedAt < key.lastReviewedAt) {
+            out[j + 1] = out[j];
+            j--;
+        }
+        out[j + 1] = key;
+    }
+    logf("[fc] FlashcardStudyListDocs - %d document(s) in '%s'\n", len(out), Str(dir));
+    return len(out);
 }
 
 // SM-2 algorithm (lite version) for spaced repetition

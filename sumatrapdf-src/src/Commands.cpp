@@ -117,7 +117,6 @@ static SeqStrings gCommandNames =
     "CmdZoomOut\0"
     "CmdZoomFitWidthAndContinuous\0"
     "CmdZoomFitPageAndSinglePage\0"
-    "CmdContributeTranslation\0"
     "CmdOpenWithKnownExternalViewerFirst\0"
     "CmdOpenWithExplorer\0"
     "CmdOpenWithDirectoryOpus\0"
@@ -327,7 +326,7 @@ static SeqStrings gCommandNames =
     "CmdFlashcardLista\0"
     "CmdFlashcardNext\0"
     "CmdFlashcardOrderOptions\0"
-    "CmdFlashcardCleanHistory\0"
+    "CmdFlashcardConfig\0"
     "CmdViewportCropV2Toggle\0"
     "CmdNone\0"
     "\0";
@@ -434,7 +433,6 @@ static i32 gCommandIds[] = {
     CmdZoomOut,
     CmdZoomFitWidthAndContinuous,
     CmdZoomFitPageAndSinglePage,
-    CmdContributeTranslation,
     CmdOpenWithKnownExternalViewerFirst,
     CmdOpenWithExplorer,
     CmdOpenWithDirectoryOpus,
@@ -644,7 +642,7 @@ static i32 gCommandIds[] = {
     CmdFlashcardLista,
     CmdFlashcardNext,
     CmdFlashcardOrderOptions,
-    CmdFlashcardCleanHistory,
+    CmdFlashcardConfig,
     CmdViewportCropV2Toggle,
     CmdNone,
 };
@@ -751,7 +749,6 @@ SeqStrings gCommandDescriptions =
     "Zoom Out\0"
     "Zoom: Fit Width And Continuous\0"
     "Zoom: Fit Page and Single Page\0"
-    "Contribute Translation\0"
     "don't use\0"
     "Open Directory In Explorer\0"
     "Open Directory In Directory Opus\0"
@@ -936,7 +933,7 @@ SeqStrings gCommandDescriptions =
     "Toggle Contrast Filter\0"
     "Increase contrast overlay opacity\0"
     "Decrease contrast overlay opacity\0"
-    "Toggle Viewport Crop\0"
+    "Toggle Scan Mode\0"
     "Toggle margin trimming\0"
     "Configure margin trimming\0"
     "Toggle Arch Scale Tool\0"
@@ -961,8 +958,8 @@ SeqStrings gCommandDescriptions =
     "Toggle Flashcard List Sidebar\0"
     "Skip To Next Card (No Rating)\0"
     "Flashcard Study Order Options\0"
-    "Clear Flashcard Review History\0"
-    "Toggle Two Column (v2, stacked columns)\0"
+    "Flashcard Config Window\0"
+    "Toggle Two Columns\0"
     "Do nothing\0"
     "\0";
 // clang-format on

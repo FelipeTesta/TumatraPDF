@@ -32,6 +32,11 @@ Below is an explanation of what the different settings mean and what their defau
 If you add or remove lines with square brackets, **make sure to always add/remove square brackets in pairs**! Else you risk losing all the data following them.
 
 ```
+; directory where flashcard study history JSONs are stored (per-book files,
+; MD5-named). Empty = default app-data dir (FlashcardStudy). Point it at a
+; cloud-synced folder (e.g. Google Drive) to keep the histories backed up
+FlashcardStudyDir = 
+
 ; default layout of pages. valid values: automatic, single page, facing, book
 ; view, continuous, continuous facing, continuous book view
 DefaultDisplayMode = automatic

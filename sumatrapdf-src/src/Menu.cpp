@@ -513,7 +513,6 @@ static MenuDef menuDefSettings[] = {
         CmdChangeLanguage,
     },
 #if 0
-    { _TRN("Contribute Translation"),       CmdContributeTranslation },
     { kMenuSeparator,                             0                  },
 #endif
     {
@@ -623,11 +622,11 @@ static MenuDef menuDefNewTools[] = {
         0,
     },
     {
-        _TRN("Viewport &Crop"),
+        _TRN("Scan &Mode"),
         CmdViewportCropToggle,
     },
     {
-        _TRN("Two Column &2"),
+        _TRN("Two &Columns"),
         CmdViewportCropV2Toggle,
     },
     {

@@ -3090,6 +3090,68 @@ static void GetGradientColor(COLORREF a, COLORREF b, float perc, TRIVERTEX* tv) 
 // Draw a border around selected annotation
 static bool gDrawOldStyleAnnotationRect = false;
 
+// Paint flashcard highlights (cloze occlusion masks over existing PDF text).
+// Render matrix (never cover text at the wrong moment):
+//   reading            (on, !study)              -> translucent marker, all cards
+//   studying           (on, study, !reveal)      -> opaque mask ONLY on current card
+//   studying + reveal  (on, study,  reveal)      -> no opaque mask (original text shows)
+// Extracted from the main canvas paint chain (was an inline block).
+// NOTE: card.pageNo is a PHYSICAL page; under TC2 the display uses virtual
+// pages, so every rect routes through PhysicalToVirtualForRect before
+// CvtToScreen (vPage below).
+static void PaintFlashcardMasks(MainWindow* win, DisplayModel* dm, HDC hdc) {
+    if (!win->flashcard.on) {
+        return;
+    }
+    // Cards live per-tab: paint only the CURRENT tab's cards (masks from
+    // another book must never appear over this document)
+    WindowTab* fcTab = win->CurrentTab();
+    Vec<Flashcard>* cards = fcTab ? &fcTab->flashcard.cards : nullptr;
+    // Index (into the current tab's cards) of the card currently being
+    // studied, -1 if none. In a cross-document session the current card
+    // may belong to another tab — its mask is only painted when that tab
+    // is the one on screen.
+    int studyCardIdx = -1;
+    if (cards && win->flashcard.studyMode && win->flashcard.currentCardIdx >= 0 &&
+        win->flashcard.currentCardIdx < len(win->flashcard.studyOrder)) {
+        const FlashcardQueueEntry& e = win->flashcard.studyOrder[win->flashcard.currentCardIdx];
+        if (e.tab == fcTab) {
+            studyCardIdx = e.cardIdx;
+        }
+    }
+    for (int i = 0; cards && i < len(*cards); i++) {
+        const Flashcard& card = (*cards)[i];
+        if (card.pageNo < 1) {
+            continue;
+        }
+        Gdiplus::Graphics gs(hdc);
+        // Paint each quad subrect separately so a multi-line cloze covers
+        // exactly the highlighted text (not the union bbox). Under TC2 the
+        // display uses virtual pages: map the physical rect to its column
+        // (PhysicalToVirtualForRect) so the mask lands on the text.
+        for (int rIdx = 0; rIdx < len(card.rects); rIdx++) {
+            RectF vr;
+            int vPage = dm->PhysicalToVirtualForRect(card.pageNo, card.rects[rIdx], &vr);
+            if (!dm->ValidPageNo(vPage)) {
+                continue;
+            }
+            Rect rc = dm->CvtToScreen(vPage, vr);
+            if (i == studyCardIdx && !win->flashcard.revealMode) {
+                // Studying this card: opaque mask hides the cloze text ([_____])
+                Gdiplus::Color col(255, 100, 100, 100); // dark gray, fully opaque
+                Gdiplus::SolidBrush brush(col);
+                gs.FillRectangle(&brush, rc.x, rc.y, rc.dx, rc.dy);
+            } else {
+                // Reading / reveal / non-current card: subtle translucent marker
+                // (text stays visible; on reveal the current card shows its original text)
+                Gdiplus::Color col(30, 128, 128, 128); // light gray, very transparent
+                Gdiplus::SolidBrush brush(col);
+                gs.FillRectangle(&brush, rc.x, rc.y, rc.dx, rc.dy);
+            }
+        }
+    }
+}
+
 NO_INLINE static void PaintCurrentEditAnnotationMark(WindowTab* tab, HDC hdc, DisplayModel* dm) {
     if (!tab) {
         return;
@@ -3410,55 +3472,7 @@ static bool DrawDocument(MainWindow* win, HDC hdc, Rect rcArea) {
         PaintSelection(win, hdc);
     }
     // Paint flashcard highlights (cloze occlusion masks over existing PDF text)
-    // Render matrix (never cover text at the wrong moment):
-    //   reading            (on, !study)              -> translucent marker, all cards
-    //   studying           (on, study, !reveal)      -> opaque mask ONLY on current card
-    //   studying + reveal  (on, study,  reveal)      -> no opaque mask (original text shows)
-    if (win->flashcard.on) {
-        // Cards live per-tab: paint only the CURRENT tab's cards (masks from
-        // another book must never appear over this document)
-        WindowTab* fcTab = win->CurrentTab();
-        Vec<Flashcard>* cards = fcTab ? &fcTab->flashcard.cards : nullptr;
-        // Index (into the current tab's cards) of the card currently being
-        // studied, -1 if none. In a cross-document session the current card
-        // may belong to another tab — its mask is only painted when that tab
-        // is the one on screen.
-        int studyCardIdx = -1;
-        if (cards && win->flashcard.studyMode && win->flashcard.currentCardIdx >= 0 &&
-            win->flashcard.currentCardIdx < len(win->flashcard.studyOrder)) {
-            const FlashcardQueueEntry& e = win->flashcard.studyOrder[win->flashcard.currentCardIdx];
-            if (e.tab == fcTab) {
-                studyCardIdx = e.cardIdx;
-            }
-        }
-        for (int i = 0; cards && i < len(*cards); i++) {
-            const Flashcard& card = (*cards)[i];
-            if (card.pageNo < 1) continue;
-            Gdiplus::Graphics gs(hdc);
-            // Paint each quad subrect separately so a multi-line cloze covers
-            // exactly the highlighted text (not the union bbox). Under TC2 the
-            // display uses virtual pages: map the physical rect to its column
-            // (PhysicalToVirtualForRect) so the mask lands on the text.
-            for (int rIdx = 0; rIdx < len(card.rects); rIdx++) {
-                RectF vr;
-                int vPage = dm->PhysicalToVirtualForRect(card.pageNo, card.rects[rIdx], &vr);
-                if (!dm->ValidPageNo(vPage)) continue;
-                Rect rc = dm->CvtToScreen(vPage, vr);
-                if (i == studyCardIdx && !win->flashcard.revealMode) {
-                    // Studying this card: opaque mask hides the cloze text ([_____])
-                    Gdiplus::Color col(255, 100, 100, 100); // dark gray, fully opaque
-                    Gdiplus::SolidBrush brush(col);
-                    gs.FillRectangle(&brush, rc.x, rc.y, rc.dx, rc.dy);
-                } else {
-                    // Reading / reveal / non-current card: subtle translucent marker
-                    // (text stays visible; on reveal the current card shows its original text)
-                    Gdiplus::Color col(30, 128, 128, 128); // light gray, very transparent
-                    Gdiplus::SolidBrush brush(col);
-                    gs.FillRectangle(&brush, rc.x, rc.y, rc.dx, rc.dy);
-                }
-            }
-        }
-    }
+    PaintFlashcardMasks(win, dm, hdc);
     // keep the floating selection toolbar aligned with the selection while
     // scrolling/zooming; hides itself when the selection is gone or off-screen
     UpdateSelectionToolbarPosition(win);

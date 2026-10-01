@@ -119,11 +119,11 @@ export async function testit(): Promise<void> {
     }
     captureWindowToPng(canvas, tmpPath("fc2-random.png"));
 
-    // ---- Clean History: hold-to-confirm dialog ----
-    function findCleanDialog(): number {
+    // ---- Config window: history folder + per-book list + clear actions ----
+    function findConfigDialog(): number {
         let found = 0;
         winapi.enumWindows((h: number) => {
-            if (winapi.getWindowText(h) === "Clean History") {
+            if (winapi.getWindowText(h) === "Configurações") {
                 found = h;
                 return false;
             }
@@ -131,45 +131,75 @@ export async function testit(): Promise<void> {
         });
         return found;
     }
-    sendCommand(frame, cmdId("CmdFlashcardCleanHistory"));
+    sendCommand(frame, cmdId("CmdFlashcardConfig"));
     await sleep(1000);
-    const dlg = findCleanDialog();
-    console.log("clean dialog open:", !!dlg);
+    const dlg = findConfigDialog();
+    console.log("config window open:", !!dlg);
     if (dlg) {
         const cr = winapi.getClientRect(dlg);
-        // layout is DPI-proportional: two buttons, centers at ~0.30/0.70 of
-        // client width, ~0.78 of client height
-        const curX = Math.round(cr.right * 0.3);
+        // bottom row: "Limpar livro selecionado" center ~0.30, "Limpar TODOS
+        // os livros" center ~0.70 of client width; button centers ~0.90 of
+        // client height (layout is DPI-proportional)
+        const selX = Math.round(cr.right * 0.3);
         const allX = Math.round(cr.right * 0.7);
-        const btnY = Math.round(cr.bottom * 0.78);
-        captureWindowToPng(dlg, tmpPath("fc2-clean1.png"));
-        // early release on "Clear current book" (600ms): must NOT confirm
-        postMessage(dlg, WM_LBUTTONDOWN, 0, packCoords(curX, btnY));
+        const btnY = Math.round(cr.bottom * 0.9);
+        captureWindowToPng(dlg, tmpPath("fc2-config1.png"));
+        // history listbox: probe children with LB_GETCOUNT; expect 1 doc
+        // (the rated card above created the study JSON)
+        let listbox = 0;
+        winapi.enumChildWindows(dlg, (h: number) => {
+            const cnt = Number(winapi.sendMessage(h, 0x018b /* LB_GETCOUNT */, 0, 0));
+            if (cnt > 0) {
+                listbox = h;
+                return false;
+            }
+            return true;
+        });
+        console.log("history listbox found:", !!listbox);
+        if (listbox) {
+            console.log("history items (expect 1):", Number(winapi.sendMessage(listbox, 0x018b, 0, 0)));
+            // select row 0 WITHOUT a physical click: LB_SETCURSEL + manual
+            // WM_COMMAND(LBN_SELCHANGE) — the dialog reads GETCURSEL on
+            // notify (physical-click coordinates would be DPI-fragile)
+            winapi.sendMessage(listbox, 0x0186 /* LB_SETCURSEL */, 0, 0);
+            postMessage(dlg, 0x0111 /* WM_COMMAND */, (1 << 16) | 60012 /* IDC_FC_CONFIG_LIST | LBN_SELCHANGE */, listbox);
+            await sleep(300);
+        }
+        // early release on "Limpar livro selecionado" (600ms): must NOT confirm
+        postMessage(dlg, WM_LBUTTONDOWN, 0, packCoords(selX, btnY));
         await sleep(600);
-        postMessage(dlg, WM_LBUTTONUP, 0, packCoords(curX, btnY));
+        postMessage(dlg, WM_LBUTTONUP, 0, packCoords(selX, btnY));
         await sleep(300);
-        captureWindowToPng(dlg, tmpPath("fc2-clean2.png"));
-        console.log("after 600ms hold + release, still open:", !!findCleanDialog());
-        // full hold "Clear current book" (2.3s): confirms, dialog closes,
-        // current book's history cleared only
-        postMessage(dlg, WM_LBUTTONDOWN, 0, packCoords(curX, btnY));
+        captureWindowToPng(dlg, tmpPath("fc2-config2.png"));
+        console.log("after 600ms hold + release, still open:", !!findConfigDialog());
+        // full hold "Limpar livro selecionado" (2.3s): confirms — the
+        // selected book's JSON is deleted; the window STAYS open (in-dialog
+        // action) and the list reloads empty
+        postMessage(dlg, WM_LBUTTONDOWN, 0, packCoords(selX, btnY));
         await sleep(2300);
         await sleep(400);
-        console.log("after 2.3s hold current-book, gone:", !findCleanDialog());
-        // reopen: full hold "Clear ALL books" (5.4s): confirms, every study
-        // JSON in the app-data dir is deleted
-        sendCommand(frame, cmdId("CmdFlashcardCleanHistory"));
+        console.log("after 2.3s hold selected-book, window still open:", !!findConfigDialog());
+        if (listbox) {
+            console.log("history items after clear (expect 0):", Number(winapi.sendMessage(listbox, 0x018b, 0, 0)));
+        }
+        postMessage(dlg, 0x0010, 0, 0); // WM_CLOSE
+        await sleep(400);
+        // reopen: full hold "Limpar TODOS os livros" (5.4s) — deletes every
+        // study JSON in the study dir; window stays open
+        sendCommand(frame, cmdId("CmdFlashcardConfig"));
         await sleep(800);
-        const dlg2 = findCleanDialog();
+        const dlg2 = findConfigDialog();
         if (dlg2) {
             const cr2 = winapi.getClientRect(dlg2);
             const allX2 = Math.round(cr2.right * 0.7);
-            const btnY2 = Math.round(cr2.bottom * 0.78);
-            captureWindowToPng(dlg2, tmpPath("fc2-clean3.png"));
+            const btnY2 = Math.round(cr2.bottom * 0.9);
+            captureWindowToPng(dlg2, tmpPath("fc2-config3.png"));
             postMessage(dlg2, WM_LBUTTONDOWN, 0, packCoords(allX2, btnY2));
             await sleep(5400);
             await sleep(400);
-            console.log("after 5.4s hold all-books, gone:", !findCleanDialog());
+            console.log("after 5.4s hold all-books, window still open:", !!findConfigDialog());
+            postMessage(dlg2, 0x0010, 0, 0); // WM_CLOSE
+            await sleep(400);
         }
     }
 

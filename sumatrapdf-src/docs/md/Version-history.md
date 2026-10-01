@@ -1,6 +1,16 @@
 # Version history
 
-**next: 3.7**
+**TumatraPDF 1.0 (first public fork release)**
+
+TumatraPDF is a fork of SumatraPDF (~3.7-pre baseline) with custom features (flashcards, two-column crop view v2, arch tools, ETA autoscroll, and more — see the repo README). Versioning restarts at 1.0, independent of upstream.
+
+- **No data collection**: crash-report upload, symbol download, and all links to `sumatrapdfreader.org` were removed or repointed to the [TumatraPDF repo](https://github.com/FelipeTesta/TumatraPDF). Crash info and dumps stay local.
+- **Self-update**: the app checks the repo's `update.txt` daily and can download and replace itself with the latest GitHub Release build (unsigned portable exe — updated in place via a helper script).
+- **Removed commands:** `CmdContributeTranslation` (translations for the fork are not managed via apptranslator).
+
+---
+
+**next: 3.7 (upstream SumatraPDF reference, below is upstream's own history)**
 
 Available in [pre-release](https://www.sumatrapdfreader.org/prerelease) builds.
 

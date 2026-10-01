@@ -255,7 +255,7 @@ static TempStr WriteInstallerFileFailureMsgTemp(Str filePath) {
 // blocked, show a dialog that retries every 3s (or silent retries for ~60s).
 
 static Str kInstallDocsURL() {
-    return StrL("https://www.sumatrapdfreader.org/docs/Installation");
+    return StrL("https://github.com/FelipeTesta/TumatraPDF#readme");
 }
 
 // Wait until a service is stopped (or timeout / query failure).
@@ -2281,10 +2281,7 @@ static bool ShouldInstallMismatchedArch(HWND hwndParent) {
     auto hr = TaskDialogIndirect(&dialogConfig, &buttonPressedId, nullptr, nullptr);
     ReportIf(hr == E_INVALIDARG);
     if (buttonPressedId == kBtnIdDownload) {
-        Str url = "https://www.sumatrapdfreader.org/download-free-pdf-viewer";
-        if (gIsPreReleaseBuild) {
-            url = "https://www.sumatrapdfreader.org/prerelease";
-        }
+        Str url = "https://github.com/FelipeTesta/TumatraPDF/releases/latest";
         LaunchBrowser(url);
         return false;
     }

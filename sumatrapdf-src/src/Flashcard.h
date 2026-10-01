@@ -84,11 +84,33 @@ void FlashcardStudySave(const char* filePath, const FlashcardStudyDoc& doc);
 // Load flashcard study state from external JSON file
 FlashcardStudyDoc FlashcardStudyLoad(const char* filePath);
 
+// Manual RESYNC: re-point an existing study JSON (old md5 file) at a new PDF
+// path (book renamed on disk). Returns false when the JSON can't be read.
+bool FlashcardStudyResync(const char* jsonPath, const char* newPdfPath);
+
 // SM-2 algorithm: compute next interval and ease factor
 void FlashcardSm2Update(FlashcardStudyState& state, int rating);
 
 // Get the JSON file path for a document's flashcard study state
 TempStr FlashcardStudyPath(const char* filePath);
+
+// Directory where the study-history JSONs live: the flashcardSettings.studyDir
+// setting when set (e.g. a cloud-synced folder for backup), else the per-exe
+// portable app-data "FlashcardStudy" dir. Never empty.
+TempStr FlashcardStudyDir();
+
+// One document's study-history summary as listed in the Config window
+struct FlashcardStudyDocInfo {
+    char* fileName = nullptr; // owned (str::Dup): JSON file name inside the study dir
+    char* docName = nullptr;  // owned (str::Dup): display name saved in the JSON ("" for legacy files)
+    int totalCards = 0;       // entries in the JSON (cards that have study state)
+    int dueCount = 0;         // entries with nextReviewAt <= now
+    i64 lastReviewedAt = 0;   // most recent review timestamp (ms), 0 = never
+};
+
+// Scan the study dir and summarize every *.json into out (sorted by
+// lastReviewedAt, most recent first). Returns the number of entries.
+int FlashcardStudyListDocs(Vec<FlashcardStudyDocInfo>& out);
 
 // Evaluate a page-filter expression into a per-page membership vector
 // (pages[i-1] = 1 when page i is included). Returns false when the
@@ -105,23 +127,17 @@ TempStr FlashcardTabLogName(WindowTab* tab);
 // Called from LoadModelIntoTab: refresh flashcard state after a tab switch
 void FlashcardOnTabChanged(MainWindow* win);
 
-// Clean History dialog result: 0 = cancelled (X/Esc), 1 = clear the
-// CURRENT book's review history (2s hold), 2 = clear ALL books (5s hold)
-enum FlashcardCleanResult {
-    kFlashcardCleanCancelled = 0,
-    kFlashcardCleanCurrentBook = 1,
-    kFlashcardCleanAllBooks = 2,
-};
-
 // FlashcardToolbar (in FlashcardToolbar.cpp)
 void FlashcardToolbarCreate(MainWindow* win);
 void FlashcardToolbarDestroy(MainWindow* win);
 void FlashcardToolbarUpdateCount(MainWindow* win);
 void FlashcardToolbarUpdateState(MainWindow* win);
-// Clean History confirmation dialog: hold-to-confirm buttons ("Clear current
-// book" 2s, "Clear ALL books" 5s, draining line under each). X/Esc cancels.
-// Returns a FlashcardCleanResult.
-int FlashcardCleanHistoryDialog(HWND hwndParent);
+// Config window (Config toolbar button): study-history folder picker (📂 —
+// e.g. a Google Drive folder so histories stay backed up), per-book history
+// list (|PDF|cards|due|last review|) and the clear actions — "clear the
+// SELECTED book" (2s hold) and "clear ALL books" (5s hold). Actions execute
+// inside the dialog (it owns the selection). X/Esc closes.
+void FlashcardConfigDialog(MainWindow* win);
 // Study Order options dialog (sequential/random + new-cards position);
 // applies instantly on each option click
 void FlashcardOrderOptionsDialog(MainWindow* win);
@@ -129,13 +145,24 @@ void FlashcardOrderOptionsDialog(MainWindow* win);
 // checkboxes (chapter ranges inject into the expression) + Filters ON/OFF +
 // Clear (2s hold) + cross-document session checkbox
 void FlashcardFilterOptionsDialog(MainWindow* win);
-// Delete every FlashcardStudy/*.json in the app-data dir (ALL books' review
+// Delete every study-history JSON in the study dir (ALL books' review
 // histories). Returns the number of files deleted.
 int FlashcardDeleteAllStudyFiles();
+
+// Move every study-history JSON from one study dir to another (called when the
+// user changes the study folder in the Config window). Files already present
+// in the target are KEPT (not overwritten — e.g. a cloud-synced folder may
+// hold a copy from another machine); MOVEFILE_COPY_ALLOWED makes the move
+// work across volumes (local disk → cloud drive). Returns the number of files
+// moved.
+int FlashcardStudyMigrateFiles(Str fromDir, Str toDir);
 
 // Commands_Flashcard.cpp: rebuild the study order after order/position
 // settings changed (restarts from the first card when a session is active)
 void FlashcardApplyStudyOrder(MainWindow* win);
+// Commands_Flashcard.cpp: stop the active study session (queue, index,
+// modes); per-tab caches are kept
+void FlashcardStopSession(MainWindow* win);
 
 // FlashcardSidebar (in FlashcardSidebar.cpp)
 void FlashcardSidebarCreate(MainWindow* win);

@@ -32,9 +32,7 @@
 // log()/loga(), so they keep logging (to at least the debugger) even when
 // gReducedLogging is set.
 
-#define kCrashHandlerServer "www.sumatrapdfreader.org"
-#define kCrashHandlerServerPort 443
-#define kCrashHandlerServerSubmitURL "/uploadcrash/sumatrapdf-crashes"
+// TumatraPDF: upstream crash-report upload removed (no data collection)
 
 // The following functions allow crash handler to be used by both installer
 // and sumatra proper. They must be implemented for each app.
@@ -293,111 +291,15 @@ static void WriteCrashInfoToStdErr(Str d) {
     WriteFile(h, (u8*)d.s, (DWORD)d.len, &written, nullptr);
 }
 
-static void UploadCrashReport(Str d) {
-    log("UploadCrashReport()\n");
-    if (len(d) == 0) {
-        return;
-    }
+// TumatraPDF: upstream UploadCrashReport (HttpPost to sumatrapdfreader.org) removed.
+// Crash info/dumps stay local (gCrashFilePath, gCrashDumpPath).
 
-    str::Builder headers(256);
-    headers.a = gCrashHandlerArena;
-    headers.Append("Content-Type: text/plain");
-
-    str::Builder data(16 * 1024);
-    data.a = gCrashHandlerArena;
-    data.Append(d);
-
-    HttpPost(kCrashHandlerServer, kCrashHandlerServerPort, kCrashHandlerServerSubmitURL, &headers, &data);
-}
-
-static bool ExtractSymbols(Str archiveData, Str dstDir, Arena* a) {
-    logf("ExtractSymbols: dir '%s', size: %d\n", dstDir, archiveData.len);
-    lzma::SimpleArchive archive;
-    bool ok = ParseSimpleArchive((const u8*)archiveData.s, archiveData.len, &archive);
-    if (!ok) {
-        logf("ExtractSymbols: ParseSimpleArchive failed\n");
-        return false;
-    }
-
-    for (int i = 0; i < archive.filesCount; i++) {
-        lzma::FileInfo* fi = &(archive.files[i]);
-        Str name = fi->name;
-        logf("ExtractSymbols: file %d is '%s'\n", i, name);
-        if (!name || str::Eq(name, StrL(".")) || str::Eq(name, StrL("..")) || str::Contains(name, StrL("/")) ||
-            str::Contains(name, StrL("\\")) || str::Contains(name, StrL(":"))) {
-            return false;
-        }
-        u8* uncompressed = GetFileDataByIdx(&archive, i, a);
-        if (!uncompressed) {
-            return false;
-        }
-        TempStr filePath = path::JoinTemp(dstDir, name);
-        if (!filePath) {
-            return false;
-        }
-        Str d = Str((char*)uncompressed, (int)fi->uncompressedSize);
-        ok = file::WriteFile(filePath, d);
-        if (!ok) {
-            DWORD err = GetLastError();
-            logf("ExtractSymbols: failed to write '%s'\n", filePath);
-            LogLastError(err);
-        }
-        Free(a, uncompressed);
-        if (!ok) {
-            return false;
-        }
-    }
-    return ok;
-}
-
-// .pdb files are stored in a .zip file on a web server. Download that .zip
-// file as pdbZipPath, extract the symbols relevant to our executable
-// to symDir directory.
-// Returns false if downloading or extracting failed
-// note: to simplify callers, it could choose pdbZipPath by itself (in a temporary
-// directory) as the file is deleted on exit anyway
-static bool DownloadAndUnzipSymbols(Str symDir) {
-    if (gDisableSymbolsDownload) {
-        // don't care about debug builds because we don't release them
-        log("DownloadAndUnzipSymbols: DEBUG build so not doing anything\n");
-        return false;
-    }
-
-    if (!dir::CreateAll(symDir)) {
-        logf("CrashHandlerDownloadSymbols: couldn't create symbols dir '%s'\n", symDir);
-        return false;
-    }
-
-    logf("DownloadAndUnzipSymbols: symDir: '%s', url: '%s'\n", symDir, gSymbolsUrl);
-    if (!symDir || !dir::Exists(symDir)) {
-        log("DownloadAndUnzipSymbols: exiting because symDir doesn't exist\n");
-        return false;
-    }
-
-    // DeleteSymbolsIfExist();
-
-    HttpRsp rsp;
-    if (!HttpGet(gSymbolsUrl, &rsp)) {
-        log("DownloadAndUnzipSymbols: couldn't download symbols\n");
-        return false;
-    }
-    if (!IsHttpRspOk(&rsp)) {
-        log("DownloadAndUnzipSymbols: HttpRspOk() returned false\n");
-    }
-
-    bool ok = ExtractSymbols(ToStr(rsp.data), symDir, gCrashHandlerArena);
-    if (!ok) {
-        log("DownloadAndUnzipSymbols: ExtractSymbols() failed\n");
-    }
-    return ok;
-}
+// TumatraPDF: upstream symbol download (sumatrapdfreader.org/dl/*.pdb.lzsa) removed —
+// kjk's pdbs never match fork builds anyway. ExtractSymbols/DownloadAndUnzipSymbols deleted.
 
 bool CrashHandlerDownloadSymbols() {
-    if (gLocalOnlyCrashHandler) {
-        log("CrashHandlerDownloadSymbols: skipping in local-only crash handler\n");
-        return false;
-    }
-    return DownloadAndUnzipSymbols(gSymbolsDir);
+    log("CrashHandlerDownloadSymbols: symbol download disabled in TumatraPDF (no net access)\n");
+    return false;
 }
 
 bool AreSymbolsDownloaded(Str symDir) {
@@ -512,17 +414,9 @@ void _uploadDebugReport(Str condStr, Str fileLine, bool isCrash, bool captureCal
         loga("_uploadDebugReport\n");
     }
 
-    bool shouldUpload = true;
-    // debug build is likely other people modyfing
-    bool downloadSymbols = true;
-    if (gIsDebugBuild || gIsAsanBuild) {
-        shouldUpload = false;
-        downloadSymbols = false;
-    }
-    if (!isCrash) {
-        // for non-crashes, don't upload in release builds (too much info)
-        shouldUpload = gIsPreReleaseBuild;
-    }
+    // TumatraPDF: never upload — all reports stay local
+    bool shouldUpload = false;
+    bool downloadSymbols = false;
 
     if (gLocalOnlyCrashHandler) {
         InitializeDbgHelp(false);
@@ -601,7 +495,6 @@ void _uploadDebugReport(Str condStr, Str fileLine, bool isCrash, bool captureCal
     Str d = s;
     SaveCrashInfo(d);
 
-    UploadCrashReport(d);
     // gCrashHandlerArena->Free((const void*)d.data());
     loga(s);
     loga("_uploadDebugReport() finished\n");
@@ -916,29 +809,6 @@ int __cdecl _purecall() {
     return 0;
 }
 
-static Str BuildSymbolsUrl() {
-    Str urlBase = StrL("https://www.sumatrapdfreader.org/dl/");
-    if (gIsPreReleaseBuild) {
-        urlBase = str::JoinTemp(urlBase, StrL("prerel/"), preReleaseVersion, StrL("/TumatraPDF-prerel"));
-    } else {
-        // assuming this is release version
-        Str ver = StrL(QM(CURR_VERSION));
-        urlBase = str::JoinTemp(urlBase, StrL("rel/"), ver, StrL("/TumatraPDF-"), ver);
-    }
-    // TODO: ugly it's different between release and pre-release
-    Str suff = StrL(".pdb.lzsa");
-    if (gIsPreReleaseBuild) {
-        suff = StrL("-32.pdb.lzsa");
-    }
-
-#if IS_ARM_64 == 1
-    suff = StrL("-arm64.pdb.lzsa");
-#elif IS_INTEL_64 == 1
-    suff = StrL("-64.pdb.lzsa");
-#endif
-    return str::Join(gCrashHandlerArena, urlBase, suff, Str());
-}
-
 void InstallCrashHandler(Str crashDumpPath, Str crashFilePath, Str symDir, bool localOnly) {
     ReportIf(gDumpEvent || gDumpThread);
 
@@ -980,8 +850,6 @@ void InstallCrashHandler(Str crashDumpPath, Str crashFilePath, Str symDir, bool 
     BuildSystemInfo();
     // at this point list of modules should be complete (except
     // dbghlp.dll which shouldn't be loaded yet)
-
-    gSymbolsUrl = BuildSymbolsUrl();
 
     // installer/uninstaller don't use app settings; reading them here would
     // trigger GetAppDataDirTemp() before installation is complete

@@ -13,13 +13,10 @@ constexpr int kFrameResizeHitTest = 5;
 
 extern bool gRedrawLog;
 
-constexpr const char* kWebsiteURL = "https://www.sumatrapdfreader.org/";
-constexpr const char* kManualURL = "https://www.sumatrapdfreader.org/manual";
-constexpr const char* kContributeTranslationsURL = "https://www.sumatrapdfreader.org/docs/Contribute-translation";
+constexpr const char* kWebsiteURL = "https://github.com/FelipeTesta/TumatraPDF";
+constexpr const char* kManualURL = "https://github.com/FelipeTesta/TumatraPDF/tree/main/sumatrapdf-src/docs/md";
 
-#ifndef CRASH_REPORT_URL
-#define CRASH_REPORT_URL "https://www.sumatrapdfreader.org/docs/Contribute-to-SumatraPDF"
-#endif
+// TumatraPDF: upstream CRASH_REPORT_URL removed (dead code, no crash upload)
 
 // scrolls half a page down/up (needed for Shift+Up/Down)
 #define SB_HALF_PAGEUP (WM_USER + 102)

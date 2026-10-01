@@ -35,7 +35,8 @@
 #include "FilterHighlightDraw.h"
 #include "AdvancedSettingsDialog.h"
 
-constexpr const char* kSettingsDocsUrl = "https://www.sumatrapdfreader.org/settings/settings3-7.html";
+constexpr const char* kSettingsDocsUrl =
+    "https://github.com/FelipeTesta/TumatraPDF/blob/main/sumatrapdf-src/docs/md/Advanced-options-settings.md";
 
 // enum settings: string settings restricted to a fixed set of values.
 // Fixed string values for the in-place enum drop-down. Matched by full path

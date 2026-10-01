@@ -1,0 +1,50 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+
+      - uses: microsoft/setup-msbuild@v2
+
+      - name: Build (Release x64)
+        working-directory: sumatrapdf-src
+        run: msbuild vs2022\TumatraPDF.sln /t:TumatraPDF /p:Configuration=Release /p:Platform=x64 /m
+
+      - name: Resolve version
+        id: ver
+        run: |
+          $v = "${{ github.ref_name }}"
+          if ($v -match '^v?(\d+\.\d+(\.\d+)?)') { $v = $Matches[1] }
+          echo "version=$v" >> $env:GITHUB_OUTPUT
+
+      - name: Bump update.txt (main) to released version
+        run: |
+          @"
+          [TumatraPDF]
+          Latest: ${{ steps.ver.outputs.version }}
+          PortableExe64: https://github.com/FelipeTesta/TumatraPDF/releases/latest/download/TumatraPDF.exe
+          "@ | Out-File -Encoding utf8 update.txt
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add update.txt
+          git diff --cached --quiet || git commit -m "chore(release): update.txt -> ${{ steps.ver.outputs.version }}"
+          git push origin HEAD:main|| echo "update.txt push skipped"
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: sumatrapdf-src/out/rel64/TumatraPDF.exe
+          tag_name: ${{ github.ref_name }}
+          generate_release_notes: true

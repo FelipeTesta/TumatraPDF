@@ -683,6 +683,11 @@ struct SessionData {
 
 // Preferences are persisted in SumatraPDF-settings.txt
 struct GlobalPrefs {
+    // directory where flashcard study history JSONs are stored (per-book
+    // files, MD5-named). Empty = default app-data dir (FlashcardStudy).
+    // Point it at a cloud-synced folder (e.g. Google Drive) to keep the
+    // histories backed up
+    Str flashcardStudyDir;
     // how pages are laid out by default. The string is the persisted form
     // of DefaultDisplayModeEnum, so it's parsed after deserialization and
     // written back before serialization
@@ -1772,6 +1777,7 @@ static const FieldInfo gGlobalPrefsFields[] = {
     {(size_t)-1, SettingType::Comment,
      (intptr_t)"For documentation, see https://www.sumatrapdfreader.org/settings/settings3-7.html"},
     {(size_t)-1, SettingType::Comment, 0},
+    {offsetof(GlobalPrefs, flashcardStudyDir), SettingType::String, (intptr_t)""},
     {offsetof(GlobalPrefs, defaultDisplayMode), SettingType::String, (intptr_t)"automatic"},
     {offsetof(GlobalPrefs, defaultZoom), SettingType::String, (intptr_t)"fit page"},
     {offsetof(GlobalPrefs, disableJavaScript), SettingType::Bool, false},
@@ -1919,26 +1925,28 @@ static const FieldInfo gGlobalPrefsFields[] = {
 };
 static const StructInfo gGlobalPrefsInfo = {
     sizeof(GlobalPrefs),
-    146,
+    147,
     gGlobalPrefsFields,
-    "\0\0DefaultDisplayMode\0DefaultZoom\0DisableJavaScript\0AllowExternalImages\0EnableTeXEnhancements\0EscToExit\0Ful"
-    "lPathInTitle\0InverseSearchCmdLine\0LazyLoading\0MainWindowBackground\0NoHomeTab\0HomePageSortByFrequentlyRead\0Ho"
-    "mePageViewMode\0FilePicker\0ReloadModifiedDocuments\0RememberOpenedFiles\0RememberStatePerDocument\0RestoreSession"
-    "\0ReuseInstance\0ShowMenubar\0ShowMenubarWithTabs\0ShowTips\0CustomColors\0ShowToolbar\0Toolbar\0ToolbarPosition\0"
-    "SearchUIFloating\0ShowFavorites\0SortFavoritesByName\0ShowToc\0ShowLinks\0AutoScrollShowEta\0AutoScrollTimerMinute"
-    "s\0AutoScrollTimerEnabled\0AutoScrollSpeedMultiplier\0ShowDocumentFocusIndicator\0ShowAnnotationNotification\0Show"
-    "TocPageNumbers\0ShowStartPage\0SidebarDx\0Scrollbars\0ScrollbarInSinglePage\0SmoothScroll\0PaddingAfterLastPage\0C"
-    "itationHoverDelay\0ReadAloudVoiceId\0ReadAloudSpeed\0DisableReadAloud\0DisableAIChat\0ArchToolsEnabled\0ArchUnit\0"
-    "ArchDecimalSeparator\0FastScrollOverScrollbar\0PreventSleepInFullscreen\0TabWidth\0Theme\0LastLightTheme\0LastDark"
-    "Theme\0DocumentColorsFollowTheme\0TocDy\0ToolbarShowReadAloud\0ToolbarSize\0TreeFontName\0TreeFontSize\0UIFontSize"
-    "\0DisableAntiAlias\0EngineeringDrawingEnhance\0DisableAutoLinks\0UseSysColors\0UseTabs\0SelectionToolbar\0TabsMru"
-    "\0CtrlTabPre36Behavior\0ZoomLevels\0ZoomIncrement\0\0ViewportCrop\0Trim\0FlashcardSettings\0\0FixedPageUI\0\0EBook"
-    "UI\0\0ComicBookUI\0\0ImageUI\0\0ChmUI\0\0MarkdownUI\0\0HtmlUI\0\0ClaudeCode\0\0GrokBuild\0\0CodexBuild\0\0AntiGrav"
-    "ity\0\0AIChatSidebarDx\0\0TranslateToLang\0TranslateFromLang\0TranslateEngine\0\0Annotations\0\0ExternalViewers\0"
-    "\0ForwardSearch\0\0PrinterDefaults\0\0Fullscreen\0\0SelectionHandlers\0\0Shortcuts\0\0Themes\0\0TabGroups\0\0Custo"
-    "mScreenDPI\0\0\0DefaultPasswords\0UiLanguage\0VersionToSkip\0WindowState\0WindowPos\0SearchUIWindowPos\0FileStates"
-    "\0SessionData\0ReopenOnce\0TimeOfLastUpdateCheck\0OpenCountWeek\0PropWinPos\0CheckForUpdates\0\0",
-    "\0\0default layout of pages. valid values: automatic, single page, facing, book view, continuous, continuous "
+    "\0\0FlashcardStudyDir\0DefaultDisplayMode\0DefaultZoom\0DisableJavaScript\0AllowExternalImages\0EnableTeXEnhanceme"
+    "nts\0EscToExit\0FullPathInTitle\0InverseSearchCmdLine\0LazyLoading\0MainWindowBackground\0NoHomeTab\0HomePageSortB"
+    "yFrequentlyRead\0HomePageViewMode\0FilePicker\0ReloadModifiedDocuments\0RememberOpenedFiles\0RememberStatePerDocum"
+    "ent\0RestoreSession\0ReuseInstance\0ShowMenubar\0ShowMenubarWithTabs\0ShowTips\0CustomColors\0ShowToolbar\0Toolbar"
+    "\0ToolbarPosition\0SearchUIFloating\0ShowFavorites\0SortFavoritesByName\0ShowToc\0ShowLinks\0AutoScrollShowEta\0Au"
+    "toScrollTimerMinutes\0AutoScrollTimerEnabled\0AutoScrollSpeedMultiplier\0ShowDocumentFocusIndicator\0ShowAnnotatio"
+    "nNotification\0ShowTocPageNumbers\0ShowStartPage\0SidebarDx\0Scrollbars\0ScrollbarInSinglePage\0SmoothScroll\0Padd"
+    "ingAfterLastPage\0CitationHoverDelay\0ReadAloudVoiceId\0ReadAloudSpeed\0DisableReadAloud\0DisableAIChat\0ArchTools"
+    "Enabled\0ArchUnit\0ArchDecimalSeparator\0FastScrollOverScrollbar\0PreventSleepInFullscreen\0TabWidth\0Theme\0LastL"
+    "ightTheme\0LastDarkTheme\0DocumentColorsFollowTheme\0TocDy\0ToolbarShowReadAloud\0ToolbarSize\0TreeFontName\0TreeF"
+    "ontSize\0UIFontSize\0DisableAntiAlias\0EngineeringDrawingEnhance\0DisableAutoLinks\0UseSysColors\0UseTabs\0Selecti"
+    "onToolbar\0TabsMru\0CtrlTabPre36Behavior\0ZoomLevels\0ZoomIncrement\0\0ViewportCrop\0Trim\0FlashcardSettings\0\0Fi"
+    "xedPageUI\0\0EBookUI\0\0ComicBookUI\0\0ImageUI\0\0ChmUI\0\0MarkdownUI\0\0HtmlUI\0\0ClaudeCode\0\0GrokBuild\0\0Code"
+    "xBuild\0\0AntiGravity\0\0AIChatSidebarDx\0\0TranslateToLang\0TranslateFromLang\0TranslateEngine\0\0Annotations\0\0"
+    "ExternalViewers\0\0ForwardSearch\0\0PrinterDefaults\0\0Fullscreen\0\0SelectionHandlers\0\0Shortcuts\0\0Themes\0\0T"
+    "abGroups\0\0CustomScreenDPI\0\0\0DefaultPasswords\0UiLanguage\0VersionToSkip\0WindowState\0WindowPos\0SearchUIWind"
+    "owPos\0FileStates\0SessionData\0ReopenOnce\0TimeOfLastUpdateCheck\0OpenCountWeek\0PropWinPos\0CheckForUpdates\0\0",
+    "\0\0directory where flashcard study history JSONs are stored (per-book files, MD5-named). Empty = default "
+    "app-data dir (FlashcardStudy). Point it at a cloud-synced folder (e.g. Google Drive) to keep the histories backed "
+    "up\0default layout of pages. valid values: automatic, single page, facing, book view, continuous, continuous "
     "facing, continuous book view\0default zoom. valid values: fit page, fit width, fit height, fit content or percent "
     "like 100%\0if true, JavaScript in PDF documents is disabled (e.g. form-field calculations won't run)\0if true, a "
     "PDF may load an image stored in a separate file referenced by name (an external image stream); the file must sit "

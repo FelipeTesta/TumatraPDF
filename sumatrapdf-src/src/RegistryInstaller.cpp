@@ -138,9 +138,9 @@ bool WriteUninstallerRegistryInfo(HKEY hkey, bool allUsers, Str installDir) {
     ok &= LoggedWriteRegStr(hkey, regPathUninst, "UninstallString", uninstallCmdLine);
     TempStr uninstallCmdLineSilent = str::JoinTemp(uninstallCmdLine, StrL(" -silent"));
     ok &= LoggedWriteRegStr(hkey, regPathUninst, "QuietUninstallString", uninstallCmdLineSilent);
-    ok &= LoggedWriteRegStr(hkey, regPathUninst, "URLInfoAbout", "https://www.sumatrapdfreader.org/");
+    ok &= LoggedWriteRegStr(hkey, regPathUninst, "URLInfoAbout", "https://github.com/FelipeTesta/TumatraPDF");
     ok &= LoggedWriteRegStr(hkey, regPathUninst, "URLUpdateInfo",
-                            "https://www.sumatrapdfreader.org/docs/Version-history.html");
+                            "https://github.com/FelipeTesta/TumatraPDF/releases");
     if (!ok) {
         log("WriteUninstallerRegistryInfo() failed\n");
     }

@@ -230,9 +230,9 @@ static AboutRow gAboutRows[] = {
     // isn't known until runtime (32/64-bit, debug)
     {"version", nullptr, nullptr},
     {"build", "Built: " __DATE__ " " __TIME__, nullptr},
-    {"website", "SumatraPDF website", kWebsiteURL},
-    {"manual", "SumatraPDF manual", kManualURL},
-    {"forums", "SumatraPDF forums", "https://github.com/sumatrapdfreader/sumatrapdf/discussions"},
+    {"website", "TumatraPDF website", kWebsiteURL},
+    {"manual", "TumatraPDF manual", kManualURL},
+    {"forums", "TumatraPDF issues", "https://github.com/FelipeTesta/TumatraPDF/issues"},
     {"programming", "The Programmers", "https://github.com/sumatrapdfreader/sumatrapdf/blob/master/AUTHORS"},
     {"licenses", "Various Open Source", "https://github.com/sumatrapdfreader/sumatrapdf/blob/master/AUTHORS"},
 #if defined(GIT_COMMIT_ID_STR)

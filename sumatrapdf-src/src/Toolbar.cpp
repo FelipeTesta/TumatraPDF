@@ -99,8 +99,8 @@ static ToolbarButtonInfo gToolbarButtons[] = {
     {TbIcon::None, 0, nullptr}, // separator after autoscroll group
     {TbIcon::Text, CmdContrastToggle, _TRN("Contrast")},
     {TbIcon::Text, CmdInvertColors, _TRN("Invert")},
-    {TbIcon::Text, CmdViewportCropToggle, _TRN("Two Column")},
-    {TbIcon::Text, CmdViewportCropV2Toggle, _TRN("Two Column 2")},
+    {TbIcon::Text, CmdViewportCropToggle, _TRN("Scan Mode")},
+    {TbIcon::Text, CmdViewportCropV2Toggle, _TRN("Two Columns")},
     {TbIcon::Text, CmdMarginTrimToggle, _TRN("Trim")},
     {TbIcon::Text, CmdTrimConfig, _TRN("Trim Config")},
     {TbIcon::None, 0, nullptr}, // separator

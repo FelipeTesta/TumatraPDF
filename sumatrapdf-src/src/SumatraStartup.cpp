@@ -964,7 +964,7 @@ static bool IsInstallerButNotInstalled() {
 // if not, at least I can add logging to figure out why it fails
 constexpr int kBtnIdLearnMore = 100;
 static Str kFailedToLoadURL() {
-    return StrL("https://www.sumatrapdfreader.org/docs/Failed-to-load-libmupdf");
+    return StrL("https://github.com/FelipeTesta/TumatraPDF/blob/main/sumatrapdf-src/docs/md/Failed-to-load-libmupdf.md");
 }
 
 static HRESULT CALLBACK LoadLibsumatrapdfDialogCallback(HWND /*hwnd*/, UINT msg, WPARAM wParam, LPARAM lParam,
@@ -1383,7 +1383,7 @@ static bool ForceRunningAsInstaller() {
     Str corruptedInstallationConsole = R"(
 Looks like corrupted installation of SumatraPDF.
 
-Learn more at https://www.sumatrapdfreader.org/docs/Corrupted-installation
+Learn more at https://github.com/FelipeTesta/TumatraPDF/blob/main/sumatrapdf-src/docs/md/Corrupted-installation.md
 )";
     Str corruptedInstallation = R"(Looks like corrupted installation of SumatraPDF.
 )";
@@ -1405,7 +1405,7 @@ Learn more at https://www.sumatrapdfreader.org/docs/Corrupted-installation
     dialogConfig.pszWindowTitle = title;
     dialogConfig.pszMainInstruction = CWStrTemp(corruptedInstallation);
     dialogConfig.pszContent =
-        LR"(Learn more at <a href="https://www.sumatrapdfreader.org/docs/Corrupted-installation">www.sumatrapdfreader.org/docs/Corrupted-installation</a>.)";
+        LR"(Learn more at <a href="https://github.com/FelipeTesta/TumatraPDF/blob/main/sumatrapdf-src/docs/md/Corrupted-installation.md">TumatraPDF docs: Corrupted-installation</a>.)";
     dialogConfig.nDefaultButton = IDOK;
     dialogConfig.dwFlags = (TASKDIALOG_FLAGS)flags;
     dialogConfig.cxWidth = 0;
@@ -1444,7 +1444,8 @@ static void ShowInstallerHelp() {
     bool ok = RedirectIOToExistingConsole();
     if (ok) {
         // if we're launched from console, print help to consle window
-        printf("%s\n%s\n", msg.s, "See more at https://www.sumatrapdfreader.org/docs/Installer-cmd-line-arguments");
+        printf("%s\n%s\n", msg.s,
+               "See more at https://github.com/FelipeTesta/TumatraPDF/blob/main/sumatrapdf-src/docs/md/Installer-cmd-line-arguments.md");
         return;
     }
 
@@ -1459,7 +1460,7 @@ static void ShowInstallerHelp() {
     dialogConfig.pszWindowTitle = L"SumatraPDF installer usage";
     dialogConfig.pszMainInstruction = CWStrTemp(msg);
     dialogConfig.pszContent =
-        LR"(<a href="https://www.sumatrapdfreader.org/docs/Installer-cmd-line-arguments">Read more on website</a>)";
+        LR"(<a href="https://github.com/FelipeTesta/TumatraPDF/blob/main/sumatrapdf-src/docs/md/Installer-cmd-line-arguments.md">Read more on website</a>)";
     dialogConfig.nDefaultButton = IDOK;
     dialogConfig.dwFlags = (TASKDIALOG_FLAGS)flags;
     dialogConfig.pfCallback = TaskdialogHandleLinkscallback;

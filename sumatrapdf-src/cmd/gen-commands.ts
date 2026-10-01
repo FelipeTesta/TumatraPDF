@@ -109,7 +109,6 @@ export const commands = [
     "CmdZoomOut", "Zoom Out",
     "CmdZoomFitWidthAndContinuous", "Zoom: Fit Width And Continuous",
     "CmdZoomFitPageAndSinglePage", "Zoom: Fit Page and Single Page",
-    "CmdContributeTranslation", "Contribute Translation",
     "CmdOpenWithKnownExternalViewerFirst", "don't use",
     "CmdOpenWithExplorer", "Open Directory In Explorer",
     "CmdOpenWithDirectoryOpus", "Open Directory In Directory Opus",
@@ -295,7 +294,7 @@ export const commands = [
     "CmdContrastToggle", "Toggle Contrast Filter",
     "CmdContrastIncrease", "Increase contrast overlay opacity",
     "CmdContrastDecrease", "Decrease contrast overlay opacity",
-    "CmdViewportCropToggle", "Toggle Viewport Crop",
+    "CmdViewportCropToggle", "Toggle Scan Mode",
     "CmdMarginTrimToggle", "Toggle margin trimming",
     "CmdTrimConfig", "Configure margin trimming",
     "CmdArchScale", "Toggle Arch Scale Tool",
@@ -320,8 +319,8 @@ export const commands = [
     "CmdFlashcardLista", "Toggle Flashcard List Sidebar",
     "CmdFlashcardNext", "Skip To Next Card (No Rating)",
     "CmdFlashcardOrderOptions", "Flashcard Study Order Options",
-    "CmdFlashcardCleanHistory", "Clear Flashcard Review History",
-    "CmdViewportCropV2Toggle", "Toggle Two Column (v2, stacked columns)",
+    "CmdFlashcardConfig", "Flashcard Config Window",
+    "CmdViewportCropV2Toggle", "Toggle Two Columns",
     "CmdNone", "Do nothing",
 ];
 

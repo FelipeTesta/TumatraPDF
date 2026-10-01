@@ -871,6 +871,13 @@ const globalPrefs: Field[] = [
   emptyLine(),
 
   field(
+    "FlashcardStudyDir",
+    Str,
+    "",
+    "directory where flashcard study history JSONs are stored (per-book files, MD5-named). Empty = default app-data dir (FlashcardStudy). Point it at a cloud-synced folder (e.g. Google Drive) to keep the histories backed up",
+  ),
+
+  field(
     "DefaultDisplayMode",
     Str,
     "automatic",

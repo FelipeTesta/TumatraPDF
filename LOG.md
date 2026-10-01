@@ -1,5 +1,84 @@
 # TumatraPDF — Development Log
 
+## 2026-10-01 (s26) — Public-repo prep FASE 0-3: telemetry removal + own update system (BUILD OK, deployed)
+
+### Added
+- **`update.txt` at repo root** — update metadata (`[TumatraPDF]` section, `Latest:` version, `PortableExe64:` = GitHub `releases/latest/download/TumatraPDF.exe`).
+- **`.github/workflows/release.yml`** — tag `v*` (or manual dispatch) → windows-2022 + bun + msbuild Release x64 → bumps+commits `update.txt` → publishes GitHub Release with `TumatraPDF.exe`.
+- **Portable auto-update self-replace** (UpdateCheck.cpp): unsigned portable exe no longer rejected — `SelfUpdateViaBatch()` writes a detached cmd batch in temp that waits for the PID to exit, `move /Y`s the downloaded exe over the running one, relaunches it, deletes itself. Download validation = PE "MZ" header + >=1 MiB (no code-signing cert in the fork).
+- **Version 1.0 fork track** (`src/BuildConfig.h`): `CURR_VERSION 1.0` / `1,0,0` — decoupled from upstream 3.7; `update.txt Latest: 1.0.x` triggers updates via existing numeric `CompareProgramVersion`.
+
+### Changed
+- **UpdateCheck.cpp**: `updateInfoURLs[]` → `raw.githubusercontent.com/FelipeTesta/TumatraPDF/main/update.txt`; `kExpectedDlHost` → GitHub `/releases/`; `kWebisteDownloadPageURL` → `releases/latest`; `ParseUpdateInfo` accepts `[TumatraPDF]` section (upstream `[SumatraPDF]` still accepted).
+- **All user-facing sumatrapdfreader.org URLs repointed** to the fork repo: `kWebsiteURL`/`kManualURL` (SumatraPDF.h), crash-submit link (SumatraPDF.cpp → `/issues/new`), homepage rows (HomePage.cpp → TumatraPDF website/manual/issues), docs fallback URLs (`DocURIToWebUrlTemp`, `MaybeLaunchDocumentation` prefix — repo `/blob/main/sumatrapdf-src/docs/md/<page>.md`), TipText Help/* links, Installer/RegistryInstaller (`URLInfoAbout`, `URLUpdateInfo` → /releases), SumatraStartup (libmupdf/corrupted-install/installer-help pages).
+
+### Removed
+- **Crash upload entirely** (CrashHandler.cpp): `UploadCrashReport` (HttpPost to sumatrapdfreader.org/uploadcrash), `kCrashHandlerServer*`, symbol download (`BuildSymbolsUrl`, `DownloadAndUnzipSymbols`, `ExtractSymbols` — kjk's pdbs never matched fork builds); `_uploadDebugReport` forced `shouldUpload=false` → all crash/debug reports stay LOCAL (crashfile + minidump kept). `CrashHandlerDownloadSymbols()` is now a logged no-op.
+- **`CmdContributeTranslation`** (gen-commands + regen, Menu.cpp, SumatraPDF.cpp handler, CommandAvailability ×3, docs/md/Commands.md) + `CRASH_REPORT_URL` define (dead `#if 0`).
+
+### Verified
+- `bun cmd/build.ts` dbg+rel 0/0, deployed `Compiled\TumatraPDF.exe`; smoke launch `-for-testing` alive (crash-handler rewrite safe). Runtime update flow NOT yet e2e-tested (needs public repo + first GitHub Release).
+- **Git history audit (FASE 0)**: no secrets/tokens/personal paths in tracked files; `D:\1 Principal` only inside historical `FLOW/*.dot` blobs — cosmetic only. Publish decision pending user.
+- Intermediate Set-Content slip on CommandAvailability.cpp self-checked via git diff — clean (ASCII-only file), Edit-tool rule reaffirmed.
+
+### Notes / backlog (TODO.md "Public Repo + Update System")
+- Upstream `cmd/` build/CI scripts (build-ci*, trans-*, build-mac*, …) KEPT as backup per user decision.
+- After first public release: e2e `update.txt` bump → verify in-app update prompt + self-replace; update.txt bump step pushes from tag workflow to `main` (needs default GITHUB_TOKEN contents:write — granted in workflow).
+- `GetExecutableSignerTemp` still used by installed-mode path (kept: signed installer flow intact if a cert ever exists).
+
+## 2026-10-01 (s25) — Study-folder file MIGRATION on folder change (BUILD OK, deployed)
+
+### Changed
+- **Changing the study folder now MIGRATES the existing `*.json` histories** (user request — files transfer to the new folder instead of the new dir starting empty). `FlashcardStudyMigrateFiles(Str fromDir, Str toDir)` (NEW, Flashcard.cpp/Flashcard.h): enumerates `fromDir\*.json` (same FindFirstFileW pattern as DeleteAllStudyFiles), moves each with `MoveFileExW(MOVEFILE_COPY_ALLOWED | MOVEFILE_WRITE_THROUGH)` — COPY_ALLOWED is REQUIRED for cross-volume moves (local disk → Google Drive letter), else the move fails silently by default. A file that already exists in the target is KEPT untouched (not overwritten — a cloud-synced dir may already hold that book's file from another machine; the next `FlashcardStudySave` of an open book writes the up-to-date state there anyway) — logged as "kept existing". Per-file + summary `[fc]` logs ("moved %d, kept %d existing").
+- `ConfigApplyPath` (FlashcardToolbar.cpp): captures the OLD dir via `FlashcardStudyDir()` BEFORE `ReplaceWithCopy` of the setting, then calls the migration with old → new; log line now "study dir set to '...' (moved N file(s) from '...')". Clearing the field (empty = default app-data dir) migrates the files BACK — round-trip works.
+- Comments updated (FlashcardStudyDir + ConfigApplyPath no longer say "no file migration").
+
+### Verified (tests/ad-hoc-config-iso.ts REWRITTEN with real assertions — ALL 16 PASS)
+Seeds 2 fake study JSONs in the default per-exe dir → launch → flashcard ON → Config → list shows exactly the 2 fakes → `WM_SETTEXT` a custom dir into the path EDIT (via `wideZ` + `bun:ffi` `ptr`; `findChildWindow(configDlg, "Edit")`) + `pressKey(VK_RETURN)` (ConfigEditProc listens to WM_KEYDOWN) → asserts: 2 files IN custom dir, 0 left in default, list reloaded from custom dir, edit text = custom dir → clear edit + Enter → asserts: 2 files back in default dir, custom dir empty, list reloaded, edit shows default dir → window closes → log-slice asserts ("moved 2, kept 0 existing" ×2, "study dir set to '(default app-data)'"). Cleanup removes the fakes + tmp dir.
+
+### Notes / traps
+- **sumlog.txt is TRUNCATED at app startup** (a launch's log contains only that run). Offset-slicing by the pre-launch size is WRONG under truncate: this run can grow past the old size and slicing then discards everything written so far (exactly the equal-size edge case failed first). Read the WHOLE file after the run instead (readLog in the iso test; other tests' slice logic only survives by luck when their assertions target late lines — left as-is, not broken).
+- **`TempStr` has NO implicit conversion to `const char*`** (C2664) — it DOES convert to `Str`. New study APIs take `Str` params (codebase convention anyway).
+- `MoveFileExW` without `MOVEFILE_COPY_ALLOWED` cannot move across volumes — silent failure class for C: → G: (Drive) migrations.
+- `ConfigEditProc` (path edit subclass) handles WM_KEYDOWN (not WM_CHAR) — `pressKey(VK_RETURN)` from win-automation triggers the apply.
+
+## 2026-10-01 (s24) — Config window (folder + history list + clear selected), dark-theme dialogs, study-state parser fix (BUILD OK, deployed)
+
+### Fixed
+- **Study-state parser bug (latent since s14)**: `ParseJsonObject`'s `getField` searched the field NAME only ("rating") but advanced `fieldIdx + len(fieldName)` without skipping the key's CLOSING QUOTE — `afterField` started with `"` instead of `:` and every field silently returned early, so **every StudyLoad returned states with all zeros** (rating/interval/ease/nextReviewAt/lastReviewedAt = 0). In practice every already-studied card came back as NEW on each app relaunch and due/learn/ok never existed across sessions. Found by the new Config window's per-doc stats (last=0 on a freshly-rated doc); fixed by skipping the closing quote (Flashcard.cpp `getField`). Save was always correct — only the read side was broken.
+- Dark themes: all three flashcard windows (Clean→Config, Order, Filter) painted a hard-coded WHITE background with near-black text — now everything uses the global theme API (`ThemeWindowBackgroundColor/TextColor/DarkerTextColor/WindowControlBackgroundColor/HotBackgroundColor/EdgeColor/HotEdgeColor`), plus `ApplyDarkModeToPopupWindow` for the title bar and `WM_CTLCOLOREDIT/WM_CTLCOLORLISTBOX` answers for the child controls (cached brush, rebuilt when the theme color changes). Blue accent (checkbox/radio) kept — readable in both themes; orange/red hold drains kept (semantic colors).
+
+### Added
+- **Config window** (toolbar button Clean → **Config**, command renamed `CmdFlashcardCleanHistory` → `CmdFlashcardConfig`, same id 512): (1) **study-history folder row** — EDIT with the current dir + `📂` button (Segoe UI Emoji font) opening a modern `IFileDialog` FOS_PICKFOLDERS picker; changing it persists the NEW `flashcardStudyDir` setting (`gGlobalPrefs->flashcardStudyDir`), creates the dir, reloads the list — point it at a Google Drive folder and the histories stay backed up; empty value = default app-data dir; **existing files are NOT migrated** (new dir starts empty; changing back restores them); Enter in the edit applies a typed path. (2) **history list** — owner-drawn listbox (~10 rows + scroll, 24px rows) listing every `*.json` in the study dir: `|PDF | cartões | due | última revisão|` (name flexible/ellipsized left, numbers + `YYYY-MM-DD HH:MM` right-aligned; em dash when never reviewed); data from NEW `FlashcardStudyListDocs()` (sorted by lastReviewedAt desc); JSON now stores `docName` (escaped; base name — added to `FlashcardStudySave`, legacy files fall back to the md5 name); `FlashcardStudyDocInfo{fileName/docName owned, totalCards, dueCount, lastReviewedAt}`. (3) **"Limpar livro selecionado"** (orange 2s hold) — deletes the SELECTED book's JSON (any tab of this window showing that same document, md5-matched, resets its in-memory studyDoc + session + count + sidebar); (4) **"Limpar TODOS os livros"** (red 5s hold) — former ALL-books action, now also refreshes the open Lista panel (missing refresh hook). Both run INSIDE the window (it owns the selection) — the window stays open and the list reloads; X/Esc closes. List selection persists (unlike the Filter's toggle list).
+- **`FlashcardStudyDir()`** + `FlashcardStudyPath`/`FlashcardDeleteAllStudyFiles` now use it (setting when set, else per-exe app-data `FlashcardStudy`).
+- Design_Guidelines improvements executed (research-audited first, per user request): **#1** dialog scaffolding extracted (`FlashcardRegisterDialogClass` / `FlashcardCreateDialogWindow` / `FlashcardRunModalDialog` — the 3 windows share ~120 duplicated lines less); **#3** refresh-hook fix (Clean-ALL now calls `FlashcardSidebarPopulate`); **#4** flashcard paint block extracted from the Canvas WndProc chain into `PaintFlashcardMasks(win, dm, hdc)` (with the vPage/pPage dual-namespace note); **#5** `ShuffleVecInPlace` now uses a seeded **xorshift128+** (rand()%n was modulo-biased; seed = time ^ tick-count<<21); **#7** `cmd/build.ts` auto-formats modified src/*.cpp/.c/.h with clang-format before building (vendored trees excluded; git-less environments skip silently). Not done: #6 (page-text cache generalization — no second consumer yet, abstraction would be speculative), #8 (FC-H2 mtime scan cache — medium risk, left for a dedicated session).
+
+### Changed
+- Button/label rename: toolbar shows **Config**; handler case + `CommandAvailability` (2 lists) + gen-commands description updated; `FlashcardCleanResult` enum and `FlashcardCleanHistoryDialog` REMOVED (window executes its own actions).
+- `tests/ad-hoc-clean-iso.ts` → **`tests/ad-hoc-config-iso.ts`** (same isolation pattern: open → listbox present/counts → close → logs); `tests/ad-hoc-flashcard-cloze.ts` Config section rewritten: listbox probe via `LB_GETCOUNT`, row-0 selection without a physical click (`LB_SETCURSEL` + manual `WM_COMMAND(IDC_FC_CONFIG_LIST|LBN_SELCHANGE)` — DPI-proof), hold fractions 0.30/0.70 × 0.90 client.
+
+### Verified (both ad-hoc tests PASS on dbg64; release x64 0/0)
+- config-iso: window opens (545×402 client), history listbox found + item counts, X closes ✓; logs show `FlashcardStudyListDocs` + per-doc name/cards/due/last.
+- cloze full repro: 2 cards → study → reveal → rate 3 (save now writes `docName`) → Order dialog open/close ✓ → Config opens with 1 item (name='zlib.3.pdf') ✓ 600ms early release keeps it open ✓ 2.3s selected-book hold deletes the JSON and the list reloads to 0 ✓ 5.4s ALL-books hold ✓. **Parser-fix regression check**: fixture JSONs with `lastReviewedAt: 1790834988123` now report `last=1790834988123` (was 0) — study states load correctly for the first time since s14. Visual check (dark theme, emoji glyph, columns) = user tests live.
+
+### Notes / traps
+- **compactStruct settings reject Str fields**: adding `StudyDir` inside `flashcardSettings` (a `compactStruct`) made the startup settings validator `ReportIf(!IsCompactable(...))` fire — app exited 105 with a "debug report (not crash)" in sumlog. Fix: Str settings must live OUTSIDE compact structs (new top-level `FlashcardStudyDir` in globalPrefs); compact structs accept Bool/Int/Float/Color only (`base/SettingsUtil.cpp` IsCompactable).
+- `FOS_PATHONLY` not declared by this Windows SDK — dropped (SIGDN_FILESYSPATH already returns the bare path); `MainWindowRerender` needs `#include "SumatraPDF.h"` (new dependency of FlashcardToolbar.cpp actions).
+- `gen-code.ts` dies at genVirtKeys without `cl` on PATH — gen-commands/gen-commands ran BEFORE it, and `bun cmd/gen-settings.ts` regenerates settings standalone (use that when only settings change).
+- `file::ReadFile` returns an owned buffer but upstream callers never free it — followed the convention in `FlashcardStudyListDocs` (ListDocs strings are `str::Dup(...).s` + `::free()` in `ConfigFreeDocs` after the modal pump).
+- Zero-char-label `FlashcardDrawButton` used for the 📂 frame (glyph drawn on top with the emoji font).
+
+## 2026-09-30 — Design Guidelines: web research + project audit (documentation only, no code)
+
+### Added
+- **`Design_Guidelines.md`** (repo root, NEW informativo): reference doc distilling web research (C++ Core Guidelines P/R/E/I/Per/A/NL sections, cppbestpractices style chapter, refactoring.guru pattern catalog + code smells, MuPDF vendored docs, upstream AGENTS) mapped onto this codebase's real conventions and bug history (LOG s1-s23). Sections: core principles; code conventions (include order, Str/fmt/len, guards, comments placement); resource + error handling (RAII, fz_try/catch, CrashIf fail-fast, atomic tmp+MoveFileEx persistence); design patterns mapped to the codebase (Command dispatch, session-vs-document State split, lazy Facade, refresh hooks, owner-draw + numeric row model); performance rules (zero-alloc paint path, caches with named invalidators, measure-first); Win32 UI/UX rules (DpiScale everywhere, keyboard-first, hold-to-confirm destructive, instant-apply dialogs, checked-state toolbars, WM_MEASUREITEM ordering); dual-namespace HARD rules (virtual vs physical pageNo, screen vs page coords); prioritized high-return/low-risk improvement table (dialog scaffolding extraction, vPage/pPage naming, refresh-hook audit, paint-block extraction, xorshift shuffle, page-text cache generalization, mtime annot-scan cache); known-traps list from project history.
+- MS UX Interaction Guidelines URLs (win32/uxguide) are archived/404 — noted in doc sources; Win32 UX rules derived from validated s15-s23 dialog/panel patterns instead.
+
+### Notes
+- Research via webfetch (Core Guidelines 760KB full text — extraction delegated to explore subagent to save context), local vendored MuPDF docs, and 8 sessions of accumulated lemma memories. tree-sitter `analyze_complexity` fails on fork cpp files ("Invalid syntax at row 1" — parser/BOM issue); improvement list grounded in session history + grep verification instead (srand seeded SumatraStartup.cpp:2150, FlashcardStudySave already atomic Flashcard.cpp:219, `.clang-format` present).
+- No code changes, no build needed. Commit awaits explicit user order.
+- prettier reflowed the whole historical LOG.md (356-line diff) — reverted via `git stash push -- LOG.md` + re-applied this entry only; LOG.md stays append-only. Do NOT prettier-format LOG.md again.
+
 ## 2026-09-25 (s23) — Lista redo: docked right panel with 4-column flashcard list (BUILD OK, deployed)
 
 ### Changed
@@ -29,7 +108,7 @@
 
 ### Changed
 - **Per-tab flashcard state (foundation)**: cards / studyDoc / filter moved from `MainWindow::flashcard` into NEW `FlashcardTabState` inside `WindowTab` (cards, studyDoc, `filterExpr` Str, `filterEnabled`, `cardsLoaded` lazy flag). MainWindow keeps session-level state only: on/studyMode/revealMode/currentCardIdx/`studyOrder` (now `Vec<FlashcardQueueEntry>{tab, cardIdx}`)/`crossDocSession`. **Fixes latent bug**: switching tabs with flashcard ON kept the previous book's cards/studyDoc painted over the new doc — `FlashcardOnTabChanged(win)` hook in `LoadModelIntoTab` (SumatraPDF.cpp, next to ArchRestoreMeasurementsForTab) now lazy-ensures the new tab's cards + refreshes count/sidebar.
-- **Two distinct study modes** (user spec): **documento atual** (default) vs **global sessão** — checkbox "Estudar de todos os PDFs abertos (sessão)" in the Filter window. Scope = all PDF tabs of THIS window only; tabs dragged to another window stop counting (per user). `FlashcardToolbarUpdateCount` scope-aware (global = sum over tabs).
+- **Two distinct study modes** (user spec): **current document** (default) vs **session-global** — checkbox "Estudar de todos os PDFs abertos (sessão)" (PT UI string, verbatim) in the Filter window. Scope = all PDF tabs of THIS window only; tabs dragged to another window stop counting (per user). `FlashcardToolbarUpdateCount` scope-aware (global = sum over tabs).
 - **Cross-document queue**: `BuildFilteredStudyOrder` collects `{tab, cardIdx}` entries from current tab (or every loaded PDF tab in global mode); each tab's OWN page filter applied independently; advance/Back/Rate navigate via `FlashcardNavigateToEntry` — `TabsSelect` auto-switch when the card belongs to another tab (`FindTabIndex` validates the tab still lives in this window; closed/moved tabs skipped + logged); rating writes SM-2 state + saves to the CARD'S OWN tab JSON (per-book MD5 path); "Again" reinserts the entry. Clean ALL books now resets EVERY tab's in-memory studyDoc (was current-only).
 - `CmdFlashcardFilter` no longer opens two sequential `Dialog_GoToPage` prompts (the "incorrect" report) — opens the new Filter window. Old `filterPageFrom/To` ints replaced by `filterExpr`.
 
@@ -146,7 +225,7 @@
 
 ### Added
 - **`Clean History`** (toolbar "Clean" button + `CmdFlashcardCleanHistory`): clears THIS document's review history (SM-2 states → all cards become "new"; stops an active study session; rewrites the study JSON with `states: {}`).
-- **Hold-to-confirm dialog** (`FlashcardCleanHistoryDialog`, FlashcardToolbar.cpp, raw Win32 + modal pump — no Dialog Manager): "tem certeza que deseja limpar o histórico de revisões?" with No / Yes. "Yes" must be clicked AND HELD 2s: while holding, a red line under the "Yes" text drains right-to-left (15ms WM_TIMER repaint); releasing early resets it (mouse capture + WM_CAPTURECHANGED safety). No / Esc / close = cancel. Question text verbatim per user spec (PT).
+- **Hold-to-confirm dialog** (`FlashcardCleanHistoryDialog`, FlashcardToolbar.cpp, raw Win32 + modal pump — no Dialog Manager): question text (PT UI string, verbatim per user spec): "tem certeza que deseja limpar o histórico de revisões?" ("are you sure you want to clear the review history?") with No / Yes. "Yes" must be clicked AND HELD 2s: while holding, a red line under the "Yes" text drains right-to-left (15ms WM_TIMER repaint); releasing early resets it (mouse capture + WM_CAPTURECHANGED safety). No / Esc / close = cancel.
 - Repro: `tests/ad-hoc-flashcard-cloze.ts` extended — finds the dialog by title via `enumWindows`, clicks Yes at DPI-proportional client fractions (0.648/0.762), tests early-release (600ms → stays open) and full hold (2.3s → confirmed, dialog gone, `"states": {}` written).
 
 ### Verified

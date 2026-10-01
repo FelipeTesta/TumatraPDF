@@ -9360,10 +9360,11 @@ static TempStr DocURIToWebUrlTemp(Str docURI) {
     if (len(docURI) == 0) {
         docURI = kManualDefaultDocURI;
     }
+    // TumatraPDF: docs live in the fork repo (upstream sumatrapdfreader.org removed)
     if (len(docURI) > 0 && docURI.s[0] == '/') {
-        return fmt("https://www.sumatrapdfreader.org/docs%s", docURI);
+        return fmt("https://github.com/FelipeTesta/TumatraPDF/blob/main/sumatrapdf-src/docs/md%s.md", docURI);
     }
-    return fmt("https://www.sumatrapdfreader.org/docs/%s", docURI);
+    return fmt("https://github.com/FelipeTesta/TumatraPDF/blob/main/sumatrapdf-src/docs/md/%s.md", docURI);
 }
 
 void LaunchDocumentation(Str docURI) {
@@ -9400,13 +9401,23 @@ void LaunchDocumentation(Str docURI) {
     SumatraLaunchBrowser(webUrl);
 }
 
-// If url is a documentation URL (https://www.sumatrapdfreader.org/docs/<page>),
-// open it in the embedded manual browser via LaunchDocumentation (which falls
-// back to the external browser when WebView is unavailable) and return true.
+// If url is a documentation URL (https://www.sumatrapdfreader.org/docs/<page>, also
+// fork repo /blob/main/sumatrapdf-src/docs/md/<page>.md), open it in the embedded
+// manual browser via LaunchDocumentation (which falls back to the external browser
+// when WebView is unavailable) and return true.
 // Returns false for non-docs URLs so the caller opens them externally. Used by
 // the home-page and notification tip links.
 bool MaybeLaunchDocumentation(Str url) {
     Str docsPrefix = StrL("https://www.sumatrapdfreader.org/docs");
+    if (str::TrimPrefix(url, docsPrefix)) {
+        // falls through to LaunchDocumentation below
+    } else if (!str::TrimPrefix(url, StrL("https://github.com/FelipeTesta/TumatraPDF/blob/main/sumatrapdf-src/docs/md"))) {
+        return false;
+    }
+    // strip repo-mode ".md" suffix so LaunchDocumentation gets a docURI
+    if (str::EndsWith(url, StrL(".md"))) {
+        url.len -= 3;
+    }
     if (!str::TrimPrefix(url, docsPrefix)) {
         return false;
     }
@@ -10724,10 +10735,6 @@ static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, L
 
         case CmdHelpOpenManualOnWebsite:
             SumatraLaunchBrowser(kManualURL);
-            break;
-
-        case CmdContributeTranslation:
-            SumatraLaunchBrowser(kContributeTranslationsURL);
             break;
 
         case CmdHelpAbout:
@@ -14032,7 +14039,7 @@ void ShowCrashHandlerMessage() {
         return;
     }
     LaunchFileIfExists(gCrashFilePath);
-    const auto* url = "https://www.sumatrapdfreader.org/docs/Submit-crash-report.html";
+    const auto* url = "https://github.com/FelipeTesta/TumatraPDF/issues/new";
     LaunchFileShell(url, nullptr, "open");
 }
 

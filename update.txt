@@ -1,0 +1,3 @@
+[TumatraPDF]
+Latest: 1.0
+PortableExe64: https://github.com/FelipeTesta/TumatraPDF/releases/latest/download/TumatraPDF.exe

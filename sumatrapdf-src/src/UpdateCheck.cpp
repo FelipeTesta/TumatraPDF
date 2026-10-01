@@ -31,30 +31,19 @@
 
 static Kind kNotifUpdateCheckInProgress = StrL("notifUpdateCheckInProgress").s;
 
-// certificate on www.sumatrapdfreader.org is not supported by win7 and win8.1
-// (doesn't have the ciphers they understand) so we have a backup on backblaze
+// TumatraPDF: update metadata lives in this repo (update.txt at repo root, served via
+// raw.githubusercontent.com) and downloads come from GitHub Releases
 
 // clang-format off
 // tried in order; later entries are backups if earlier HTTP gets fail
-#if defined(PRE_RELEASE_VER) || defined(DEBUG)
 static const Str updateInfoURLs[] = {
-    StrL("https://www.sumatrapdfreader.org/updatecheck-pre-release.txt"),
-    StrL("https://kjk-files.s3.us-west-001.backblazeb2.com/software/sumatrapdf/sumpdf-prerelease-update.txt"),
+    StrL("https://raw.githubusercontent.com/FelipeTesta/TumatraPDF/main/update.txt"),
 };
-#else
-static const Str updateInfoURLs[] = {
-    StrL("https://www.sumatrapdfreader.org/update-check-rel.txt"),
-};
-#endif
+// clang-format on
 
 #ifndef kWebisteDownloadPageURL
-#if defined(PRE_RELEASE_VER)
-#define kWebisteDownloadPageURL "https://www.sumatrapdfreader.org/prerelease"
-#else
-#define kWebisteDownloadPageURL "https://www.sumatrapdfreader.org/download-free-pdf-viewer"
+#define kWebisteDownloadPageURL "https://github.com/FelipeTesta/TumatraPDF/releases/latest"
 #endif
-#endif
-// clang-format on
 
 // prevent multiple update tasks from happening simultaneously
 // (this might e.g. happen if a user checks manually very quickly after startup)
@@ -103,16 +92,14 @@ struct UpdateInfo {
 static UpdateInfo* gPendingUpdate = nullptr;
 
 /*
-The format of update information downloaded from the server:
+The format of update information downloaded from the server (repo-root update.txt):
 
-[SumatraPDF]
-Latest: 14276
-Installer64: https://www.sumatrapdfreader.org/dl/prerel/14276/SumatraPDF-prerel-64-install.exe
-Installer32: https://www.sumatrapdfreader.org/dl/prerel/14276/SumatraPDF-prerel-install.exe
-PortableExe64: https://www.sumatrapdfreader.org/dl/prerel/14276/SumatraPDF-prerel-64.exe
-PortableExe32: https://www.sumatrapdfreader.org/dl/prerel/14276/SumatraPDF-prerel.exe
-PortableZip64: https://www.sumatrapdfreader.org/dl/prerel/14276/SumatraPDF-prerel-64.zip
-PortableZip32: https://www.sumatrapdfreader.org/dl/prerel/14276/SumatraPDF-prerel.zip
+[TumatraPDF]
+Latest: 1.0
+PortableExe64: https://github.com/FelipeTesta/TumatraPDF/releases/latest/download/TumatraPDF.exe
+
+(upstream keys Installer64/Installer32/PortableExeArm64/... still parsed; section name
+may also be [SumatraPDF] for compatibility)
 
 [Promo]
 [
@@ -128,8 +115,11 @@ static UpdateInfo* ParseUpdateInfo(Str d) {
     if (!d) {
         return nullptr;
     }
-    Str prefix = (d.s[0] == '[') ? StrL("[SumatraPDF]") : StrL("SumatraPDF");
-    if (!str::StartsWith(d, prefix)) {
+    bool bracketed = d.s[0] == '[';
+    Str prefix = bracketed ? StrL("[TumatraPDF]") : StrL("TumatraPDF");
+    Str prefixUpstream = bracketed ? StrL("[SumatraPDF]") : StrL("SumatraPDF");
+    bool isTumatra = str::StartsWith(d, prefix);
+    if (!isTumatra && !str::StartsWith(d, prefixUpstream)) {
         return nullptr;
     }
 
@@ -141,7 +131,10 @@ static UpdateInfo* ParseUpdateInfo(Str d) {
 
     SetPromoString(SerializeSquareTreeNodeTemp(root->GetChild(StrL("Promo"))));
 
-    SquareTreeNode* node = root->GetChild(StrL("SumatraPDF"));
+    SquareTreeNode* node = root->GetChild(StrL("TumatraPDF"));
+    if (!node) {
+        node = root->GetChild(StrL("SumatraPDF")); // accept upstream layout too
+    }
     if (!node) {
         return nullptr;
     }
@@ -248,12 +241,47 @@ static bool ShouldCheckForUpdate(UpdateCheck updateCheckType) {
     return checkUpdate;
 }
 
+// TumatraPDF release builds are unsigned portable exes: overwrite the running exe via a
+// detached cmd batch that waits for this process to exit, moves the new exe in place
+// and relaunches it, then deletes itself.
+static void SelfUpdateViaBatch(Str newExePath) {
+    TempStr selfExe = GetSelfExePathTemp();
+    TempStr batPath = GetTempFilePathTemp(StrL("tumatrapdf-update"));
+    batPath = str::JoinTemp(batPath, StrL(".bat"));
+    DWORD pid = GetCurrentProcessId();
+    Str content = fmt(
+        "@echo off\r\n"
+        ":wait\r\n"
+        "tasklist /FI \"PID eq %d\" 2>NUL | find /I \" %d \" >NUL\r\n"
+        "if not errorlevel 1 (timeout /T 1 /NOBREAK >NUL & goto wait)\r\n"
+        "move /Y \"%s\" \"%s\"\r\n"
+        "if errorlevel 1 (goto wait)\r\n"
+        "start \"\" /D \"%s\" \"%s\"\r\n"
+        "del \"%%~f0\"\r\n",
+        pid, pid, newExePath, selfExe, path::GetDirTemp(selfExe), selfExe);
+    bool ok = file::WriteFile(batPath, content);
+    if (!ok) {
+        logf("SelfUpdateViaBatch: failed to write '%s'\n", batPath);
+        return;
+    }
+    TempStr cmd = fmt("\"cmd.exe\" /c \"%s\"", batPath);
+    HANDLE h = LaunchProcessInDir(cmd, Str(), CREATE_NO_WINDOW | DETACHED_PROCESS);
+    if (h) {
+        CloseHandle(h);
+    }
+    logf("SelfUpdateViaBatch: ok=%d bat '%s'\n", (int)(h != nullptr), batPath);
+}
+
 void StartInstallerAutoUpgrade(Str installerPath) {
-    TempStr expectedSigner = GetExecutableSignerTemp(GetSelfExePathTemp());
-    TempStr installerSigner = GetExecutableSignerTemp(installerPath);
-    if (!expectedSigner || !installerSigner || !str::Eq(expectedSigner, installerSigner) ||
-        !IsPEFileSigned(installerPath)) {
-        logf("StartInstallerAutoUpgrade: refusing an update with an untrusted signature\n");
+    bool signed_ = IsPEFileSigned(installerPath);
+    if (!signed_) {
+        if (IsOurExeInstalled()) {
+            logf("StartInstallerAutoUpgrade: refusing unsigned update for installed exe\n");
+            return;
+        }
+        // TumatraPDF: unsigned portable exe — self-replace via helper batch
+        logf("StartInstallerAutoUpgrade: unsigned portable update, self-replacing via batch\n");
+        SelfUpdateViaBatch(installerPath);
         return;
     }
     str::Builder cmd;
@@ -428,10 +456,16 @@ static void DownloadUpdateAsync(DownloadUpdateAsyncData* data) {
     constexpr i64 kMaxUpdateDownloadSize = 256LL * 1024 * 1024;
     bool ok = HttpGetToFile(updateInfo->dlURL, installerPath, cb, kMaxUpdateDownloadSize);
     logf("ShowAutoUpdateDialog: HttpGetToFile(): ok=%d, downloaded to '%s'\n", (int)ok, installerPath);
-    TempStr expectedSigner = GetExecutableSignerTemp(GetSelfExePathTemp());
-    TempStr installerSigner = ok ? GetExecutableSignerTemp(installerPath) : TempStr{};
-    ok = ok && expectedSigner && installerSigner && str::Eq(expectedSigner, installerSigner) &&
-         IsPEFileSigned(installerPath);
+    // TumatraPDF releases are unsigned portable exes: instead of a signature check,
+    // require a plausible PE file (MZ header, >= 1 MiB)
+    if (ok) {
+        constexpr i64 kMinExeSize = 1024 * 1024;
+        Str hdr = file::ReadFile(installerPath);
+        i64 size = len(hdr);
+        ok = size >= kMinExeSize && hdr.s[0] == 'M' && hdr.s[1] == 'Z';
+        str::Free(hdr);
+        logf("ShowAutoUpdateDialog: size=%lld, PE header ok=%d\n", size, (int)ok);
+    }
     if (ok) {
         updateInfo->installerPath = str::Dup(installerPath);
     } else {
@@ -529,7 +563,7 @@ static HRESULT CALLBACK TaskDialogHyperlinkCallback(HWND /*hwnd*/, UINT msg, WPA
     return S_OK;
 }
 
-static const Str kExpectedDlHost = StrL("https://www.sumatrapdfreader.org/");
+static const Str kExpectedDlHost = StrL("https://github.com/FelipeTesta/TumatraPDF/releases/");
 
 static void NotifySuspiciousUpdate(HWND hwndParent, Str dlURL) {
     logf("NotifySuspiciousUpdate: suspicious download url '%s'\n", dlURL);

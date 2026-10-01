@@ -39,10 +39,32 @@ static void AddUniquePageNo(Vec<int>& pageNos, int pageNo) {
     pageNos.Append(pageNo);
 }
 
+// xorshift128+ generator: better distribution than rand() (and rand()%n is
+// modulo-biased). Seeded once at first use; good enough for shuffling the
+// study queue.
+static u64 sXorshift128State[2] = {0, 0};
+
+static u64 Xorshift128Next() {
+    u64* s = sXorshift128State;
+    if (s[0] == 0 && s[1] == 0) {
+        u64 t = (u64)time(nullptr) ^ ((u64)GetTickCount64() << 21);
+        s[0] = t ? t : 88172645463325252ULL;
+        s[1] = t ^ 0x9E3779B97F4A7C15ULL;
+    }
+    u64 x = s[0];
+    u64 y = s[1];
+    s[0] = y;
+    x ^= x << 23;
+    x ^= x >> 17;
+    x ^= y ^ (y >> 26);
+    s[1] = x;
+    return x + y;
+}
+
 template <typename T>
 static void ShuffleVecInPlace(Vec<T>& v) {
     for (int i = len(v) - 1; i > 0; i--) {
-        int j = rand() % (i + 1);
+        int j = (int)(Xorshift128Next() % ((u64)i + 1));
         T tmp = v[i];
         v[i] = v[j];
         v[j] = tmp;
@@ -351,7 +373,7 @@ static void HandleFlashcardRate(MainWindow* win, int rating) {
 
 // Stop the active study session (queue, index, modes) — per-tab caches
 // (cards/states/filter) are kept: they belong to the documents.
-static void FlashcardStopSession(MainWindow* win) {
+void FlashcardStopSession(MainWindow* win) {
     win->flashcard.studyMode = false;
     win->flashcard.revealMode = false;
     win->flashcard.currentCardIdx = -1;
@@ -603,46 +625,12 @@ bool HandleCommandFlashcard(MainWindow* win, int cmd) {
             FlashcardFilterOptionsDialog(win);
             return true;
         }
-        case CmdFlashcardCleanHistory: {
-            logf("[fc] CmdFlashcardCleanHistory - opening confirm dialog\n");
-            WindowTab* tab = win->CurrentTab();
-            if (!tab || !tab->filePath) {
-                logf("[fc] CmdFlashcardCleanHistory - ERROR: no document loaded\n");
-                return true;
-            }
-            // hold-to-confirm: "Clear current book" 2s, "Clear ALL books" 5s;
-            // X/Esc cancels
-            int res = FlashcardCleanHistoryDialog(win->hwndFrame);
-            if (res == kFlashcardCleanCurrentBook) {
-                // current book only: other books' histories are untouched
-                // (each book has its own JSON, keyed by MD5 of its path)
-                tab->flashcard.studyDoc.states.Reset();
-                FlashcardStopSession(win);
-                FlashcardStudySave(tab->filePath.s, tab->flashcard.studyDoc);
-                FlashcardToolbarUpdateCount(win);
-                FlashcardToolbarUpdateState(win);
-                FlashcardSidebarPopulate(win); // every card is "new" now
-                MainWindowRerender(win);
-                logf("[fc] CmdFlashcardCleanHistory - review history cleared for this doc\n");
-            } else if (res == kFlashcardCleanAllBooks) {
-                // ALL books: delete every study JSON in the app-data dir and
-                // reset the in-memory state of every tab of this window. No
-                // FlashcardStudySave afterwards — don't recreate deleted files
-                int nDeleted = FlashcardDeleteAllStudyFiles();
-                auto tabs = win->Tabs();
-                for (WindowTab* t : tabs) {
-                    t->flashcard.studyDoc.states.Reset();
-                }
-                FlashcardStopSession(win);
-                FlashcardToolbarUpdateCount(win);
-                FlashcardToolbarUpdateState(win);
-                MainWindowRerender(win);
-                logf("[fc] CmdFlashcardCleanHistory - review history cleared for ALL books (%d files)\n", nDeleted);
-            } else {
-                logf("[fc] CmdFlashcardCleanHistory - cancelled by user\n");
-            }
+        case CmdFlashcardConfig:
+            logf("[fc] CmdFlashcardConfig - opening config window\n");
+            // the window owns its list + selection, so the clear actions and
+            // the folder change execute inside it (see FlashcardToolbar.cpp)
+            FlashcardConfigDialog(win);
             return true;
-        }
         default:
             return false;
     }
