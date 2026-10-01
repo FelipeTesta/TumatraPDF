@@ -35,10 +35,11 @@ User decisions: keep ALL upstream build/CI scripts in `cmd/` as backup (future c
 - [ ] Flavor E2E after repo goes public: tag v1.0.0 -> verify release asset + update.txt bump -> in-app update prompt from v1.0 -> self-replace.
 - [ ] Document in BUILD.md + docs/md/Version-history.md (at first public release).
 
-### FASE 4 — Tests + docs
+### FASE 4 — Tests + docs — DONE s26/s26b
 
-- [x] Build dbg+rel 0 errors; smoke launch OK. No existing functional update test (all set CheckForUpdates=false) — e2e deferred to post-public.
-- [x] LOG.md + README pending user commit order.
+- [x] Build dbg+rel 0 errors; smoke launch OK. E2E: repo PUBLIC, v1.0.4 released via Actions (update.txt bumped by workflow), all CI deps fixed (NASM, WebView2 nuget, bin/ tools, EngineAll.h include).
+- [x] LOG.md + README + BUILD.md + Version-history.md updated (TumatraPDF 1.0 section).
+- [ ] Remaining polish: old stray local branches (master, feature/*) vs git-flow conventions; in-app update prompt manual validation from a released 1.0 build (daily throttle — set TimeOfLastUpdateCheck or wait).
 
 ---
 

@@ -1,5 +1,19 @@
 # TumatraPDF — Development Log
 
+## 2026-10-01 (s26b) — Repo PUBLIC + first automated release v1.0.4 LIVE
+
+### Done
+- Repo pushed to **github.com/FelipeTesta/TumatraPDF** (public, default branch **main**; local `master`/`feature/flashcard-system` stale-diverged, `main` created from HEAD 22dc208).
+- Tag-triggered release pipeline brought up over 3 CI iterations: v1.0.0/v1.0.1 failed (missing NASM for libjpeg-turbo/dav1d asm → added `ilammy/setup-nasm@v1`), then missing `WebView2EnvironmentOptions.h` (v1.0.2 → `nuget install Microsoft.Web.WebView2 1.0.4022.49` step; package lives in gitignored `sumatrapdf-src/packages/`), then `bin/` tools missing (v1.0.3 → force-added `sumatrapdf-src/bin/` nasm/MakeLZSA/lzma/pigz/bin2coff/efi/premake5 — upstream tracks these too), then Release-config compile error in FlashcardToolbar.cpp (`EngineSupportsAnnotations`/`AsEngineMupdf` undeclared — Debug passed by header-order luck; the parallel flashcard agent's uncommitted `#include "EngineAll.h"` + `delete srcBase`→`Release()` fixes were committed in).
+- **v1.0.4 green**: build ✓ → update.txt bumped+committed to main by the workflow ✓ → GitHub Release published with `TumatraPDF.exe` (11.7 MB) ✓. `update.txt` reachable at raw.githubusercontent.com with `Latest: 1.0.4`.
+- update.txt serving URL verified live (200, correct content).
+
+### Lessons
+- CI bring-up needs a local-clean Release build first (incremental builds masked the missing `EngineAll.h` include).
+- `sumatrapdf-src/.gitignore` ignores `bin/` — CI build depends on those exes; force-add required.
+- `gh repo edit --visibility public` needs `--accept-visibility-change-consequences` (non-interactive).
+- Cross-check CI failure SHA vs local HEAD: line-number drift (660 vs 661) exposed uncommitted parallel-agent edits as the missing fix.
+
 ## 2026-10-01 (s26) — Public-repo prep FASE 0-3: telemetry removal + own update system (BUILD OK, deployed)
 
 ### Added
