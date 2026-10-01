@@ -1,5 +1,35 @@
 # TumatraPDF — Development Log
 
+## 2026-10-01 (s29b) — Auto-update E2E green; asset = TumatraPDF-portable-win64.exe (v1.0.7 LIVE)
+
+### Fixed (E2E: tests/ad-hoc-update.ts — check → download → dialog → swap → relaunch, PASSES in 16.8s)
+- **dlURL empty**: `IsDllBuild()` is TRUE (embedded `libsumatrapdf.dll` extracted on launch) → updater reads `Installer64:`, not `PortableExe64:`. update.txt + workflow now serve BOTH keys → same portable asset (portable-only decision; installer deferred — user call).
+- **Self-replace batch stalled**: original bat used `timeout` (fails console-less: "Input redirection is not supported") + unbounded retry loop. Fixed: `ping 127.0.0.1 -n 2` wait (console-safe) + bounded 120-retry loop around the move. Manually verified swap hash-change + relaunch + bat self-delete.
+- **Asset renamed** to `TumatraPDF-portable-win64.exe` (user request: portable + win64 in name); workflow rename step, update.txt, docs updated. v1.0.7 published green.
+- ad-hoc-update registered in tests/before-release.ts.
+
+### Hardening (same session)
+- Branch protection `main`: no force-push/delete, linear history. Ruleset `protect-release-tags` (v* immutable, admin-bypass only). Actions default token read. Secret scanning + push protection + Dependabot security updates ON. gitleaks full-history scan clean (1 vendored fixture false positive).
+
+## 2026-10-01 (s29) — Keyboard help fork sections + resizable sheet; Trim Config temporarily disables trim (BUILD OK, deployed)
+
+### Added
+- **Keyboard shortcuts sheet fork sections** (`?` / Shift+/, `KeyboardHelp.cpp`): the sheet builds from static per-section command lists and only shows rows with a LIVE shortcut — fork commands were missing entirely. New sections: **Flashcards** (Add `S`/`Shift+S`, Reveal `Space`/`Enter`, Rate `1`–`4` + numpad) and **Auto-Scroll & Contrast** (`F7`/`F8`/`F9`, `Ctrl+Shift+C`); `CmdInvertColors` stays in upstream's View & Zoom section (no duplicate row).
+- **Shortcuts sheet resizable** (user: "janela helper mais responsiva e permitir redimensionamento"): window gains `WS_THICKFRAME`; the natural content size computed in BuildContent + the frame deltas become the resize floor (`WM_GETMINMAXINFO`); the positioning tail of BuildContent was extracted into `LayoutContent(clientDx, clientDy)`, reused by a new `WM_SIZE` handler — columns keep their natural width and CENTER horizontally when the window is wider, title/close/separator re-place, the footer pins to the bottom edge.
+- **`RELEASE.md`** (repo root, NEW): per-version changelog — v1.0.7 (pending) / v1.0.6 / v1.0.5 / v1.0.4 sections, "Notable bug fixes" themed list, and the pre-release checklist. The README's roadmap block and its two 2026-08-17 changelog sections moved here; README now links to it ("What's new" + Status).
+
+### Changed
+- **Trim Config temporarily disables trim** (user request, `TrimConfigDialog.cpp/.h`): `Create` snapshots `hadTrimEnabled = dm->marginTrimEnabled` and, if trim was on, forces it OFF + `RelayoutKeepingView` + `FreeForDisplayModel` — the FULL page is visible while the lines are placed (the `tRef` formula in the line math reads the flag, so lines follow automatically). `OnSave`/`OnCancel` restore the flag BEFORE their relayout condition. **OnCancel now also frees the render cache**: tiles cached mid-dialog were rendered untrimmed and would be stale after the restore (skipping the free was only ever safe because the layout never changed while the dialog was open). `marginTrimEnabled` is set from prefs only at DisplayModel creation and by the toolbar toggle, so nothing re-enables it behind the dialog's back.
+- README fixes: section 3 retitled "Scan Mode & Two Columns (ex Viewport Crop)"; section 4 rewritten — the stale upstream-update PowerShell-script description replaced by the own update system (+ `MERGE.md` for upstream tracking); the flashcards "Controls" line points to the in-app `?` sheet and `Ctrl+K` palette instead of the deleted file; Status line refreshed.
+- **`Shortcuts.md` DELETED** (added s27, committed in 244955a) — the in-app keyboard sheet + Command Palette supersede it.
+
+### Verified
+- Build debug + Release x64: 0 warnings / 0 errors; deployed `Compiled\TumatraPDF.exe` (release 11,700 KB) + `TumatraPDF-debug.exe` (21.1 MB). Trim/keyboard behaviors are visual/interactive — user tests live: open Trim Config with trim on → full page + lines at true edges; resize the `?` sheet; Flashcards + Auto-Scroll & Contrast sections appear in the sheet.
+
+### Notes / traps
+- KeyboardHelp rows show ONLY commands with a binding (`ShortcutsForCmdTemp` empty → row skipped): fork commands WITHOUT an accelerator (Study, Order, Filter, List, Config, Scan Mode, Two Columns, …) legitimately do NOT appear in the sheet — they stay reachable via the `Ctrl+K` Command Palette, which is visibility-driven: flashcard commands are NOT in `gBlacklistCommandsFromPalette` and DO show with a document loaded (the `removeIfChm`/`removeIfMarkdown` lists that contain them are doc-type filters, not palette filters). The palette was left unchanged.
+- `.dot` labels are single lines with literal `\n` inside the quoted string — grep output wraps them, so Edit oldStrings must come from Read, not from grep.
+
 ## 2026-10-01 (s28) — Trim Config context-aware red lines (BUILD OK; local release deploy blocked by running app)
 
 ### Changed
