@@ -586,6 +586,16 @@ bool HandleCommandFlashcard(MainWindow* win, int cmd) {
             FlashcardOrderOptionsDialog(win);
             return true;
         }
+        case CmdFlashcardImport: {
+            logf("[fc] CmdFlashcardImport - opening import window\n");
+            FlashcardImportDialog(win);
+            return true;
+        }
+        case CmdFlashcardSession: {
+            logf("[fc] CmdFlashcardSession - opening session window\n");
+            FlashcardSessionDialog(win);
+            return true;
+        }
         case CmdFlashcardLista:
             logf("[fc] CmdFlashcardLista - toggling sidebar\n");
             FlashcardSidebarToggle(win);

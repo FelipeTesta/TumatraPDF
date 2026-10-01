@@ -319,7 +319,9 @@ export const commands = [
     "CmdFlashcardLista", "Toggle Flashcard List Sidebar",
     "CmdFlashcardNext", "Skip To Next Card (No Rating)",
     "CmdFlashcardOrderOptions", "Flashcard Study Order Options",
-    "CmdFlashcardConfig", "Flashcard Config Window",
+    "CmdFlashcardConfig", "Flashcard Settings Window",
+    "CmdFlashcardImport", "Flashcard Import Window",
+    "CmdFlashcardSession", "Flashcard Session Window",
     "CmdViewportCropV2Toggle", "Toggle Two Columns",
     "CmdNone", "Do nothing",
 ];

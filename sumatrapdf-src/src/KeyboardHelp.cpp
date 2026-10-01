@@ -74,6 +74,17 @@ static const int kSecIface[] = {
     CmdToggleCursorPosition, CmdTogglePageInfo, CmdCommandPalette,
     CmdFavoriteAdd, CmdFavoriteToggle, CmdHelpOpenManual, CmdToggleKeyboardHelp, 0,
 };
+// fork-added tools: rows only show when the command has a live shortcut, so
+// commands without an accelerator (Study / Order / Filter / Config …) are
+// skipped by the same rule as upstream's
+static const int kSecFlashcards[] = {
+    CmdFlashcardAdd, CmdFlashcardReveal,
+    CmdFlashcardRate1, CmdFlashcardRate2, CmdFlashcardRate3, CmdFlashcardRate4, 0,
+};
+static const int kSecTools[] = {
+    CmdAutoScrollToggle, CmdAutoScrollSpeedUp, CmdAutoScrollSpeedDown,
+    CmdContrastToggle, 0,
+};
 
 struct KbSectionDef {
     const char* title;
@@ -88,6 +99,8 @@ static KbSectionDef gKbSectionDefs[] = {
     {"Tabs", kSecTabs},
     {"Annotations", kSecAnnot},
     {"Interface", kSecIface},
+    {"Flashcards", kSecFlashcards},
+    {"Auto-Scroll & Contrast", kSecTools},
 };
 // clang-format on
 
@@ -159,10 +172,18 @@ struct KeyboardHelpWnd : Wnd {
     int pad = 0;
     int contentTop = 0;
     int footerH = 0;
+    // natural (size-to-content) client size = the minimum the user can resize
+    // the sheet down to, plus the frame deltas to express it as a window size
+    // in WM_GETMINMAXINFO (s29)
+    int minDx = 0, minDy = 0;
+    int frameDx = 0, frameDy = 0;
+    // natural size of the two-column block, reused when the window resizes
+    Size colsSize{};
 
     ~KeyboardHelpWnd() override;
     bool Create(MainWindow* win);
     void BuildContent();
+    void LayoutContent(int clientDx, int clientDy);
     void SyncColors();
     void PaintContent(HDC hdc, const Rect& client);
     LRESULT WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) override;
@@ -528,7 +549,7 @@ void KeyboardHelpWnd::BuildContent() {
 
     vroot->SetChild(container);
 
-    Size colsSize = columns->Layout(ExpandInf());
+    colsSize = columns->Layout(ExpandInf());
     int rightPad = rem / 2; // 0.5rem right margin
     int clientDx = pad + colsSize.dx + rightPad;
     int clientDy = contentTop + colsSize.dy + DpiScale(hwnd, 12) + footerH + DpiScale(hwnd, 6);
@@ -539,16 +560,29 @@ void KeyboardHelpWnd::BuildContent() {
     AdjustWindowRectEx(&wr, style, FALSE, exStyle);
     int winDx = wr.right - wr.left;
     int winDy = wr.bottom - wr.top;
+    // remember the natural size (the resize floor) and the frame deltas
+    minDx = clientDx;
+    minDy = clientDy;
+    frameDx = winDx - clientDx;
+    frameDy = winDy - clientDy;
 
     Rect r = PositionHelpWindow(win, winDx, winDy);
     SetWindowPos(hwnd, nullptr, r.x, r.y, r.dx, r.dy, SWP_NOZORDER);
 
-    // place the pieces; the container positions its children itself, so the root
-    // must not re-layout them
+    LayoutContent(clientDx, clientDy);
+}
+
+// place the pieces for the given client size; the columns block keeps its
+// natural width and centers horizontally when the window is wider, the footer
+// pins to the bottom edge (s29: called from BuildContent and on WM_SIZE)
+void KeyboardHelpWnd::LayoutContent(int clientDx, int clientDy) {
+    // the container positions its children itself, so the root must not
+    // re-layout them
     vroot->bounds = {0, 0, clientDx, clientDy};
     vroot->needsLayout = false;
     container->SetBounds(vroot->bounds);
 
+    Size szTitle = title->GetIdealSize();
     Size szClose = closeBtn->GetIdealSize();
     int closeGrow = DpiScale(hwnd, 6);
     title->SetBounds({pad, pad, clientDx - (2 * pad) - szClose.dx, szTitle.dy});
@@ -556,7 +590,9 @@ void KeyboardHelpWnd::BuildContent() {
                          szClose.dy + (2 * closeGrow)});
     int sepY = contentTop - DpiScale(hwnd, 10);
     separator->SetBounds({pad, sepY, clientDx - (2 * pad), separator->thickness});
-    columns->SetBounds({pad, contentTop, colsSize.dx, colsSize.dy});
+    int availDx = clientDx - pad - (pad / 2);
+    int colsX = pad + (std::max(0, availDx - colsSize.dx) / 2);
+    columns->SetBounds({colsX, contentTop, colsSize.dx, colsSize.dy});
     footer->SetBounds({pad, clientDy - footerH - (pad / 2), clientDx - (2 * pad), footerH});
 }
 
@@ -589,6 +625,25 @@ LRESULT KeyboardHelpWnd::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
         case WM_ERASEBKGND:
             return 1; // we paint the whole client, so skip the erase flicker
+        case WM_SIZE: {
+            // the sheet is resizable (s29): re-place the pieces for the new
+            // client size; the columns keep their natural width and center
+            if (vroot) {
+                Rect client = HwndClientRect(hwnd);
+                LayoutContent(client.dx, client.dy);
+                InvalidateRect(hwnd, nullptr, FALSE);
+            }
+            break;
+        }
+        case WM_GETMINMAXINFO: {
+            // don't let the user resize below the natural content size (s29)
+            auto* mmi = (MINMAXINFO*)lp;
+            if (minDx > 0) {
+                mmi->ptMinTrackSize.x = minDx + frameDx;
+                mmi->ptMinTrackSize.y = minDy + frameDy;
+            }
+            return 0;
+        }
         case WM_PAINT: {
             PAINTSTRUCT ps;
             HDC hdc = BeginPaint(hwnd, &ps);
@@ -665,7 +720,9 @@ bool KeyboardHelpWnd::Create(MainWindow* win) {
     {
         CreateCustomArgs args;
         args.visible = false;
-        args.style = WS_POPUPWINDOW;
+        // WS_THICKFRAME makes the sheet resizable (s29); the natural content
+        // size set in BuildContent is the resize floor (WM_GETMINMAXINFO)
+        args.style = WS_POPUPWINDOW | WS_THICKFRAME;
         args.title = "Keyboard Shortcuts";
         CreateCustom(args);
     }

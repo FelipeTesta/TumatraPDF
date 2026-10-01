@@ -91,6 +91,12 @@ Annotation* FlashcardCreateHighlightAnnot(EngineBase* engine, int pageNo, Vec<Re
 // Returns the number of cards created.
 int FlashcardImportFromPdf(EngineMupdf* dstEngine, Vec<Flashcard>& existing, const char* srcPath);
 
+// Dry-run count for the Import window: how many of the source PDF's
+// flashcard-tagged highlights we don't have yet (same dedupe rule), without
+// creating anything. *srcCountOut (optional) gets the source's total cards.
+// Returns -1 when the source can't be opened.
+int FlashcardImportDiffCount(Vec<Flashcard>& existing, const char* srcPath, int* srcCountOut);
+
 // Save flashcard study state to external JSON file
 void FlashcardStudySave(const char* filePath, const FlashcardStudyDoc& doc);
 
@@ -164,6 +170,14 @@ void FlashcardOrderOptionsDialog(MainWindow* win);
 // checkboxes (chapter ranges inject into the expression) + Filters ON/OFF +
 // Clear (2s hold) + cross-document session checkbox
 void FlashcardFilterOptionsDialog(MainWindow* win);
+// Import window (toolbar Import button): compare the current document's cards
+// with a picked source PDF — dry-run diff count first, then create the new
+// cards on confirm. Table |document|cards| + "New cards: N".
+void FlashcardImportDialog(MainWindow* win);
+// Session window (toolbar Session button): search field + multi-select list of
+// every book in the study history (|PDF|cards|due|last reviewed|tags|) —
+// Open Session launches a NEW app window with all checked books.
+void FlashcardSessionDialog(MainWindow* win);
 // Delete every study-history JSON in the study dir (ALL books' review
 // histories). Returns the number of files deleted.
 int FlashcardDeleteAllStudyFiles();

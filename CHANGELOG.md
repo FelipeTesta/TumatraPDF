@@ -4,8 +4,29 @@ Per-version changelog for TumatraPDF — new functions + bug fixes, newest first
 Feature details live in [README.md](README.md); full per-session development
 history in [LOG.md](LOG.md).
 
-## v1.0.7 (pending)
+## v1.0.8 (2026-10-01)
 
+(ships the keyboard-sheet and trim-features below together — their code landed
+after the v1.0.7 tag)
+
+## v1.0.7 (2026-10-01)
+
+- Auto-update verified end-to-end; release asset renamed to
+  `TumatraPDF-portable-win64.exe`.
+
+- **Flashcard Import window** (new toolbar **Import** button): compare another
+  copy of the same book with yours — `| Document | Cards |` table, dry-run
+  `New cards: N` count, one click creates only the DIFFERENT flashcard-tagged
+  highlights (duplicates skipped, study history NOT imported). Supersedes the
+  old Settings → Import path.
+- **Flashcard Session window** (new toolbar **Session** button): search all
+  books in your study history, multi-select via checkboxes and **Open Session**
+  launches a new TumatraPDF window with every selected book — ready for
+  session-wide (cross-document) study.
+- **Settings window polish:** toolbar button renamed Config → **Settings**;
+  document list gained a column-header strip aligned with the rows.
+- **Filter window dark-theme fix:** the expression field and the bookmark list
+  no longer paint white in dark themes.
 - **Keyboard shortcuts sheet** (`?` / Shift+/): new **Flashcards** and
   **Auto-Scroll & Contrast** sections (fork commands were missing from the
   sheet); the sheet window is now **resizable** — content size is the floor,

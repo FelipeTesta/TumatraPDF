@@ -266,6 +266,8 @@ static UINT_PTR removeIfChm[] = {
     CmdFlashcardRate3,
     CmdFlashcardRate4,
     CmdFlashcardLista,
+    CmdFlashcardImport,
+    CmdFlashcardSession,
     0,
 };
 
@@ -294,6 +296,8 @@ static UINT_PTR removeIfMarkdown[] = {
     CmdFlashcardRate3,
     CmdFlashcardRate4,
     CmdFlashcardLista,
+    CmdFlashcardImport,
+    CmdFlashcardSession,
     0,
 };
 

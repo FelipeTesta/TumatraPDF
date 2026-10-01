@@ -168,6 +168,11 @@ void TrimConfigWnd::OnSave() {
     // page heights depend on the trim values, so re-layout (keeping the view)
     // before repainting
     auto* trimDm = win->AsFixed();
+    // restore the trim that was temporarily disabled at dialog open (s29);
+    // must happen before the relayout condition below, which reads the flag
+    if (trimDm && hadTrimEnabled) {
+        trimDm->marginTrimEnabled = true;
+    }
     if (trimDm && (trimDm->marginTrimEnabled || trimDm->IsViewportCropV2Active())) {
         trimDm->RelayoutKeepingView();
         // cached tiles were rendered with the old trim/colGap values
@@ -191,8 +196,17 @@ void TrimConfigWnd::OnCancel() {
     gGlobalPrefs->viewportCrop.colGap = savedColGap;
     win->trimConfigMode = 0;
     auto* trimDm = win->AsFixed();
+    // restore the trim that was temporarily disabled at dialog open (s29)
+    if (trimDm && hadTrimEnabled) {
+        trimDm->marginTrimEnabled = true;
+    }
     if (trimDm && (trimDm->marginTrimEnabled || trimDm->IsViewportCropV2Active())) {
         trimDm->RelayoutKeepingView();
+        // while the dialog was open the page rendered UNtrimmed, so the cached
+        // tiles are stale for the restored layout — free them (s29; OnSave
+        // always frees, OnCancel used to skip it because the layout never
+        // changed mid-dialog)
+        gRenderCache->FreeForDisplayModel(trimDm);
     }
     HwndRepaintNow(win->hwndCanvas);
     // Ensure contrast overlay stays positioned correctly after cancel
@@ -386,6 +400,20 @@ bool TrimConfigWnd::Create(MainWindow* mainWin) {
     int dx = DpiScale(hwnd, 320);
     LayoutAndSizeToContent(layout, dx, 0, hwnd);
     PositionDialog(hwnd, win->hwndFrame);
+
+    // Temporarily disable trim while the dialog is open so the FULL page is
+    // visible for placing the margin lines (with trim on, the lines would sit
+    // relative to the already-clipped view). Restored on Save/Cancel (s29).
+    // marginTrimEnabled is only set from prefs at DisplayModel creation and by
+    // the toolbar toggle, so nothing re-enables it behind our back meanwhile.
+    auto* dmTrim = win->AsFixed();
+    hadTrimEnabled = dmTrim && dmTrim->marginTrimEnabled;
+    if (dmTrim && hadTrimEnabled) {
+        dmTrim->marginTrimEnabled = false;
+        dmTrim->RelayoutKeepingView();
+        // cached tiles were rendered with trim on
+        gRenderCache->FreeForDisplayModel(dmTrim);
+    }
 
     SyncEditsFromLine();
     SetIsVisible(true);

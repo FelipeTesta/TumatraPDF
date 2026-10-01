@@ -327,6 +327,8 @@ static SeqStrings gCommandNames =
     "CmdFlashcardNext\0"
     "CmdFlashcardOrderOptions\0"
     "CmdFlashcardConfig\0"
+    "CmdFlashcardImport\0"
+    "CmdFlashcardSession\0"
     "CmdViewportCropV2Toggle\0"
     "CmdNone\0"
     "\0";
@@ -643,6 +645,8 @@ static i32 gCommandIds[] = {
     CmdFlashcardNext,
     CmdFlashcardOrderOptions,
     CmdFlashcardConfig,
+    CmdFlashcardImport,
+    CmdFlashcardSession,
     CmdViewportCropV2Toggle,
     CmdNone,
 };
@@ -958,7 +962,9 @@ SeqStrings gCommandDescriptions =
     "Toggle Flashcard List Sidebar\0"
     "Skip To Next Card (No Rating)\0"
     "Flashcard Study Order Options\0"
-    "Flashcard Config Window\0"
+    "Flashcard Settings Window\0"
+    "Flashcard Import Window\0"
+    "Flashcard Session Window\0"
     "Toggle Two Columns\0"
     "Do nothing\0"
     "\0";

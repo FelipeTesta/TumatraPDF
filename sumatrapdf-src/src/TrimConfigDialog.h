@@ -23,6 +23,7 @@ struct TrimConfigWnd : Wnd {
     int savedColGap = 0;               // two-column v2 column overlap (for cancel)
     bool suppressEditUpdate = false;   // prevents feedback loop when syncing edits
     bool isDialog = false;
+    bool hadTrimEnabled = false; // trim was on at dialog open (temporarily disabled, s29)
 
     bool Create(MainWindow* mainWin);
     void OnEditTopChanged();

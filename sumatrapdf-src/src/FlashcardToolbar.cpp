@@ -82,7 +82,9 @@ void FlashcardToolbarCreate(MainWindow* win) {
         {CmdFlashcardOrderOptions, _TRN("Order")},
         {CmdFlashcardLista, _TRN("List")},
         {CmdFlashcardFilter, _TRN("Filter")},
-        {CmdFlashcardConfig, _TRN("Config")},
+        {CmdFlashcardImport, _TRN("Import")},
+        {CmdFlashcardSession, _TRN("Session")},
+        {CmdFlashcardConfig, _TRN("Settings")},
     };
     constexpr int kFlashcardToolbarButtonsCount = dimof(gFlashcardToolbarButtons);
 
@@ -374,7 +376,7 @@ static void FlashcardDrawHoldButton(HWND hwnd, HDC hdc, const RECT& rc, const WC
 //   | other.pdf       5    0    2026-09-28 09:11 |     ~10 rows + scroll
 //   +---------------------------------------------+
 //   [Clear Selected (2s)] [Clear All (5s)]
-//   [Link to PDF...] [Restore Backup (5s)] [Import from PDF...]
+//   [Link to PDF...] [Restore Backup (5s)]
 //
 // The clear buttons hold-to-confirm (orange 2s for the SELECTED book, red 5s
 // for ALL books). X / Esc closes. Actions execute inside the window (it owns
@@ -383,6 +385,8 @@ static void FlashcardDrawHoldButton(HWND hwnd, HDC hdc, const RECT& rc, const WC
 enum {
     IDC_FC_CONFIG_EDIT = 60011,
     IDC_FC_CONFIG_LIST = 60012,
+    IDC_FC_SESSION_SEARCH = 60013,
+    IDC_FC_SESSION_LIST = 60014,
 };
 
 enum {
@@ -399,13 +403,12 @@ struct ConfigDialog {
     HWND hwndList = nullptr;
     Vec<FlashcardStudyDocInfo> docs;
     int selIdx = -1; // selected row (-1 = none)
-    RECT rcEditCaption{}, rcListCaption{};
+    RECT rcEditCaption{}, rcListCaption{}, rcListHeader{};
     RECT rcBrowse{};   // 📂 folder button
     RECT rcClearSel{}; // "Clear Selected" (2s hold)
     RECT rcClearAll{}; // "Clear All" (5s hold)
     RECT rcLink{};     // "Link to PDF..." (manual resync)
     RECT rcRecover{};  // "Restore Backup" (5s hold)
-    RECT rcImport{};   // "Import from PDF..." (merge cards into current book)
     RECT rcRecheck{};  // "Re-check" (re-validate sync markers)
     int holding = kFcConfigHoldNone;
     ULONGLONG holdStartTick = 0;
@@ -658,33 +661,6 @@ static void ConfigRecoverBackup(ConfigDialog* d) {
 // import the NEW flashcards from another copy of the SAME book (study
 // partner's PDF) into the CURRENT tab's document: creates the missing
 // highlight annotations, study history untouched (imported cards are "new")
-static void ConfigImportFromPdf(ConfigDialog* d) {
-    WindowTab* tab = d->win->CurrentTab();
-    if (!tab) {
-        logf("[fc] Import - ERROR: no current tab\n");
-        return;
-    }
-    DisplayModel* dm = tab->AsFixed();
-    EngineBase* engine = dm ? dm->GetEngine() : nullptr;
-    if (!engine || !EngineSupportsAnnotations(engine)) {
-        logf("[fc] Import - ERROR: current tab is not an annotation-capable PDF\n");
-        return;
-    }
-    TempStr src = nullptr;
-    if (!FcPickPdfFile(d->hwnd, src)) {
-        return; // cancelled — the picker is the confirmation
-    }
-    FlashcardEnsureTabCards(tab); // 'existing' must be loaded before the merge
-    int n = FlashcardImportFromPdf(AsEngineMupdf(engine), tab->flashcard.cards, CStrTemp(Str(src)));
-    if (n > 0) {
-        tab->flashcard.cards = FlashcardLoadFromDocument(AsEngineMupdf(engine));
-        FlashcardToolbarUpdateCount(d->win);
-        FlashcardToolbarUpdateState(d->win);
-        FlashcardSidebarPopulate(d->win);
-        MainWindowRerender(d->win);
-    }
-}
-
 static void ConfigLayout(ConfigDialog* d) {
     RECT rc;
     GetClientRect(d->hwnd, &rc);
@@ -712,6 +688,11 @@ static void ConfigLayout(ConfigDialog* d) {
     d->rcListCaption = {pad, y, w - pad - recheckW - gap, y + capDy};
     d->rcRecheck = {w - pad - recheckW, y, w - pad, y + capDy};
     y += capDy + DpiScale(d->hwnd, 4);
+    // column-header strip over the list (labels line up with the row columns,
+    // same anchors as ConfigDrawListItem) — s30-B
+    int hdrDy = DpiScale(d->hwnd, 20);
+    d->rcListHeader = {pad, y, w - pad, y + hdrDy};
+    y += hdrDy;
     // two bottom rows of buttons: clears on top, resync/recover below
     int yBtn2 = h - pad - btnH;      // bottom row
     int yBtn1 = yBtn2 - gap - btnH;  // row above
@@ -728,19 +709,17 @@ static void ConfigLayout(ConfigDialog* d) {
     }
     d->rcClearSel = {x0, yBtn1, x0 + selW, yBtn1 + btnH};
     d->rcClearAll = {x0 + selW + gap, yBtn1, x0 + selW + gap + allW, yBtn1 + btnH};
-    // row 2: "Link to PDF..." | "Restore Backup" | "Import from PDF..."
-    // (all instant or hold actions; the pickers confirm the file ones)
+    // row 2: "Link to PDF..." | "Restore Backup"
+    // (Import moved to its own toolbar button/window — s30-C)
     int linkW = DpiScale(d->hwnd, 165);
     int recW = DpiScale(d->hwnd, 165);
-    int impW = DpiScale(d->hwnd, 165);
-    int totalW2 = linkW + recW + impW + 2 * gap;
+    int totalW2 = linkW + recW + gap;
     int x1 = (w - totalW2) / 2;
     if (x1 < 0) {
         x1 = 0;
     }
     d->rcLink = {x1, yBtn2, x1 + linkW, yBtn2 + btnH};
     d->rcRecover = {x1 + linkW + gap, yBtn2, x1 + linkW + gap + recW, yBtn2 + btnH};
-    d->rcImport = {x1 + linkW + recW + 2 * gap, yBtn2, x1 + linkW + recW + 2 * gap + impW, yBtn2 + btnH};
 }
 
 // owner-drawn one history row: |PDF |cartões|due|última revisão| — name
@@ -815,8 +794,32 @@ static void ConfigPaint(ConfigDialog* d) {
     SetTextColor(hdc, ThemeWindowDarkerTextColor());
     DrawTextW(hdc, L"Study history folder (empty = app default):", -1, &d->rcEditCaption,
               DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-    DrawTextW(hdc, L"Documents in history   |   cards   |   due   |   last reviewed:", -1, &d->rcListCaption,
-              DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    DrawTextW(hdc, L"Documents in history:", -1, &d->rcListCaption, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+
+    // column header strip: labels at the SAME x anchors the rows use
+    // (pad 6 / gap 10 / cNumW 56 / cLastW 110 — keep in sync with
+    // ConfigDrawListItem) so each column is visually named and aligned
+    {
+        int pad = DpiScale(d->hwnd, 6);
+        int gap = DpiScale(d->hwnd, 10);
+        int cLastW = DpiScale(d->hwnd, 110);
+        int cNumW = DpiScale(d->hwnd, 56);
+        int dotD = DpiScale(d->hwnd, 8);
+        RECT rcH = d->rcListHeader;
+        SetTextColor(hdc, ThemeWindowDarkerTextColor());
+        RECT rcPdf = rcH;
+        rcPdf.left += pad + dotD + pad;
+        DrawTextW(hdc, L"PDF", -1, &rcPdf, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        RECT rcCards = {rcH.right - pad - cLastW - 2 * (gap + cNumW), rcH.top, rcH.right - pad - cLastW - 2 * gap - cNumW, rcH.bottom};
+        DrawTextW(hdc, L"Cards", -1, &rcCards, DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
+        RECT rcDue = {rcH.right - pad - cLastW - gap - cNumW, rcH.top, rcH.right - pad - cLastW - gap, rcH.bottom};
+        DrawTextW(hdc, L"Due", -1, &rcDue, DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
+        RECT rcLastH = {rcH.right - pad - cLastW, rcH.top, rcH.right - pad, rcH.bottom};
+        DrawTextW(hdc, L"Last reviewed", -1, &rcLastH, DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
+        // thin separator under the header
+        RECT rcSep = {rcH.left, rcH.bottom, rcH.right, rcH.bottom + DpiScale(d->hwnd, 1)};
+        FlashcardFillBg(hdc, rcSep, ThemeEdgeColor());
+    }
 
     // 📂 browse button: frame + emoji glyph (needs the emoji font)
     FlashcardDrawButton(hdc, d->rcBrowse, L"", false);
@@ -838,8 +841,6 @@ static void ConfigPaint(ConfigDialog* d) {
     // "Restore Backup": red drain, 5s hold (overwrites current history)
     FlashcardDrawHoldButton(d->hwnd, hdc, d->rcRecover, L"Restore Backup", d->holding == kFcConfigHoldRecover,
                             d->holding == kFcConfigHoldRecover ? d->progress : 1.0, RGB(229, 57, 53));
-    // "Import from PDF...": instant (the file picker is the confirmation)
-    FlashcardDrawButton(hdc, d->rcImport, L"Import from PDF...", false);
     // "Re-check": instant — re-validate every sync marker (e.g. a Drive
     // folder that came back online)
     FlashcardDrawButton(hdc, d->rcRecheck, L"Re-check", false);
@@ -933,8 +934,6 @@ static LRESULT CALLBACK ConfigWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
                 }
             } else if (PtInRect(&d->rcLink, pt)) {
                 ConfigResyncSelected(d);
-            } else if (PtInRect(&d->rcImport, pt)) {
-                ConfigImportFromPdf(d);
             } else if (PtInRect(&d->rcClearSel, pt)) {
                 if (d->selIdx < 0) {
                     logf("[fc] Config - clear selected ignored: no row selected\n");
@@ -1061,6 +1060,591 @@ void FlashcardConfigDialog(MainWindow* win) {
     FlashcardRunModalDialog(hwnd, hwndParent, dlg.hwndPathEdit);
     ConfigFreeDocs(dlg.docs); // owned strings must not outlive the pump
     gConfigDialog = nullptr;
+}
+
+// ---- Import window ---------------------------------------------------------
+// Toolbar "Import" button (s30-C). Compares the CURRENT document's flashcards
+// with a picked source PDF (another copy of the same book — e.g. a study
+// partner's file): a | document | cards | table for both, the dry-run
+// "New cards: N" diff count (same dedupe rule as the merge), and only then
+// creates the new cards on confirm. Study history is never touched —
+// imported cards are NEW cards. Every step is [fc]-logged.
+
+struct ImportDialog {
+    HWND hwnd = nullptr;
+    MainWindow* win = nullptr;
+    char* srcPath = nullptr; // owned (str::Dup): picked source PDF
+    int srcCards = -1;       // source card count (-1 = nothing picked yet)
+    int newCards = -1;       // dry-run diff count (-1 = not computed)
+    int importedTotal = 0;   // cards created during this dialog's lifetime
+    RECT rcPick{}, rcImportBtn{}, rcTable{}, rcNewLine{};
+};
+
+static ImportDialog* gImportDialog = nullptr;
+
+static void ImportLayout(ImportDialog* d) {
+    RECT rc;
+    GetClientRect(d->hwnd, &rc);
+    int w = rc.right;
+    int h = rc.bottom;
+    int pad = DpiScale(d->hwnd, 14);
+    int btnH = DpiScale(d->hwnd, 40);
+    int capDy = DpiScale(d->hwnd, 22);
+    d->rcTable = {pad, pad, w - pad, pad + DpiScale(d->hwnd, 108)};
+    d->rcNewLine = {pad, d->rcTable.bottom + DpiScale(d->hwnd, 10), w - pad,
+                    d->rcTable.bottom + DpiScale(d->hwnd, 10) + capDy};
+    int yBtn = h - pad - btnH;
+    int pickW = DpiScale(d->hwnd, 130);
+    int impW = DpiScale(d->hwnd, 240);
+    d->rcPick = {pad, yBtn, pad + pickW, yBtn + btnH};
+    d->rcImportBtn = {w - pad - impW, yBtn, w - pad, yBtn + btnH};
+}
+
+static void ImportPickSource(ImportDialog* d) {
+    TempStr src = nullptr;
+    if (!FcPickPdfFile(d->hwnd, src)) {
+        return; // cancelled
+    }
+    WindowTab* tab = d->win->CurrentTab();
+    if (!tab) {
+        return;
+    }
+    ::free(d->srcPath);
+    d->srcPath = str::Dup(src).s;
+    FlashcardEnsureTabCards(tab);
+    d->newCards = FlashcardImportDiffCount(tab->flashcard.cards, d->srcPath, &d->srcCards);
+    logf("[fc] Import window - source picked: '%s' (%d cards, %d new)\n", Str(d->srcPath), d->srcCards, d->newCards);
+    InvalidateRect(d->hwnd, nullptr, FALSE);
+}
+
+static void ImportDoImport(ImportDialog* d) {
+    if (!d->srcPath || d->newCards <= 0) {
+        logf("[fc] Import window - import ignored: no new cards (pick a source first)\n");
+        return;
+    }
+    WindowTab* tab = d->win->CurrentTab();
+    if (!tab) {
+        return;
+    }
+    DisplayModel* dm = tab->AsFixed();
+    EngineBase* engine = dm ? dm->GetEngine() : nullptr;
+    if (!engine || !EngineSupportsAnnotations(engine)) {
+        logf("[fc] Import window - ERROR: current tab is not an annotation-capable PDF\n");
+        return;
+    }
+    int n = FlashcardImportFromPdf(AsEngineMupdf(engine), tab->flashcard.cards, d->srcPath);
+    d->importedTotal += n;
+    logf("[fc] Import window - created %d new card(s)\n", n);
+    if (n > 0) {
+        tab->flashcard.cards = FlashcardLoadFromDocument(AsEngineMupdf(engine));
+        FlashcardToolbarUpdateCount(d->win);
+        FlashcardToolbarUpdateState(d->win);
+        FlashcardSidebarPopulate(d->win);
+        MainWindowRerender(d->win);
+    }
+    // re-run the dry-run so the table stays truthful (usually 0 after success)
+    d->newCards = FlashcardImportDiffCount(tab->flashcard.cards, d->srcPath, &d->srcCards);
+    InvalidateRect(d->hwnd, nullptr, FALSE);
+}
+
+static void ImportPaint(ImportDialog* d) {
+    PAINTSTRUCT ps;
+    HDC hdc = BeginPaint(d->hwnd, &ps);
+    RECT rc;
+    GetClientRect(d->hwnd, &rc);
+    FlashcardFillBg(hdc, rc, ThemeWindowBackgroundColor());
+    SetBkMode(hdc, TRANSPARENT);
+    HFONT font = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
+    HFONT oldFont = (HFONT)SelectObject(hdc, font);
+
+    WindowTab* tab = d->win->CurrentTab();
+    TempStr curName = tab ? FlashcardTabLogName(tab) : StrL("?");
+    int curCards = tab ? len(tab->flashcard.cards) : 0;
+
+    SetTextColor(hdc, ThemeWindowTextColor());
+    RECT rcCap = d->rcTable;
+    rcCap.bottom = rcCap.top + DpiScale(d->hwnd, 22);
+    DrawTextW(hdc, L"Compare flashcards with another copy of this document:", -1, &rcCap,
+              DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+
+    int colCardsW = DpiScale(d->hwnd, 64);
+    int rowDy = DpiScale(d->hwnd, 26);
+    int y = rcCap.bottom;
+    // header row: | Document | Cards |
+    SetTextColor(hdc, ThemeWindowDarkerTextColor());
+    RECT rcHdr = {d->rcTable.left, y, d->rcTable.right - colCardsW - DpiScale(d->hwnd, 10), y + rowDy};
+    DrawTextW(hdc, L"Document", -1, &rcHdr, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    RECT rcHdrC = {d->rcTable.right - colCardsW, y, d->rcTable.right, y + rowDy};
+    DrawTextW(hdc, L"Cards", -1, &rcHdrC, DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
+    y += rowDy;
+    RECT rcSep = {d->rcTable.left, y, d->rcTable.right, y + DpiScale(d->hwnd, 1)};
+    FlashcardFillBg(hdc, rcSep, ThemeEdgeColor());
+    y += DpiScale(d->hwnd, 5);
+    SetTextColor(hdc, ThemeWindowTextColor());
+    // row 1: current document
+    RECT rcN1 = {d->rcTable.left, y, d->rcTable.right - colCardsW - DpiScale(d->hwnd, 10), y + rowDy};
+    TempStr row1 = fmt("%s   (current)", Str(curName));
+    DrawTextW(hdc, CWStrTemp(ToWStrTemp(Str(row1))), -1, &rcN1,
+              DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+    RECT rcC1 = {d->rcTable.right - colCardsW, y, d->rcTable.right, y + rowDy};
+    TempStr c1 = fmt("%d", curCards);
+    DrawTextW(hdc, CWStrTemp(ToWStrTemp(Str(c1))), -1, &rcC1, DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
+    y += rowDy;
+    // row 2: picked source (or the empty-state hint)
+    if (d->srcPath) {
+        TempStr srcBase = path::GetBaseNameTemp(Str(d->srcPath));
+        RECT rcN2 = {d->rcTable.left, y, d->rcTable.right - colCardsW - DpiScale(d->hwnd, 10), y + rowDy};
+        DrawTextW(hdc, CWStrTemp(ToWStrTemp(Str(srcBase))), -1, &rcN2,
+                  DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+        RECT rcC2 = {d->rcTable.right - colCardsW, y, d->rcTable.right, y + rowDy};
+        TempStr c2 = fmt("%d", d->srcCards);
+        DrawTextW(hdc, CWStrTemp(ToWStrTemp(Str(c2))), -1, &rcC2, DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
+    } else {
+        RECT rcN2 = {d->rcTable.left, y, d->rcTable.right, y + rowDy};
+        SetTextColor(hdc, ThemeWindowDarkerTextColor());
+        DrawTextW(hdc, L"— pick a source PDF below —", -1, &rcN2, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    }
+    // "New cards: N" summary (+ total imported during this dialog)
+    SetTextColor(hdc, ThemeWindowTextColor());
+    TempStr nl;
+    if (d->srcPath && d->newCards >= 0) {
+        nl = fmt("New cards: %d", d->newCards);
+        if (d->importedTotal > 0) {
+            nl = fmt("New cards: %d   (imported %d so far)", d->newCards, d->importedTotal);
+        }
+    } else {
+        nl = fmt("New cards: —");
+    }
+    DrawTextW(hdc, CWStrTemp(ToWStrTemp(Str(nl))), -1, &d->rcNewLine, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+
+    FlashcardDrawButton(hdc, d->rcPick, L"Select PDF...", false);
+    FlashcardDrawButton(hdc, d->rcImportBtn, L"Import new cards to this document", false);
+    SelectObject(hdc, oldFont);
+    EndPaint(d->hwnd, &ps);
+}
+
+static LRESULT CALLBACK ImportWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    ImportDialog* d = gImportDialog;
+    if (msg == WM_CREATE) {
+        gImportDialog->hwnd = hwnd;
+        return 0;
+    }
+    if (!d || d->hwnd != hwnd) {
+        return DefWindowProcW(hwnd, msg, wp, lp);
+    }
+    switch (msg) {
+        case WM_SIZE:
+            ImportLayout(d);
+            InvalidateRect(hwnd, nullptr, TRUE);
+            return 0;
+        case WM_ERASEBKGND:
+            return 1;
+        case WM_PAINT:
+            ImportPaint(d);
+            return 0;
+        case WM_LBUTTONDOWN: {
+            POINT pt{(short)LOWORD(lp), (short)HIWORD(lp)};
+            if (PtInRect(&d->rcPick, pt)) {
+                ImportPickSource(d);
+            } else if (PtInRect(&d->rcImportBtn, pt)) {
+                ImportDoImport(d);
+            }
+            return 0;
+        }
+    }
+    return DefWindowProcW(hwnd, msg, wp, lp);
+}
+
+void FlashcardImportDialog(MainWindow* win) {
+    WindowTab* tab = win->CurrentTab();
+    if (!tab) {
+        logf("[fc] Import window - ERROR: no current tab\n");
+        return;
+    }
+    DisplayModel* dm = tab->AsFixed();
+    EngineBase* engine = dm ? dm->GetEngine() : nullptr;
+    if (!engine || !EngineSupportsAnnotations(engine)) {
+        logf("[fc] Import window - ERROR: current tab is not an annotation-capable PDF\n");
+        return;
+    }
+    FlashcardEnsureTabCards(tab);
+    FlashcardRegisterDialogClass(L"TUMATRA_FLASHCARD_IMPORT", ImportWndProc);
+    HWND hwndParent = win->hwndFrame;
+    ImportDialog dlg; // no {}: explicit-ctor members
+    dlg.win = win;
+    gImportDialog = &dlg;
+    HWND hwnd = FlashcardCreateDialogWindow(L"TUMATRA_FLASHCARD_IMPORT", L"Import Flashcards", 560, 360, hwndParent);
+    if (!hwnd) {
+        gImportDialog = nullptr;
+        return;
+    }
+    logf("[fc] Import window - opened\n");
+    ImportLayout(&dlg);
+    FlashcardRunModalDialog(hwnd, hwndParent, nullptr);
+    ::free(dlg.srcPath);
+    gImportDialog = nullptr;
+}
+
+// ---- Session window --------------------------------------------------------
+// Toolbar "Session" button (s30-D): search field + multi-select list of every
+// book in the study history — | PDF | cards | due | last reviewed | tags |
+// (tags column is a placeholder until a tags data model exists). "Open
+// Session" launches a NEW app window with all checked books (their saved
+// docPaths); books missing on disk are skipped + logged. Combined with the
+// global-session cross-doc study mode this becomes a study session over
+// several books. Every step is [fc]-logged.
+
+struct SessionDialog {
+    HWND hwnd = nullptr;
+    MainWindow* win = nullptr;
+    HWND hwndSearch = nullptr;
+    HWND hwndList = nullptr;
+    Vec<FlashcardStudyDocInfo> docs; // every book in the study dir
+    Vec<bool> checked;               // parallel to docs
+    Vec<int> displayIdx;             // listbox row -> docs index (search filter)
+    RECT rcOpen{};
+};
+
+static SessionDialog* gSessionDialog = nullptr;
+static WNDPROC gSessionSearchOrigProc = nullptr;
+
+// refill the listbox with the rows matching the search text (case-insensitive
+// substring on the book name; empty text = all rows)
+static void SessionApplyFilter(SessionDialog* d) {
+    d->displayIdx.Reset();
+    Str filter;
+    if (d->hwndSearch) {
+        filter = FcGetEditText(d->hwndSearch);
+    }
+    for (int i = 0; i < len(d->docs); i++) {
+        const FlashcardStudyDocInfo& info = d->docs[i];
+        Str name(info.docName && len(info.docName) > 0 ? info.docName : info.fileName);
+        if (len(filter) == 0 || str::ContainsI(name, filter)) {
+            d->displayIdx.Append(i);
+        }
+    }
+    if (d->hwndList) {
+        SendMessageW(d->hwndList, LB_RESETCONTENT, 0, 0);
+        for (int k = 0; k < len(d->displayIdx); k++) {
+            int idx = d->displayIdx[k];
+            Str name(d->docs[idx].docName && len(d->docs[idx].docName) > 0 ? d->docs[idx].docName
+                                                                           : d->docs[idx].fileName);
+            SendMessageW(d->hwndList, LB_ADDSTRING, 0, (LPARAM)CWStrTemp(ToWStrTemp(name)));
+            SendMessageW(d->hwndList, LB_SETITEMDATA, k, (LPARAM)idx);
+        }
+        SendMessageW(d->hwndList, LB_SETCURSEL, (WPARAM)-1, 0);
+    }
+    logf("[fc] Session - list rebuilt: %d row(s) match\n", len(d->displayIdx));
+}
+
+static void SessionReloadList(SessionDialog* d) {
+    ConfigFreeDocs(d->docs);
+    d->checked.Reset();
+    FlashcardStudyListDocs(d->docs);
+    for (int i = 0; i < len(d->docs); i++) {
+        d->checked.Append(false);
+    }
+    SessionApplyFilter(d);
+}
+
+static void SessionLayout(SessionDialog* d) {
+    RECT rc;
+    GetClientRect(d->hwnd, &rc);
+    int w = rc.right;
+    int h = rc.bottom;
+    int pad = DpiScale(d->hwnd, 14);
+    int capDy = DpiScale(d->hwnd, 22);
+    int editH = DpiScale(d->hwnd, 26);
+    int btnH = DpiScale(d->hwnd, 44);
+    int y = pad + capDy + DpiScale(d->hwnd, 4);
+    if (d->hwndSearch) {
+        MoveWindow(d->hwndSearch, pad, y, w - 2 * pad, editH, TRUE);
+    }
+    y += editH + DpiScale(d->hwnd, 10);
+    int yBtn = h - pad - btnH;
+    if (d->hwndList) {
+        MoveWindow(d->hwndList, pad, y, w - 2 * pad, yBtn - DpiScale(d->hwnd, 10) - y, TRUE);
+    }
+    int openW = DpiScale(d->hwnd, 200);
+    int x0 = (w - openW) / 2;
+    if (x0 < 0) {
+        x0 = 0;
+    }
+    d->rcOpen = {x0, yBtn, x0 + openW, yBtn + btnH};
+}
+
+// one row: [checkbox] (dot) name | cards | due | last reviewed | tags
+static void SessionDrawListItem(SessionDialog* d, const DRAWITEMSTRUCT* dis) {
+    int idx = (int)dis->itemData;
+    if (idx < 0 || idx >= len(d->docs)) {
+        return;
+    }
+    const FlashcardStudyDocInfo& info = d->docs[idx];
+    HDC hdc = dis->hDC;
+    RECT rc = dis->rcItem;
+    FlashcardFillBg(hdc, rc, ThemeWindowBackgroundColor());
+    HFONT font = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
+    HFONT oldFont = (HFONT)SelectObject(hdc, font);
+    SetBkMode(hdc, TRANSPARENT);
+    SetTextColor(hdc, ThemeWindowTextColor());
+    int pad = DpiScale(d->hwnd, 6);
+    int gap = DpiScale(d->hwnd, 10);
+    // checkbox (blue = checked, Filter-window visual language)
+    int boxD = DpiScale(d->hwnd, 13);
+    RECT rcBox = {rc.left + pad, (rc.top + rc.bottom - boxD) / 2, rc.left + pad + boxD,
+                  (rc.top + rc.bottom - boxD) / 2 + boxD};
+    FlashcardFillBg(hdc, rcBox, d->checked[idx] ? RGB(66, 133, 244) : ThemeWindowControlBackgroundColor());
+    // sync dot (green/red/grey, same as the Settings window)
+    int dotD = DpiScale(d->hwnd, 8);
+    int dotX = rcBox.right + pad;
+    {
+        int dotY = (rc.top + rc.bottom - dotD) / 2;
+        COLORREF col = RGB(158, 158, 158);
+        if (info.syncStatus == 1) {
+            col = RGB(67, 160, 71);
+        } else if (info.syncStatus == 2) {
+            col = RGB(229, 57, 53);
+        }
+        HBRUSH br = CreateSolidBrush(col);
+        HGDIOBJ oldBr = SelectObject(hdc, br);
+        HGDIOBJ oldPen = SelectObject(hdc, GetStockObject(NULL_PEN));
+        Ellipse(hdc, dotX, dotY, dotX + dotD, dotY + dotD);
+        SelectObject(hdc, oldPen);
+        SelectObject(hdc, oldBr);
+        DeleteObject(br);
+    }
+    // columns: tags | last reviewed | due | cards (right-aligned), name left
+    int cTagsW = DpiScale(d->hwnd, 56);
+    int cLastW = DpiScale(d->hwnd, 110);
+    int cNumW = DpiScale(d->hwnd, 56);
+    auto drawRight = [&](int xRight, TempStr txt) {
+        RECT rcT = {xRight - cNumW, rc.top, xRight, rc.bottom};
+        DrawTextW(hdc, CWStrTemp(ToWStrTemp(Str(txt))), -1, &rcT, DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
+    };
+    int xRightBase = rc.right - pad - cTagsW;
+    // tags column (placeholder — no data model yet)
+    {
+        RECT rcT = {xRightBase, rc.top, rc.right - pad, rc.bottom};
+        SetTextColor(hdc, ThemeWindowDarkerTextColor());
+        DrawTextW(hdc, L"—", -1, &rcT, DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
+        SetTextColor(hdc, ThemeWindowTextColor());
+    }
+    RECT rcDate = {xRightBase - gap - cLastW, rc.top, xRightBase - gap, rc.bottom};
+    DrawTextW(hdc, CWStrTemp(ToWStrTemp(Str(ConfigFormatDateTemp(info.lastReviewedAt)))), -1, &rcDate,
+              DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
+    drawRight(xRightBase - gap - cLastW - gap - cNumW, fmt("%d", info.dueCount));
+    drawRight(xRightBase - gap - cLastW - 2 * (gap + cNumW), fmt("%d", info.totalCards));
+    RECT rcName = rc;
+    rcName.left = dotX + dotD + pad;
+    rcName.right = xRightBase - gap - cLastW - 2 * (gap + cNumW) - pad;
+    Str name(info.docName && len(info.docName) > 0 ? info.docName : info.fileName);
+    DrawTextW(hdc, CWStrTemp(ToWStrTemp(name)), -1, &rcName,
+              DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
+    SelectObject(hdc, oldFont);
+}
+
+static void SessionToggleItem(SessionDialog* d, int row) {
+    int idx = (int)SendMessageW(d->hwndList, LB_GETITEMDATA, row, 0);
+    if (idx < 0 || idx >= len(d->docs)) {
+        return;
+    }
+    d->checked[idx] = !d->checked[idx];
+    int nChecked = 0;
+    for (int i = 0; i < len(d->checked); i++) {
+        if (d->checked[i]) {
+            nChecked++;
+        }
+    }
+    logf("[fc] Session - %s book %d ('%s'), %d checked\n", d->checked[idx] ? StrL("checked") : StrL("unchecked"), idx,
+         Str(d->docs[idx].docName ? d->docs[idx].docName : "?"), nChecked);
+    // clear the selection so clicking the SAME row again still fires
+    SendMessageW(d->hwndList, LB_SETCURSEL, (WPARAM)-1, 0);
+    InvalidateRect(d->hwnd, nullptr, FALSE);
+}
+
+// launch a NEW app window with every CHECKED book that still exists on disk
+static void SessionOpenSelected(SessionDialog* d) {
+    int n = 0;
+    int skipped = 0;
+    str::Builder cmd;
+    for (int i = 0; i < len(d->docs); i++) {
+        if (!d->checked[i]) {
+            continue;
+        }
+        FlashcardStudyDocInfo& info = d->docs[i];
+        if (!info.docPath || !file::Exists(Str(info.docPath))) {
+            skipped++;
+            logf("[fc] Session - skipped '%s': PDF missing at '%s'\n",
+                 Str(info.docName ? info.docName : "?"), Str(info.docPath ? info.docPath : "(none)"));
+            continue;
+        }
+        cmd.AppendChar('"');
+        cmd.Append(Str(info.docPath));
+        cmd.AppendChar('"');
+        cmd.AppendChar(' ');
+        n++;
+    }
+    if (n == 0) {
+        logf("[fc] Session - nothing to open (%d checked book(s) missing on disk)\n", skipped);
+        return;
+    }
+    WCHAR exeW[MAX_PATH] = {};
+    GetModuleFileNameW(nullptr, exeW, dimof(exeW));
+    str::Builder full;
+    full.AppendChar('"');
+    full.Append(Str(ToUtf8Temp(WStr(exeW))));
+    full.AppendChar('"');
+    full.AppendChar(' ');
+    Str cmdTail = cmd.TakeStr();
+    full.Append(cmdTail);
+    Str cmdline = full.TakeStr();
+    STARTUPINFOW si = {};
+    si.cb = sizeof(si);
+    PROCESS_INFORMATION pi = {};
+    WCHAR* cmdW = CWStrTemp(ToWStrTemp(cmdline));
+    BOOL ok = CreateProcessW(nullptr, cmdW, nullptr, nullptr, FALSE, 0, nullptr, nullptr, &si, &pi);
+    if (ok) {
+        CloseHandle(pi.hProcess);
+        CloseHandle(pi.hThread);
+    }
+    logf("[fc] Session - launched new window with %d book(s) (skipped %d missing) ok=%d\n", n, skipped,
+         ok ? 1 : 0);
+}
+
+static void SessionPaint(SessionDialog* d) {
+    PAINTSTRUCT ps;
+    HDC hdc = BeginPaint(d->hwnd, &ps);
+    RECT rc;
+    GetClientRect(d->hwnd, &rc);
+    FlashcardFillBg(hdc, rc, ThemeWindowBackgroundColor());
+    SetBkMode(hdc, TRANSPARENT);
+    HFONT font = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
+    HFONT oldFont = (HFONT)SelectObject(hdc, font);
+    SetTextColor(hdc, ThemeWindowDarkerTextColor());
+    int pad = DpiScale(d->hwnd, 14);
+    int capDy = DpiScale(d->hwnd, 22);
+    RECT rcCap = {pad, pad, rc.right - pad, pad + capDy};
+    DrawTextW(hdc, L"Search your studied books:", -1, &rcCap, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    FlashcardDrawButton(hdc, d->rcOpen, L"Open Session", false);
+    SelectObject(hdc, oldFont);
+    EndPaint(d->hwnd, &ps);
+}
+
+static LRESULT CALLBACK SessionSearchProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    if (msg == WM_KEYDOWN && wp == VK_ESCAPE) {
+        SendMessageW(GetParent(hwnd), WM_CLOSE, 0, 0);
+        return 0;
+    }
+    return CallWindowProc(gSessionSearchOrigProc, hwnd, msg, wp, lp);
+}
+
+static LRESULT CALLBACK SessionWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    SessionDialog* d = gSessionDialog;
+    if (msg == WM_CREATE) {
+        gSessionDialog->hwnd = hwnd;
+        return 0;
+    }
+    if (!d || d->hwnd != hwnd) {
+        return DefWindowProcW(hwnd, msg, wp, lp);
+    }
+    switch (msg) {
+        case WM_SIZE:
+            SessionLayout(d);
+            InvalidateRect(hwnd, nullptr, TRUE);
+            return 0;
+        case WM_ERASEBKGND:
+            return 1;
+        case WM_PAINT:
+            SessionPaint(d);
+            return 0;
+        case WM_MEASUREITEM: {
+            MEASUREITEMSTRUCT* mis = (MEASUREITEMSTRUCT*)lp;
+            if (mis->CtlID == IDC_FC_SESSION_LIST) {
+                mis->itemHeight = DpiScale(hwnd, 24);
+                return TRUE;
+            }
+            break;
+        }
+        case WM_DRAWITEM: {
+            DRAWITEMSTRUCT* dis = (DRAWITEMSTRUCT*)lp;
+            if (dis->CtlID == IDC_FC_SESSION_LIST) {
+                SessionDrawListItem(d, dis);
+                return TRUE;
+            }
+            break;
+        }
+        case WM_CTLCOLOREDIT:
+        case WM_CTLCOLORLISTBOX: {
+            // theme the search EDIT / book LISTBOX interiors (dark mode)
+            HDC hdc = (HDC)wp;
+            SetBkColor(hdc, ThemeWindowBackgroundColor());
+            SetTextColor(hdc, ThemeWindowTextColor());
+            return (LRESULT)FlashcardCtlColorBrush();
+        }
+        case WM_COMMAND: {
+            int id = LOWORD(wp);
+            int code = HIWORD(wp);
+            if (id == IDC_FC_SESSION_SEARCH && code == EN_CHANGE) {
+                SessionApplyFilter(d);
+                return 0;
+            }
+            if (id == IDC_FC_SESSION_LIST && code == LBN_SELCHANGE) {
+                int sel = (int)SendMessageW(d->hwndList, LB_GETCURSEL, 0, 0);
+                if (sel >= 0) {
+                    SessionToggleItem(d, sel);
+                }
+                return 0;
+            }
+            break;
+        }
+        case WM_LBUTTONDOWN: {
+            POINT pt{(short)LOWORD(lp), (short)HIWORD(lp)};
+            if (PtInRect(&d->rcOpen, pt)) {
+                SessionOpenSelected(d);
+            }
+            return 0;
+        }
+    }
+    return DefWindowProcW(hwnd, msg, wp, lp);
+}
+
+void FlashcardSessionDialog(MainWindow* win) {
+    FlashcardRegisterDialogClass(L"TUMATRA_FLASHCARD_SESSION", SessionWndProc);
+    HWND hwndParent = win->hwndFrame;
+    SessionDialog dlg; // no {}: Vec's default ctor is explicit
+    dlg.win = win;
+    gSessionDialog = &dlg;
+    HWND hwnd = FlashcardCreateDialogWindow(L"TUMATRA_FLASHCARD_SESSION", L"Study Session", 640, 520, hwndParent);
+    if (!hwnd) {
+        gSessionDialog = nullptr;
+        return;
+    }
+    logf("[fc] Session window - opened\n");
+
+    // child controls: search EDIT + book LISTBOX
+    HINSTANCE hinst = GetModuleHandle(nullptr);
+    HFONT font = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
+    dlg.hwndSearch =
+        CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", nullptr, WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL, 0, 0,
+                        0, 0, hwnd, (HMENU)IDC_FC_SESSION_SEARCH, hinst, nullptr);
+    dlg.hwndList = CreateWindowExW(0, L"LISTBOX", nullptr,
+                                   WS_CHILD | WS_VISIBLE | WS_VSCROLL | WS_BORDER | LBS_NOTIFY | LBS_OWNERDRAWFIXED |
+                                       LBS_NOINTEGRALHEIGHT | WS_TABSTOP,
+                                   0, 0, 0, 0, hwnd, (HMENU)IDC_FC_SESSION_LIST, hinst, nullptr);
+    SendMessageW(dlg.hwndSearch, WM_SETFONT, (WPARAM)font, TRUE);
+    SendMessageW(dlg.hwndList, WM_SETFONT, (WPARAM)font, TRUE);
+
+    // subclass the search edit: Esc closes (typing filters via EN_CHANGE)
+    if (nullptr == gSessionSearchOrigProc) {
+        gSessionSearchOrigProc = (WNDPROC)GetWindowLongPtr(dlg.hwndSearch, GWLP_WNDPROC);
+    }
+    SetWindowLongPtr(dlg.hwndSearch, GWLP_WNDPROC, (LONG_PTR)SessionSearchProc);
+
+    SessionReloadList(&dlg);
+    SessionLayout(&dlg);
+    FlashcardRunModalDialog(hwnd, hwndParent, dlg.hwndSearch);
+    ConfigFreeDocs(dlg.docs);
+    gSessionDialog = nullptr;
 }
 
 // ---- Study Order options dialog -------------------------------------------
@@ -1604,6 +2188,15 @@ static LRESULT CALLBACK FilterOptionsWndProc(HWND hwnd, UINT msg, WPARAM wp, LPA
             return 0;
         case WM_ERASEBKGND:
             return 1; // painted in WM_PAINT
+        case WM_CTLCOLOREDIT:
+        case WM_CTLCOLORLISTBOX: {
+            // theme the expression EDIT / bookmark LISTBOX interiors (dark
+            // mode support) — same answer the Settings window gives (s30-A)
+            HDC hdc = (HDC)wp;
+            SetBkColor(hdc, ThemeWindowBackgroundColor());
+            SetTextColor(hdc, ThemeWindowTextColor());
+            return (LRESULT)FlashcardCtlColorBrush();
+        }
         case WM_PAINT:
             FilterOptionsPaint(d);
             return 0;

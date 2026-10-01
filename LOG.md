@@ -1,5 +1,26 @@
 # TumatraPDF — Development Log
 
+## 2026-10-01 (s30) — Import + Session windows, Settings rename/header, Filter dark-theme (BUILD OK 0/0)
+
+### Added
+- **Import window (toolbar Import button, s30-C rework)**: `FlashcardImportDialog` (FlashcardToolbar.cpp, class TUMATRA_FLASHCARD_IMPORT, "Import Flashcards" 560×360) — comparison table `| Document | Cards |` (row 1 = current doc via FlashcardTabLogName + "(current)" + its card count; row 2 = picked source base name + its count), summary line `New cards: N (+ imported N so far)`, buttons `[Select PDF...]` (FcPickPdfFile inside the window) + `[Import new cards to this document]`. Dry-run via NEW `FlashcardImportDiffCount(existing, srcPath, int* srcCountOut)` (Flashcard.cpp): opens source (CreateEngineMupdfFromFile, released with `srcBase->Release()`), reads its cards, dedupes against ours (same page + bounds within 1pt, nearF lambda — `near` is a windows.h macro), returns the diff count WITHOUT creating; -1 on open failure. Confirm = existing `FlashcardImportFromPdf` creates the annots (author TumatraPDF-Flashcard, dedupe identical), then cards reload + count/state/sidebar/rerender + diff re-runs. Settings "Import from PDF..." REMOVED (superseded — window owns the flow now).
+- **Session window (toolbar Session button, user item 8, s30-D)**: `FlashcardSessionDialog` (class TUMATRA_FLASHCARD_SESSION, "Study Session" 640×520) — search EDIT on top (live EN_CHANGE filter via `str::ContainsI` on docName||fileName), multi-select owner-drawn listbox `|PDF | cards | due | last reviewed | tags —|` with checkbox rows (blue RGB(66,133,244) when checked) + sync dots (s27 colors), data = `FlashcardStudyListDocs` (docPath + syncStatus from s27); **Open Session** button → `SessionOpenSelected`: str::Builder with quoted selected docPaths (file::Exists-guarded) + own exe (GetModuleFileNameW) → `CreateProcessW` launches a NEW app window with all selected books; works with Filter/global-session study in the new window. Tags column shows em dash (data model TBD). Esc in search closes; window themed (WM_CTLCOLOREDIT/LISTBOX).
+- New commands (gen-commands.ts + regen): `CmdFlashcardImport` (512, "Flashcard Import Window") + `CmdFlashcardSession` (513, "Flashcard Session Window"); both added to removeIfChm + removeIfMarkdown (CommandAvailability.cpp). Toolbar array: ...Filter / Import / Session / Settings.
+
+### Changed
+- **Filter window dark theme (s30-A user bug)**: FilterOptionsWndProc now answers WM_CTLCOLOREDIT + WM_CTLCOLORLISTBOX (ThemeWindowBackgroundColor/TextColor + cached FlashcardCtlColorBrush) — EDIT expression field + bookmark listbox no longer paint white in dark themes.
+- **Settings polish (s30-B)**: flashcard toolbar button renamed Config → **Settings** (`_TRN("Settings")`; gen-commands description → "Flashcard Settings Window"); NEW column-header strip over the document list (20px row drawn in ConfigPaint with the SAME anchors as ConfigDrawListItem — PDF left, Cards/Due right-aligned 56px, Last reviewed 110px + 1px ThemeEdgeColor separator) — rows and header now line up per column; caption shortened to "Documents in history:" (concept per user: which books were studied on this PC + their flashcard stats, per-book/total reset).
+
+### Verified
+- Build debug x64 0 warnings / 0 errors (auto clang-format step ran). No new automated test (file pickers not automatable); window open/close smoke via existing flows still green (config-iso + cloze suites unchanged and passing pre-batch).
+
+### Notes / traps
+- `str::Dup` returns Str → assign with `.s` (C2440 on char*).
+- MSVC rejects compound literals (`&(RECT){...}`) — use a named local.
+- `str::ContainsI`, `FcGetEditText`, `path::GetBaseNameTemp` all already existed (Filter dialog / s22 helpers) — reused, no new utils.
+- Sync-dot + checkbox + right-aligned columns share one drawItem function; anchors derived from the RIGHT edge (xRightBase = right - pad - cTagsW) so resizing keeps columns pinned.
+- Docs synced same day; commit PENDING user order (tree also carries leftover s29 files KeyboardHelp/TrimConfigDialog + Shortcuts.md deletion).
+
 ## 2026-10-01 (s29b) — Auto-update E2E green; asset = TumatraPDF-portable-win64.exe (v1.0.7 LIVE)
 
 ### Fixed (E2E: tests/ad-hoc-update.ts — check → download → dialog → swap → relaunch, PASSES in 16.8s)

@@ -231,6 +231,62 @@ int FlashcardImportFromPdf(EngineMupdf* dstEngine, Vec<Flashcard>& existing, con
     return imported;
 }
 
+// Dry-run half of FlashcardImportFromPdf: counts how many of the source's
+// flashcard-tagged highlights we DON'T have yet (same dedupe rule: same page
+// + bounds within 1pt) without creating anything. *srcCountOut gets the
+// source's total card count. Used by the Import window's comparison table.
+int FlashcardImportDiffCount(Vec<Flashcard>& existing, const char* srcPath, int* srcCountOut) {
+    if (srcCountOut) {
+        *srcCountOut = 0;
+    }
+    if (!srcPath) {
+        return 0;
+    }
+    EngineBase* srcBase = CreateEngineMupdfFromFile(Str(srcPath), FileType::PDF, 0, nullptr);
+    if (!srcBase) {
+        logf("[fc] Import diff - ERROR: cannot open '%s'\n", Str(srcPath));
+        return -1;
+    }
+    EngineMupdf* srcEngine = AsEngineMupdf(srcBase);
+    if (!srcEngine || !srcEngine->pdfdoc) {
+        logf("[fc] Import diff - ERROR: '%s' is not a PDF (engine mismatch)\n", Str(srcPath));
+        srcBase->Release();
+        return -1;
+    }
+    Vec<Flashcard> theirs = FlashcardLoadFromDocument(srcEngine);
+    int srcTotal = len(theirs);
+    if (srcCountOut) {
+        *srcCountOut = srcTotal;
+    }
+    logf("[fc] Import diff - source '%s' has %d card(s)\n", Str(srcPath), srcTotal);
+    auto nearF = [](float a, float b) {
+        float d = a - b;
+        return d < 0 ? -d : d;
+    };
+    int diff = 0;
+    for (int i = 0; i < srcTotal; i++) {
+        Flashcard& tc = theirs[i];
+        bool dup = false;
+        for (int j = 0; j < len(existing); j++) {
+            const Flashcard& ec = existing[j];
+            if (ec.pageNo != tc.pageNo) {
+                continue;
+            }
+            if (nearF(ec.bounds.x, tc.bounds.x) < 1.0f && nearF(ec.bounds.y, tc.bounds.y) < 1.0f &&
+                nearF(ec.bounds.dx, tc.bounds.dx) < 1.0f && nearF(ec.bounds.dy, tc.bounds.dy) < 1.0f) {
+                dup = true;
+                break;
+            }
+        }
+        if (!dup) {
+            diff++;
+        }
+    }
+    srcBase->Release();
+    logf("[fc] Import diff - %d new card(s) vs current document\n", diff);
+    return diff;
+}
+
 // Directory where the study-history JSONs are stored: the user-configured
 // flashcardSettings.studyDir when set (e.g. a Google Drive folder so the
 // histories are backed up / synced between machines), else the per-exe

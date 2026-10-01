@@ -320,8 +320,10 @@ enum {
     CmdFlashcardNext = 509,
     CmdFlashcardOrderOptions = 510,
     CmdFlashcardConfig = 511,
-    CmdViewportCropV2Toggle = 512,
-    CmdNone = 513,
+    CmdFlashcardImport = 512,
+    CmdFlashcardSession = 513,
+    CmdViewportCropV2Toggle = 514,
+    CmdNone = 515,
 
     /* range for file history */
     CmdFileHistoryFirst,
