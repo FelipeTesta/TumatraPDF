@@ -19,6 +19,7 @@
 #include "Theme.h"
 #include "FileHistory.h"
 #include "AppSettings.h"
+#include "Toolbar.h"
 
 static void OnPaintAbout(MainWindow* win) {
     auto t = TimeGet();
@@ -172,6 +173,16 @@ LRESULT WndProcCanvasAbout(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, LPAR
                     }
                     return 0;
                 }
+                case VK_ESCAPE:
+                    // close the home overlay (per-window overlay mode, no tab)
+                    if (win->showHomeOverlay) {
+                        win->showHomeOverlay = false;
+                        InvalidateRect(win->hwndCanvas, nullptr, TRUE);
+                        SetToolbarButtonCheckedState(win, CmdOpenHome, false);
+                        logf("[home] overlay %s\n", StrL("OFF"));
+                        return 0;
+                    }
+                    break;
             }
             break;
 

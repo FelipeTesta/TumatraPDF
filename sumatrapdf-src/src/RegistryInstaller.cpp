@@ -139,8 +139,7 @@ bool WriteUninstallerRegistryInfo(HKEY hkey, bool allUsers, Str installDir) {
     TempStr uninstallCmdLineSilent = str::JoinTemp(uninstallCmdLine, StrL(" -silent"));
     ok &= LoggedWriteRegStr(hkey, regPathUninst, "QuietUninstallString", uninstallCmdLineSilent);
     ok &= LoggedWriteRegStr(hkey, regPathUninst, "URLInfoAbout", "https://github.com/FelipeTesta/TumatraPDF");
-    ok &= LoggedWriteRegStr(hkey, regPathUninst, "URLUpdateInfo",
-                            "https://github.com/FelipeTesta/TumatraPDF/releases");
+    ok &= LoggedWriteRegStr(hkey, regPathUninst, "URLUpdateInfo", "https://github.com/FelipeTesta/TumatraPDF/releases");
     if (!ok) {
         log("WriteUninstallerRegistryInfo() failed\n");
     }
@@ -155,9 +154,9 @@ static bool RegisterForDefaultPrograms(HKEY hkey, Str installedExePath) {
     // L"SOFTWARE\\SumatraPDF\\Capabilities"
     TempStr appCapabilityPath = str::JoinTemp(StrL("SOFTWARE\\"), kAppName, StrL("\\Capabilities"));
 
-    Str desc = "SumatraPDF is a PDF reader.";
+    Str desc = kAppName " is a PDF reader.";
     ok &= LoggedWriteRegStr(hkey, appCapabilityPath, "ApplicationDescription", desc);
-    Str appLongName = "SumatraPDF Reader";
+    Str appLongName = kAppName " Reader";
     ok &= LoggedWriteRegStr(hkey, appCapabilityPath, "ApplicationName", appLongName);
     // icon shown next to the app in Settings > Default Apps
     TempStr appIcon = str::JoinTemp(StrL("\""), installedExePath, StrL("\",0"));

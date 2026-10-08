@@ -56,6 +56,10 @@
 #include "EbookDoc.h"
 #include "MobiDoc.h"
 #include "DisplayModel.h"
+extern "C" {
+#include <mupdf/pdf.h>
+}
+#include "EngineMupdf.h"
 #include "FileHistory.h"
 #include "PdfSync.h"
 #include "RenderCache.h"
@@ -2077,15 +2081,9 @@ static void UpdateUiForCurrentTab(MainWindow* win) {
     HwndSetWindowStyle(win->hwndPageEdit, ES_NUMBER, onlyNumbers);
 }
 
-static bool showTocByDefault(Str path) {
-    if (!gGlobalPrefs->showToc) {
-        return false;
-    }
-    // we don't want to show toc by default for comic book files
-    FileType kind = GuessFileTypeFromName(path);
-    bool showByDefault = !IsEngineCbxSupportedFileType(kind);
-    return showByDefault;
-}
+// Books always open with the sidebar (bookmarks / favorites) hidden; the user
+// toggles it manually (F12). The old showTocByDefault() logic was removed by
+// user request (2026-10-08).
 
 // Document is represented as DocController. Replace current DocController (if any) with ctrl
 // in current tab.
@@ -2219,7 +2217,6 @@ static void ReplaceDocumentInCurrentTab(LoadArgs* args, DocController* ctrl, Fil
     ScrollState ss(1, -1, -1);
     int rotation = 0;
     Str path = args->FilePath();
-    bool showToc = showTocByDefault(path);
     bool showAsFullScreen = WIN_STATE_FULLSCREEN == gGlobalPrefs->windowState;
     int showType = SW_NORMAL;
     if (gGlobalPrefs->windowState == WIN_STATE_MAXIMIZED || showAsFullScreen) {
@@ -2236,10 +2233,6 @@ static void ReplaceDocumentInCurrentTab(LoadArgs* args, DocController* ctrl, Fil
             showType = SW_MAXIMIZE;
         } else if (fs->windowState == WIN_STATE_MINIMIZED) {
             showType = SW_MINIMIZE;
-        }
-        showToc = fs->showToc;
-        if (win->ctrl && win->presentation) {
-            showToc = tab->showTocPresentation;
         }
         ParsedColor* bgParsed = GetPrefsColor(fs->bgCol);
         if (bgParsed->parsedOk) {
@@ -2483,7 +2476,9 @@ static void ReplaceDocumentInCurrentTab(LoadArgs* args, DocController* ctrl, Fil
     if (!IsMainWindowValid(win) || win->isBeingClosed) {
         return;
     }
-    SetSidebarVisibility(win, showToc, gGlobalPrefs->showFavorites);
+    // Sidebar always starts hidden on open (user request): TOC restore from
+    // FileState/TabState and the persisted global favorites pref are ignored.
+    SetSidebarVisibility(win, false, false);
     // restore scroll state after the canvas size has been restored
     if ((args->showWin || ss.page != 1) && win->AsFixed()) {
         DisplayModel* dm = win->AsFixed();
@@ -4116,6 +4111,9 @@ void LoadModelIntoTab(WindowTab* tab) {
     // Flashcard mode: refresh per-tab state (cards/studyDoc are per-document;
     // without this the previous book's masks would paint over the new doc)
     FlashcardOnTabChanged(win);
+    if (win->showHomeOverlay) {
+        win->showHomeOverlay = false;
+    }
 
     // Restore arch tools scale calibration from FileState for the new tab (tab-switch case)
     if (gGlobalPrefs->archToolsEnabled) {
@@ -8512,6 +8510,9 @@ void SetSidebarVisibility(MainWindow* win, bool tocVisible, bool showFavorites) 
 
     win->uiState.tocVisible = tocVisible;
     win->uiState.favVisible = showFavorites;
+    // keep the toolbar Bookmarks toggle in sync (single point for all sidebar
+    // changes: F12, open, tab switch, session restore)
+    SetToolbarButtonCheckedState(win, CmdToggleBookmarks, tocVisible);
     ScheduleUiUpdate(win, kUiRelayout | kUiNoToolbars | kUiSidebarDirty);
 }
 
@@ -9411,7 +9412,8 @@ bool MaybeLaunchDocumentation(Str url) {
     Str docsPrefix = StrL("https://www.sumatrapdfreader.org/docs");
     if (str::TrimPrefix(url, docsPrefix)) {
         // falls through to LaunchDocumentation below
-    } else if (!str::TrimPrefix(url, StrL("https://github.com/FelipeTesta/TumatraPDF/blob/main/sumatrapdf-src/docs/md"))) {
+    } else if (!str::TrimPrefix(url,
+                                StrL("https://github.com/FelipeTesta/TumatraPDF/blob/main/sumatrapdf-src/docs/md"))) {
         return false;
     }
     // strip repo-mode ".md" suffix so LaunchDocumentation gets a docURI
@@ -9711,6 +9713,213 @@ static void HandleCmdReloadDocument(MainWindow* win) {
 
 static void HandleCmdCreateShortcutToFile(MainWindow* win) {
     CreateLnkShortcut(win);
+}
+
+// --- TUMATRA: replace / externally-edit embedded PDF images (right-click Image menu) ---
+
+static constexpr int kPaintWatchTimerId = 41;
+static constexpr int kPaintWatchDelayMs = 1200;
+
+// watch state for "Edit With Paint": one in-flight external edit at a time
+static MainWindow* gPaintWatchWin = nullptr;
+static EngineMupdf* gPaintWatchEngine = nullptr;
+static int gPaintWatchPageNo = -1;
+static int gPaintWatchImageIdx = -1;
+static WCHAR gPaintWatchTmpPath[MAX_PATH]{};
+static FILETIME gPaintWatchMtime{};
+
+static void StopPaintImageWatch() {
+    if (gPaintWatchWin) {
+        KillTimer(gPaintWatchWin->hwndFrame, kPaintWatchTimerId);
+    }
+    gPaintWatchWin = nullptr;
+    gPaintWatchEngine = nullptr;
+    gPaintWatchPageNo = -1;
+    gPaintWatchImageIdx = -1;
+    gPaintWatchTmpPath[0] = 0;
+}
+
+// very small GDI+ PNG writer (lookup the png encoder clsid once per call)
+static bool SaveHbitmapAsPng(HBITMAP hbmp, WStr destPath) {
+    UINT num = 0;
+    UINT size = 0;
+    Gdiplus::GetImageEncodersSize(&num, &size);
+    if (size == 0) {
+        return false;
+    }
+    char* buf = (char*)malloc(size);
+    Gdiplus::ImageCodecInfo* codecs = (Gdiplus::ImageCodecInfo*)buf;
+    Gdiplus::GetImageEncoders(num, size, codecs);
+    CLSID pngClsid{};
+    bool found = false;
+    for (UINT i = 0; i < num; i++) {
+        if (0 == lstrcmpW(codecs[i].MimeType, L"image/png")) {
+            pngClsid = codecs[i].Clsid;
+            found = true;
+            break;
+        }
+    }
+    free(buf);
+    if (!found) {
+        return false;
+    }
+    Gdiplus::Bitmap bmp(hbmp, nullptr);
+    Gdiplus::Status st = bmp.Save(destPath.s, &pngClsid, nullptr);
+    return st == Gdiplus::Ok;
+}
+
+// modern open-file picker restricted to image formats (unicode-safe)
+static Str PickImageFileDup(HWND owner) {
+    Str res{};
+    static COMDLG_FILTERSPEC kImgFilters[] = {{L"Images", L"*.png;*.jpg;*.jpeg;*.bmp;*.gif;*.webp"},
+                                              {L"All files", L"*.*"}};
+    IFileOpenDialog* dlg = nullptr;
+    HRESULT hr = CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_ALL, IID_IFileOpenDialog, (void**)&dlg);
+    if (FAILED(hr) || !dlg) {
+        return res;
+    }
+    dlg->SetFileTypes(2, kImgFilters);
+    dlg->SetTitle(L"Select an image to insert into the PDF");
+    DWORD flags = 0;
+    dlg->GetOptions(&flags);
+    dlg->SetOptions(flags | FOS_FILEMUSTEXIST | FOS_FORCEFILESYSTEM);
+    hr = dlg->Show(owner);
+    if (SUCCEEDED(hr)) {
+        IShellItem* item = nullptr;
+        dlg->GetResult(&item);
+        if (item) {
+            WCHAR* wpath = nullptr;
+            if (SUCCEEDED(item->GetDisplayName(SIGDN_FILESYSPATH, &wpath)) && wpath) {
+                res = str::Dup(ToUtf8Temp(WStrL(wpath)));
+                CoTaskMemFree(wpath);
+            }
+            item->Release();
+        }
+    }
+    dlg->Release();
+    return res;
+}
+
+static void HandleCmdReplaceImage(MainWindow* win) {
+    WindowTab* tab = win->CurrentTab();
+    DisplayModel* dm = tab ? tab->AsFixed() : nullptr;
+    EngineMupdf* emup = nullptr;
+    if (dm) {
+        emup = AsEngineMupdf(dm->GetEngine());
+    }
+    IPageElement* pageEl = nullptr;
+    if (dm) {
+        pageEl = dm->GetElementAtPos(win->contextMenuPt, nullptr);
+    }
+    if (!emup || !pageEl || !pageEl->Is(kindPageElementImage)) {
+        logf("[imgedit] ReplaceImage: no image under the right-click point\n");
+        return;
+    }
+    Str picked = PickImageFileDup(win->hwndFrame);
+    if (!picked.s) {
+        logf("[imgedit] ReplaceImage: picker cancelled\n");
+        return;
+    }
+    TempStr confirmMsg =
+        fmt("Replace this image with the picked file?\nSave the PDF afterwards to keep the change.\n\n%s", picked);
+    int choice = MessageBoxW(win->hwndFrame, CWStrTemp(Str(confirmMsg)), CWStrTemp(StrL("Replace Image")),
+                             MB_OKCANCEL | MB_ICONQUESTION);
+    if (choice != IDOK) {
+        str::Free(picked);
+        return;
+    }
+    int replaced = emup->ReplaceImageWithFile(pageEl, picked);
+    str::Free(picked);
+    if (replaced) {
+        gRenderCache->FreeForDisplayModel(dm);
+        MainWindowRerender(win);
+        logf("[imgedit] ReplaceImage: done; save the PDF (File > Save) to persist\n");
+    }
+}
+
+static void HandleCmdEditImageWithPaint(MainWindow* win) {
+    WindowTab* tab = win->CurrentTab();
+    DisplayModel* dm = tab ? tab->AsFixed() : nullptr;
+    EngineMupdf* emup = dm ? AsEngineMupdf(dm->GetEngine()) : nullptr;
+    IPageElement* pageEl = dm ? dm->GetElementAtPos(win->contextMenuPt, nullptr) : nullptr;
+    if (!emup || !pageEl || !pageEl->Is(kindPageElementImage)) {
+        logf("[imgedit] EditWithPaint: no image under the right-click point\n");
+        return;
+    }
+    RenderedBitmap* bmp = dm->GetEngine()->GetImageForPageElement(pageEl);
+    if (!bmp) {
+        logf("[imgedit] EditWithPaint: could not extract image\n");
+        return;
+    }
+    int pageNo = 0;
+    int imageIdx = 0;
+    if (!emup->GetImageElementCoords(pageEl, &pageNo, &imageIdx)) {
+        delete bmp;
+        return;
+    }
+
+    WCHAR tmpDir[MAX_PATH]{};
+    GetTempPathW(MAX_PATH, tmpDir);
+    swprintf_s(gPaintWatchTmpPath, L"%stumatrapdf-paintedit-%u.png", tmpDir, GetCurrentProcessId());
+    if (!SaveHbitmapAsPng(bmp->GetBitmap(), WStr(gPaintWatchTmpPath))) {
+        logf("[imgedit] EditWithPaint: could not write temp png\n");
+        delete bmp;
+        return;
+    }
+    delete bmp;
+
+    WIN32_FILE_ATTRIBUTE_DATA fad{};
+    if (GetFileAttributesExW(gPaintWatchTmpPath, GetFileExInfoStandard, &fad)) {
+        gPaintWatchMtime = fad.ftLastWriteTime;
+    }
+    StopPaintImageWatch();
+    gPaintWatchWin = win;
+    gPaintWatchEngine = emup;
+    gPaintWatchPageNo = pageNo;
+    gPaintWatchImageIdx = imageIdx;
+
+    WCHAR params[MAX_PATH + 16]{};
+    swprintf_s(params, L"\"%s\"", gPaintWatchTmpPath);
+    HINSTANCE started = ShellExecuteW(win->hwndFrame, L"open", L"mspaint.exe", params, nullptr, SW_SHOWNORMAL);
+    if ((INT_PTR)started <= 32) {
+        logf("[imgedit] EditWithPaint: could not launch mspaint.exe\n");
+        StopPaintImageWatch();
+        return;
+    }
+    SetTimer(win->hwndFrame, kPaintWatchTimerId, kPaintWatchDelayMs, nullptr);
+    logf("[imgedit] EditWithPaint: mspaint opened; saving the png replaces the PDF image (save the PDF after)\n");
+}
+
+static void TickPaintImageWatch() {
+    MainWindow* win = gPaintWatchWin;
+    if (!win) {
+        return;
+    }
+    WindowTab* tab = win->CurrentTab();
+    DisplayModel* dm = tab ? tab->AsFixed() : nullptr;
+    EngineMupdf* em = dm ? AsEngineMupdf(dm->GetEngine()) : nullptr;
+    if (em != gPaintWatchEngine) {
+        // doc swapped/closed while editing — stop without touching stale state
+        logf("[imgedit] paint watch stopped (doc changed)\n");
+        StopPaintImageWatch();
+        return;
+    }
+    WIN32_FILE_ATTRIBUTE_DATA fad{};
+    if (!GetFileAttributesExW(gPaintWatchTmpPath, GetFileExInfoStandard, &fad)) {
+        return;
+    }
+    if (0 == CompareFileTime(&fad.ftLastWriteTime, &gPaintWatchMtime)) {
+        return;
+    }
+    TempStr utf8Path = ToUtf8Temp(WStr(gPaintWatchTmpPath));
+    int r = gPaintWatchEngine->ReplaceImageByIdx(gPaintWatchPageNo, gPaintWatchImageIdx, utf8Path);
+    logf("[imgedit] paint edit saved; replaced=%d\n", r);
+    StopPaintImageWatch();
+    if (r > 0 && dm) {
+        gRenderCache->FreeForDisplayModel(dm);
+        MainWindowRerender(win);
+        logf("[imgedit] external edit applied; save the PDF (File > Save) to persist\n");
+    }
 }
 
 static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
@@ -10057,6 +10266,14 @@ static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, L
 
         case CmdPasteClipboardImage:
             PasteImageFromClipboard(win);
+            break;
+
+        case CmdReplaceImage:
+            HandleCmdReplaceImage(win);
+            break;
+
+        case CmdEditImagePaint:
+            HandleCmdEditImageWithPaint(win);
             break;
 
         case CmdListPrinters: {
@@ -11126,6 +11343,15 @@ static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, L
         case CmdFavoriteShowInTab:
             ToggleFavoritesTab(win);
             break;
+
+        case CmdOpenHome:
+            // toggle the per-window home overlay (paints over the canvas, no tab)
+            win->showHomeOverlay = !win->showHomeOverlay;
+            logf("[home] overlay %s\n", win->showHomeOverlay ? StrL("ON") : StrL("OFF"));
+            InvalidateRect(win->hwndCanvas, nullptr, TRUE);
+            SetFocus(win->hwndCanvas);
+            SetToolbarButtonCheckedState(win, CmdOpenHome, win->showHomeOverlay);
+            return true;
 
         case CmdToggleFavoritesSort:
             ToggleSortFavoritesByName();
@@ -12285,6 +12511,11 @@ static LRESULT CustomCaptionFrameProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp,
         case WM_TIMER:
             if (wp == DO_NOT_REOPEN_MENU_TIMER_ID) {
                 KillTimer(hwnd, DO_NOT_REOPEN_MENU_TIMER_ID);
+                *callDef = false;
+                return 0;
+            }
+            if (wp == kPaintWatchTimerId) {
+                TickPaintImageWatch();
                 *callDef = false;
                 return 0;
             }

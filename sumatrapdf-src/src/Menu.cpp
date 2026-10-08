@@ -1006,8 +1006,12 @@ static MenuDef menuDefCreateAnnotUnderCursor[] = {
 //[ ACCESSKEY_GROUP Context Menu (Image)
 static MenuDef menuDefContextImage[] = {
     {
-        _TRN("C&opy To Clipboard"),
-        CmdCopyImage,
+        _TRN("Replace Image..."),
+        CmdReplaceImage,
+    },
+    {
+        _TRN("Edit Wi&th Paint"),
+        CmdEditImagePaint,
     },
     {
         _TRN("&Save"),
@@ -1147,6 +1151,10 @@ static MenuDef menuDefContext[] = {
     {
         _TRN("Copy Co&mment"),
         CmdCopyComment,
+    },
+    {
+        _TRN("C&opy Image To Clipboard"),
+        CmdCopyImage,
     },
     {
         _TRN("Save Attachment"),
@@ -2158,6 +2166,8 @@ void OnWindowContextMenu(MainWindow* win, int x, int y) {
         if (!isImageEngine && !onImage) {
             MenuRemove(popup, CmdCropImage);
             MenuRemove(popup, CmdResizeImage);
+            MenuRemove(popup, CmdReplaceImage);
+            MenuRemove(popup, CmdEditImagePaint);
             MenuRemove(popup, CmdConvertImageToPdf);
         }
         // remove the Image submenu entirely if no items left

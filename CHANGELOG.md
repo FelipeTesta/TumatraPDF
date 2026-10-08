@@ -4,6 +4,34 @@ Per-version changelog for TumatraPDF — new functions + bug fixes, newest first
 Feature details live in [README.md](README.md); full per-session development
 history in [LOG.md](LOG.md).
 
+## v1.0.9 (pending)
+
+- **Installable version:** every release now ships `TumatraPDF-install-win64.exe`
+  alongside the portable exe. Same binary — the `install` in the name flips it
+  into installer mode. Installs to `%LOCALAPPDATA%\TumatraPDF` (or Program Files
+  with "all users"), registers file associations/preview/filter, creates
+  shortcuts, and lists its own entry in Windows "Installed apps"
+  (uninstall included). Fully isolated from an upstream SumatraPDF install —
+  separate directories, registry keys and settings.
+- **Auto-update on installed copies:** the daily update check now upgrades an
+  installed copy by running the downloaded installer (previously it refused
+  unsigned updates for installed exes). Portable copies keep the direct
+  self-replace flow.
+- **Fixed update-check version loop:** released exes reported version `1.0`
+  regardless of the release tag, so the update prompt reappeared forever. The
+  app version now tracks the release (`CURR_VERSION` is bumped with each tag).
+- **Right-click on an image:** new **Replace Image...** (pick another image
+  from the PC; swaps the embedded image in the PDF) and **Edit With Paint**
+  (opens the image in mspaint — saving it there replaces it in the PDF).
+  Both require saving the PDF afterwards (File > Save) to keep the edit.
+  **Copy Image To Clipboard** is now a top-level context-menu entry (no longer
+  nested inside Image).
+- **Home button (`⌂ Home`)** on the toolbar (before Open): the Home tab no
+  longer auto-opens on startup — it appears only when requested.
+- **Home button opens the home page as an overlay** over the canvas — no extra
+  tab is created or consumed; dismiss with 🏠 again, `Esc`, or by opening a file.
+  The startup home tab stays disabled.
+
 ## v1.0.8 (2026-10-01)
 
 (ships the keyboard-sheet and trim-features below together — their code landed

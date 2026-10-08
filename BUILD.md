@@ -74,17 +74,20 @@ git push origin refs/tags/v1.0.8
 gh run watch --exit-status
 ```
 
-After ~3-4 min the workflow publishes `TumatraPDF-portable-win64.exe` to GitHub Releases and auto-commits the `update.txt` bump (`Latest: 1.0.8`) to `main` — so `git pull` BEFORE your next push, and running apps v1.0.x get the update dialog within a day (daily check; `update.txt` is checked against app version via `CompareProgramVersion`).
+After ~3-4 min the workflow publishes BOTH assets — `TumatraPDF-portable-win64.exe` + `TumatraPDF-install-win64.exe` (same exe; the `install` in the name flips it to installer mode) — to GitHub Releases and auto-commits the `update.txt` bump (`Latest: 1.0.8`) to `main` — so `git pull` BEFORE your next push, and running apps v1.0.x get the update dialog within a day (daily check; `update.txt` Latest is compared against the exe's `CURR_VERSION` via `CompareProgramVersion` — bump BuildConfig.h in the release commit or the prompt loops forever).
 
 Gotchas:
+
 - **Never delete/retag `v*`** — tags are protected (ruleset, admin-bypass only). Bump to the next patch instead.
 - CI needs: NASM step, WebView2 nuget restore, tracked `sumatrapdf-src/bin/` tools — all already in `.github/workflows/release.yml`; don't remove.
 - The workflow runs `gh`-style commit+push with GITHUB_TOKEN (`permissions: contents: write`) — repo default token is `read`; only this workflow may write.
 
 ### How the system works
-- **Pipeline**: `.github/workflows/release.yml` — push tag `v*` → windows-2022 runner (setup-bun + setup-msbuild + setup-nasm + nuget WebView2) → Release x64 → renames exe to `TumatraPDF-portable-win64.exe` → bumps + commits repo-root `update.txt` → GitHub Release published.
+
+- **Pipeline**: `.github/workflows/release.yml` — push tag `v*` → windows-2022 runner (setup-bun + setup-msbuild + setup-nasm + nuget WebView2) → Release x64 → copies exe as `TumatraPDF-portable-win64.exe` + `TumatraPDF-install-win64.exe` → bumps + commits repo-root `update.txt` (PortableExe64 + Installer64 keys) → GitHub Release published. Local equivalent: `bun cmd/build-installer.ts` (also copies both flavors to ../Compiled).
+- **Installer mechanics**: no separate installer build. Same dll-mode exe; `install` in the filename (or `-install` flag) runs installer mode. Payload `out/<cfg>/InstallerData.dat` (libsumatrapdf.dll/PdfFilter.dll/PdfPreview.dll/sumatrapdf-tool.exe) is packed by the vcxproj prebuild (MakeLZSA, only when missing; libsumatrapdf postbuild deletes it to force repack) and embedded via `INSTALL_PAYLOAD_ZIP`. Install dir `%LOCALAPPDATA%\TumatraPDF` (or Program Files `-all-users`), registry keys all derive from `kAppName="TumatraPDF"` — zero overlap with upstream SumatraPDF. Installed exe = `TumatraPDF.exe` (`kExeName`, SumatraConfig.h).
 - **Version source**: `src/BuildConfig.h` (`CURR_VERSION`). update.txt `Latest:` must be numerically > the running app's version for the prompt to fire.
-- **Update flow in-app**: UpdateCheck.cpp pulls `update.txt` daily (setting `CheckForUpdates`), downloads `releases/latest/download/TumatraPDF-portable-win64.exe`, validates MZ header + ≥1 MiB (unsigned, no cert), then `SelfUpdateViaBatch`: detached cmd batch (ping-sleep, no `timeout` — fails console-less) waits for exit → `move /Y` over running exe → relaunch. E2E test: `tests/ad-hoc-update.ts` (registered in `before-release.ts`).
+- **Update flow in-app**: UpdateCheck.cpp pulls `update.txt` daily (setting `CheckForUpdates`), downloads the `Installer64` URL (both flavors read that key — `IsDllBuild()` is always true), validates MZ header + ≥1 MiB (unsigned, no cert). **Portable copy** → `SelfUpdateViaBatch`: detached cmd batch (ping-sleep, no `timeout` — fails console-less) waits for exit → `move /Y` over running exe → relaunch. **Installed copy** → runs the downloaded installer with `-install` (reuses registry-remembered install dir, replaces files in place). E2E test: `tests/ad-hoc-update.ts` (registered in `before-release.ts`).
 - **Telemetry stance**: zero phone-home except the update-check GET against this repo. No crash upload (local dumps only).
 
 ## Why the exe shrank 22 MB → 11.7 MB

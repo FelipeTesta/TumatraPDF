@@ -46,6 +46,8 @@ const char* gInstalledFiles[] = {
     "PdfFilter.dll",
     "PdfPreview.dll",
     // those probably won't delete because in use
+    "TumatraPDF.exe",
+    // legacy upstream name (never shipped by this fork, kept for safety)
     "SumatraPDF.exe",
     "RA-MICRO PDF Viewer.exe",
     // files no longer shipped, to be deleted
@@ -57,6 +59,7 @@ const char* gInstalledFiles[] = {
     "UnRar64.dll",
     // other files we might generate
     "sumatrapdfprefs.dat",
+    "TumatraPDF-settings.txt",
     "SumatraPDF-settings.txt",
 };
 // clang-format on
@@ -192,7 +195,7 @@ static void OnUninstallationFinished() {
     gButtonUninstaller = nullptr;
     gButtonExit = CreateDefaultButton(gHwndFrame, _TRA("Close"), isRtl);
     gButtonExit->onClick = MkFunc0Void(OnButtonExit);
-    SetMsg(_TRA("SumatraPDF has been uninstalled."), gMsgError ? COLOR_MSG_FAILED : COLOR_MSG_OK);
+    SetMsg(fmt(_TRA("%s has been uninstalled.").s, StrL(kAppName)), gMsgError ? COLOR_MSG_FAILED : COLOR_MSG_OK);
     gMsgError = gFirstError;
     HwndRepaintNow(gHwndFrame);
 
@@ -214,7 +217,7 @@ static bool UninstallerOnWmCommand(WPARAM wp) {
 #define kInstallerWindowClassName L"SUMATRA_PDF_INSTALLER_FRAME"
 
 static void CreateUninstallerWindow() {
-    TempStr title = fmt(_TRA("SumatraPDF %s Uninstaller").s, StrL(CURR_VERSION_STRA));
+    TempStr title = fmt(_TRA("%s %s Uninstaller").s, StrL(kAppName), StrL(CURR_VERSION_STRA));
     int x = CW_USEDEFAULT;
     int y = CW_USEDEFAULT;
     int dx = GetInstallerWinDx();
@@ -583,7 +586,7 @@ int RunUninstaller() {
     if (!installerExists) {
         log("Uninstaller executable doesn't exist\n");
         auto caption = _TRA("Uninstallation failed");
-        auto msg = _TRA("SumatraPDF installation not found.");
+        auto msg = fmt(_TRA("%s installation not found.").s, StrL(kAppName));
         MsgBox(nullptr, msg, caption, MB_ICONEXCLAMATION | MB_OK);
         goto Exit;
     }

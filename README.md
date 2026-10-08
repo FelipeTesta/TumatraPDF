@@ -159,8 +159,11 @@ The features below were developed on top of SumatraPDF and **do not exist in the
 
 **What it does:** The app checks for its OWN new versions (this repo's GitHub Releases) — upstream SumatraPDF update checks and all upstream data collection were removed.
 
-- Daily check of the repo's `update.txt`; a newer version prompts, downloads the latest portable exe, validates it and replaces itself (no installer, no admin)
-- Releases are built by GitHub Actions from `v*` tags
+- Daily check of the repo's `update.txt`; a newer version prompts and downloads the update, validates it (MZ header + size)
+- **Portable copy:** replaces its own exe via a detached helper script (no installer, no admin)
+- **Installed copy:** runs the downloaded installer (`-install`) — it reuses the install dir remembered in the registry and upgrades files in place
+- Releases are built by GitHub Actions from `v*` tags; every release ships TWO assets: `TumatraPDF-portable-win64.exe` and `TumatraPDF-install-win64.exe` (same exe — the `install` in the name flips it into installer mode)
+- Installed build is fully isolated from upstream SumatraPDF: own install dir (`%LOCALAPPDATA%\TumatraPDF` / Program Files), own registry keys (`TumatraPDF*` progIDs, Uninstall, App Paths, RegisteredApplications), own settings dir (`%LOCALAPPDATA%\TumatraPDF`), installed exe named `TumatraPDF.exe`
 - Tracking/merging UPSTREAM SumatraPDF changes is a manual process documented in `MERGE.md`
 
 ---
@@ -242,6 +245,16 @@ The features below were developed on top of SumatraPDF and **do not exist in the
 
 ---
 
+### 8. 🖼️ Image Editing (right-click on an image)
+
+- **Copy Image To Clipboard** is a top-level context-menu entry (was nested in Image >).
+- **Replace Image...** — pick another image from the PC, confirm, and the embedded image is swapped in the PDF (same page position). Save the PDF afterwards (File > Save) to keep the change.
+- **Edit With Paint** — the image opens in mspaint; every time you save there, the PDF image is replaced automatically. Save the PDF afterwards to persist.
+
+**Technical:** `EngineMupdf::ReplaceImageWithFile`/`ReplaceImageByIdx` (pageNo + imageIdx identity from the clicked element; mupdf image-store pointer match → XObject dict `pdf_add_image` + `pdf_dict_put`), 1.2s mtime watch timer for the external-edit flow, GDI+ temp-PNG writer.
+
+Also: **Home (`⌂`) toolbar button** before Open — the Home tab no longer auto-opens at startup; it opens only on request.
+
 ### 📋 Technical Summary for Developers
 
 | Feature                    | Main files                                                                                                                       | Hook point                                                                                              |
@@ -289,10 +302,11 @@ TumatraPDF/
 - `MERGE.md` documents the upstream update process (fork point ~912ecf2, Aug 2026)
 - Informativos (`README.md`, `LOG.md`, `TODO.md`, `BUILD.md`, `MERGE.md`, `FLOW/*.dot`): English + caveman, always (AGENTS.md §13)
 
-## Download + Update System (s26)
+## Download + Update System (s26, installer since s32)
 
-- **Releases:** built by GitHub Actions from `v*` tags — grab the latest `TumatraPDF.exe` from [Releases](https://github.com/FelipeTesta/TumatraPDF/releases)
-- **In-app auto-update:** daily check of the repo's `update.txt`; when a newer version exists, the app downloads the latest portable exe, validates it (MZ header + size), and replaces itself via a detached helper script (no installer, no admin)
+- **Releases:** built by GitHub Actions from `v*` tags — grab `TumatraPDF-portable-win64.exe` (just run) or `TumatraPDF-install-win64.exe` (installer) from [Releases](https://github.com/FelipeTesta/TumatraPDF/releases)
+- **In-app auto-update:** daily check of the repo's `update.txt`; when a newer version exists, the app downloads it, validates it (MZ header + size). Portable copies self-replace via a detached helper script; installed copies run the downloaded installer, which upgrades the install dir in place
+- **Isolation:** installing TumatraPDF does NOT touch an existing upstream SumatraPDF install (separate dirs, registry keys, exe and settings names)
 - **Privacy:** the only network call the app makes on its own is the update-check GET to this repo. All upstream SumatraPDF data collection (crash upload, symbol download, apptranslator links) was removed — crash dumps stay local
 - Upstream merge tracking documented in `MERGE.md` (manual process)
 

@@ -763,7 +763,7 @@ CommandVisibility GetCommandVisibility(int cmdId, const AppCommandCtx& ctx, Comm
     if (!ctx.cursorOnComment && cmdId == CmdCopyComment) {
         return CommandVisibility::Hide;
     }
-    if (!ctx.cursorOnImage && cmdId == CmdCopyImage) {
+    if (!ctx.cursorOnImage && (cmdId == CmdCopyImage || cmdId == CmdReplaceImage || cmdId == CmdEditImagePaint)) {
         return CommandVisibility::Hide;
     }
     if ((cmdId == CmdToggleBookmarks) || (cmdId == CmdToggleTableOfContents)) {

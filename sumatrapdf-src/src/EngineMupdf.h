@@ -103,6 +103,14 @@ class EngineMupdf : public EngineBase {
 
     RenderedBitmap* GetImageForPageElement(IPageElement*) override;
 
+    // replace the PDF image xobject behind this element with the image loaded
+    // from a file; returns 1 when replaced (TUMATRA: "Replace Image...")
+    int ReplaceImageWithFile(IPageElement* ipel, Str newImagePath);
+    // same by explicit identity — used by the "Edit with Paint" watch flow
+    int ReplaceImageByIdx(int pageNo, int imageIdx, Str newImagePath);
+    // out-identity of an image element for the watch flow
+    bool GetImageElementCoords(IPageElement* ipel, int* pageNoOut, int* imageIdxOut);
+
     IPageDestination* GetNamedDest(Str name) override;
     int GetOpenActionPageNo() override;
     TocTree* GetToc() override;

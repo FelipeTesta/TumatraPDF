@@ -856,7 +856,7 @@ static bool PrepareInstallDirByRenaming(Str installDir, bool silent) {
 static void DeleteInstallCopyLeftovers(Str destDir) {
     static const Str kCopies[] = {
         StrL("libsumatrapdf.dll.copy"), StrL("libmupdf.dll.copy"),   StrL("PdfFilter.dll.copy"),
-        StrL("PdfPreview.dll.copy"),    StrL("SumatraPDF.exe.copy"),
+        StrL("PdfPreview.dll.copy"),    StrL("TumatraPDF.exe.copy"), StrL("SumatraPDF.exe.copy"),
     };
     for (Str name : kCopies) {
         TempStr copyPath = path::JoinTemp(destDir, name);
@@ -880,8 +880,8 @@ static void DeleteInstallCopyLeftovers(Str destDir) {
 static void RestoreInstallCopyFiles(Str installDir) {
     logf("RestoreInstallCopyFiles('%s')\n", installDir);
     static const Str kFiles[] = {
-        StrL("SumatraPDF.exe"), StrL("libsumatrapdf.dll"), StrL("PdfFilter.dll"),
-        StrL("PdfPreview.dll"), StrL("libmupdf.dll"),
+        StrL("TumatraPDF.exe"), StrL("SumatraPDF.exe"), StrL("libsumatrapdf.dll"),
+        StrL("PdfFilter.dll"),  StrL("PdfPreview.dll"), StrL("libmupdf.dll"),
     };
     for (Str name : kFiles) {
         TempStr path = path::JoinTemp(installDir, name);
@@ -1025,22 +1025,25 @@ static bool CopySelfToDir(Str destDir) {
 
     logf("  failed to copy '%s' to '%s' lastError=%u\n", exePath, dstPath, lastErr);
     if (lastErr == ERROR_ACCESS_DENIED) {
-        NotifyFailed(
-            _TRA("Couldn't copy SumatraPDF.exe to the installation directory (access denied). "
-                 "Temporarily disable antivirus or Controlled Folder Access for this folder, "
-                 "run the installer as administrator, or choose a different install folder. "
-                 "See https://www.sumatrapdfreader.org/docs/Installation"));
+        NotifyFailed(fmt(_TRA("Couldn't copy %s to the installation directory (access denied). "
+                              "Temporarily disable antivirus or Controlled Folder Access for this folder, "
+                              "run the installer as administrator, or choose a different install folder. "
+                              "See https://github.com/FelipeTesta/TumatraPDF#installation")
+                             .s,
+                         StrL(kExeName)));
     } else if (lastErr == ERROR_SHARING_VIOLATION || lastErr == ERROR_LOCK_VIOLATION) {
-        NotifyFailed(
-            _TRA("Couldn't copy SumatraPDF.exe to the installation directory (file in use). "
-                 "Close all SumatraPDF windows and Explorer PDF previews, then try again. "
-                 "See https://www.sumatrapdfreader.org/docs/Installation"));
+        NotifyFailed(fmt(_TRA("Couldn't copy %s to the installation directory (file in use). "
+                              "Close all %s windows and Explorer PDF previews, then try again. "
+                              "See https://github.com/FelipeTesta/TumatraPDF#installation")
+                             .s,
+                         StrL(kExeName), StrL(kAppName)));
     } else if (IsDiskFullError(lastErr)) {
-        NotifyFailed(
-            _TRA("Not enough free disk space to copy SumatraPDF.exe to the installation directory.\n\n"
-                 "Free up space on this drive and try again."));
+        NotifyFailed(fmt(_TRA("Not enough free disk space to copy %s to the installation directory.\n\n"
+                              "Free up space on this drive and try again.")
+                             .s,
+                         StrL(kExeName)));
     } else {
-        NotifyFailed(_TRA("Couldn't copy SumatraPDF.exe to the installation directory"));
+        NotifyFailed(fmt(_TRA("Couldn't copy %s to the installation directory").s, StrL(kExeName)));
     }
     return false;
 }
@@ -1438,7 +1441,7 @@ static HRESULT CALLBACK InstallationFailedDialogCallback(HWND /*hwnd*/, UINT msg
         case TDN_BUTTON_CLICKED:
             if ((int)wParam == kBtnIdShowInstallLog) {
                 Str logText = gLogBuf ? ToStr(*gLogBuf) : StrL("(no log available)");
-                ShowTextInWindowDialog(_TRA("SumatraPDF installation log"), logText);
+                ShowTextInWindowDialog(fmt(_TRA("%s installation log").s, StrL(kAppName)), logText);
                 return S_FALSE; // keep TaskDialog open
             }
             break;
@@ -1971,7 +1974,7 @@ static bool CreateInstallerWnd(Flags* cli) {
         RegisterClassExW(&wcex);
     }
 
-    TempStr title = fmt(_TRA("SumatraPDF %s Installer").s, StrL(CURR_VERSION_STRA));
+    TempStr title = fmt(_TRA("%s %s Installer").s, StrL(kAppName), StrL(CURR_VERSION_STRA));
     DWORD exStyle = 0;
     if (trans::IsCurrLangRtl()) {
         exStyle = WS_EX_LAYOUTRTL;

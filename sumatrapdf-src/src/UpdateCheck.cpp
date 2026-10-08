@@ -249,20 +249,20 @@ static void SelfUpdateViaBatch(Str newExePath) {
     TempStr batPath = GetTempFilePathTemp(StrL("tumatrapdf-update"));
     batPath = str::JoinTemp(batPath, StrL(".bat"));
     DWORD pid = GetCurrentProcessId();
-    Str content = fmt(
-        "@echo off\r\n"
-        "setlocal\r\n"
-        "set tries=0\r\n"
-        ":wait\r\n"
-        "ping 127.0.0.1 -n 2 >NUL\r\n"
-        "tasklist /FI \"PID eq %d\" 2>NUL | findstr /R /C:\" %d \" >NUL\r\n"
-        "if not errorlevel 1 goto wait\r\n"
-        "move /Y \"%s\" \"%s\" >NUL 2>&1\r\n"
-        "if errorlevel 1 (set /a tries+=1)&(if %%tries%% LSS 120 (goto wait) else (goto fail))\r\n"
-        "start \"\" /D \"%s\" \"%s\"\r\n"
-        ":fail\r\n"
-        "del \"%%~f0\"\r\n",
-        pid, pid, newExePath, selfExe, path::GetDirTemp(selfExe), selfExe);
+    Str content =
+        fmt("@echo off\r\n"
+            "setlocal\r\n"
+            "set tries=0\r\n"
+            ":wait\r\n"
+            "ping 127.0.0.1 -n 2 >NUL\r\n"
+            "tasklist /FI \"PID eq %d\" 2>NUL | findstr /R /C:\" %d \" >NUL\r\n"
+            "if not errorlevel 1 goto wait\r\n"
+            "move /Y \"%s\" \"%s\" >NUL 2>&1\r\n"
+            "if errorlevel 1 (set /a tries+=1)&(if %%tries%% LSS 120 (goto wait) else (goto fail))\r\n"
+            "start \"\" /D \"%s\" \"%s\"\r\n"
+            ":fail\r\n"
+            "del \"%%~f0\"\r\n",
+            pid, pid, newExePath, selfExe, path::GetDirTemp(selfExe), selfExe);
     bool ok = file::WriteFile(batPath, content);
     if (!ok) {
         logf("SelfUpdateViaBatch: failed to write '%s'\n", batPath);
@@ -280,7 +280,14 @@ void StartInstallerAutoUpgrade(Str installerPath) {
     bool signed_ = IsPEFileSigned(installerPath);
     if (!signed_) {
         if (IsOurExeInstalled()) {
-            logf("StartInstallerAutoUpgrade: refusing unsigned update for installed exe\n");
+            // TumatraPDF: unsigned fork build. The downloaded file IS our installer
+            // asset (Installer64 in update.txt); the -install flag flips it into
+            // installer mode regardless of its temp file name, it reuses the
+            // install dir remembered in the registry and replaces files in place.
+            logf("StartInstallerAutoUpgrade: unsigned update for installed exe, running installer\n");
+            str::Builder cmd;
+            cmd.Append(" -install");
+            CreateProcessHelper(installerPath, ToStr(cmd));
             return;
         }
         // TumatraPDF: unsigned portable exe — self-replace via helper batch
@@ -342,7 +349,7 @@ static void NotifyUserOfUpdate(UpdateInfo* updateInfo) {
 
     constexpr int kBtnIdDontInstall = 100;
     constexpr int kBtnIdInstall = 101;
-    auto title = _TRA("SumatraPDF Update");
+    auto title = fmt(_TRA("%s Update").s, StrL(kAppName));
     TASKDIALOGCONFIG dialogConfig{};
     TASKDIALOG_BUTTON buttons[2];
 
@@ -572,7 +579,7 @@ static const Str kExpectedDlHost = StrL("https://github.com/FelipeTesta/TumatraP
 static void NotifySuspiciousUpdate(HWND hwndParent, Str dlURL) {
     logf("NotifySuspiciousUpdate: suspicious download url '%s'\n", dlURL);
     ReportIfFast(true);
-    auto title = _TRA("SumatraPDF Update");
+    auto title = fmt(_TRA("%s Update").s, StrL(kAppName));
     auto content = fmt(R"(Suspicious update.
 
 Download link should come from <a href="%s">%s</a> but is %s.

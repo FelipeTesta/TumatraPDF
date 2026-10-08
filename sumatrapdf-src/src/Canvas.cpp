@@ -5749,6 +5749,10 @@ LRESULT CALLBACK WndProcCanvas(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 
         default:
             // TODO: achieve this split through subclassing or different window classes
+            // home overlay: paint/route the home page over the canvas without a tab
+            if (win->showHomeOverlay) {
+                return WndProcCanvasAbout(win, hwnd, msg, wp, lp);
+            }
             if (win->AsFixed()) {
                 HomePageDestroySearch(win);
                 return WndProcCanvasFixedPageUI(win, hwnd, msg, wp, lp);

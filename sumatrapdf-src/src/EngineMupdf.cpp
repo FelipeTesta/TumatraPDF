@@ -5278,6 +5278,101 @@ RenderedBitmap* EngineMupdf::GetImageForPageElement(IPageElement* ipel) {
 #endif
 }
 
+// TUMATRA: replace an embedded page image with an image loaded from a file
+// (context menu "Replace Image..." / "Edit with Paint").
+bool EngineMupdf::GetImageElementCoords(IPageElement* ipel, int* pageNoOut, int* imageIdxOut) {
+    if (kindPageElementImage != ipel->GetKind()) {
+        return false;
+    }
+    auto* pel = (PageElementImage*)ipel;
+    *pageNoOut = pel->pageNo;
+    *imageIdxOut = pel->imageID;
+    return true;
+}
+
+int EngineMupdf::ReplaceImageWithFile(IPageElement* ipel, Str newImagePath) {
+    int pageNo = 0;
+    int imageIdx = 0;
+    if (!GetImageElementCoords(ipel, &pageNo, &imageIdx)) {
+        return 0;
+    }
+    return ReplaceImageByIdx(pageNo, imageIdx, newImagePath);
+}
+
+int EngineMupdf::ReplaceImageByIdx(int pageNo, int imageIdx, Str newImagePath) {
+#if !OS_WIN
+    (void)pageNo;
+    (void)imageIdx;
+    (void)newImagePath;
+    return 0;
+#else
+    ReportIf(!pdfdoc);
+    if (!pdfdoc || !newImagePath || len(newImagePath) == 0) {
+        return 0;
+    }
+    FzPageInfo* pageInfo = GetFzPageInfo(pageNo, false);
+    if (!pageInfo || !pageInfo->page) {
+        return 0;
+    }
+    auto* ctx = Ctx();
+    ScopedRecursiveMutex scope(&docLock);
+
+    fz_image* origImage = FzFindImageAtIdx(ctx, pageInfo, imageIdx);
+    if (!origImage) {
+        logf("[imgedit] ReplaceImageByIdx: no image at page %d idx %d\n", pageNo, imageIdx);
+        return 0;
+    }
+
+    int replaced = 0;
+    fz_image* newImage = nullptr;
+    fz_var(newImage);
+    fz_try(ctx) {
+        // read via a buffer so non-ASCII (unicode) paths work
+        Str imgData = file::ReadFile(newImagePath);
+        if (!imgData.s) {
+            fz_throw(ctx, FZ_ERROR_GENERIC, "could not read image file");
+        }
+        fz_buffer* buf = fz_new_buffer_from_copied_data(ctx, (const unsigned char*)imgData.s, (size_t)len(imgData));
+        newImage = fz_new_image_from_buffer(ctx, buf);
+        fz_drop_buffer(ctx, buf);
+        pdf_page* ppage = pdf_page_from_fz_page(ctx, pageInfo->page);
+        pdf_obj* res = pdf_page_resources(ctx, ppage);
+        pdf_obj* xobj = pdf_dict_get(ctx, res, PDF_NAME(XObject));
+        if (pdf_is_dict(ctx, xobj)) {
+            int n = pdf_dict_len(ctx, xobj);
+            for (int i = 0; i < n && !replaced; i++) {
+                pdf_obj* key = pdf_dict_get_key(ctx, xobj, i);
+                pdf_obj* val = pdf_dict_get_val(ctx, xobj, i);
+                pdf_obj* st = pdf_dict_get(ctx, val, PDF_NAME(Subtype));
+                if (!pdf_is_name(ctx, st) || !str::Eq(pdf_to_name(ctx, st), "Image")) {
+                    continue;
+                }
+                fz_image* img = pdf_load_image(ctx, pdfdoc, val);
+                if (img == origImage) {
+                    pdf_obj* newObj = pdf_add_image(ctx, pdfdoc, newImage);
+                    pdf_dict_put(ctx, xobj, key, newObj);
+                    pdf_drop_obj(ctx, newObj);
+                    replaced = 1;
+                }
+                fz_drop_image(ctx, img);
+            }
+        }
+    }
+    fz_always(ctx) {
+        if (newImage) {
+            fz_drop_image(ctx, newImage);
+        }
+        fz_drop_image(ctx, origImage);
+    }
+    fz_catch(ctx) {
+        fz_report_error(ctx);
+    }
+    logf("[imgedit] ReplaceImageByIdx: page=%d idx=%d from '%s' -> replaced=%d\n", pageNo, imageIdx, newImagePath,
+         replaced);
+    return replaced;
+#endif
+}
+
 bool EngineMupdf::BenchLoadPage(int pageNo) {
     return GetFzPageInfo(pageNo, false) != nullptr;
 }

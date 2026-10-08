@@ -329,6 +329,9 @@ static SeqStrings gCommandNames =
     "CmdFlashcardConfig\0"
     "CmdFlashcardImport\0"
     "CmdFlashcardSession\0"
+    "CmdOpenHome\0"
+    "CmdReplaceImage\0"
+    "CmdEditImagePaint\0"
     "CmdViewportCropV2Toggle\0"
     "CmdNone\0"
     "\0";
@@ -647,6 +650,9 @@ static i32 gCommandIds[] = {
     CmdFlashcardConfig,
     CmdFlashcardImport,
     CmdFlashcardSession,
+    CmdOpenHome,
+    CmdReplaceImage,
+    CmdEditImagePaint,
     CmdViewportCropV2Toggle,
     CmdNone,
 };
@@ -965,6 +971,9 @@ SeqStrings gCommandDescriptions =
     "Flashcard Settings Window\0"
     "Flashcard Import Window\0"
     "Flashcard Session Window\0"
+    "Open Home\0"
+    "Replace Image...\0"
+    "Edit Image With Paint\0"
     "Toggle Two Columns\0"
     "Do nothing\0"
     "\0";

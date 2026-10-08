@@ -322,6 +322,9 @@ export const commands = [
     "CmdFlashcardConfig", "Flashcard Settings Window",
     "CmdFlashcardImport", "Flashcard Import Window",
     "CmdFlashcardSession", "Flashcard Session Window",
+    "CmdOpenHome", "Open Home",
+    "CmdReplaceImage", "Replace Image...",
+    "CmdEditImagePaint", "Edit Image With Paint",
     "CmdViewportCropV2Toggle", "Toggle Two Columns",
     "CmdNone", "Do nothing",
 ];

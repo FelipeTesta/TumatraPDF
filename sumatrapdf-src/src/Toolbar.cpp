@@ -74,7 +74,10 @@ struct ToolbarButtonInfo {
 };
 
 static ToolbarButtonInfo gToolbarButtons[] = {
+    {TbIcon::Text, CmdOpenHome, _TRN("⌂ Home")},
     {TbIcon::Open, CmdOpenFile, _TRN("Open")},
+    // symbol-only toggle (Tabler "bookmarks", MIT) — checked = sidebar visible
+    {TbIcon::Bookmarks, CmdToggleBookmarks, _TRN("Bookmarks")},
     {TbIcon::Print, CmdPrint, _TRN("Print")},
     {TbIcon::None, PageInfoId, nullptr}, // text box for page number + show current page / no of pages
     {TbIcon::PagePrev, CmdGoToPrevPage, _TRN("Previous Page")},
@@ -387,7 +390,8 @@ static TBBUTTON TbButtonFromButtonInfo(const ToolbarButtonInfo& bi, bool noTrans
 
     if (bi.cmdId == CmdFindToggleMatchCase || bi.cmdId == CmdFindToggleMatchWholeWord ||
         bi.cmdId == CmdContrastToggle || bi.cmdId == CmdAutoScrollToggle || bi.cmdId == CmdViewportCropToggle ||
-        bi.cmdId == CmdViewportCropV2Toggle || bi.cmdId == CmdMarginTrimToggle || bi.cmdId == CmdArchToolsToggle) {
+        bi.cmdId == CmdViewportCropV2Toggle || bi.cmdId == CmdMarginTrimToggle || bi.cmdId == CmdArchToolsToggle ||
+        bi.cmdId == CmdToggleBookmarks) {
         b.fsStyle = BTNS_CHECK;
     }
     if (bi.bmpIndex == TbIcon::Text) {
@@ -948,6 +952,46 @@ static LRESULT CALLBACK WndProcEditBg(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 }
 
 static WNDPROC DefWndProcToolbar = nullptr;
+
+// After the toolbar laid out its buttons (possibly wrapping them into several
+// rows on a narrow window), set the hosting rebar band's height to match that
+// row count. Bands are created with RBBS_FIXEDSIZE | RBBS_VARIABLEHEIGHT and a
+// single-row height; without this update the wrapped rows are clipped away and
+// the buttons look simply hidden (user report: at half the screen width the
+// toolbar buttons disappeared). Returns true when the height changed.
+static bool SetToolbarBandToRowHeight(HWND hwndToolbar) {
+    HWND hwndRebar = GetParent(hwndToolbar);
+    if (!hwndRebar) {
+        return false;
+    }
+    int rows = (int)SendMessageW(hwndToolbar, TB_GETBUTTONROWS, 0, 0);
+    if (rows < 1) {
+        rows = 1;
+    }
+    RECT rcBtn{};
+    if (!SendMessageW(hwndToolbar, TB_GETITEMRECT, 0, (LPARAM)&rcBtn) || rcBtn.bottom <= rcBtn.top) {
+        return false;
+    }
+    int bandH = rows * (rcBtn.bottom - rcBtn.top) + 2 * rcBtn.top;
+
+    REBARBANDINFOW rbi{};
+    rbi.cbSize = sizeof(rbi);
+    rbi.fMask = RBBIM_STYLE | RBBIM_CHILDSIZE | RBBIM_SIZE;
+    if (!SendMessageW(hwndRebar, RB_GETBANDINFO, 0, (LPARAM)&rbi)) {
+        return false;
+    }
+    if (!(rbi.fStyle & RBBS_VARIABLEHEIGHT)) {
+        return false; // band not allowed to change height
+    }
+    if (rbi.cyChild == bandH) {
+        return false;
+    }
+    rbi.cyChild = bandH;
+    rbi.cyMinChild = bandH;
+    rbi.cyMaxChild = bandH;
+    SendMessageW(hwndRebar, RB_SETBANDINFO, 0, (LPARAM)&rbi);
+    return true;
+}
 static LRESULT CALLBACK WndProcToolbar(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     if (WM_CTLCOLORSTATIC == msg || WM_CTLCOLOREDIT == msg || WM_CTLCOLORBTN == msg) {
         HWND hwndCtrl = (HWND)lp;
@@ -1030,15 +1074,29 @@ static LRESULT CALLBACK WndProcToolbar(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp
         return res;
     }
 
-    // reposition the ETA label instantly on resize; without this it stays stale
-    // for up to a second and overlaps buttons or gets clipped on narrow windows
+    // On resize, first let the toolbar do its own (wrap-aware) layout, then
+    // adapt: grow/shrink the rebar band to the number of button rows the
+    // toolbar wrapped into (user request: on narrow windows the toolbar
+    // doubles its height and the buttons that don't fit move to the second
+    // row instead of being cut off), and reposition the floating page box to
+    // the row its anchor button landed on.
     if (WM_SIZE == msg) {
+        LRESULT sizeRes = CallWindowProc(DefWndProcToolbar, hwnd, msg, wp, lp);
         MainWindow* win = FindMainWindowByHwnd(hwnd);
-        if (win) {
-            // LayoutToolbarChildWindows is the single entry point for positioning all toolbar child windows
-            // (timer/speed/page/ETA)
-            LayoutToolbarChildWindows(win);
+        if (win && !win->isBeingClosed) {
+            if (hwnd == win->hwndToolbar) {
+                int nPages = win->ctrl ? win->ctrl->PageCount() : -1;
+                UpdateToolbarPageText(win, nPages);
+                LayoutToolbarChildWindows(win);
+            }
+            if (SetToolbarBandToRowHeight(hwnd)) {
+                // band height changed -> rebar height changed -> the canvas
+                // and the other toolbars must move; deferred relayout is
+                // idempotent and won't re-trigger this when stable
+                ScheduleUiUpdate(win, kUiRelayout);
+            }
         }
+        return sizeRes;
     }
 
     return CallWindowProc(DefWndProcToolbar, hwnd, msg, wp, lp);
@@ -1314,9 +1372,11 @@ static void CreateEtaLabel(MainWindow* win) {
     MapWindowPoints(HWND_DESKTOP, GetParent(win->hwndCanvas), (LPPOINT)&rcCanvas, 2);
     int dx = DpiScale(win->hwndFrame, 200); // width for "xMLT | ETA Nmin"
     int dy = DpiScale(win->hwndFrame, 22);
-    HWND h = CreateWindowExW(WS_EX_LAYERED | WS_EX_TRANSPARENT, kEtaOverlayClass, L"", WS_CHILD | WS_VISIBLE,
-                             rcCanvas.left, rcCanvas.top, dx, dy, GetParent(win->hwndCanvas), (HMENU) nullptr,
-                             GetModuleHandleW(nullptr), nullptr);
+    // Hidden until autoscroll activates (UpdateEtaOverlayText shows it) —
+    // creating visible painted an empty black pill on every document open.
+    HWND h =
+        CreateWindowExW(WS_EX_LAYERED | WS_EX_TRANSPARENT, kEtaOverlayClass, L"", WS_CHILD, rcCanvas.left, rcCanvas.top,
+                        dx, dy, GetParent(win->hwndCanvas), (HMENU) nullptr, GetModuleHandleW(nullptr), nullptr);
     win->autoScroll.hwndEtaLabel = h;
     // WS_EX_LAYERED child windows don't draw their content until given an
     // alpha via SetLayeredWindowAttributes (same as ContrastOverlay). Use a
@@ -1968,14 +2028,18 @@ void CreateToolbar(MainWindow* win) {
     REBARBANDINFOW rbBand{};
     rbBand.cbSize = sizeof(REBARBANDINFOW);
     rbBand.fMask = RBBIM_STYLE | RBBIM_CHILD | RBBIM_CHILDSIZE;
-    rbBand.fStyle = RBBS_FIXEDSIZE;
+    // RBBS_FIXEDSIZE only blocks the user's resize gripper; RBBS_VARIABLEHEIGHT
+    // lets the band's height track the toolbar's wrapped row count
+    // (see SetToolbarBandToRowHeight). cxMinChild must be one button, not the
+    // whole row, or the toolbar never narrows and never wraps.
+    rbBand.fStyle = RBBS_FIXEDSIZE | RBBS_VARIABLEHEIGHT;
     if (IsAppThemed() && IsCurrentThemeDefault()) {
         rbBand.fStyle |= RBBS_CHILDEDGE;
     }
     rbBand.hbmBack = nullptr;
     rbBand.lpText = (WCHAR*)L"Toolbar"; // NOLINT
     rbBand.hwndChild = hwndToolbar;
-    rbBand.cxMinChild = rc.dx * kButtonsCount;
+    rbBand.cxMinChild = rc.dx;
     rbBand.cyMinChild = rc.dy + (2 * rc.y);
     rbBand.cx = 0;
     SendMessageW(win->hwndReBar, RB_INSERTBAND, (WPARAM)-1, (LPARAM)&rbBand);
@@ -2132,14 +2196,15 @@ void CreateToolbar2(MainWindow* win) {
     REBARBANDINFOW rbBand{};
     rbBand.cbSize = sizeof(REBARBANDINFOW);
     rbBand.fMask = RBBIM_STYLE | RBBIM_CHILD | RBBIM_CHILDSIZE;
-    rbBand.fStyle = RBBS_FIXEDSIZE;
+    // same wrap-on-narrow behavior as the main toolbar (SetToolbarBandToRowHeight)
+    rbBand.fStyle = RBBS_FIXEDSIZE | RBBS_VARIABLEHEIGHT;
     if (IsAppThemed() && IsCurrentThemeDefault()) {
         rbBand.fStyle |= RBBS_CHILDEDGE;
     }
     rbBand.hbmBack = nullptr;
     rbBand.lpText = (WCHAR*)L"Arch Tools Toolbar"; // NOLINT
     rbBand.hwndChild = hwndToolbar2;
-    rbBand.cxMinChild = rc.dx * kToolbar2ButtonsCount;
+    rbBand.cxMinChild = rc.dx;
     rbBand.cyMinChild = rc.dy + (2 * rc.y);
     rbBand.cx = 0;
     SendMessageW(win->archTools.hwndReBar2, RB_INSERTBAND, (WPARAM)-1, (LPARAM)&rbBand);

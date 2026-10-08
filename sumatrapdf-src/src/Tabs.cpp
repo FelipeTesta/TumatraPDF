@@ -716,7 +716,9 @@ WindowTab* AddTabToWindow(MainWindow* win, WindowTab* tab, bool deferUpdate) {
     auto* tabs = win->tabsCtrl;
     int idx = win->TabCount();
     bool useTabs = SettingsUseTabs();
-    bool noHomeTab = gGlobalPrefs->noHomeTab;
+    // TUMATRA: Home no longer auto-opens as a tab — the user opens it via the
+    // Home toolbar button (CmdOpenHome). The noHomeTab setting is ignored (forced on).
+    bool noHomeTab = true;
     bool createHomeTab = useTabs && !noHomeTab && (idx == 0);
     if (createHomeTab) {
         WindowTab* homeTab = new WindowTab(win);
