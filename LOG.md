@@ -1,5 +1,38 @@
 # TumatraPDF — Development Log
 
+## 2026-10-08 (s32b) — Bug batch: digit keys, sidebar off, ETA rect, bookmarks button, toolbar wrap, timer anchor (BUILD OK, wrap-verify passed)
+
+### Fixed
+
+- **Bare digits stolen by flashcard rating keys** (user bug 1): `isSafeAccel` (Accelerators.cpp) treats bare `0`–`9` + numpad (FVIRTKEY, no modifier) as NOT safe → excluded from edit/treeview accel tables → digits type into edits (page box, timer). Ctrl+digit zoom presets unchanged. User-verified OK.
+- **ETA black rect on open without autoscroll** (user bug 3): `CreateEtaLabel` (Toolbar.cpp) drops `WS_VISIBLE` — label hidden until `UpdateEtaOverlayText` shows it with autoscroll active.
+- **Timer trio "flying" on resize** (user complaint): `PositionToolbarChildWindows` (ToolbarLayout.cpp) re-anchored to the REAL `CmdAutoScrollToggle` button rect (was TimerInfoId separator — its TB_GETRECT goes empty when comctl absorbs the separator at wrap). Right-to-left layout: edit/label/checkbox; hidden as a whole when no room. `HandleToolbarOverflow` now a no-op (old progressive hiding read the empty separator rect).
+
+### Changed
+
+- **Sidebar OFF on every document open** (user bug 2): `showTocByDefault()` deleted (SumatraPDF.cpp, comment left); LoadDocument + `SetTabState` (SumatraStartup.cpp) + `CreateAndShowMainWindow` (MainWindowCreate.cpp) all call `SetSidebarVisibility(win, false, false)`. `SetSidebarVisibility` writes prefs + tab state → everything converges OFF. Settings.h defaults (showToc=true) untouched, bypassed; options-dialog "show TOC by default" checkbox now inert.
+- **Bookmarks toolbar button** (icon-only, per user: save space): `TbIcon::Bookmarks` + `gIconBookmarks` (Tabler "bookmarks" outline, MIT, unpkg @tabler/icons; stroke-width 1 + bg rect pattern) in SvgIcons.*; button between Open and Print in `gToolbarButtons`, BTNS_CHECK. Checked-state sync single point: tail of `SetSidebarVisibility` (SumatraPDF.cpp) — F9/F12/menu/open all pass through it.
+
+### Added
+
+- **Toolbar 2-row wrap on narrow windows** (user request): comctl computes wrap points ONLY at button-add time (TB_SETROWS same-count = no-op; TB_SETBUTTONSIZE nudge doesn't re-wrap; TBSTATE_WRAP via TB_SETBUTTONINFO ignored as input; TB_GETITEMRECT/TB_GETRECT don't marshal cross-process) → real re-wrap = delete + re-add all buttons (`AddAllToolbarButtons`, `RebuildToolbarButtonsForWidth`), then TB_SETROWS rows+1 loop (≤8) until rows fit client width (comctl BALANCES row widths, not fill-first; small tail overflow <~700px accepted), then re-apply ALL per-button state (visibility/enabled, checked toggles incl. bookmarks/autoscroll/contrast/crops/trim, tooltips, page box) + `LayoutToolbarChildWindows`.
+  - Bands ×3 (main, arch, flashcard): `RBBS_FIXEDSIZE|RBBS_VARIABLEHEIGHT`, cxMinChild = one button (was rc.dx*kButtonsCount → forced full-width band, root cause of hidden buttons).
+  - `SetToolbarBandToRowHeight`: counts distinct TB_GETITEMRECT tops → rows (TB_GETBUTTONROWS absent from SDK commctrl.h) → band cyChild/cyMin/cyMax. Secondary toolbars share `WndProcToolbar` subclass → height-synced; only main toolbar rebuilt.
+  - Debounce: WM_SIZE → 200ms timer (`kRewrapToolbarTimerId=0x4242`) → WM_TIMER rebuild once; last-TWO-widths guard kills any A↔B layout oscillation (brake added after user's PC froze).
+
+### Verified
+
+- `tests/tmp/s32-wrap-verify.ts` (dbg-control, in-process button dump): WIDE 1600 → 1 row, band dy 27, bookmarks w=32, timerEdit anchored left of Autoscroll same row; NARROW 960 → 2 rows, dy 75, nothing beyond client edge, trio hidden; WIDE-AGAIN → 1 row, anchored. Build 0 err/0 warn. User manual-verified: digit input works.
+- **exit code 5 on GUI close: PRE-EXISTING** — DEBUG build at 8d86bcc (v1.0.8 code, worktree baseline) exits 5 the same way; Release exits 0. All `PostQuitMessage(0)`; no `exit(5)`/`ExitProcess(5)` in src. Debug-CRT path, invisible to users. NOT from this session's changes — documented, not blocking.
+
+### Notes / traps
+
+- **User's PC froze mid-session → reboot.** Cause: two full C++ builds run in PARALLEL (main tree test harness build + tumatra-baseline worktree build) — each MSBuild oversubscribes all cores. RULE: builds strictly serial on this machine, one at a time.
+- rtk safety net blocks `git worktree remove --force` — remove build-artifact worktrees by deleting the dir + `rtk git worktree prune` instead (only when zero tracked changes).
+- TB constants for FFI tests: TB_GETITEMRECT=WM_USER+29, TB_COMMANDTOINDEX=WM_USER+25 (SDK 10.0.26100); findChildWindow can hit the menu-rebar's toolbar → pick by client dx>0 / ≥10 buttons.
+- Parallel-agent commit 1da9f0e absorbed the mid-flight snapshot of this work; after restoring the bisect leftovers, `SumatraPDF.cpp` became identical to HEAD (only my bisect-disable had been the delta).
+- Set-Content on source = UTF-8 BOM corruption (hit Toolbar.cpp, byte-stripped via ReadAllBytes/WriteAllBytes). NEVER again; Edit tool only.
+
 ## 2026-10-08 (s32) — Installable version (installer asset + installed-mode auto-update) (BUILD OK, E2E tested)
 
 ### Added

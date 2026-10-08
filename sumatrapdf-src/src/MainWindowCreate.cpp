@@ -164,7 +164,8 @@ MainWindow* CreateAndShowMainWindow(SessionData* data, bool showWin) {
 
     // always set up toolbar and sidebar, even if we defer showing
     ShowOrHideToolbar(win);
-    SetSidebarVisibility(win, false, gGlobalPrefs->showFavorites);
+    // sidebar always starts hidden on open (user request)
+    SetSidebarVisibility(win, false, false);
     ToolbarUpdateStateForWindow(win, true);
 
     if (showWin) {

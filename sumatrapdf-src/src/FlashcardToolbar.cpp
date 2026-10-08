@@ -118,15 +118,18 @@ void FlashcardToolbarCreate(MainWindow* win) {
     REBARBANDINFOW rbBand{};
     rbBand.cbSize = sizeof(REBARBANDINFOW);
     rbBand.fMask = RBBIM_STYLE | RBBIM_CHILD | RBBIM_CHILDSIZE;
-    rbBand.fStyle = RBBS_FIXEDSIZE;
+    // same wrap-on-narrow behavior as the main toolbar (SetToolbarBandToRowHeight
+    // in Toolbar.cpp; this toolbar is subclassed with the same WndProcToolbar
+    // via ToolbarApplyThemeToRebar)
+    rbBand.fStyle = RBBS_FIXEDSIZE | RBBS_VARIABLEHEIGHT;
     if (IsAppThemed() && IsCurrentThemeDefault()) {
         rbBand.fStyle |= RBBS_CHILDEDGE;
     }
     rbBand.hbmBack = nullptr;
     rbBand.lpText = (WCHAR*)L"Flashcard Toolbar"; // NOLINT
     rbBand.hwndChild = hwndToolbar;
-    // Approximate width: button width * number of buttons
-    rbBand.cxMinChild = rc.dx * kFlashcardToolbarButtonsCount;
+    // one button minimum, not the whole row, so the toolbar can narrow and wrap
+    rbBand.cxMinChild = rc.dx;
     rbBand.cyMinChild = rc.dy + (2 * rc.y);
     rbBand.cx = 0;
     SendMessageW(hwndRebar, RB_INSERTBAND, (WPARAM)-1, (LPARAM)&rbBand);
@@ -549,8 +552,8 @@ static void ConfigApplyPath(ConfigDialog* d, Str path) {
     }
     SaveSettings();
     int nMoved = FlashcardStudyMigrateFiles(oldDir, FlashcardStudyDir());
-    logf("[fc] Config - study dir set to '%s' (moved %d file(s) from '%s')\n",
-         path ? path : StrL("(default app-data)"), nMoved, Str(oldDir));
+    logf("[fc] Config - study dir set to '%s' (moved %d file(s) from '%s')\n", path ? path : StrL("(default app-data)"),
+         nMoved, Str(oldDir));
     ConfigReloadList(d);
 }
 
@@ -694,8 +697,8 @@ static void ConfigLayout(ConfigDialog* d) {
     d->rcListHeader = {pad, y, w - pad, y + hdrDy};
     y += hdrDy;
     // two bottom rows of buttons: clears on top, resync/recover below
-    int yBtn2 = h - pad - btnH;      // bottom row
-    int yBtn1 = yBtn2 - gap - btnH;  // row above
+    int yBtn2 = h - pad - btnH;     // bottom row
+    int yBtn1 = yBtn2 - gap - btnH; // row above
     if (d->hwndList) {
         MoveWindow(d->hwndList, pad, y, w - 2 * pad, yBtn1 - gap - y, TRUE);
     }
@@ -810,7 +813,8 @@ static void ConfigPaint(ConfigDialog* d) {
         RECT rcPdf = rcH;
         rcPdf.left += pad + dotD + pad;
         DrawTextW(hdc, L"PDF", -1, &rcPdf, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-        RECT rcCards = {rcH.right - pad - cLastW - 2 * (gap + cNumW), rcH.top, rcH.right - pad - cLastW - 2 * gap - cNumW, rcH.bottom};
+        RECT rcCards = {rcH.right - pad - cLastW - 2 * (gap + cNumW), rcH.top,
+                        rcH.right - pad - cLastW - 2 * gap - cNumW, rcH.bottom};
         DrawTextW(hdc, L"Cards", -1, &rcCards, DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
         RECT rcDue = {rcH.right - pad - cLastW - gap - cNumW, rcH.top, rcH.right - pad - cLastW - gap, rcH.bottom};
         DrawTextW(hdc, L"Due", -1, &rcDue, DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
@@ -830,8 +834,7 @@ static void ConfigPaint(ConfigDialog* d) {
     SelectObject(hdc, font);
 
     // "Clear Selected": orange drain, 2s hold
-    FlashcardDrawHoldButton(d->hwnd, hdc, d->rcClearSel, L"Clear Selected",
-                            d->holding == kFcConfigHoldSelected,
+    FlashcardDrawHoldButton(d->hwnd, hdc, d->rcClearSel, L"Clear Selected", d->holding == kFcConfigHoldSelected,
                             d->holding == kFcConfigHoldSelected ? d->progress : 1.0, RGB(255, 152, 0));
     // "Clear All": red drain, 5s hold
     FlashcardDrawHoldButton(d->hwnd, hdc, d->rcClearAll, L"Clear All", d->holding == kFcConfigHoldAll,
@@ -1184,8 +1187,7 @@ static void ImportPaint(ImportDialog* d) {
     // row 1: current document
     RECT rcN1 = {d->rcTable.left, y, d->rcTable.right - colCardsW - DpiScale(d->hwnd, 10), y + rowDy};
     TempStr row1 = fmt("%s   (current)", Str(curName));
-    DrawTextW(hdc, CWStrTemp(ToWStrTemp(Str(row1))), -1, &rcN1,
-              DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+    DrawTextW(hdc, CWStrTemp(ToWStrTemp(Str(row1))), -1, &rcN1, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
     RECT rcC1 = {d->rcTable.right - colCardsW, y, d->rcTable.right, y + rowDy};
     TempStr c1 = fmt("%d", curCards);
     DrawTextW(hdc, CWStrTemp(ToWStrTemp(Str(c1))), -1, &rcC1, DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
@@ -1474,8 +1476,8 @@ static void SessionOpenSelected(SessionDialog* d) {
         FlashcardStudyDocInfo& info = d->docs[i];
         if (!info.docPath || !file::Exists(Str(info.docPath))) {
             skipped++;
-            logf("[fc] Session - skipped '%s': PDF missing at '%s'\n",
-                 Str(info.docName ? info.docName : "?"), Str(info.docPath ? info.docPath : "(none)"));
+            logf("[fc] Session - skipped '%s': PDF missing at '%s'\n", Str(info.docName ? info.docName : "?"),
+                 Str(info.docPath ? info.docPath : "(none)"));
             continue;
         }
         cmd.AppendChar('"');
@@ -1507,8 +1509,7 @@ static void SessionOpenSelected(SessionDialog* d) {
         CloseHandle(pi.hProcess);
         CloseHandle(pi.hThread);
     }
-    logf("[fc] Session - launched new window with %d book(s) (skipped %d missing) ok=%d\n", n, skipped,
-         ok ? 1 : 0);
+    logf("[fc] Session - launched new window with %d book(s) (skipped %d missing) ok=%d\n", n, skipped, ok ? 1 : 0);
 }
 
 static void SessionPaint(SessionDialog* d) {

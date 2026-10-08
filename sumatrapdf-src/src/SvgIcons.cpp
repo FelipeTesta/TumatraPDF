@@ -257,6 +257,14 @@ static const char* gIconPin =
   <path d="M9.5 4l10.5 10.5l-5.5 0.5l-4 4l-1 -4.5l-4.5 -1l4 -4z" />
 </svg>)";
 
+// https://github.com/tabler/tabler-icons/blob/master/icons/bookmarks.svg
+static const char* gIconBookmarks =
+    R"(<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" stroke-width="1" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round">
+  <rect x="0" y="0" width="24" height="24" stroke="none"></rect>
+  <path d="M15 10v11l-5 -3l-5 3v-11a3 3 0 0 1 3 -3h4a3 3 0 0 1 3 3" />
+  <path d="M11 3h5a3 3 0 0 1 3 3v11" />
+</svg>)";
+
 // must match order in enum class TbIcon
 // clang-format off
 static const char* gIcons[] = {
@@ -288,6 +296,7 @@ static const char* gIcons[] = {
     gIconHomeList,
     gIconHomeThumbnails,
     gIconPin,
+    gIconBookmarks,
 };
 // clang-format on
 

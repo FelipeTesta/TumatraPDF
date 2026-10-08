@@ -289,6 +289,15 @@ static bool isSafeAccel(const ACCEL& a) {
         }
     }
 
+    // bare digits (no Ctrl/Alt/Shift) are bound to flashcard rating (1-4) but
+    // must still type into edit controls (autoscroll timer, page number).
+    // With a modifier (Ctrl+1-4 = zoom) they remain safe.
+    if (a.fVirt == FVIRTKEY) {
+        if ((k >= '0' && k <= '9') || (k >= VK_NUMPAD0 && k <= VK_NUMPAD9)) {
+            return false;
+        }
+    }
+
     // whitelist Alt + Left, Alt + Right to enable document
     // navigation when focus is in edit or tree control
     // https://github.com/sumatrapdfreader/sumatrapdf/issues/3688#issuecomment-1728271753

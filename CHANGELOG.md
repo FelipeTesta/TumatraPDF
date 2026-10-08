@@ -31,6 +31,22 @@ history in [LOG.md](LOG.md).
 - **Home button opens the home page as an overlay** over the canvas — no extra
   tab is created or consumed; dismiss with 🏠 again, `Esc`, or by opening a file.
   The startup home tab stays disabled.
+- **Bookmarks toolbar button** (icon-only, between Open and Print): toggles the
+  sidebar; its pressed state always mirrors the sidebar's visibility.
+- **Responsive toolbar:** on narrow windows the toolbar doubles its height and
+  the buttons that don't fit wrap down to a second row (rightmost first)
+  instead of being cut off. The autoscroll timer controls move with the
+  Autoscroll button and hide as one unit when there's no room.
+- **Sidebar starts hidden:** every document opens with the
+  favorites/bookmarks sidebar OFF (the old "show TOC by default" heuristics
+  are gone) — enable it manually when wanted.
+- **Fixed:** digits (`1`–`4` and all bare number keys) could not be typed into
+  the page-number and autoscroll-timer fields — the flashcard rating keys were
+  swallowing them outside study mode. Digits now always type into edit
+  fields; Ctrl+digit zoom presets are unchanged.
+- **Fixed:** an empty black ETA box appeared in the toolbar when opening a
+  PDF without autoscroll running. The ETA label now stays hidden until
+  autoscroll is actually on.
 
 ## v1.0.8 (2026-10-01)
 

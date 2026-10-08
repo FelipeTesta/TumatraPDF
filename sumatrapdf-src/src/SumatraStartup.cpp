@@ -394,7 +394,8 @@ void SetTabState(WindowTab* tab, TabState* state) {
     }
 
     tab->tocState = *state->tocState;
-    SetSidebarVisibility(win, state->showToc, gGlobalPrefs->showFavorites);
+    // sidebar always starts hidden on open (user request): ignore saved showToc
+    SetSidebarVisibility(win, false, false);
 
     DisplayMode displayMode = DisplayModeFromString(state->displayMode, DisplayMode::Automatic);
     if (displayMode != DisplayMode::Automatic) {
@@ -964,7 +965,8 @@ static bool IsInstallerButNotInstalled() {
 // if not, at least I can add logging to figure out why it fails
 constexpr int kBtnIdLearnMore = 100;
 static Str kFailedToLoadURL() {
-    return StrL("https://github.com/FelipeTesta/TumatraPDF/blob/main/sumatrapdf-src/docs/md/Failed-to-load-libmupdf.md");
+    return StrL(
+        "https://github.com/FelipeTesta/TumatraPDF/blob/main/sumatrapdf-src/docs/md/Failed-to-load-libmupdf.md");
 }
 
 static HRESULT CALLBACK LoadLibsumatrapdfDialogCallback(HWND /*hwnd*/, UINT msg, WPARAM wParam, LPARAM lParam,
@@ -1445,7 +1447,9 @@ static void ShowInstallerHelp() {
     if (ok) {
         // if we're launched from console, print help to consle window
         printf("%s\n%s\n", msg.s,
-               "See more at https://github.com/FelipeTesta/TumatraPDF/blob/main/sumatrapdf-src/docs/md/Installer-cmd-line-arguments.md");
+               "See more at "
+               "https://github.com/FelipeTesta/TumatraPDF/blob/main/sumatrapdf-src/docs/md/"
+               "Installer-cmd-line-arguments.md");
         return;
     }
 

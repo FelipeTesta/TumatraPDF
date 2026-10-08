@@ -52,8 +52,8 @@ The features below were developed on top of SumatraPDF and **do not exist in the
 - Play/Pause toggle button (▶/⏸ icon)
 - - and - buttons for speed adjustment
 - Speed label `%d px/min` in dedicated toolbar slot via fake placeholder button `SpeedInfoId` + `TbSetButtonDx` (cloned page-counter pattern) — occupies space like a native control, no overlap
-- Numeric field for timer (minutes, 0 = no limit)
-- Label showing ETA (e.g.: "⏱ 12min remaining") — works on both PDF (fixed pages: remaining height / speed) and Markdown (webview `autoscrollProgress` ~100ms → `DocController::OnAutoScrollProgress` → `UpdateToolbarEtaText`)
+- Numeric field for timer (minutes, 0 = no limit) — `[checkbox][Timer:][input]` anchored to the Autoscroll button: moves with it on resize/wrap, hidden as a whole when the wrapped toolbar leaves no room
+- Label showing ETA (e.g.: "⏱ 12min remaining") — works on both PDF (fixed pages: remaining height / speed) and Markdown (webview `autoscrollProgress` ~100ms → `DocController::OnAutoScrollProgress` → `UpdateToolbarEtaText`); the label stays hidden until autoscroll is actually on (no empty black box at document open)
 
 **Persistence:** Speed and timer saved in `TumatraPDF-settings.txt` (`AutoScrollSpeed`, `AutoScrollTimerMinutes`). Fresh docs start at min speed `0.008×` (`kMinSpeedMultiplier = 0.008f` ≈ 100 px/min — never-used default). Persistence unchanged; any persisted value below min clamps to min.
 
@@ -241,6 +241,8 @@ The features below were developed on top of SumatraPDF and **do not exist in the
 | `Space` / `Enter`    | Reveal answer                   |
 | `1`–`4` (numpad too) | Rate Again / Hard / Good / Easy |
 
+`1`–`4` are rating keys only while a study card is on screen; otherwise they type digits into edit fields (page box, timer field).
+
 **Technical:** `src/Flashcard.{h,cpp}` (loader, SM-2, study JSON incl. docName + folder setting, history list reader, filter parser), `src/Commands_Flashcard.cpp` (session queue `{tab, cardIdx}`, navigation, rating, xorshift shuffle), `src/FlashcardToolbar.cpp` (2nd toolbar + shared dialog scaffolding + Order/Filter/Config windows, theme-aware), `src/FlashcardSidebar.cpp`, `src/Canvas.cpp` (`PaintFlashcardMasks`), `src/WindowTab.h` (per-tab `FlashcardTabState`). Rich `[fc]` logging for bug diagnosis.
 
 ---
@@ -254,6 +256,15 @@ The features below were developed on top of SumatraPDF and **do not exist in the
 **Technical:** `EngineMupdf::ReplaceImageWithFile`/`ReplaceImageByIdx` (pageNo + imageIdx identity from the clicked element; mupdf image-store pointer match → XObject dict `pdf_add_image` + `pdf_dict_put`), 1.2s mtime watch timer for the external-edit flow, GDI+ temp-PNG writer.
 
 Also: **Home (`⌂`) toolbar button** before Open — the Home tab no longer auto-opens at startup; it opens only on request.
+
+### 9. 🧰 Responsive Toolbar + Sidebar/Input Defaults
+
+- **Bookmarks toolbar button** (icon-only, Tabler "bookmarks", between Open and Print): toggles the sidebar; checked state mirrors sidebar visibility (single sync point in `SetSidebarVisibility` — F9/F12/menu/toolbar all converge there).
+- **Two-row wrap:** when the window gets narrow enough to clip a button, the toolbar doubles its height and the buttons that don't fit move down to a second row (rightmost first). Works via a debounced rebuild (200 ms after the last resize step) — comctl only computes wrap points when buttons are added, so the toolbar deletes and re-adds its buttons at the new width, then re-applies every per-button state (hidden/enabled, checked toggles, tooltips, page box). ArchTools and Flashcard toolbars get their band heights synced through the same subclass.
+- **Sidebar starts hidden:** every document opens with favorites/TOC OFF (previous "show TOC by default" heuristics removed); enable manually via the bookmarks button, F9/F12, or the View menu.
+- **Digit keys stay digits:** `1`–`4` (and all bare digits) type into edit fields; only Ctrl+digit combos (zoom presets) remain global shortcuts.
+
+**Technical:** `src/Toolbar.cpp` (`AddAllToolbarButtons`, `RebuildToolbarButtonsForWidth`, `SetToolbarBandToRowHeight`, `WndProcToolbar` WM_SIZE/WM_TIMER), `src/ToolbarLayout.cpp` (timer trio anchored to the Autoscroll button rect), `src/Accelerators.cpp` (`isSafeAccel` bare-digit rule), `src/SvgIcons.cpp` (`gIconBookmarks`).
 
 ### 📋 Technical Summary for Developers
 

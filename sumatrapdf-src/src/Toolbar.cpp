@@ -1,4 +1,4 @@
-﻿/* Copyright 2022 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2022 the SumatraPDF project authors (see AUTHORS file).
    License: GPLv3 */
 
 #include "base/Base.h"
@@ -951,6 +951,94 @@ static LRESULT CALLBACK WndProcEditBg(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     return res;
 }
 
+// (Re-)add all toolbar buttons: built-ins from gToolbarButtons plus the
+// user's custom-command buttons. comctl computes wrap points ONLY when
+// buttons are added (TB_SETROWS with the current row count is a no-op and a
+// TB_SETBUTTONSIZE nudge doesn't re-wrap either), so a resize re-wrap means
+// deleting and re-adding every button at the current width.
+static void AddAllToolbarButtons(HWND hwndToolbar) {
+    TBBUTTON tbButtons[kButtonsCount];
+    for (int i = 0; i < kButtonsCount; i++) {
+        tbButtons[i] = TbButtonFromButtonInfo(gToolbarButtons[i]);
+    }
+    TbAddButtons(hwndToolbar, kButtonsCount, tbButtons);
+
+    TBBUTTON* buttons = AllocArrayTemp<TBBUTTON>(gCustomButtonsCount);
+    for (int i = 0; i < gCustomButtonsCount; i++) {
+        ToolbarButtonInfo& tbi = gCustomButtons[i];
+        buttons[i] = TbButtonFromButtonInfo(tbi, true);
+    }
+    TbAddButtons(hwndToolbar, gCustomButtonsCount, buttons);
+}
+
+// Delete and re-add every button so comctl lays out FRESH wrap points for the
+// current width (user request: buttons that don't fit move down to the next
+// row and the band grows taller). Adding buttons resets their state to the
+// TBBUTTON defaults, so every piece of per-button state is re-applied right
+// after: hidden/enabled (ToolbarUpdateStateForWindow), the checked toggles
+// and the zoom-layout checks, the page box, and the floating timer controls.
+static void RebuildToolbarButtonsForWidth(MainWindow* win, HWND hwndToolbar) {
+    DWORD sz = (DWORD)SendMessageW(hwndToolbar, TB_GETBUTTONSIZE, 0, 0);
+    int dxBtn = LOWORD(sz);
+    int dyBtn = HIWORD(sz);
+
+    int count = (int)SendMessageW(hwndToolbar, TB_BUTTONCOUNT, 0, 0);
+    for (int i = 0; i < count; i++) {
+        SendMessageW(hwndToolbar, TB_DELETEBUTTON, 0, 0);
+    }
+    AddAllToolbarButtons(hwndToolbar);
+    if (dxBtn > 0 && dyBtn > 0) {
+        TbSetButtonSize(hwndToolbar, Size(dxBtn, dyBtn));
+    }
+
+    // comctl's wrap BALANCES row widths (row1 ~= row2) and tolerates small
+    // overflows past the right edge. Keep asking for one more row (TB_SETROWS
+    // recomputes only when the requested count differs from the current one)
+    // until every row fits the client width.
+    RECT rcClient{};
+    GetClientRect(hwndToolbar, &rcClient);
+    int nBtns = (int)SendMessageW(hwndToolbar, TB_BUTTONCOUNT, 0, 0);
+    for (int tries = 0; tries < 8 && nBtns > 0; tries++) {
+        int maxRight = 0;
+        int rows = 0;
+        int lastTop = INT_MIN;
+        for (int i = 0; i < nBtns; i++) {
+            RECT rc{};
+            if (!SendMessageW(hwndToolbar, TB_GETITEMRECT, (WPARAM)i, (LPARAM)&rc) || rc.right <= rc.left) {
+                continue;
+            }
+            if (rc.right > maxRight) {
+                maxRight = rc.right;
+            }
+            if (rc.top > lastTop) {
+                rows++;
+                lastTop = rc.top;
+            }
+        }
+        if (maxRight <= rcClient.right || rows >= nBtns) {
+            break;
+        }
+        SendMessageW(hwndToolbar, TB_SETROWS, MAKEWPARAM(rows + 1, TRUE), 0);
+    }
+
+    // adding buttons reset every per-button state: re-apply visibility /
+    // enabled, the checked toggles, the zoom-layout checks and the tooltips
+    // (the accel suffix lives in the tooltip, not the button label)
+    ToolbarUpdateStateForWindow(win, true);
+    UpdateToolbarButtonsToolTipsForWindow(win);
+    UpdateToolbarState(win);
+    SetToolbarButtonCheckedState(win, CmdToggleBookmarks, win->uiState.tocVisible);
+    SetToolbarButtonCheckedState(win, CmdAutoScrollToggle, win->autoScroll.active);
+    SetToolbarButtonCheckedState(win, CmdContrastToggle, win->contrastEnabled);
+    SetToolbarButtonCheckedState(win, CmdViewportCropToggle, gGlobalPrefs->viewportCrop.enabled);
+    DisplayModel* dm = win->AsFixed();
+    SetToolbarButtonCheckedState(win, CmdViewportCropV2Toggle, dm ? dm->viewportCropV2Enabled : false);
+    SetToolbarButtonCheckedState(win, CmdMarginTrimToggle, dm ? dm->marginTrimEnabled : false);
+
+    UpdateToolbarPageText(win, win->ctrl ? win->ctrl->PageCount() : -1);
+    LayoutToolbarChildWindows(win);
+}
+
 static WNDPROC DefWndProcToolbar = nullptr;
 
 // After the toolbar laid out its buttons (possibly wrapping them into several
@@ -964,12 +1052,26 @@ static bool SetToolbarBandToRowHeight(HWND hwndToolbar) {
     if (!hwndRebar) {
         return false;
     }
-    int rows = (int)SendMessageW(hwndToolbar, TB_GETBUTTONROWS, 0, 0);
-    if (rows < 1) {
-        rows = 1;
-    }
+    // TB_GETBUTTONROWS isn't in this SDK's commctrl.h, so count distinct row
+    // tops over all button rects (separators can report empty rects, skip them)
     RECT rcBtn{};
-    if (!SendMessageW(hwndToolbar, TB_GETITEMRECT, 0, (LPARAM)&rcBtn) || rcBtn.bottom <= rcBtn.top) {
+    int rows = 0;
+    int lastRowTop = -1;
+    int nBtns = (int)SendMessageW(hwndToolbar, TB_BUTTONCOUNT, 0, 0);
+    for (int i = 0; i < nBtns; i++) {
+        RECT rcIt{};
+        if (!SendMessageW(hwndToolbar, TB_GETITEMRECT, (WPARAM)i, (LPARAM)&rcIt) || rcIt.right <= rcIt.left) {
+            continue;
+        }
+        if (rcBtn.bottom <= rcBtn.top) {
+            rcBtn = rcIt; // first real button: reference rect for row height
+        }
+        if (rcIt.top > lastRowTop) {
+            rows++;
+            lastRowTop = rcIt.top;
+        }
+    }
+    if (rows < 1 || rcBtn.bottom <= rcBtn.top) {
         return false;
     }
     int bandH = rows * (rcBtn.bottom - rcBtn.top) + 2 * rcBtn.top;
@@ -983,7 +1085,7 @@ static bool SetToolbarBandToRowHeight(HWND hwndToolbar) {
     if (!(rbi.fStyle & RBBS_VARIABLEHEIGHT)) {
         return false; // band not allowed to change height
     }
-    if (rbi.cyChild == bandH) {
+    if ((int)rbi.cyChild == bandH) {
         return false;
     }
     rbi.cyChild = bandH;
@@ -992,6 +1094,10 @@ static bool SetToolbarBandToRowHeight(HWND hwndToolbar) {
     SendMessageW(hwndRebar, RB_SETBANDINFO, 0, (LPARAM)&rbi);
     return true;
 }
+// timer id for the debounced toolbar re-wrap (WM_SIZE restarts the timer, the
+// WM_TIMER handler does the actual rebuild once the drag has settled)
+static const int kRewrapToolbarTimerId = 0x4242;
+
 static LRESULT CALLBACK WndProcToolbar(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     if (WM_CTLCOLORSTATIC == msg || WM_CTLCOLOREDIT == msg || WM_CTLCOLORBTN == msg) {
         HWND hwndCtrl = (HWND)lp;
@@ -1088,6 +1194,12 @@ static LRESULT CALLBACK WndProcToolbar(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp
                 int nPages = win->ctrl ? win->ctrl->PageCount() : -1;
                 UpdateToolbarPageText(win, nPages);
                 LayoutToolbarChildWindows(win);
+                // comctl only moves buttons to the next row for widths it saw
+                // when the buttons were added, so a real re-wrap needs the
+                // delete+re-add rebuild. WM_SIZE fires continuously while the
+                // user drags the frame edge, so debounce: restart a short
+                // timer and rebuild once, when the drag settles.
+                SetTimer(hwnd, kRewrapToolbarTimerId, 200, nullptr);
             }
             if (SetToolbarBandToRowHeight(hwnd)) {
                 // band height changed -> rebar height changed -> the canvas
@@ -1097,6 +1209,31 @@ static LRESULT CALLBACK WndProcToolbar(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp
             }
         }
         return sizeRes;
+    }
+
+    if (WM_TIMER == msg && kRewrapToolbarTimerId == (int)wp) {
+        KillTimer(hwnd, kRewrapToolbarTimerId);
+        MainWindow* win = FindMainWindowByHwnd(hwnd);
+        if (win && !win->isBeingClosed && hwnd == win->hwndToolbar) {
+            // only rebuild when the width actually changed since the last
+            // rebuilds (WM_SIZE may have restarted the timer many times).
+            // Remember the last TWO widths: if a relayout ever oscillates
+            // between two sizes, the revisited width is skipped and the
+            // loop dies instead of rebuilding forever.
+            static int sLastRewrapDx[2] = {-1, -1};
+            RECT rcClient{};
+            GetClientRect(hwnd, &rcClient);
+            int dx = rcClient.right - rcClient.left;
+            if (dx > 0 && dx != sLastRewrapDx[0] && dx != sLastRewrapDx[1]) {
+                sLastRewrapDx[1] = sLastRewrapDx[0];
+                sLastRewrapDx[0] = dx;
+                RebuildToolbarButtonsForWidth(win, hwnd);
+                if (SetToolbarBandToRowHeight(hwnd)) {
+                    ScheduleUiUpdate(win, kUiRelayout);
+                }
+            }
+        }
+        return 0;
     }
 
     return CallWindowProc(DefWndProcToolbar, hwnd, msg, wp, lp);
@@ -2006,19 +2143,7 @@ void CreateToolbar(MainWindow* win) {
     exstyle |= TBSTYLE_EX_DRAWDDARROWS;
     TbSetExtendedStyle(hwndToolbar, exstyle);
 
-    TBBUTTON tbButtons[kButtonsCount];
-    for (int i = 0; i < kButtonsCount; i++) {
-        const ToolbarButtonInfo& bi = gToolbarButtons[i];
-        tbButtons[i] = TbButtonFromButtonInfo(bi);
-    }
-    TbAddButtons(hwndToolbar, kButtonsCount, tbButtons);
-
-    TBBUTTON* buttons = AllocArrayTemp<TBBUTTON>(gCustomButtonsCount);
-    for (int i = 0; i < gCustomButtonsCount; i++) {
-        ToolbarButtonInfo& tbi = gCustomButtons[i];
-        buttons[i] = TbButtonFromButtonInfo(tbi, true);
-    }
-    TbAddButtons(hwndToolbar, gCustomButtonsCount, buttons);
+    AddAllToolbarButtons(hwndToolbar);
     TbSetButtonSize(hwndToolbar, Size(iconSize, iconSize));
 
     Rect rc = TbGetItemRect(hwndToolbar, 0);

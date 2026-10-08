@@ -107,42 +107,44 @@ void PositionToolbarChildWindows(MainWindow* win) {
     HWND hwndToolbar = win->hwndToolbar;
     if (!hwndToolbar) return;
 
-    for (int i = 0; i < gToolbarSlotCount; i++) {
-        const ToolbarSlotSpec& slot = gToolbarSlots[i];
-        Rect slotRect = TbGetRect(hwndToolbar, slot.placeholderId);
-        if (slotRect.IsEmpty()) continue;
+    // Timer trio (checkbox | "Timer:" | minutes edit). Anchored to the REAL
+    // CmdAutoScrollToggle button, laid out right-to-left ending at its left
+    // edge. The old anchor was the TimerInfoId separator; when comctl absorbs
+    // that separator at a wrap point its TB_GETRECT goes empty and the controls
+    // kept stale "flying" coordinates on every resize. A real button's rect is
+    // always valid (or clearly hidden), and the trio follows its group to
+    // whichever row the Autoscroll button wrapped into.
+    HWND hwndCheck = win->autoScroll.hwndTimerCheck;
+    HWND hwndLabel = win->autoScroll.hwndTimerLabel;
+    HWND hwndEdit = win->autoScroll.hwndTimerEdit;
+    if (!hwndCheck || !hwndLabel || !hwndEdit) return;
 
-        int ctrlGapX = DpiScale(win->hwndFrame, slot.gapX);
-        int ctrlH = DpiScale(win->hwndFrame, slot.ctrlH);
-        int x = slotRect.x + ctrlGapX;
-        int y = slotRect.y + (slotRect.dy - ctrlH) / 2;
+    Rect anchor = TbGetRect(hwndToolbar, CmdAutoScrollToggle);
+    int gap = DpiScale(win->hwndFrame, gToolbarTokens.ctrlGapX);
+    int ctrlH = DpiScale(win->hwndFrame, gToolbarTokens.ctrlH);
 
-        for (int j = 0; j < slot.childCount; j++) {
-            const ToolbarChildSpec& child = slot.children[j];
-            HWND hwndChild = nullptr;
+    // measure the three pieces from their actual text
+    Size editSz = HwndMeasureText(hwndEdit, "8888");
+    int editW = std::max(editSz.dx, DpiScale(win->hwndFrame, 20));
+    Size labelSz = HwndMeasureText(hwndLabel, "Timer:");
+    int xEdit = anchor.x - gap - editW;
+    int xLabel = xEdit - gap - labelSz.dx;
+    int xCheck = xLabel - gap - ctrlH;
 
-            // Find child window by class name and position heuristic
-            // In practice, we store HWNDs in MainWindow.autoScroll or similar
-            // For now, this is a framework - actual HWND mapping done in Toolbar.cpp
-
-            if (child.ctrlId == CmdAutoScrollTimerToggle) {
-                hwndChild = win->autoScroll.hwndTimerCheck;
-            } else if (child.ctrlId == CmdAutoScrollTimerEdit) {
-                hwndChild = win->autoScroll.hwndTimerEdit;
-            } else if (slot.placeholderId == TimerInfoId && j == 1) { // Timer label
-                hwndChild = win->autoScroll.hwndTimerLabel;
-            }
-
-            if (!hwndChild) continue;
-
-            int childWidth = DpiScale(win->hwndFrame, child.minWidth);
-            if (child.measureText && child.initialText) {
-                Size textSize = HwndMeasureText(hwndChild, child.initialText);
-                childWidth = std::max(childWidth, textSize.dx + DpiScale(win->hwndFrame, child.textPaddingRight));
-            }
-
-            MoveWindow(hwndChild, x, y, childWidth, ctrlH, TRUE);
-            x += childWidth + ctrlGapX;
+    // no anchor (button hidden / not created yet) or no room for the whole
+    // trio before it -> hide; show otherwise (all-or-nothing, keeps the group
+    // from visually tearing apart on narrow windows)
+    bool show = !anchor.IsEmpty() && xCheck > gap;
+    if (show) {
+        int y = anchor.y + (anchor.dy - ctrlH) / 2;
+        MoveWindow(hwndEdit, xEdit, y, editW, ctrlH, TRUE);
+        MoveWindow(hwndLabel, xLabel, y, labelSz.dx, ctrlH, TRUE);
+        MoveWindow(hwndCheck, xCheck, y, ctrlH, ctrlH, TRUE);
+    }
+    for (HWND h : {hwndCheck, hwndLabel, hwndEdit}) {
+        bool visible = IsWindowVisible(h) != FALSE;
+        if (visible != show) {
+            ShowWindow(h, show ? SW_SHOW : SW_HIDE);
         }
     }
 }
@@ -176,41 +178,10 @@ int MeasureChildTextWidth(MainWindow* win, HWND hwndChild, const char* fallbackT
 
 // Clamp/hide overflow for narrow windows
 void HandleToolbarOverflow(MainWindow* win) {
-    // Priority 1: Hide speed label text or clamp — handled by slot sizing / PositionToolbarChildWindows
-    // Priority 2: Hide timer edit (show only checkbox + label)
-    // Priority 3: Hide timer label (show only checkbox)
-    // Never hide checkbox (it's the toggle)
-    HWND hwndToolbar = win->hwndToolbar;
-    if (!hwndToolbar) return;
-
-    Rect timerSlot = TbGetRect(hwndToolbar, TimerInfoId);
-    if (timerSlot.IsEmpty()) return;
-
-    HWND hwndCheck = win->autoScroll.hwndTimerCheck;
-    HWND hwndLabel = win->autoScroll.hwndTimerLabel;
-    HWND hwndEdit = win->autoScroll.hwndTimerEdit;
-
-    if (!hwndCheck) return;
-
-    // Determine available width for timer slot
-    int slotW = timerSlot.dx;
-    int ctrlH = gToolbarTokens.ctrlH;
-    int minWidthForCheck = ctrlH + DpiScale(win->hwndFrame, 8);
-    int minWidthForCheckAndLabel = minWidthForCheck + DpiScale(win->hwndFrame, 45);
-
-    if (slotW < minWidthForCheckAndLabel && hwndEdit) {
-        if (IsWindowVisible(hwndEdit)) {
-            ShowWindow(hwndEdit, SW_HIDE);
-        }
-    } else if (hwndEdit && !IsWindowVisible(hwndEdit)) {
-        ShowWindow(hwndEdit, SW_SHOW);
-    }
-
-    if (slotW < minWidthForCheck && hwndLabel) {
-        if (IsWindowVisible(hwndLabel)) {
-            ShowWindow(hwndLabel, SW_HIDE);
-        }
-    } else if (hwndLabel && !IsWindowVisible(hwndLabel)) {
-        ShowWindow(hwndLabel, SW_SHOW);
-    }
+    // All-or-nothing timer-trio visibility is now decided in
+    // PositionToolbarChildWindows (anchored to the CmdAutoScrollToggle button);
+    // the old slot-width-based progressive hiding read the TimerInfoId
+    // separator rect, which goes empty at wrap points. Keep the call site in
+    // LayoutToolbarChildWindows for future overflow rules.
+    (void)win;
 }
