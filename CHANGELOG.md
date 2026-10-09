@@ -4,7 +4,7 @@ Per-version changelog for TumatraPDF — new functions + bug fixes, newest first
 Feature details live in [README.md](README.md); full per-session development
 history in [LOG.md](LOG.md).
 
-## v1.0.9 (pending)
+## v1.0.9 (2026-10-09)
 
 - **Installable version:** every release now ships `TumatraPDF-install-win64.exe`
   alongside the portable exe. Same binary — the `install` in the name flips it
