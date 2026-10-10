@@ -411,14 +411,9 @@ bool HandleCommandFlashcard(MainWindow* win, int cmd) {
             if (win->flashcard.on) {
                 FlashcardToolbarCreate(win);
                 RelayoutFrame(win, true, -1);
-                // Close arch tools if open (mutually exclusive toolbars)
-                if (win->archTools.on) {
-                    win->archTools.on = false;
-                    if (win->archTools.hwndReBar2) {
-                        ShowWindow(win->archTools.hwndReBar2, SW_HIDE);
-                    }
-                    SetToolbarButtonCheckedState(win, CmdArchToolsToggle, false);
-                }
+                // arch tools stay as they are: the toolbars are mutually
+                // exclusive through DISABLED buttons / blocked commands (user
+                // request - "inativar" beats auto-closing the other toolbar)
                 // Lazy-load the current tab's cards + study states
                 WindowTab* tab = win->CurrentTab();
                 if (tab) {

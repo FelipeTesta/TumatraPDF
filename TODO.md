@@ -309,21 +309,12 @@ Two functions, INDEPENDENT PER DOCUMENT (each tab/doc keeps its own state):
 - Overlay: draw in OnPaintDocument (TrimConfigDialog/ContrastOverlay pattern) with GDI+
 - Persistence: UpdateTabFileDisplayStateForTab / SetDisplayState
 
-**Status:** ✅ IN TESTING (2026-08-28) — Phases 1-4 build-verified (infra+shell, vector extraction+SNAP, overlay+interaction+Scale/Measure math, FileState persistence+polish); awaiting user runtime validation (interactive Scale/Measure).
+**Status:** ✅ COMPLETE + E2E VALIDATED (s33, 2026-10-09) — user-confirmed + `tests/tmp/s33-arch-repro.ts` ALL PASS (draw→accept, calculator, pan between clicks, measure, clean lines, conflict gates).
 
-**Refinements:**
+**Phases 1-12 shipped & validated:** vector extraction + SNAP, overlay + interaction, FileState persistence, floating Scale dialog, click-click + drag, Measure labels, Esc cancel, erase 'e', 2nd-toolbar redesign, OnOk crash + regression fixes, per-page scale refactor.
 
-- Phase 5: floating Scale window, click-click+drag, Measure table + Clear lines — awaiting runtime validation
-- Phase 5b: automatic [arch] logging + Draw line bug fix (arm mode, do not pre-set archDragLine=1) — awaiting runtime validation
-- Phase 6: [Clear lines] visible, measure label on scale line, crosshair cursor while drawing, Esc cancels mode, minidump-on-crash (sumatrapdfcrash.dmp) — awaiting runtime validation
-- Phase 6b: fixed OnOk crash (atof null) — validate drawn line + float>0 before atof — awaiting runtime validation
-- Phase 7: UI redesign — sidebar removed, 'Arch Tools' toolbar button opens 2nd toolbar (Scale/Measure/Reset Scale); lines visible only with Arch Tools=on; erase mode (hold 'e' = red cursor + click deletes single line); flicker fix — awaiting runtime validation
-- Modularity: gated by global pref archToolsEnabled (default on); off → zero UI + zero processing cost
-- Phase 8: Scale dialog activates existing line + shows real length in edit; label bg measures text (no leak); erase 'e' works with Arch Tools on (red cursor + overlay); 2nd bar has 'Clear lines' (CmdArchClear) + 'Reset Scale' (scale-only) — awaiting runtime validation
-- Phase 9: 'Clear lines' clears only measurements (not scale); erase 'e' works with Arch Tools on (outside draw-mode gate); 'e' cursor without black background (red overlay on canvas) — awaiting runtime validation
-- Phase 10: simplified Scale — no line clicking; type new measure + OK recomputes scale (uses existing line); drawing a new line replaces the previous one; pre-fill current length in dialog — awaiting runtime validation
-- Phase 11: scale editing works (OnOk uses archScaleSet; toggle does not clear archScaleLineDefined); erase 'e' hit-tests stored lines directly (not PDF segment); white underline draws for active toggle (no gAnyToggleChecked early-out) — awaiting runtime validation
-- Phase 12: fixed OnOk regression (archScaleLineDefined||archScaleSet guard, allowed drawing new scale line); fixed inverted Measure underline (removed BTNS_CHECK auto-toggle, state managed by UpdateToolbar2State); renamed 'Limpar linhas'→'Clean lines' — awaiting runtime validation
+**s33 additions:** per-page `scaleLineDefined` fixed (draw paths set only the dead win-level flag — the "scale never accepted" root cause); real BS_DEFPUSHBUTTON (Enter works, was a dialog ding); calculator input (`+ - * /`, left-to-right, result echoed); page-coord point pinning + right-drag pan between clicks (pan never turns click-click into drag); Timer edit Enter commit; Clean lines clears page scale too; conflict gates via inativação (arch ON → Two Columns/Scan/Autoscroll/Trim/Flashcards off; flashcards ON → Arch/Autoscroll/Scan off; OFF of an active feature always passes; no auto-close).
+
 - Phase 13: canonical scale factor (meters) + label respects current unit + remember last unit (ArchUnit) + configurable decimal separator (ArchDecimalSeparator, default ',') + Shift constrain horizontal/vertical — awaiting runtime validation
 - Phase 13b: scale and measurements independent per document (HashMap archMeasurementsByDoc, save/restore on tab switch, discarded on close) — awaiting runtime validation
 

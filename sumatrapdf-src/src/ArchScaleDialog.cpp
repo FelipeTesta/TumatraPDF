@@ -93,14 +93,64 @@ void ArchScaleDialogWnd::OnDrawLine() {
     // Clear any existing scale line so user can draw a new one
     ps.scaleLineDefined = false;
     win->archTools.dragLine = 0;
-    win->archTools.point1 = Point{0, 0};
-    win->archTools.point2 = Point{0, 0};
+    win->archTools.point1 = PointF{0, 0};
+    win->archTools.point2 = PointF{0, 0};
     win->archTools.toolMode = 1; // scale mode
     // Do NOT SetCapture or set mouseAction=Dragging here.
     // Capture is acquired on first canvas click in OnMouseLeftButtonDown.
     LogInfo("[arch] OnDrawLine: page %d archToolMode=%d archDragLine=%d", pageNo, win->archTools.toolMode,
             win->archTools.dragLine);
     ScheduleRepaint(win, 0);
+}
+
+// Evaluate a simple calculator expression: numbers joined by + - * /
+// (left-to-right, like a pocket calculator), spaces allowed. A plain number
+// with no operator evaluates to itself. Returns false on any parse error.
+static bool EvalCalcExpr(const char* s, float& result) {
+    float acc = 0.0f;
+    char op = '+';
+    const char* p = s;
+    while (true) {
+        while (*p == ' ') {
+            p++;
+        }
+        char* endp = nullptr;
+        float v = strtof(p, &endp);
+        if (endp == p) {
+            return false; // no number where one was expected
+        }
+        p = endp;
+        switch (op) {
+            case '+':
+                acc += v;
+                break;
+            case '-':
+                acc -= v;
+                break;
+            case '*':
+                acc *= v;
+                break;
+            case '/':
+                if (v == 0.0f) {
+                    return false; // no divide-by-zero
+                }
+                acc /= v;
+                break;
+        }
+        while (*p == ' ') {
+            p++;
+        }
+        if (!*p) {
+            break;
+        }
+        op = *p;
+        if (op != '+' && op != '-' && op != '*' && op != '/') {
+            return false;
+        }
+        p++;
+    }
+    result = acc;
+    return true;
 }
 
 void ArchScaleDialogWnd::OnOk() {
@@ -135,12 +185,14 @@ void ArchScaleDialogWnd::OnOk() {
     }
 
     float realLen = 0.0f;
-    Str end = str::Parse(txtBuf, "%f", &realLen);
-    if (str::IsNull(end) || realLen <= 0.0f) {
+    if (!EvalCalcExpr(txtBuf, realLen) || realLen <= 0.0f) {
         MessageBeep(MB_ICONERROR);
         LogInfo("[arch] OnOk: invalid length");
         return;
     }
+    // show the computed value in the field ("100-20" becomes "80") so the
+    // accepted number is visible even if the dialog stays open
+    editLen->SetText(str::FormatTemp("%.4g", realLen));
 
     // Get selected unit from combo
     int selUnit = 0;
@@ -156,7 +208,9 @@ void ArchScaleDialogWnd::OnOk() {
     float pageLenPt = sqrtf(dx * dx + dy * dy);
 
     if (pageLenPt <= 0.0f) {
+        // degenerate line (both clicks on the same spot): tell the user why
         MessageBeep(MB_ICONWARNING);
+        LogInfo("[arch] OnOk: degenerate scale line (length 0)");
         return;
     }
 
@@ -172,6 +226,8 @@ void ArchScaleDialogWnd::OnOk() {
 
     // Persist the selected unit as global preference
     gGlobalPrefs->archUnit = selUnit;
+
+    LogInfo("[arch] OnOk: accepted length %.4g (unit %d), factor %.1f pt/m", realLen, selUnit, ps.scaleFactor);
 
     // Exit scale mode
     win->archTools.toolMode = 0;
@@ -359,6 +415,10 @@ bool ArchScaleDialogWnd::Create(MainWindow* mainWin) {
 
         btnOk = CreateButton(hwnd, _TRA("✅"), MkMethod0<ArchScaleDialogWnd, &ArchScaleDialogWnd::OnOk>(this), isRtl);
         btnOk->isDefault = true;
+        // isDefault was set after Create, so the button was created with
+        // BS_PUSHBUTTON and IsDialogMessage would find no default button for
+        // Enter (dialog ding). Swap the style for real now.
+        SendMessageW(btnOk->hwnd, BM_SETSTYLE, BS_DEFPUSHBUTTON, MAKELPARAM(TRUE, 0));
         hbox->AddChild(new Padding(btnOk, pad));
 
         vbox->AddChild(hbox);

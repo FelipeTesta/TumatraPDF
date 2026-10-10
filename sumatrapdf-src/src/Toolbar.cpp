@@ -293,6 +293,32 @@ static bool IsCmdEnabled(MainWindow* win, int cmdId) {
             return SettingsUseTabs();
         case PageInfoId:
             return true;
+        case CmdViewportCropV2Toggle:
+        case CmdMarginTrimToggle:
+        case CmdTrimConfig:
+            // arch tools only: measuring over a cropped/trimmed view makes
+            // no sense, so the buttons gray out while arch tools are on
+            if (win->archTools.on) {
+                return false;
+            }
+            break;
+        case CmdViewportCropToggle: // scan view
+        case CmdAutoScrollToggle:
+            // both arch tools and flashcards clash with these
+            if (win->archTools.on || win->flashcard.on) {
+                return false;
+            }
+            break;
+        case CmdFlashcardToggle:
+            if (win->archTools.on) {
+                return false;
+            }
+            break;
+        case CmdArchToolsToggle:
+            if (win->flashcard.on) {
+                return false;
+            }
+            break;
     }
 
     bool remove, disable;
@@ -1323,6 +1349,37 @@ static LRESULT CALLBACK WndProcPageBox(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp
     return CallWindowProc(DefWndProcPageBox, hwnd, msg, wp, lp);
 }
 
+// the autoscroll timer edit behaves like the page box: Enter (main or numpad,
+// both arrive as VK_RETURN) applies the value and leaves the field, Esc just
+// leaves it, Tab moves on. Handled on WM_KEYDOWN because the edit has
+// ES_NUMBER, which filters non-digit WM_CHAR messages.
+static WNDPROC DefWndProcTimerBox = nullptr;
+static LRESULT CALLBACK WndProcTimerBox(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    MainWindow* win = FindMainWindowByHwnd(hwnd);
+    if (!win) {
+        return DefWindowProc(hwnd, msg, wp, lp);
+    }
+
+    if (WM_KEYDOWN == msg) {
+        switch (wp) {
+            case VK_RETURN:
+                // apply the minutes now - reuses the command that reads the
+                // edit, then leave the field
+                SendMessageW(win->hwndFrame, WM_COMMAND, CmdAutoScrollTimerEdit, 0);
+                HwndSetFocus(win->hwndFrame);
+                return 1;
+            case VK_ESCAPE:
+                HwndSetFocus(win->hwndFrame);
+                return 1;
+            case VK_TAB:
+                AdvanceFocus(win);
+                return 1;
+        }
+    }
+
+    return CallWindowProc(DefWndProcTimerBox, hwnd, msg, wp, lp);
+}
+
 void UpdateToolbarPageText(MainWindow* win, int pageCount, bool updateOnly) {
     if (!win->hwndToolbar) {
         return;
@@ -1640,6 +1697,12 @@ static void CreateTimerControls(MainWindow* win) {
     SetWindowFont(win->autoScroll.hwndTimerCheck, font, FALSE);
     SetWindowFont(win->autoScroll.hwndTimerLabel, font, FALSE);
     SetWindowFont(win->autoScroll.hwndTimerEdit, font, FALSE);
+
+    // Enter/Esc/Tab handling for the minutes edit (see WndProcTimerBox)
+    if (!DefWndProcTimerBox) {
+        DefWndProcTimerBox = (WNDPROC)GetWindowLongPtr(win->autoScroll.hwndTimerEdit, GWLP_WNDPROC);
+    }
+    SetWindowLongPtr(win->autoScroll.hwndTimerEdit, GWLP_WNDPROC, (LONG_PTR)WndProcTimerBox);
 
     // Initialize from state
     CheckDlgButton(win->hwndToolbar, CmdAutoScrollTimerToggle,

@@ -4,6 +4,31 @@ Per-version changelog for TumatraPDF — new functions + bug fixes, newest first
 Feature details live in [README.md](README.md); full per-session development
 history in [LOG.md](LOG.md).
 
+## v1.0.10 (pending)
+
+- **Fixed: Arch Tools scale was never accepted.** Since the per-page scale
+  refactor the drawn line was stored against a legacy flag that nothing read,
+  so Scale's OK always beeped "no scale line defined". Lines drawn (click or
+  drag) now register correctly.
+- **Arch Tools: calculator input** — the scale-length field accepts simple
+  expressions (`100-20`, `2*50`, `25/2`; `+ - * /`), showing the computed
+  result when accepted. Enter (main or numpad) confirms.
+- **Arch Tools: pan between clicks** — after the first click pins point 1,
+  drag with the right mouse button to pan (and zoom freely) before placing
+  point 2 far away. The pinned point is page-anchored and stays put.
+- **Arch Tools: "Clean lines" now clears everything on the page** —
+  measurements AND the scale line + calibration (previously the green scale
+  line persisted and the button looked broken). "Reset Scale" keeps its
+  scale-only meaning.
+- **Enter confirms in every numeric field** — the autoscroll timer edit now
+  applies on Enter and leaves the field (page box already did; numpad Enter
+  works everywhere).
+- **Conflict gates:** while Arch Tools is on, the Two Columns, Scan View,
+  Autoscroll, Trim and Flashcards buttons gray out and their shortcuts/menus
+  are blocked; while Flashcards is on, Arch Tools, Autoscroll and Scan View
+  are disabled. The toolbars never auto-close each other anymore — anything
+  still active can always be turned off.
+
 ## v1.0.9 (2026-10-09)
 
 - **Installable version:** every release now ships `TumatraPDF-install-win64.exe`

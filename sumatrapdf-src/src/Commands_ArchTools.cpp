@@ -12,6 +12,10 @@
 #include "MainWindow.h"
 #include "Toolbar.h"
 #include "DocController.h"
+#include "DocProperties.h"
+#include "TreeModel.h"
+#include "EngineBase.h"
+#include "DisplayModel.h"
 
 // Forward declarations — these are defined in other translation units
 void ShowArchScaleDialog(MainWindow* win);
@@ -55,7 +59,9 @@ void HandleCmdArchMeasure(MainWindow* win) {
     UpdateToolbar2State(win);
 }
 
-// HandleCmdArchClear — clear only current page's measurements
+// HandleCmdArchClear — clear current page's measurements AND its scale line
+// (the green line + calibration persist otherwise and "Clean lines" would
+// appear to do nothing about the most visible line on the page)
 void HandleCmdArchClear(MainWindow* win) {
     if (!gGlobalPrefs->archToolsEnabled) return;
     int pageNo = win->ctrl ? win->ctrl->CurrentPageNo() : 1;
@@ -69,7 +75,15 @@ void HandleCmdArchClear(MainWindow* win) {
         }
     }
     win->archTools.measurements = remaining;
-    LogInfo("[arch] CmdArchClear: cleared %d measurements on page %d", count, pageNo);
+    auto& ps = win->archTools.GetScaleForPage(pageNo);
+    bool hadScale = ps.scaleSet || ps.scaleLineDefined;
+    ps.scaleSet = false;
+    ps.scaleLineDefined = false;
+    ps.scaleFactor = 0.0f;
+    ps.scaleLineP1x = ps.scaleLineP1y = 0.0f;
+    ps.scaleLineP2x = ps.scaleLineP2y = 0.0f;
+    LogInfo("[arch] CmdArchClear: cleared %d measurements (scale reset: %d) on page %d", count, hadScale ? 1 : 0,
+            pageNo);
     ScheduleRepaint(win, 0);
 }
 
@@ -96,14 +110,25 @@ void HandleCmdArchToolsToggle(MainWindow* win) {
         if (win->archTools.hwndReBar2) {
             ShowWindow(win->archTools.hwndReBar2, SW_SHOW);
         }
-        // Close flashcard if open (mutually exclusive toolbars)
-        if (win->flashcard.on) {
-            win->flashcard.on = false;
-            FlashcardToolbarDestroy(win);
-            win->flashcard.studyMode = false;
-            win->flashcard.revealMode = false;
-            win->flashcard.currentCardIdx = -1;
-            win->flashcard.studyOrder.Reset();
+        // flashcards stay as they are: the toolbars are mutually exclusive
+        // through DISABLED buttons / blocked commands (user request -
+        // "inativar" beats auto-closing the other toolbar)
+        // Stop the conflicting features (user request: arch tools and
+        // two-columns/scan/autoscroll/trim are mutually exclusive). Post their
+        // toggles: they run through FrameOnCommand, whose arch gate lets an
+        // OFF through and blocks anything that would turn ON.
+        auto* dmOn = win->AsFixed();
+        if (win->autoScroll.active) {
+            PostMessageW(win->hwndFrame, WM_COMMAND, CmdAutoScrollToggle, 0);
+        }
+        if (gGlobalPrefs->viewportCrop.enabled) {
+            PostMessageW(win->hwndFrame, WM_COMMAND, CmdViewportCropToggle, 0);
+        }
+        if (dmOn && dmOn->viewportCropV2Enabled) {
+            PostMessageW(win->hwndFrame, WM_COMMAND, CmdViewportCropV2Toggle, 0);
+        }
+        if (dmOn && dmOn->marginTrimEnabled) {
+            PostMessageW(win->hwndFrame, WM_COMMAND, CmdMarginTrimToggle, 0);
         }
         UpdateToolbar2State(win);
     } else {
@@ -113,8 +138,8 @@ void HandleCmdArchToolsToggle(MainWindow* win) {
         win->archTools.toolMode = 0;
         win->archTools.eraseMode = false;
         win->archTools.dragLine = 0;
-        win->archTools.point1 = Point{0, 0};
-        win->archTools.point2 = Point{0, 0};
+        win->archTools.point1 = PointF{0, 0};
+        win->archTools.point2 = PointF{0, 0};
         if (GetCapture() == win->hwndCanvas) {
             ReleaseCapture();
         }
@@ -123,6 +148,9 @@ void HandleCmdArchToolsToggle(MainWindow* win) {
     // Explicitly set checked state for the toggle button (fixes underline drawing)
     SetToolbarButtonCheckedState(win, CmdArchToolsToggle, win->archTools.on);
     LogInfo("[arch] CmdArchToolsToggle: archToolsOn=%d", win->archTools.on);
+    // refresh button enabled states: the conflicting buttons gray out while
+    // arch tools are on and come back when it's off (IsCmdEnabled)
+    ToolbarUpdateStateForWindow(win, false);
     RelayoutFrame(win, true, -1);
     ScheduleRepaint(win, 0);
 }

@@ -1712,7 +1712,7 @@ static int TrimCollectVisibleLines(MainWindow* win, DisplayModel* dm, TrimLineCa
     return n;
 }
 
-static void OnMouseMove(MainWindow* win, int x, int y, WPARAM /*key*/) {
+static void OnMouseMove(MainWindow* win, int x, int y, WPARAM key) {
     // Track mouse position for erase mode overlay
     win->archTools.mousePos = Point{x, y};
 
@@ -1745,17 +1745,20 @@ static void OnMouseMove(MainWindow* win, int x, int y, WPARAM /*key*/) {
         return;
     }
 
-    // Arch Tools: handle scale/measure mouse move (drag preview)
+    // Arch Tools: handle scale/measure mouse move (drag preview). A
+    // right-button drag pans the page instead (see OnMouseRightButtonDown) -
+    // those moves must reach the drag-scroll handler, not be swallowed here.
     if (gGlobalPrefs->archToolsEnabled && win->archTools.toolMode != 0 && win->archTools.dragLine == 1 &&
-        win->AsFixed()) {
+        win->AsFixed() && !(key & MK_RBUTTON)) {
         DisplayModel* dm = win->AsFixed();
         int pageNo = dm->CurrentPageNo();
         if (dm->ValidPageNo(pageNo)) {
             Point screenPt{x, y};
             PointF pagePt = ArchSnapScreenPoint(win, dm, pageNo, screenPt);
-            // Shift constraint: snap to horizontal or vertical
+            // Shift constraint: snap to horizontal or vertical (point1 is in
+            // page coords already, so the preview survives pan/zoom)
             if (GetAsyncKeyState(VK_SHIFT) & 0x8000) {
-                PointF p1page = dm->CvtFromScreen(win->archTools.point1, pageNo);
+                PointF p1page = win->archTools.point1;
                 float dx = pagePt.x - p1page.x;
                 float dy = pagePt.y - p1page.y;
                 if (fabsf(dx) > fabsf(dy)) {
@@ -1764,9 +1767,12 @@ static void OnMouseMove(MainWindow* win, int x, int y, WPARAM /*key*/) {
                     pagePt.x = p1page.x;
                 }
             }
-            win->archTools.point2 = dm->CvtToScreen(pageNo, pagePt);
-            // Track drag distance for click-click vs click-drag detection
-            if (!win->archTools.dragMoved) {
+            win->archTools.point2 = pagePt;
+            // Track drag distance for click-click vs click-drag detection.
+            // Only LEFT-button movement counts: panning with the right button
+            // (allowed while a point is pinned) must not turn the next click
+            // into a "drag" finalize.
+            if ((key & MK_LBUTTON) && !win->archTools.dragMoved) {
                 int dx = x - win->archTools.dragStartPos.x;
                 int dy = y - win->archTools.dragStartPos.y;
                 if (dx * dx + dy * dy > 16) { // ~4px threshold
@@ -2250,7 +2256,9 @@ static void OnMouseLeftButtonDown(MainWindow* win, int x, int y, WPARAM key) {
                 if (win->archTools.dragLine == 0) {
                     // First click: start drawing a new line (click or drag)
                     // No auto-select of existing PDF vector segments
-                    win->archTools.point1 = dm->CvtToScreen(pageNo, pagePt);
+                    // point1 in PAGE coords: the user may pan/zoom with the
+                    // right button / keys before the second click
+                    win->archTools.point1 = pagePt;
                     win->archTools.dragLine = 1;
                     win->archTools.dragStartPos = Point{x, y};
                     win->archTools.dragMoved = false;
@@ -2262,22 +2270,23 @@ static void OnMouseLeftButtonDown(MainWindow* win, int x, int y, WPARAM key) {
                     // Second click (not a drag): finalize the line
                     // Shift constraint: snap to horizontal or vertical
                     if (GetAsyncKeyState(VK_SHIFT) & 0x8000) {
-                        PointF p1page = dm->CvtFromScreen(win->archTools.point1, pageNo);
-                        float dx = pagePt.x - p1page.x;
-                        float dy = pagePt.y - p1page.y;
+                        float dx = pagePt.x - win->archTools.point1.x;
+                        float dy = pagePt.y - win->archTools.point1.y;
                         if (fabsf(dx) > fabsf(dy)) {
-                            pagePt.y = p1page.y;
+                            pagePt.y = win->archTools.point1.y;
                         } else {
-                            pagePt.x = p1page.x;
+                            pagePt.x = win->archTools.point1.x;
                         }
                     }
-                    win->archTools.point2 = dm->CvtToScreen(pageNo, pagePt);
+                    win->archTools.point2 = pagePt;
                     win->archTools.dragLine = 2;
-                    win->archTools.scaleLineDefined = true;
                     // Store in page coords
-                    PointF p1page = dm->CvtFromScreen(win->archTools.point1, pageNo);
-                    PointF p2page = dm->CvtFromScreen(win->archTools.point2, pageNo);
+                    PointF p1page = win->archTools.point1;
+                    PointF p2page = win->archTools.point2;
                     auto& ps = win->archTools.GetScaleForPage(pageNo);
+                    // OnOk validates the PER-PAGE flag; the win-level legacy
+                    // scaleLineDefined is never read anywhere
+                    ps.scaleLineDefined = true;
                     ps.scaleLineP1x = p1page.x;
                     ps.scaleLineP1y = p1page.y;
                     ps.scaleLineP2x = p2page.x;
@@ -2292,7 +2301,7 @@ static void OnMouseLeftButtonDown(MainWindow* win, int x, int y, WPARAM key) {
             } else if (win->archTools.toolMode == 2) { // Measure mode
                 if (win->archTools.dragLine == 0) {
                     // First click: start measuring
-                    win->archTools.point1 = dm->CvtToScreen(pageNo, pagePt);
+                    win->archTools.point1 = pagePt;
                     win->archTools.dragLine = 1;
                     win->archTools.dragStartPos = Point{x, y};
                     win->archTools.dragMoved = false;
@@ -2304,16 +2313,15 @@ static void OnMouseLeftButtonDown(MainWindow* win, int x, int y, WPARAM key) {
                     // Second click (not a drag): finalize measurement
                     // Shift constraint: snap to horizontal or vertical
                     if (GetAsyncKeyState(VK_SHIFT) & 0x8000) {
-                        PointF p1page = dm->CvtFromScreen(win->archTools.point1, pageNo);
-                        float dx = pagePt.x - p1page.x;
-                        float dy = pagePt.y - p1page.y;
+                        float dx = pagePt.x - win->archTools.point1.x;
+                        float dy = pagePt.y - win->archTools.point1.y;
                         if (fabsf(dx) > fabsf(dy)) {
-                            pagePt.y = p1page.y;
+                            pagePt.y = win->archTools.point1.y;
                         } else {
-                            pagePt.x = p1page.x;
+                            pagePt.x = win->archTools.point1.x;
                         }
                     }
-                    win->archTools.point2 = dm->CvtToScreen(pageNo, pagePt);
+                    win->archTools.point2 = pagePt;
                     win->archTools.dragLine = 2;
                     ReleaseCapture();
                     win->mouseAction = MouseAction::None;
@@ -2519,11 +2527,10 @@ static void OnMouseLeftButtonDown(MainWindow* win, int x, int y, WPARAM key) {
     }
 }
 
-static void FinalizeArchMeasurement(MainWindow* win, DisplayModel* dm, int pageNo) {
-    Point screenPt1 = win->archTools.point1;
-    Point screenPt2 = win->archTools.point2;
-    PointF pagePt1 = dm->CvtFromScreen(screenPt1, pageNo);
-    PointF pagePt2 = dm->CvtFromScreen(screenPt2, pageNo);
+static void FinalizeArchMeasurement(MainWindow* win, DisplayModel* /*dm*/, int pageNo) {
+    // point1/point2 are stored in page coords (survive pan/zoom)
+    PointF pagePt1 = win->archTools.point1;
+    PointF pagePt2 = win->archTools.point2;
     float dxPage = fabsf(pagePt2.x - pagePt1.x);
     float dyPage = fabsf(pagePt2.y - pagePt1.y);
     float lenPage = sqrtf(dxPage * dxPage + dyPage * dyPage);
@@ -2585,27 +2592,25 @@ static void OnMouseLeftButtonUp(MainWindow* win, int x, int y, WPARAM key) {
             win->mouseAction = MouseAction::None;
 
             if (win->archTools.dragMoved) {
-                // Drag case: finalize the line
+                // Drag case: finalize the line (point1/point2 already page coords)
                 if (win->archTools.toolMode == 1) { // Scale mode
                     // Re-apply Shift constraint at release for correctness
                     if (GetAsyncKeyState(VK_SHIFT) & 0x8000) {
-                        PointF p1page = dm->CvtFromScreen(win->archTools.point1, pageNo);
-                        PointF p2page = dm->CvtFromScreen(win->archTools.point2, pageNo);
-                        float dx = p2page.x - p1page.x;
-                        float dy = p2page.y - p1page.y;
+                        PointF p1page = win->archTools.point1;
+                        float dx = win->archTools.point2.x - p1page.x;
+                        float dy = win->archTools.point2.y - p1page.y;
                         if (fabsf(dx) > fabsf(dy)) {
-                            p2page.y = p1page.y;
+                            win->archTools.point2.y = p1page.y;
                         } else {
-                            p2page.x = p1page.x;
+                            win->archTools.point2.x = p1page.x;
                         }
-                        win->archTools.point2 = dm->CvtToScreen(pageNo, p2page);
                     }
                     win->archTools.dragLine = 2;
-                    win->archTools.scaleLineDefined = true;
-                    // Store in page coords
-                    PointF p1page = dm->CvtFromScreen(win->archTools.point1, pageNo);
-                    PointF p2page = dm->CvtFromScreen(win->archTools.point2, pageNo);
+                    PointF p1page = win->archTools.point1;
+                    PointF p2page = win->archTools.point2;
                     auto& ps = win->archTools.GetScaleForPage(pageNo);
+                    // per-page flag is what OnOk validates (see click path above)
+                    ps.scaleLineDefined = true;
                     ps.scaleLineP1x = p1page.x;
                     ps.scaleLineP1y = p1page.y;
                     ps.scaleLineP2x = p2page.x;
@@ -2616,16 +2621,14 @@ static void OnMouseLeftButtonUp(MainWindow* win, int x, int y, WPARAM key) {
                 } else if (win->archTools.toolMode == 2) { // Measure mode
                     // Re-apply Shift constraint at release for correctness
                     if (GetAsyncKeyState(VK_SHIFT) & 0x8000) {
-                        PointF p1page = dm->CvtFromScreen(win->archTools.point1, pageNo);
-                        PointF p2page = dm->CvtFromScreen(win->archTools.point2, pageNo);
-                        float dx = p2page.x - p1page.x;
-                        float dy = p2page.y - p1page.y;
+                        PointF p1page = win->archTools.point1;
+                        float dx = win->archTools.point2.x - p1page.x;
+                        float dy = win->archTools.point2.y - p1page.y;
                         if (fabsf(dx) > fabsf(dy)) {
-                            p2page.y = p1page.y;
+                            win->archTools.point2.y = p1page.y;
                         } else {
-                            p2page.x = p1page.x;
+                            win->archTools.point2.x = p1page.x;
                         }
-                        win->archTools.point2 = dm->CvtToScreen(pageNo, p2page);
                     }
                     LogInfo("[arch] OnMouseLeftButtonUp: drag finalized mode=measure, finalizing measurement");
                     FinalizeArchMeasurement(win, dm, pageNo);
@@ -2928,7 +2931,13 @@ static void OnMouseRightButtonDown(MainWindow* win, int x, int y) {
     if (MouseAction::Scrolling == win->mouseAction) {
         win->mouseAction = MouseAction::None;
     } else if (win->mouseAction != MouseAction::None) {
-        return;
+        // Arch draw armed: the first click holds Dragging; allow a right-drag
+        // to pan the page so the second point can be placed far away. The
+        // pinned first point lives in page coords and stays put while panning.
+        bool archArmed = gGlobalPrefs->archToolsEnabled && win->archTools.on && win->archTools.toolMode != 0;
+        if (!archArmed) {
+            return;
+        }
     }
     ReportIf(!win->AsFixed());
 
@@ -3716,17 +3725,20 @@ static void OnPaintDocument(MainWindow* win) {
                     }
                 }
 
-                // Draw in-progress line (orange highlight)
-                if (win->archTools.dragLine > 0) {
+                // Draw in-progress line (orange highlight). point1/point2 are
+                // page coords, so the pinned line follows the page while the
+                // user pans/zoomes between clicks.
+                if (win->archTools.dragLine > 0 && dm->ValidPageNo(curPageNo)) {
+                    Point p1 = dm->CvtToScreen(curPageNo, win->archTools.point1);
+                    Point p2 = dm->CvtToScreen(curPageNo, win->archTools.point2);
                     Gdiplus::Pen pen(Gdiplus::Color(255, 255, 165, 0), 2); // orange
                     pen.SetDashStyle(Gdiplus::DashStyleDash);
-                    gs.DrawLine(&pen, win->archTools.point1.x, win->archTools.point1.y, win->archTools.point2.x,
-                                win->archTools.point2.y);
+                    gs.DrawLine(&pen, p1.x, p1.y, p2.x, p2.y);
                     // Endpoint circles
                     Gdiplus::SolidBrush brush(Gdiplus::Color(255, 255, 165, 0));
                     int r = 4;
-                    gs.FillEllipse(&brush, win->archTools.point1.x - r, win->archTools.point1.y - r, 2 * r, 2 * r);
-                    gs.FillEllipse(&brush, win->archTools.point2.x - r, win->archTools.point2.y - r, 2 * r, 2 * r);
+                    gs.FillEllipse(&brush, p1.x - r, p1.y - r, 2 * r, 2 * r);
+                    gs.FillEllipse(&brush, p2.x - r, p2.y - r, 2 * r, 2 * r);
                 }
 
                 // Erase mode: draw red "+" crosshair overlay at mouse position

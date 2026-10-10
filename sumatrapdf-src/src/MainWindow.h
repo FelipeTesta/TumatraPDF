@@ -400,8 +400,8 @@ struct MainWindow {
         float scaleAnchorY = 0.0f;
         bool scaleSet = false;
         bool scaleLineDefined = false; // true when a scale line has been drawn (for dialog ✅)
-        Point point1;                  // screen coords during draw
-        Point point2;
+        PointF point1;                 // page coords during draw (survives pan/zoom between clicks)
+        PointF point2;
         int dragLine = 0; // 0 none, 1 first point placed, 2 done
         bool snap = true; // default true
         Vec<ArchMeasurement> measurements;

@@ -1,5 +1,40 @@
 # TumatraPDF — Development Log
 
+## 2026-10-09 (s33) — Arch Tools overhaul: scale accepted, calculator input, pan between clicks, conflict gates (BUILD OK, s33-arch-repro ALL PASS)
+
+### Fixed
+
+- **Scale never accepted (root cause of "não aceita a medida" + beep):** since the per-page refactor (d57d7f3) the Canvas finalize paths (click-click + drag) set only the win-level legacy `archTools.scaleLineDefined` (read NOWHERE), never the per-page `ps.scaleLineDefined` that OnOk validates → every accept beeped "no scale line defined". Both paths now set the per-page flag.
+- **Enter ding in the Scale dialog:** `btnOk->isDefault` was set AFTER CreateButton → button created BS_PUSHBUTTON → IsDialogMessage found no default button → dialog DING. Fix: BM_SETSTYLE BS_DEFPUSHBUTTON after creation.
+- **Silent reject:** OnOk's degenerate-line branch (pageLenPt<=0) beeped without logging — added the log ("degenerate scale line") + success log ("accepted length X, factor Y").
+- **"Clean lines" broken:** CmdArchClear cleared measurements only — the green scale line (+ calibration restored from FileState) stayed → looked dead. Now also resets the page's scale (endpoints + factor); Reset Scale keeps the scale-only meaning.
+
+### Added (user requests, all E2E-verified via tests/tmp/s33-arch-repro.ts against the user's book)
+
+- **Calculator input** in the scale-length field: `EvalCalcExpr` (ArchScaleDialog.cpp) — numbers joined by + - * /, left-to-right, spaces ok, comma normalized to dot; computed result shown in the field; `100-20` → accepted as 80.
+- **Pan between clicks:** arch draw points stored in PAGE coords (MainWindow.h `PointF point1/point2`; all Canvas paths + in-progress paint converted; preview survives pan/zoom). Right-drag pans while a point is pinned: OnMouseRightButtonDown no longer early-returns when arch armed; OnMouseMove arch-preview branch skips moves with MK_RBUTTON so they reach the drag-scroll handler (was the "travado" cause — the preview branch swallowed every move); dragMoved only counts LEFT-button movement so panning never turns click-click into drag.
+- **Timer edit Enter:** WndProcTimerBox subclass (Toolbar.cpp) — WM_KEYDOWN VK_RETURN (ES_NUMBER filters WM_CHAR) → WM_COMMAND CmdAutoScrollTimerEdit + blur; Esc/Tab handled too. Page edit already had Enter; arch edit gets it via the real default button.
+- **Conflict gates (bidirectional, via inativação — user: "inativar é mais util", no auto-close):**
+  - arch ON → gray out + block ON of: Two Columns (v2), Scan View (v1), Autoscroll, Trim (+TrimConfig dialog), Flashcards.
+  - flashcards ON → gray out + block ON of: Arch Tools, Autoscroll, Scan View.
+  - Toggle-OFF of an active conflicting feature always passes (asymmetric gate); arch toggle still POSTS the offs of active conflicts (autoscroll/crops/trim) when turning on.
+  - Removed the mutual auto-close of arch/flashcard toolbars (both handlers).
+  - Toolbar.cpp `IsCmdEnabled` gates buttons; SumatraPDF.cpp FrameOnCommand gates menus/shortcuts (logs `[arch]`/`[fc] blocked cmd N`).
+
+### Verified
+
+- s33-arch-repro ALL PASS: calculator `100-20`→80 accepted (factor 298.6 pt/m); right-drag pan moved the page (scroll 0→225) with point 1 pinned → 2nd click at the SAME screen point produced a different page point → accepted 50; measure len 0.53 m; CmdArchClear cleared 1 + scale reset; gates: 3 [arch]-blocked + 3 [fc]-blocked commands, flashcards ON/OFF clean after arch off.
+- Release build 0 err → Compiled (3 flavors).
+
+### Notes / traps
+
+- **getClientRect (tests/winapi.ts) returns {left,top,right,bottom} — NOT dx/dy**: using .dx → NaN → packCoords masks to 0 → all synthetic clicks land at (0,0). Cost 3 repro rounds.
+- **Synthetic focus ≠ real focus**: postMessage/sendMessage never sets keyboard focus → Enter goes to the MAIN accel table (CmdFlashcardReveal), not IsDialogMessage. Real-user Enter (focus in edit) flows correctly. Repros must fall back to BM_CLICK for button verification.
+- Right-drag pan sign: dragging +x,+y scrolls the view toward the page origin (clamps at top-left of page 1). To move DOWN the doc, drag -x,-y.
+- FFI probe confirmed Bun number→i64 lParam works (0x0ABC0DEF arrived, DPI-scaled 1.25x in the raw log).
+- ES_NUMBER edit: WM_CHAR filtered (Enter arrives as \r but risky) → handle WM_KEYDOWN in the subclass instead.
+- Commands_ArchTools.cpp needed the full include chain (DocController → DocProperties → TreeModel → EngineBase → DisplayModel) for DisplayModel members — headers not self-sufficient.
+
 ## 2026-10-08 (s32b) — Bug batch: digit keys, sidebar off, ETA rect, bookmarks button, toolbar wrap, timer anchor (BUILD OK, wrap-verify passed)
 
 ### Fixed

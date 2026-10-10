@@ -258,6 +258,8 @@ _Living document — append patterns/gotchas discovered during development._
 - **2026-09-14**: Nested structs need full qualification: `MainWindow::ArchToolsState::ArchScaleState`.
 - **2026-09-12**: `Commands_Flashcard.cpp` requires exact include order: Settings.h → DocController.h → DocProperties.h → TreeModel.h → EngineBase.h → DisplayModel.h → EngineMupdf.h. Missing TreeModel.h before EngineBase.h causes 30+ cascade errors.
 - **2026-09-12**: `AddUniquePageNo` is static in SumatraPDF.cpp — must reimplement locally if needed.
+- **2026-10-09**: `Commands_ArchTools.cpp` needs the same chain as Commands_Flashcard.cpp (DocController → DocProperties → TreeModel → EngineBase → DisplayModel) to touch DisplayModel members (`viewportCropV2Enabled` etc.) — C2027 otherwise.
+- **2026-10-09**: `tests/winapi.ts` `getClientRect` returns `{left,top,right,bottom}` — NOT dx/dy; `.dx` → NaN → `packCoords` masks to 0 → synthetic clicks land at (0,0).
 
 # 13. Informativos: English + Caveman (MANDATORY)
 

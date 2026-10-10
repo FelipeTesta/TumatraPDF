@@ -170,18 +170,21 @@ The features below were developed on top of SumatraPDF and **do not exist in the
 
 ### 5. 📐 Arch Tools (Scale + Measure)
 
-**Status:** 🟡 Build-verified, runtime validation in progress (2026-08-29, Phase 12)
+**Status:** 🟢 Complete + E2E verified (s33, 2026-10-09)
 
 **What it does:** For architecture PDFs (vector drawings). Define a scale by drawing/selecting a line and entering its real length; then measure any line to get real-world x / y / length.
 
 **How it works:**
 
 - A second toolbar (below the main one) opens via the "Arch Tools" toggle button on the main toolbar. Lines (scale + measurements) are visible only when Arch Tools = ON.
-- **Scale:** draw a line on the page (snaps to vector endpoints), open the floating Scale dialog, type the real length + ✅ → computes the scale factor (page units / real unit). Drawing a new line replaces the previous one.
+- **Scale:** draw a line on the page (snaps to vector endpoints), open the floating Scale dialog, type the real length + Enter/✅ → computes the scale factor (page units / real unit). Drawing a new line replaces the previous one.
+- **Calculator input:** the length field accepts simple expressions — `100-20`, `2*50`, `25/2` (+ - * /, left-to-right). Enter (main or numpad) accepts the computed value.
+- **Pan between clicks:** after the first click pins point 1, drag with the RIGHT mouse button to pan the page (zoom also works) and click point 2 far away — the pinned point is stored in page coordinates and stays put.
 - **Measure:** draw lines; each shows its real x / y / length (in the chosen unit) as a label on the page.
-- **Clean lines** (`CmdArchClear`): clears all measurements. **Reset Scale** (`CmdArchResetScale`): clears scale calibration only.
+- **Clean lines** (`CmdArchClear`): clears all measurements + the scale line/calibration of the page. **Reset Scale** (`CmdArchResetScale`): clears scale calibration only.
 - **Erase:** hold `E` while Arch Tools is ON → red "+" cursor; click a drawn line to delete it individually.
 - **Esc:** cancels the current draw / closes the Scale dialog.
+- **Conflict gates:** while Arch Tools = ON the Two Columns, Scan View, Autoscroll, Trim and Flashcards buttons gray out (and their shortcuts/menus are blocked — turning a still-active one OFF stays possible). While Flashcards = ON, Arch Tools, Autoscroll and Scan View are disabled the same way. The toolbars never auto-close each other.
 
 **Controls:**
 
@@ -190,12 +193,13 @@ The features below were developed on top of SumatraPDF and **do not exist in the
 | Main toolbar "Arch Tools" toggle | Show/hide 2nd toolbar + lines   |
 | 2nd toolbar "Scale"              | Enter scale mode (opens dialog) |
 | 2nd toolbar "Measure"            | Toggle measure mode             |
-| 2nd toolbar "Clean lines"        | Clear all measurements          |
+| 2nd toolbar "Clean lines"        | Clear measurements + scale line |
 | 2nd toolbar "Reset Scale"        | Clear scale calibration         |
+| Right-drag (while drawing)       | Pan the page between clicks     |
 | Hold `E` + click                 | Erase individual line           |
 | `Esc`                            | Cancel draw / close dialog      |
 
-**Technical:** `sumatrapdf-src/src/ArchScaleDialog.{h,cpp}` (floating dialog), `sumatrapdf-src/src/ArchVector.{h,cpp}` (PDF vector segment extraction + snap + hit-test), `sumatrapdf-src/src/Canvas.cpp` (draw overlay + erase), `sumatrapdf-src/src/Toolbar.cpp` (2nd toolbar + underline), `sumatrapdf-src/src/SumatraPDF.cpp` (command handlers + RelayoutFrame). Per-document state in `FileState` + `MainWindow`. Modularity gate: global pref `archToolsEnabled` (default on; off = zero cost).
+**Technical:** `sumatrapdf-src/src/ArchScaleDialog.{h,cpp}` (floating dialog + expression evaluator), `sumatrapdf-src/src/ArchVector.{h,cpp}` (PDF vector segment extraction + snap + hit-test), `sumatrapdf-src/src/Canvas.cpp` (draw overlay + erase + right-drag pan), `sumatrapdf-src/src/Toolbar.cpp` (2nd toolbar + conflict gates in `IsCmdEnabled`), `sumatrapdf-src/src/SumatraPDF.cpp` (command handlers + FrameOnCommand gates + RelayoutFrame), `src/Commands_ArchTools.cpp`. Draw points stored in PAGE coords (pan/zoom-proof). Modularity gate: global pref `archToolsEnabled` (default on; off = zero cost).
 
 ---
 

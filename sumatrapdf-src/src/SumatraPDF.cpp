@@ -7989,8 +7989,8 @@ static bool FrameOnKeydown(MainWindow* win, WPARAM key, LPARAM lp) {
                 win->archTools.dragLine = 0;
                 win->archTools.scaleLineDefined = false;
                 win->archTools.eraseMode = false;
-                win->archTools.point1 = Point{0, 0};
-                win->archTools.point2 = Point{0, 0};
+                win->archTools.point1 = PointF{0, 0};
+                win->archTools.point2 = PointF{0, 0};
                 if (GetCapture() == win->hwndCanvas) {
                     ReleaseCapture();
                 }
@@ -9929,6 +9929,78 @@ static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, L
     if (cmdId >= 0xF000) {
         // handle system menu messages for the Window menu (needed for Tabs in Titlebar)
         return SendMessageW(hwnd, WM_SYSCOMMAND, wp, lp);
+    }
+
+    // Toolbar-conflict gates (user request): arch tools and flashcards are
+    // mutually exclusive with each other and with the view/scroll features
+    // each clashes with. Their toolbar buttons gray out (IsCmdEnabled); this
+    // catches menus and shortcuts. A gated toggle whose feature is currently
+    // ON passes through, so it can turn OFF; only turning ON is blocked.
+    if (win && win->archTools.on) {
+        bool isGatedCmd = false;
+        bool featureOn = false;
+        switch (cmdId) {
+            case CmdViewportCropToggle:
+                isGatedCmd = true;
+                featureOn = gGlobalPrefs->viewportCrop.enabled;
+                break;
+            case CmdViewportCropV2Toggle:
+                isGatedCmd = true;
+                if (auto* dm = win->AsFixed()) {
+                    featureOn = dm->viewportCropV2Enabled;
+                }
+                break;
+            case CmdMarginTrimToggle:
+                isGatedCmd = true;
+                if (auto* dm = win->AsFixed()) {
+                    featureOn = dm->marginTrimEnabled;
+                }
+                break;
+            case CmdAutoScrollToggle:
+                isGatedCmd = true;
+                featureOn = win->autoScroll.active;
+                break;
+            case CmdFlashcardToggle:
+                isGatedCmd = true;
+                featureOn = win->flashcard.on;
+                break;
+            case CmdStartAutoScroll:
+            case CmdTrimConfig:
+                // starting autoscroll or opening the trim dialog while arch
+                // tools are on never makes sense
+                isGatedCmd = true;
+                break;
+        }
+        if (isGatedCmd && !featureOn) {
+            logf("[arch] blocked cmd %d while arch tools are on\n", cmdId);
+            return 0;
+        }
+    }
+    if (win && win->flashcard.on) {
+        bool isGatedCmd = false;
+        bool featureOn = false;
+        switch (cmdId) {
+            case CmdArchToolsToggle:
+                isGatedCmd = true;
+                featureOn = win->archTools.on;
+                break;
+            case CmdAutoScrollToggle:
+                isGatedCmd = true;
+                featureOn = win->autoScroll.active;
+                break;
+            case CmdViewportCropToggle: // scan view
+                isGatedCmd = true;
+                featureOn = gGlobalPrefs->viewportCrop.enabled;
+                break;
+            case CmdStartAutoScroll:
+                // starting autoscroll during flashcard study never makes sense
+                isGatedCmd = true;
+                break;
+        }
+        if (isGatedCmd && !featureOn) {
+            logf("[fc] blocked cmd %d while flashcards are on\n", cmdId);
+            return 0;
+        }
     }
 
     if (win && HandleMenuBarCommand(win, cmdId)) {
