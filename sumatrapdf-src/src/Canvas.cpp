@@ -3465,8 +3465,64 @@ static bool DrawDocument(MainWindow* win, HDC hdc, Rect rcArea) {
     bool rendering = false;
     Rect screen(Point(), dm->GetViewPort().Size());
 
+    // Iterate only the pages that can intersect the viewport. In continuous
+    // modes pageOnScreen.y is non-decreasing with pageNo (rows are laid out
+    // in order), so binary-search the [firstPage, lastPage] window and keep
+    // a small slack; the visibleRatio/isShown guards inside the loop still
+    // do the exact filtering. Non-continuous modes and small docs keep the
+    // full loop (non-continuous only positions the current page, so geometry
+    // is not a valid bound there; all-zero geometry degrades to full range).
+    int nPages = dm->PageCount();
+    int firstPage = 1;
+    int lastPage = nPages;
+    if (IsContinuous(dm->GetDisplayMode()) && nPages > 64) {
+        int lo = 1, hi = nPages + 1;
+        while (lo < hi) {
+            int mid = lo + (hi - lo) / 2;
+            PageInfo* pi = dm->GetPageInfo(mid);
+            int top = pi ? pi->pageOnScreen.y : 0;
+            if (top <= screen.BR().y) {
+                lo = mid + 1;
+            } else {
+                hi = mid;
+            }
+        }
+        lastPage = lo - 1;
+        lo = 1;
+        hi = lastPage + 1;
+        while (lo < hi) {
+            int mid = lo + (hi - lo) / 2;
+            PageInfo* pi = dm->GetPageInfo(mid);
+            int top = pi ? pi->pageOnScreen.y : 0;
+            if (top < screen.y) {
+                lo = mid + 1;
+            } else {
+                hi = mid;
+            }
+        }
+        firstPage = lo;
+        // the page before the window may share the first visible row and
+        // extend below the viewport top (taller row-mate in facing modes)
+        while (firstPage > 1) {
+            PageInfo* prev = dm->GetPageInfo(firstPage - 1);
+            if (prev && prev->pageOnScreen.BR().y > screen.y) {
+                --firstPage;
+            } else {
+                break;
+            }
+        }
+        // slack is cheap and filtered by the in-loop guards
+        firstPage = std::max(1, firstPage - 2);
+        lastPage = std::min(nPages, lastPage + 2);
+        if (firstPage > lastPage) {
+            // degenerate probe (e.g. before the first layout) — fall back
+            firstPage = 1;
+            lastPage = nPages;
+        }
+    }
+
     bool isRtl = IsUIRtl();
-    for (int pageNo = 1; pageNo <= dm->PageCount(); ++pageNo) {
+    for (int pageNo = firstPage; pageNo <= lastPage; ++pageNo) {
         PageInfo* pi = dm->GetPageInfo(pageNo);
         if (!pi || 0.0F == pi->visibleRatio) {
             continue;
@@ -3654,123 +3710,145 @@ static void OnPaintDocument(MainWindow* win) {
             // to prevent flicker. Gated by archToolsOn (not archToolMode).
             if (gGlobalPrefs->archToolsEnabled && win->archTools.on && win->AsFixed()) {
                 auto* dm = win->AsFixed();
-                HDC bufHdc = win->buffer->GetDC();
-                Gdiplus::Graphics gs(bufHdc);
-
                 int curPageNo = dm->CurrentPageNo();
                 auto& scaleState = win->archTools.GetScaleForPage(curPageNo);
 
-                // Draw persistent scale line (green)
-                if (scaleState.scaleSet) {
-                    if (dm->ValidPageNo(curPageNo)) {
-                        Point p1 = dm->CvtToScreen(curPageNo, PointF{scaleState.scaleLineP1x, scaleState.scaleLineP1y});
-                        Point p2 = dm->CvtToScreen(curPageNo, PointF{scaleState.scaleLineP2x, scaleState.scaleLineP2y});
-                        Gdiplus::Pen pen(Gdiplus::Color(255, 0, 200, 0), 2); // green
-                        gs.DrawLine(&pen, p1.x, p1.y, p2.x, p2.y);
-                        // Endpoint circles
-                        Gdiplus::SolidBrush brush(Gdiplus::Color(255, 0, 200, 0));
-                        int r = 4;
-                        gs.FillEllipse(&brush, p1.x - r, p1.y - r, 2 * r, 2 * r);
-                        gs.FillEllipse(&brush, p2.x - r, p2.y - r, 2 * r, 2 * r);
-                        // Label at midpoint showing real measure - theme-aware bg (semi-transparent dark)
-                        const WCHAR* unitNames[] = {L"mm", L"cm", L"m", L"in", L"ft"};
-                        float dx = scaleState.scaleLineP2x - scaleState.scaleLineP1x;
-                        float dy = scaleState.scaleLineP2y - scaleState.scaleLineP1y;
-                        float pageLenPt = sqrtf(dx * dx + dy * dy);
-                        // archScaleFactor is now page units per METER (canonical)
-                        // realLen in meters = pageLenPt / archScaleFactor
-                        // Convert to current display unit
-                        float realLenM = (scaleState.scaleFactor > 0) ? (pageLenPt / scaleState.scaleFactor) : 0.0f;
-                        float displayLen = realLenM / kMeterPerUnit[scaleState.unit];
-                        WCHAR label[128];
-                        swprintf_s(label, L"%.2f %s", displayLen, unitNames[scaleState.unit]);
-                        // Apply decimal separator preference
-                        if (gGlobalPrefs->archDecimalSeparator == 1) {
-                            for (WCHAR* p = label; *p; ++p) {
-                                if (*p == L'.') *p = L',';
-                            }
-                        }
-                        int midX = (p1.x + p2.x) / 2;
-                        int midY = (p1.y + p2.y) / 2;
-                        Gdiplus::Font font(L"MS Shell Dlg", 9, Gdiplus::FontStyleBold);
-                        Gdiplus::SolidBrush textBrush(Gdiplus::Color(255, 0, 150, 0));
-                        // Semi-transparent dark background matching theme - measure text for proper size
-                        Gdiplus::SolidBrush bgBrush(Gdiplus::Color(180, 30, 30, 30));
-                        Gdiplus::RectF textSize;
-                        gs.MeasureString(label, -1, &font, Gdiplus::PointF(0, 0), &textSize);
-                        Gdiplus::RectF bgRect((float)midX + 6, (float)midY - 16, textSize.Width + 8,
-                                              textSize.Height + 4);
-                        gs.FillRectangle(&bgBrush, bgRect);
-                        gs.DrawString(label, -1, &font, Gdiplus::PointF(bgRect.X + 4, bgRect.Y + 2), &textBrush);
-                    }
-                }
-
-                // Draw saved measurements (blue)
+                bool hasMeasurementOnPage = false;
                 for (const ArchMeasurement& meas : win->archTools.measurements) {
-                    if (meas.pageNo != curPageNo) continue;
-                    if (dm->ValidPageNo(curPageNo)) {
-                        Point p1 = dm->CvtToScreen(curPageNo, PointF{meas.p1x, meas.p1y});
-                        Point p2 = dm->CvtToScreen(curPageNo, PointF{meas.p2x, meas.p2y});
-                        Gdiplus::Pen pen(Gdiplus::Color(255, 0, 100, 255), 2); // blue
-                        gs.DrawLine(&pen, p1.x, p1.y, p2.x, p2.y);
-                        // Endpoint circles
-                        Gdiplus::SolidBrush brush(Gdiplus::Color(255, 0, 100, 255));
-                        int r = 3;
-                        gs.FillEllipse(&brush, p1.x - r, p1.y - r, 2 * r, 2 * r);
-                        gs.FillEllipse(&brush, p2.x - r, p2.y - r, 2 * r, 2 * r);
-                        // Label at midpoint - theme-aware bg - measure text for proper size
-                        const WCHAR* unitNames[] = {L"mm", L"cm", L"m", L"in", L"ft"};
-                        WCHAR label[128];
-                        // meas.x/y/len are now in METERS (canonical). Convert to current display unit.
-                        float dispX = meas.x / kMeterPerUnit[scaleState.unit];
-                        float dispY = meas.y / kMeterPerUnit[scaleState.unit];
-                        float dispLen = meas.len / kMeterPerUnit[scaleState.unit];
-                        swprintf_s(label, L"x=%.2f y=%.2f L=%.2f %s", dispX, dispY, dispLen,
-                                   unitNames[scaleState.unit]);
-                        // Apply decimal separator preference
-                        if (gGlobalPrefs->archDecimalSeparator == 1) {
-                            for (WCHAR* p = label; *p; ++p) {
-                                if (*p == L'.') *p = L',';
-                            }
-                        }
-                        int midX = (p1.x + p2.x) / 2;
-                        int midY = (p1.y + p2.y) / 2;
-                        Gdiplus::Font font(L"MS Shell Dlg", 9);
-                        Gdiplus::SolidBrush textBrush(Gdiplus::Color(255, 200, 200, 200));
-                        Gdiplus::SolidBrush bgBrush(Gdiplus::Color(180, 30, 30, 30));
-                        Gdiplus::RectF textSize;
-                        gs.MeasureString(label, -1, &font, Gdiplus::PointF(0, 0), &textSize);
-                        Gdiplus::RectF bgRect((float)midX + 4, (float)midY - 14, textSize.Width + 8,
-                                              textSize.Height + 4);
-                        gs.FillRectangle(&bgBrush, bgRect);
-                        gs.DrawString(label, -1, &font, Gdiplus::PointF(bgRect.X + 4, bgRect.Y + 2), &textBrush);
+                    if (meas.pageNo == curPageNo) {
+                        hasMeasurementOnPage = true;
+                        break;
                     }
                 }
 
-                // Draw in-progress line (orange highlight). point1/point2 are
-                // page coords, so the pinned line follows the page while the
-                // user pans/zoomes between clicks.
-                if (win->archTools.dragLine > 0 && dm->ValidPageNo(curPageNo)) {
-                    Point p1 = dm->CvtToScreen(curPageNo, win->archTools.point1);
-                    Point p2 = dm->CvtToScreen(curPageNo, win->archTools.point2);
-                    Gdiplus::Pen pen(Gdiplus::Color(255, 255, 165, 0), 2); // orange
-                    pen.SetDashStyle(Gdiplus::DashStyleDash);
-                    gs.DrawLine(&pen, p1.x, p1.y, p2.x, p2.y);
-                    // Endpoint circles
-                    Gdiplus::SolidBrush brush(Gdiplus::Color(255, 255, 165, 0));
-                    int r = 4;
-                    gs.FillEllipse(&brush, p1.x - r, p1.y - r, 2 * r, 2 * r);
-                    gs.FillEllipse(&brush, p2.x - r, p2.y - r, 2 * r, 2 * r);
-                }
+                // early-out: idle paints (no scale line, no measurement on this
+                // page, no in-progress line, no erase crosshair) skip Graphics
+                // and all GDI+ object construction entirely
+                bool nothingToDraw = !scaleState.scaleSet && !hasMeasurementOnPage && win->archTools.dragLine <= 0 &&
+                                     !win->archTools.eraseMode;
+                if (!nothingToDraw) {
+                    HDC bufHdc = win->buffer->GetDC();
+                    Gdiplus::Graphics gs(bufHdc);
 
-                // Erase mode: draw red "+" crosshair overlay at mouse position
-                if (win->archTools.eraseMode) {
-                    Gdiplus::Pen redPen(Gdiplus::Color(255, 255, 0, 0), 3); // red 3px
-                    int cx = win->archTools.mousePos.x;
-                    int cy = win->archTools.mousePos.y;
-                    int sz = 16;
-                    gs.DrawLine(&redPen, cx - sz, cy, cx + sz, cy);
-                    gs.DrawLine(&redPen, cx, cy - sz, cx, cy + sz);
+                    // shared immutable GDI+ objects, constructed once (GDI+ is
+                    // started at app init and never shut down, so statics are
+                    // safe); reused across paints to avoid per-WM_PAINT churn
+                    static Gdiplus::Pen scalePen(Gdiplus::Color(255, 0, 200, 0), 2); // green
+                    static Gdiplus::SolidBrush scaleBrush(Gdiplus::Color(255, 0, 200, 0));
+                    static Gdiplus::Font fontBold(L"MS Shell Dlg", 9, Gdiplus::FontStyleBold);
+                    static Gdiplus::SolidBrush scaleTextBrush(Gdiplus::Color(255, 0, 150, 0));
+                    static Gdiplus::SolidBrush bgBrush(Gdiplus::Color(180, 30, 30, 30));
+                    static Gdiplus::Pen measurePen(Gdiplus::Color(255, 0, 100, 255), 2); // blue
+                    static Gdiplus::SolidBrush measureBrush(Gdiplus::Color(255, 0, 100, 255));
+                    static Gdiplus::Font fontReg(L"MS Shell Dlg", 9);
+                    static Gdiplus::SolidBrush measureTextBrush(Gdiplus::Color(255, 200, 200, 200));
+                    static Gdiplus::Pen dragPen(Gdiplus::Color(255, 255, 165, 0), 2); // orange
+                    static Gdiplus::SolidBrush dragBrush(Gdiplus::Color(255, 255, 165, 0));
+                    static Gdiplus::Pen erasePen(Gdiplus::Color(255, 255, 0, 0), 3); // red 3px
+
+                    // Draw persistent scale line (green)
+                    if (scaleState.scaleSet) {
+                        if (dm->ValidPageNo(curPageNo)) {
+                            Point p1 =
+                                dm->CvtToScreen(curPageNo, PointF{scaleState.scaleLineP1x, scaleState.scaleLineP1y});
+                            Point p2 =
+                                dm->CvtToScreen(curPageNo, PointF{scaleState.scaleLineP2x, scaleState.scaleLineP2y});
+                            gs.DrawLine(&scalePen, p1.x, p1.y, p2.x, p2.y);
+                            // Endpoint circles
+                            int r = 4;
+                            gs.FillEllipse(&scaleBrush, p1.x - r, p1.y - r, 2 * r, 2 * r);
+                            gs.FillEllipse(&scaleBrush, p2.x - r, p2.y - r, 2 * r, 2 * r);
+                            // Label at midpoint showing real measure - theme-aware bg (semi-transparent dark)
+                            const WCHAR* unitNames[] = {L"mm", L"cm", L"m", L"in", L"ft"};
+                            float dx = scaleState.scaleLineP2x - scaleState.scaleLineP1x;
+                            float dy = scaleState.scaleLineP2y - scaleState.scaleLineP1y;
+                            float pageLenPt = sqrtf(dx * dx + dy * dy);
+                            // archScaleFactor is now page units per METER (canonical)
+                            // realLen in meters = pageLenPt / archScaleFactor
+                            // Convert to current display unit
+                            float realLenM = (scaleState.scaleFactor > 0) ? (pageLenPt / scaleState.scaleFactor) : 0.0f;
+                            float displayLen = realLenM / kMeterPerUnit[scaleState.unit];
+                            WCHAR label[128];
+                            swprintf_s(label, L"%.2f %s", displayLen, unitNames[scaleState.unit]);
+                            // Apply decimal separator preference
+                            if (gGlobalPrefs->archDecimalSeparator == 1) {
+                                for (WCHAR* p = label; *p; ++p) {
+                                    if (*p == L'.') *p = L',';
+                                }
+                            }
+                            int midX = (p1.x + p2.x) / 2;
+                            int midY = (p1.y + p2.y) / 2;
+                            // Semi-transparent dark background matching theme - measure text for proper size
+                            Gdiplus::RectF textSize;
+                            gs.MeasureString(label, -1, &fontBold, Gdiplus::PointF(0, 0), &textSize);
+                            Gdiplus::RectF bgRect((float)midX + 6, (float)midY - 16, textSize.Width + 8,
+                                                  textSize.Height + 4);
+                            gs.FillRectangle(&bgBrush, bgRect);
+                            gs.DrawString(label, -1, &fontBold, Gdiplus::PointF(bgRect.X + 4, bgRect.Y + 2),
+                                          &scaleTextBrush);
+                        }
+                    }
+
+                    // Draw saved measurements (blue)
+                    for (const ArchMeasurement& meas : win->archTools.measurements) {
+                        if (meas.pageNo != curPageNo) continue;
+                        if (dm->ValidPageNo(curPageNo)) {
+                            Point p1 = dm->CvtToScreen(curPageNo, PointF{meas.p1x, meas.p1y});
+                            Point p2 = dm->CvtToScreen(curPageNo, PointF{meas.p2x, meas.p2y});
+                            gs.DrawLine(&measurePen, p1.x, p1.y, p2.x, p2.y);
+                            // Endpoint circles
+                            int r = 3;
+                            gs.FillEllipse(&measureBrush, p1.x - r, p1.y - r, 2 * r, 2 * r);
+                            gs.FillEllipse(&measureBrush, p2.x - r, p2.y - r, 2 * r, 2 * r);
+                            // Label at midpoint - theme-aware bg - measure text for proper size
+                            const WCHAR* unitNames[] = {L"mm", L"cm", L"m", L"in", L"ft"};
+                            WCHAR label[128];
+                            // meas.x/y/len are now in METERS (canonical). Convert to current display unit.
+                            float dispX = meas.x / kMeterPerUnit[scaleState.unit];
+                            float dispY = meas.y / kMeterPerUnit[scaleState.unit];
+                            float dispLen = meas.len / kMeterPerUnit[scaleState.unit];
+                            swprintf_s(label, L"x=%.2f y=%.2f L=%.2f %s", dispX, dispY, dispLen,
+                                       unitNames[scaleState.unit]);
+                            // Apply decimal separator preference
+                            if (gGlobalPrefs->archDecimalSeparator == 1) {
+                                for (WCHAR* p = label; *p; ++p) {
+                                    if (*p == L'.') *p = L',';
+                                }
+                            }
+                            int midX = (p1.x + p2.x) / 2;
+                            int midY = (p1.y + p2.y) / 2;
+                            Gdiplus::RectF textSize;
+                            gs.MeasureString(label, -1, &fontReg, Gdiplus::PointF(0, 0), &textSize);
+                            Gdiplus::RectF bgRect((float)midX + 4, (float)midY - 14, textSize.Width + 8,
+                                                  textSize.Height + 4);
+                            gs.FillRectangle(&bgBrush, bgRect);
+                            gs.DrawString(label, -1, &fontReg, Gdiplus::PointF(bgRect.X + 4, bgRect.Y + 2),
+                                          &measureTextBrush);
+                        }
+                    }
+
+                    // Draw in-progress line (orange highlight). point1/point2 are
+                    // page coords, so the pinned line follows the page while the
+                    // user pans/zoomes between clicks.
+                    if (win->archTools.dragLine > 0 && dm->ValidPageNo(curPageNo)) {
+                        Point p1 = dm->CvtToScreen(curPageNo, win->archTools.point1);
+                        Point p2 = dm->CvtToScreen(curPageNo, win->archTools.point2);
+                        dragPen.SetDashStyle(Gdiplus::DashStyleDash); // idempotent; shared pen
+                        gs.DrawLine(&dragPen, p1.x, p1.y, p2.x, p2.y);
+                        // Endpoint circles
+                        int r = 4;
+                        gs.FillEllipse(&dragBrush, p1.x - r, p1.y - r, 2 * r, 2 * r);
+                        gs.FillEllipse(&dragBrush, p2.x - r, p2.y - r, 2 * r, 2 * r);
+                    }
+
+                    // Erase mode: draw red "+" crosshair overlay at mouse position
+                    if (win->archTools.eraseMode) {
+                        int cx = win->archTools.mousePos.x;
+                        int cy = win->archTools.mousePos.y;
+                        int sz = 16;
+                        gs.DrawLine(&erasePen, cx - sz, cy, cx + sz, cy);
+                        gs.DrawLine(&erasePen, cx, cy - sz, cx, cy + sz);
+                    }
                 }
             }
 

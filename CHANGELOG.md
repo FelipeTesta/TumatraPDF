@@ -6,6 +6,27 @@ history in [LOG.md](LOG.md).
 
 ## v1.0.10 (pending)
 
+- **Right-click Image tools fixed + Crop/Resize writeback.** The Image menu
+  (Replace Image, Edit With Paint, Crop, Resize, Save) was effectively dead —
+  its items showed on every right-click and the edits never landed in the PDF.
+  Items now appear only when an image is under the cursor; Replace/Paint swap
+  the embedded image correctly (with the page cache invalidated); Crop/Resize
+  write the edited image back into the PDF on Save (position/aspect preserved)
+  in addition to exporting the file. Shift while dragging a resize edge keeps
+  the aspect ratio. "Convert page to PDF" is grayed out pending a revisit.
+- **New "Edit" mode** — toolbar toggle (like Flashcards/Arch Tools) with a
+  +Text/+Img toolbar. While on, Ctrl+V pastes the clipboard image INTO the
+  current page: the next left-click places it (clamped to the page) as a
+  stamp annotation. With Edit off, Ctrl+V still opens the clipboard image
+  as a new document.
+- **Fixed: Invert no longer corrupts images** — inverted pages render a true
+  per-pixel negative instead of the theme recolor ramp (which crushed hues
+  and repainted "link-colored" pixels inside scanned images).
+- **Fixed: Save/Reload keeps Invert + Contrast** — the save-a-copy / reload
+  path no longer drops the document's Invert and Contrast settings.
+- **Ctrl+click on a flashcard highlight opens the flashcard panel (Lista)**
+  instead of the annotation editor; first-click slowness got `[perf]` timing
+  instrumentation for follow-up.
 - **Fixed: Arch Tools scale was never accepted.** Since the per-page scale
   refactor the drawn line was stored against a legacy flag that nothing read,
   so Scale's OK always beeped "no scale line defined". Lines drawn (click or

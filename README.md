@@ -253,11 +253,15 @@ The features below were developed on top of SumatraPDF and **do not exist in the
 
 ### 8. 🖼️ Image Editing (right-click on an image)
 
+The Image submenu appears only when an image is under the cursor (or the tab is an image file) — previously its items showed on every right-click and several of them did nothing.
+
 - **Copy Image To Clipboard** is a top-level context-menu entry (was nested in Image >).
 - **Replace Image...** — pick another image from the PC, confirm, and the embedded image is swapped in the PDF (same page position). Save the PDF afterwards (File > Save) to keep the change.
 - **Edit With Paint** — the image opens in mspaint; every time you save there, the PDF image is replaced automatically. Save the PDF afterwards to persist.
+- **Crop / Resize** — the editor window (Image > Crop / Image > Resize) now writes the edited image back into the PDF on **Save** (position and aspect preserved — the edit is composed onto the original image canvas), in addition to the exported file. Hold **Shift** while dragging a resize edge to keep the aspect ratio.
+- **"Convert page to PDF"** is disabled (grayed) — pending a revisit.
 
-**Technical:** `EngineMupdf::ReplaceImageWithFile`/`ReplaceImageByIdx` (pageNo + imageIdx identity from the clicked element; mupdf image-store pointer match → XObject dict `pdf_add_image` + `pdf_dict_put`), 1.2s mtime watch timer for the external-edit flow, GDI+ temp-PNG writer.
+**Technical:** `EngineMupdf::ReplaceImageWithFile`/`ReplaceImageByIdx` (pageNo + imageIdx identity from the clicked element; mupdf image-store pointer match → XObject dict `pdf_add_image` + `pdf_dict_put`), page-cache invalidation (`InvalidatePageAfterImageReplace`) after every in-place swap, 1.2s mtime watch timer for the external-edit flow, transform-tracked crop/resize writeback (padded PNG replace via `ImageEditHost::WriteBackToPdf`), command handlers in `src/Commands_Image.cpp`, recursive submenu pruning in `Menu.cpp`.
 
 Also: **Home (`⌂`) toolbar button** before Open — the Home tab no longer auto-opens at startup; it opens only on request.
 
@@ -270,6 +274,16 @@ Also: **Home (`⌂`) toolbar button** before Open — the Home tab no longer aut
 
 **Technical:** `src/Toolbar.cpp` (`AddAllToolbarButtons`, `RebuildToolbarButtonsForWidth`, `SetToolbarBandToRowHeight`, `WndProcToolbar` WM_SIZE/WM_TIMER), `src/ToolbarLayout.cpp` (timer trio anchored to the Autoscroll button rect), `src/Accelerators.cpp` (`isSafeAccel` bare-digit rule), `src/SvgIcons.cpp` (`gIconBookmarks`).
 
+### 10. ✏️ Edit Mode (paste images into the page)
+
+Toolbar toggle like Flashcards/Arch Tools. When ON:
+
+- A second toolbar offers **+Text** and **+Img** (minimal for now).
+- **Ctrl+V** pastes the clipboard image INTO the current page — the next left-click places it (clamped to fit the page) as a stamp annotation. With Edit OFF, Ctrl+V keeps the old behavior (open the clipboard image as a new document).
+- Mutually exclusive with Arch Tools and Flashcards — enabling Edit turns those off.
+
+**Technical:** `src/Commands_Edit.{h,cpp}` (toggle, toolbars, placement), `MainWindow::EditToolsState` (`MainWindow.h`), `Canvas.cpp` click routing, `EngineMupdfCreateAnnotation` (stamp; clipboard BGR pixmaps converted to RGB before embedding — mupdf only accepts Gray/RGB/CMYK).
+
 ### 📋 Technical Summary for Developers
 
 | Feature                    | Main files                                                                                                                       | Hook point                                                                                              |
@@ -280,6 +294,8 @@ Also: **Home (`⌂`) toolbar button** before Open — the Home tab no longer aut
 | Update                     | `scripts/check-updates.ps1`, `MERGE.md`                                                                                          | N/A (external tool)                                                                                     |
 | Arch Tools (Scale+Measure) | `src/ArchScaleDialog.{h,cpp}`, `src/ArchVector.{h,cpp}`, `src/Canvas.cpp`, `src/Toolbar.cpp`, `src/SumatraPDF.cpp`               | `CmdArchToolsToggle`/`CmdArchScale`/`CmdArchMeasure`, `OnPaintDocument`, `UpdateToolbar2State`          |
 | Flashcards (Cloze SRS)     | `src/Flashcard.{h,cpp}`, `src/Commands_Flashcard.cpp`, `src/FlashcardToolbar.cpp`, `src/FlashcardSidebar.cpp`, `src/WindowTab.h` | `FrameOnCommand()` flashcard branch, `LoadModelIntoTab` (per-tab state), `OnPaintDocument` (mask paint) |
+| Image Editing              | `src/Commands_Image.cpp`, `src/EngineMupdf.cpp`, `src/ImageSaveCropResize.cpp`, `src/ImageEditHostSumatra.cpp`, `src/Menu.cpp` | right-click Image menu, `FrameOnCommand()`, WM_TIMER paint watch |
+| Edit Mode                  | `src/Commands_Edit.{h,cpp}`, `src/Canvas.cpp`, `src/MainWindow.h`                                                              | `CmdEditToolsToggle`, Ctrl+V routing, canvas click placement                                        |
 
 **How to build:** See "Build" section below.
 

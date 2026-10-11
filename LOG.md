@@ -1,5 +1,26 @@
 # TumatraPDF — Development Log
 
+## 2026-10-11 (s34-c) — Image cmds modularized (Commands_Image), docs (README/CHANGELOG), render perf audit (BUILD OK, post-move E2E PASS)
+
+### Changed
+
+- **P1 render opts implemented (all 3 from the audit):** ① `BlitPixmapRegion` (base/Pixmap_win.cpp): `SetStretchBltMode(HALFTONE)` now only set when actually stretching (1:1 BitBlt tiles — the common case — skip it entirely; StretchBlt/StretchDIBits branches unchanged quality). ② Arch overlay (Canvas.cpp OnPaintDocument): early-out when nothing to draw on the page (no scale line, no measurement, no in-progress line, no erase crosshair) + all GDI+ Pen/Brush/Font objects now shared statics (safe: app never calls GdiplusShutdown); dashed in-progress line kept via idempotent SetDashStyle per draw. ③ `DrawDocument` page loop: binary-searched [firstPage,lastPage] window over monotonic `pageOnScreen.y` (continuous modes, docs >64 pages) with row-mate walk-back + ±2 slack; visibleRatio/isShown guards unchanged inside the loop; non-continuous modes and degenerate geometry keep the full loop (safe degradation).
+- **Image command handlers extracted from SumatraPDF.cpp (~210 lines) into new `src/Commands_Image.{h,cpp}`** (user pre-authorized): HandleCmdReplaceImage, HandleCmdEditImageWithPaint, TickPaintImageWatch + paint-watch globals, SaveHbitmapAsPng, PickImageFileDup. `kPaintWatchTimerId` (41) moved to the header (SumatraPDF.cpp WM_TIMER compares against it). Added to BOTH vcxproj files (premake5.lua still unaware). Byte-safe move via bun line-surgery script (exactly 210 deletions, git diff clean); code unchanged apart from `static` dropped on the 3 exported fns.
+- **Docs:** README §8 rewritten (submenu visibility fix, Crop/Resize writeback, Shift aspect, Convert grayed; tech line: InvalidatePageAfterImageReplace + Commands_Image.cpp + deep pruning) + NEW §10 "Edit Mode"; Technical Summary table +2 rows (Image Editing, Edit Mode). CHANGELOG v1.0.10 pending section extended with s34 items (image tools fixed + writeback, Edit mode, invert true-negative, reload preserve, ctrl+click flashcard routing, [perf] instrumentation).
+
+### Added
+
+- **Render pipeline perf audit recorded in TODO "Render performance" (NO code changed):** P1 = BlitPixmapRegion unconditional SetStretchBltMode(HALFTONE) per tile blit (software bilinear every paint×tile); arch GDI+ Graphics/Font/Brush ctor churn every WM_PAINT even idle; DrawDocument O(all pages) loop per paint. P2 = PaintTile linear scans over cache[128], RecalcVisibleParts full DocumentLayout copy per scroll tick (autoscroll), per-tile CreateCompatibleDC/SelectObject/DeleteDC blit path, HdcCreateSimpleFont per slow-page paint. P3 = EngineMupdfGetAnnotations full-doc page load (async/lazy after [perf] numbers).
+
+### Verified
+
+- Build 0 err/0 warn → deployed to Compiled (after modularization AND again after P1 opts). Post-move E2E: s34-replace-e2e PASS (replaced=1, canvas changed), s34-paint-e2e PASS (both scenarios; mspaint loads the temp png). Post-P1 regression: s34-crop-e2e PASS 7/7 (blit + windowed page loop + writeback), s33-arch-repro ALL PASS (statics overlay, scale/pan/measure/clear/gates).
+
+### Notes / traps
+
+- Commands_Image.cpp include chain = Commands_Edit.cpp proven order (DocController → DocProperties → TreeModel → Annotation → EngineBase → mupdf/pdf.h → EngineMupdf → DisplayModel → RenderCache → SumatraPDF → MainWindow → WindowTab) + `<shobjidl.h>` for IFileOpenDialog (FlashcardToolbar.cpp pattern; SumatraPDF.cpp only got it transitively). First build green, zero include errors.
+- `<shobjidl.h>` must come after base/Base.h (needs windows.h first).
+
 ## 2026-10-10 (s34/s34-b) — Image tools fixed (Replace/Paint/Crop-writeback/Resize) + Edit mode (paste image into page) + bug batch (BUILD OK; s34-{replace,paint,crop,edit,reload}-e2e ALL PASS)
 
 ### Fixed

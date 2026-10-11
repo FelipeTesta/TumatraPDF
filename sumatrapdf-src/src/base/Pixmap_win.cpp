@@ -187,7 +187,13 @@ bool BlitPixmapRegion(Pixmap* p, HDC hdc, Rect target, Rect source) {
     if (!p || !p->data || target.IsEmpty() || source.IsEmpty()) {
         return false;
     }
-    SetStretchBltMode(hdc, HALFTONE);
+    // stretch mode only affects StretchBlt/StretchDIBits; the 1:1 BitBlt path
+    // (the common case: tiles render at device resolution) ignores it, so only
+    // pay the HALFTONE set when we actually stretch (progressive zoom etc.)
+    bool isStretch = !(target.dx == source.dx && target.dy == source.dy);
+    if (isStretch) {
+        SetStretchBltMode(hdc, HALFTONE);
+    }
     if (p->hbmp) {
         HDC bmpDC = CreateCompatibleDC(hdc);
         if (!bmpDC) {
@@ -195,7 +201,7 @@ bool BlitPixmapRegion(Pixmap* p, HDC hdc, Rect target, Rect source) {
         }
         HGDIOBJ oldBmp = SelectObject(bmpDC, p->hbmp);
         bool ok = false;
-        if (oldBmp && target.dx == source.dx && target.dy == source.dy) {
+        if (oldBmp && !isStretch) {
             ok = BitBlt(hdc, target.x, target.y, target.dx, target.dy, bmpDC, source.x, source.y, SRCCOPY) != 0;
         } else if (oldBmp) {
             ok = StretchBlt(hdc, target.x, target.y, target.dx, target.dy, bmpDC, source.x, source.y, source.dx,
@@ -390,7 +396,8 @@ void InvertPixmap(Pixmap* px) {
 }
 
 // Returns a copy of the clipboard bitmap as a platform-independent Pixmap.
-Pixmap* GetClipboardImageAsPixmap() {    if (!IsClipboardFormatAvailable(CF_BITMAP) || !OpenClipboard(nullptr)) {
+Pixmap* GetClipboardImageAsPixmap() {
+    if (!IsClipboardFormatAvailable(CF_BITMAP) || !OpenClipboard(nullptr)) {
         return nullptr;
     }
 
