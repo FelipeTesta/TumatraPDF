@@ -464,6 +464,19 @@ struct MainWindow {
     } flashcard;
     // --- end flashcard state ---
 
+    // --- edit tools state ---
+    // "Edit" mode (toolbar toggle like Arch Tools / Flashcards). When on,
+    // a second toolbar offers +Text / +Img; +Img (or Ctrl+V) grabs the
+    // clipboard image and the next left-click on the page places it as a
+    // Stamp annotation (click-to-place).
+    struct EditToolsState {
+        bool on = false;                       // edit mode active
+        struct Pixmap* pendingImage = nullptr; // clipboard image armed for placement (owned)
+        HWND hwndReBarEdit = nullptr;          // second toolbar rebar
+        HWND hwndToolbarEdit = nullptr;        // second toolbar
+    } editTools;
+    // --- end edit tools state ---
+
     // --- selection & touch input state ---
     struct SelectionState {
         // true while selecting and when CurrentTab()->selectionOnPage != nullptr

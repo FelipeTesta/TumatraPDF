@@ -9,6 +9,8 @@
 - NEVER commit automatically — wait for explicit command.
 - NEVER include `base/Base.h` in `.h` files — causes 300+ redefinition errors.
 - NEVER put prose comments in `.h` files — put them on the definition in `.cpp`.
+- Keep the opencode `TODO` lateral panel updated while working for the user to follow the process.
+- ALWAYS use `Tree-Sitter` tools for mapping.
 - ALWAYS use `#ifndef`/`#define` guards, NOT `#pragma once`.
 - ALWAYS run `clang-format` on `.cpp`/`.c`/`.h` files after edits (before build).
 - ALWAYS pass `-for-testing` when launching for ad-hoc testing.

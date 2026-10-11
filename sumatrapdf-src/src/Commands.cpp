@@ -333,6 +333,9 @@ static SeqStrings gCommandNames =
     "CmdReplaceImage\0"
     "CmdEditImagePaint\0"
     "CmdViewportCropV2Toggle\0"
+    "CmdEditToolsToggle\0"
+    "CmdEditAddText\0"
+    "CmdEditAddImage\0"
     "CmdNone\0"
     "\0";
 
@@ -654,6 +657,9 @@ static i32 gCommandIds[] = {
     CmdReplaceImage,
     CmdEditImagePaint,
     CmdViewportCropV2Toggle,
+    CmdEditToolsToggle,
+    CmdEditAddText,
+    CmdEditAddImage,
     CmdNone,
 };
 
@@ -975,6 +981,9 @@ SeqStrings gCommandDescriptions =
     "Replace Image...\0"
     "Edit Image With Paint\0"
     "Toggle Two Columns\0"
+    "Toggle Edit Mode\0"
+    "Edit: Add Text Box\0"
+    "Edit: Paste Image At Click\0"
     "Do nothing\0"
     "\0";
 // clang-format on

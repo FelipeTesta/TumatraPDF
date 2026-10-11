@@ -326,6 +326,9 @@ export const commands = [
     "CmdReplaceImage", "Replace Image...",
     "CmdEditImagePaint", "Edit Image With Paint",
     "CmdViewportCropV2Toggle", "Toggle Two Columns",
+    "CmdEditToolsToggle", "Toggle Edit Mode",
+    "CmdEditAddText", "Edit: Add Text Box",
+    "CmdEditAddImage", "Edit: Paste Image At Click",
     "CmdNone", "Do nothing",
 ];
 

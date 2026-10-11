@@ -19,10 +19,12 @@
 #include "base/GuessFileType.h"
 #include "EngineAll.h"
 #include "DisplayModel.h"
+#include "Annotation.h"
+#include "mupdf/pdf.h"
+#include "EngineMupdf.h"
 #include "FileHistory.h"
 #include "Theme.h"
 #include "GlobalPrefs.h"
-#include "Annotation.h"
 #include "SumatraConfig.h"
 #include "SumatraPDF.h"
 #include "Canvas.h"
@@ -2088,6 +2090,38 @@ static TempStr CleanupURLForClipbardCopyTemp(Str s) {
     return str::DupTemp(slice);
 }
 
+// Win32's RemoveMenu/EnableMenuItem with MF_BYCOMMAND only search the
+// immediate level of the given menu. The context menu keeps its image items
+// one level down, inside the "&Image" submenu, so the plain helpers never
+// found them; these versions descend into submenus.
+static bool MenuRemoveDeep(HMENU m, int id) {
+    if (RemoveMenu(m, (UINT)id, MF_BYCOMMAND)) {
+        return true;
+    }
+    int n = GetMenuItemCount(m);
+    for (int i = 0; i < n; i++) {
+        HMENU sub = GetSubMenu(m, i);
+        if (sub && MenuRemoveDeep(sub, id)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool MenuSetEnabledDeep(HMENU m, int id, bool isEnabled) {
+    if (EnableMenuItem(m, (UINT)id, MF_BYCOMMAND | (isEnabled ? MF_ENABLED : MF_GRAYED)) != (DWORD)-1) {
+        return true;
+    }
+    int n = GetMenuItemCount(m);
+    for (int i = 0; i < n; i++) {
+        HMENU sub = GetSubMenu(m, i);
+        if (sub && MenuSetEnabledDeep(sub, id, isEnabled)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 void OnWindowContextMenu(MainWindow* win, int x, int y) {
     DisplayModel* dm = win->AsFixed();
     ReportIf(!dm);
@@ -2158,18 +2192,20 @@ void OnWindowContextMenu(MainWindow* win, int x, int y) {
         bool onImage = pageEl && pageEl->Is(kindPageElementImage);
         bool isImageEngine = tab && tab->GetEngineType() == kindEngineImage;
         if (!onImage && !isImageEngine) {
-            MenuRemove(popup, CmdCopyImage);
+            MenuRemoveDeep(popup, CmdCopyImage);
         }
         if (!onImage) {
-            MenuRemove(popup, CmdSaveImage);
+            MenuRemoveDeep(popup, CmdSaveImage);
         }
         if (!isImageEngine && !onImage) {
-            MenuRemove(popup, CmdCropImage);
-            MenuRemove(popup, CmdResizeImage);
-            MenuRemove(popup, CmdReplaceImage);
-            MenuRemove(popup, CmdEditImagePaint);
-            MenuRemove(popup, CmdConvertImageToPdf);
+            MenuRemoveDeep(popup, CmdCropImage);
+            MenuRemoveDeep(popup, CmdResizeImage);
+            MenuRemoveDeep(popup, CmdReplaceImage);
+            MenuRemoveDeep(popup, CmdEditImagePaint);
+            MenuRemoveDeep(popup, CmdConvertImageToPdf);
         }
+        // "Convert page to &PDF" stays visible but disabled for now
+        MenuSetEnabledDeep(popup, CmdConvertImageToPdf, false);
         // remove the Image submenu entirely if no items left
         if (!onImage && !isImageEngine) {
             // find and remove the submenu by scanning top-level items
@@ -2317,7 +2353,16 @@ void OnWindowContextMenu(MainWindow* win, int x, int y) {
             } else if (cmdId == CmdConvertImageToPdf) {
                 selectPdf = true;
             }
-            ShowImageEditWindow(win->hwndFrame, m, destPath, bmp, selectPdf);
+            HWND editHwnd = ShowImageEditWindow(win->hwndFrame, m, destPath, bmp, selectPdf);
+            // remember which PDF image is being edited so Save replaces it
+            // in the document too ("Convert page to PDF" only exports)
+            if (editHwnd && cmdId != CmdConvertImageToPdf) {
+                EngineMupdf* em = AsEngineMupdf(dm->GetEngine());
+                int pg = 0, imgIdx = -1;
+                if (em && em->GetImageElementCoords(pageEl, &pg, &imgIdx) && pg > 0 && imgIdx >= 0) {
+                    ImageEditSetWritebackContext(editHwnd, pg, imgIdx, (void*)em);
+                }
+            }
             delete bmp;
             return;
         };
@@ -2382,6 +2427,46 @@ void OnWindowContextMenu(MainWindow* win, int x, int y) {
     }
     // everything else we forward to FrameOnCommand() in SumatraPDF.cpp
     HwndSendCommand(win->hwndFrame, cmdId);
+}
+
+// -dbg-control TestContextMenu diagnostics: what element sits under canvas
+// client (x,y), and whether the image extraction behind the whole Image
+// submenu (Save/Crop/Resize/Copy/Replace/Paint) works.
+TempStr ContextMenuResultTemp(int x, int y, int* exitCodeOut) {
+    str::Builder out;
+    *exitCodeOut = 1;
+    MainWindow* win = len(gWindows) == 0 ? nullptr : gWindows[0];
+    DisplayModel* dm = win ? win->AsFixed() : nullptr;
+    if (!dm) {
+        out.Append("ERROR no-doc\n");
+        return ToStrTemp(out);
+    }
+    Point pos{x, y};
+    int pageNoUnderEl = 0;
+    IPageElement* pageEl = dm->GetElementAtPos(pos, &pageNoUnderEl);
+    if (!pageEl) {
+        out.Append("pageEl=(none)\n");
+        return ToStrTemp(out);
+    }
+    bool isImage = pageEl->Is(kindPageElementImage);
+    RectF elRectF = pageEl->GetRect();
+    out.Append(fmt("pageEl isImage=%d pageNo=%d rect=%d,%d %dx%d\n", isImage ? 1 : 0, pageNoUnderEl, (int)elRectF.x,
+                   (int)elRectF.y, (int)elRectF.dx, (int)elRectF.dy));
+    if (isImage) {
+        // the removal logic in OnWindowContextMenu keeps all six Image items
+        // when the cursor is over an image (Crop/Resize need image-engine OR
+        // onImage), so the menu is fine as long as the element is detected
+        RenderedBitmap* bmp = dm->GetEngine()->GetImageForPageElement(pageEl);
+        if (bmp) {
+            Size size = bmp->GetSize();
+            out.Append(fmt("GetImageForPageElement=OK %dx%d\n", size.dx, size.dy));
+            delete bmp;
+            *exitCodeOut = 0;
+        } else {
+            out.Append("GetImageForPageElement=FAILED-null\n");
+        }
+    }
+    return ToStrTemp(out);
 }
 
 // so that we can do free everything at exit

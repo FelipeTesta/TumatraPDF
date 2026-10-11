@@ -216,6 +216,10 @@ static UINT_PTR removeIfAnnotsNotSupported[] = {
     // added past the CmdCreateAnnotFirst..CmdCreateAnnotLast range, so the
     // range check doesn't catch it
     CmdCreateAnnotImageFromClipboard,
+    // edit mode needs annots too (stamp placement / free text)
+    CmdEditToolsToggle,
+    CmdEditAddText,
+    CmdEditAddImage,
     0,
 };
 
@@ -268,6 +272,10 @@ static UINT_PTR removeIfChm[] = {
     CmdFlashcardLista,
     CmdFlashcardImport,
     CmdFlashcardSession,
+    // edit mode is PDF-only (annotation-based; needs DisplayModel)
+    CmdEditToolsToggle,
+    CmdEditAddText,
+    CmdEditAddImage,
     0,
 };
 
@@ -298,6 +306,10 @@ static UINT_PTR removeIfMarkdown[] = {
     CmdFlashcardLista,
     CmdFlashcardImport,
     CmdFlashcardSession,
+    // edit mode is PDF-only (annotation-based; needs DisplayModel)
+    CmdEditToolsToggle,
+    CmdEditAddText,
+    CmdEditAddImage,
     0,
 };
 

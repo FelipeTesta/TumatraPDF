@@ -71,6 +71,8 @@ Pixmap* PixmapFromRenderedBitmap(RenderedBitmap* rb);
 RenderedBitmap* RenderedBitmapFromPixmap(Pixmap* px);
 void RecolorPixmap(Pixmap* px, COLORREF textColor, COLORREF bgColor, COLORREF linkColor = 0,
                    Vec<Rect>* skipRects = nullptr);
+// true per-pixel negative of the rendered page (session invert; see InvertBitmapColors)
+void InvertPixmap(Pixmap* px);
 
 void FreePixmapNativeBitmap(Pixmap* p);
 #endif

@@ -42,6 +42,7 @@
 #include "WindowTab.h"
 #include "TableOfContents.h"
 #include "Commands.h"
+#include "Commands_Edit.h"
 #include "StressTesting.h"
 #include "Toolbar.h"
 #include "uia/Provider.h"
@@ -108,6 +109,8 @@ MainWindow::~MainWindow() {
     scrollAnimActive = false;
     RefHoverDestroy(refHover);
     FinishStressTest(this);
+    // free an armed clipboard image that was never placed
+    EditToolsClearPendingImage(this);
 
     ReportIf(TabCount() > 0);
     RemoveNotificationsForHwnd(hwndCanvas);

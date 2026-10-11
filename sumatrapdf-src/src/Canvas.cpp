@@ -52,6 +52,7 @@
 #include "Menu.h"
 #include "ArchVector.h"
 #include "Commands.h"
+#include "Commands_Edit.h"
 #include "uia/Provider.h"
 #include "SearchAndDDE.h"
 #include "Selection.h"
@@ -2196,6 +2197,14 @@ static void OnMouseLeftButtonDown(MainWindow* win, int x, int y, WPARAM key) {
         }
     }
 
+    // Edit mode: an armed clipboard image is placed by the next left-click
+    // on a page (click-to-place; +Img or Ctrl+V arms it)
+    if (win->editTools.on && win->editTools.pendingImage) {
+        if (EditToolsPlacePendingImage(win, x, y)) {
+            return; // consumed by edit mode placement
+        }
+    }
+
     // Arch Tools: erase mode — works whenever Arch Tools is ON, regardless of draw mode
     if (gGlobalPrefs->archToolsEnabled && win->archTools.on && win->AsFixed()) {
         DisplayModel* dm = win->AsFixed();
@@ -2744,6 +2753,19 @@ static void OnMouseLeftButtonUp(MainWindow* win, int x, int y, WPARAM key) {
     }
 
     if (IsCtrlPressed() && win->annotationUnderCursor) {
+        // a flashcard highlight is not a plain annotation: ctrl+click routes
+        // to the flashcard Lista panel instead of the annotation editor
+        // (user spec, 2026-10-10)
+        Annotation* annotUnderCursor = win->annotationUnderCursor;
+        if (str::Eq(Author(annotUnderCursor), StrL("TumatraPDF-Flashcard"))) {
+            logf("[fc] ctrl+click on flashcard highlight - opening Lista panel\n");
+            if (!win->flashcard.on) {
+                // the panel only exists in flashcard mode; turn it on first
+                HwndSendCommand(win->hwndFrame, CmdFlashcardToggle);
+            }
+            FlashcardSidebarShow(win);
+            return;
+        }
         ShowEditAnnotationsWindow(tab, win->annotationUnderCursor);
         return;
     }
@@ -3865,6 +3887,13 @@ static LRESULT OnSetCursor(MainWindow* win, HWND hwnd) {
     ReportIf(win->hwndCanvas != hwnd);
     if (win->mouseAction != MouseAction::None) {
         win->DeleteToolTip();
+    }
+
+    // Edit mode: crosshair while a clipboard image is armed for placement
+    if (win->editTools.on && win->editTools.pendingImage) {
+        SetCursorCached(IDC_CROSS);
+        win->DeleteToolTip();
+        return TRUE;
     }
 
     // Arch Tools: crosshair cursor when Arch Tools is ON

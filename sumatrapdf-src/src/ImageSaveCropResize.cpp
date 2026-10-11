@@ -156,6 +156,21 @@ struct ImageEditWindow {
     int imgW = 0;
     int imgH = 0;
 
+    // original image size; never changes even after ApplyCrop/ApplyResize.
+    // the PDF writeback canvas is always this size so the edited content lands
+    // exactly where the original image was drawn
+    int origW = 0;
+    int origH = 0;
+    // current-image -> original-image transform, maintained by ApplyCrop /
+    // ApplyResize: x_orig = tfSX * x_cur + tfOX (y likewise). Identity until
+    // something is applied.
+    double tfSX = 1.0;
+    double tfSY = 1.0;
+    double tfOX = 0.0;
+    double tfOY = 0.0;
+    // true once ApplyCrop/ApplyResize actually changed the bitmap
+    bool edited = false;
+
     // display
     int imgDisplayX = 0;
     int imgDisplayY = 0;
@@ -201,10 +216,35 @@ struct ImageEditWindow {
 static Vec<ImageEditWindow*> gImageEditWindows;
 static UINT_PTR gDestEditSubclassId = 0;
 
+// TUMATRA: which PDF image (if any) the editor should write back into on
+// Save. Set by the caller right after ShowImageEditWindow returns, cleared
+// when consumed, on the next editor window, and whenever the document the
+// engine pointer refers to is no longer the one being displayed.
+struct ImageEditWritebackCtx {
+    HWND editHwnd = nullptr;
+    int pageNo = 0;
+    int imageIdx = -1;
+    void* engine = nullptr;
+    bool valid = false;
+};
+static ImageEditWritebackCtx gWriteback;
+
+void ImageEditSetWritebackContext(HWND editHwnd, int pageNo, int imageIdx, void* engine) {
+    if (!editHwnd || pageNo <= 0 || imageIdx < 0 || !engine) {
+        return;
+    }
+    gWriteback.editHwnd = editHwnd;
+    gWriteback.pageNo = pageNo;
+    gWriteback.imageIdx = imageIdx;
+    gWriteback.engine = engine;
+    gWriteback.valid = true;
+}
+
 static void UpdateInfoLabel(ImageEditWindow* ew);
 static void UpdateModeButtons(ImageEditWindow* ew);
 static void InvalidateImageArea(ImageEditWindow* ew);
 static bool HandleImageEditArrowKey(ImageEditWindow* ew, WPARAM wp);
+static void WriteBackEditedImage(ImageEditWindow* ew, Bitmap* result);
 
 static LRESULT CALLBACK WndProcDestEditSubclass(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR /*idSubclass*/,
                                                 DWORD_PTR data) {
@@ -250,6 +290,14 @@ static bool HandleImageEditArrowKey(ImageEditWindow* ew, WPARAM wp) {
             ew->newH -= 1;
         } else {
             return false;
+        }
+        // Shift keeps the aspect ratio of the current image
+        if (GetKeyState(VK_SHIFT) & 0x8000) {
+            if (wp == VK_LEFT || wp == VK_RIGHT) {
+                ew->newH = (int)(((double)ew->newW * ew->imgH / ew->imgW) + 0.5);
+            } else {
+                ew->newW = (int)(((double)ew->newH * ew->imgW / ew->imgH) + 0.5);
+            }
         }
         ew->newW = std::max(ew->newW, 1);
         ew->newH = std::max(ew->newH, 1);
@@ -1269,18 +1317,25 @@ static void OnSave(ImageEditWindow* ew) {
         TempWStr destW = ToWStrTemp(dest);
         saved = SaveBitmapWithWIC(result, destW, gImageFormats[fmtIdx].containerFormat);
     }
-    delete result;
 
     if (!saved) {
+        delete result;
         WarnBox(ew->hwnd, "Failed to save image", "Save Image");
         return;
     }
+
+    // if this edits an image inside a PDF, replace it there too
+    WriteBackEditedImage(ew, result);
+    delete result;
     OptimizePngFileAsync(dest);
+    logf("[imgedit] OnSave: dest saved, closing editor\n");
 
     // load the saved image
     HWND hwndParent = ew->hwndParent;
     Str savedPath = str::Dup(dest);
-    DestroyWindow(ew->hwnd);
+    if (!DestroyWindow(ew->hwnd)) {
+        logf("[imgedit] OnSave: DestroyWindow failed gle=%ld\n", (long)GetLastError());
+    }
 
     if (gImageEditHost.OpenSavedFile) {
         gImageEditHost.OpenSavedFile(hwndParent, savedPath);
@@ -1323,6 +1378,117 @@ static bool IsResizeChanged(ImageEditWindow* ew) {
     return ew->newW != ew->imgW || ew->newH != ew->imgH;
 }
 
+// GDI+'s built-in PNG encoder CLSID (what GetImageEncoders reports for
+// "image/png"). Note: this is NOT wincodec's GUID_ContainerFormatPng, which
+// GDI+ does not recognize as an encoder.
+static const CLSID kGdiplusPngEncoderClsid = {0x557cf406,
+                                              0x1a04,
+                                              0x11d3,
+                                              {0x9a, 0x73, 0x00, 0x00, 0xf8, 0x1e, 0xf3, 0x2e}};
+
+// Save via GDI+ so the alpha channel survives (the WIC path flattens
+// transparency to white via GetHBITMAP).
+static bool SaveBitmapPngAlpha(Bitmap* bmp, WStr destPath) {
+    if (!bmp || !destPath) {
+        return false;
+    }
+    IStream* stream = nullptr;
+    HRESULT hr = SHCreateStreamOnFileEx(destPath.s, STGM_CREATE | STGM_WRITE | STGM_SHARE_EXCLUSIVE,
+                                        FILE_ATTRIBUTE_NORMAL, TRUE, nullptr, &stream);
+    if (FAILED(hr) || !stream) {
+        logf("[imgedit] SaveBitmapPngAlpha: no stream (hr=%ld)\n", (long)hr);
+        return false;
+    }
+    Status st = bmp->Save(stream, &kGdiplusPngEncoderClsid, nullptr);
+    stream->Release();
+    if (st != Ok) {
+        logf("[imgedit] SaveBitmapPngAlpha: save status %d\n", (int)st);
+    }
+    return st == Ok;
+}
+
+// Build the writeback image: the original size with the edited result pasted
+// at the position (and scale) its pixels originally occupied. Keeping the
+// original dimensions means the PDF draws it exactly where the old image was
+// - no squash, no shift, no content-stream surgery. result is what was just
+// saved; (rx,ry,rw,rh) is the region of the current image it represents.
+static Bitmap* ComposeWritebackBitmap(ImageEditWindow* ew, Bitmap* result, int rx, int ry, int rw, int rh) {
+    if (!result || ew->origW <= 0 || ew->origH <= 0) {
+        return nullptr;
+    }
+    Bitmap* canvas = new Bitmap(ew->origW, ew->origH, PixelFormat32bppARGB);
+    if (!canvas || canvas->GetLastStatus() != Ok) {
+        delete canvas;
+        return nullptr;
+    }
+    Graphics g(canvas);
+    g.Clear(Color(0, 0, 0, 0));
+    g.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic);
+    // current-image coords -> original-image coords: x = tfSX * x + tfOX
+    int dx = (int)(ew->tfOX + (rx * ew->tfSX));
+    int dy = (int)(ew->tfOY + (ry * ew->tfSY));
+    int dr = (int)(ew->tfOX + ((rx + rw) * ew->tfSX) + 0.999999);
+    int db = (int)(ew->tfOY + ((ry + rh) * ew->tfSY) + 0.999999);
+    if (dr <= dx || db <= dy) {
+        delete canvas;
+        return nullptr;
+    }
+    g.DrawImage(result, dx, dy, dr - dx, db - dy);
+    return canvas;
+}
+
+// If this editor was opened from a PDF image (context set via
+// ImageEditSetWritebackContext) and the content actually changed, replace
+// that image in the document with the padded result. One-shot.
+static void WriteBackEditedImage(ImageEditWindow* ew, Bitmap* result) {
+    if (!gWriteback.valid || gWriteback.editHwnd != ew->hwnd) {
+        return;
+    }
+    gWriteback.valid = false;
+    if (!gImageEditHost.WriteBackToPdf || !result) {
+        return;
+    }
+    bool changed = ew->edited;
+    int rx = 0, ry = 0, rw = ew->imgW, rh = ew->imgH;
+    if (ew->mode == ImageEditMode::Crop && IsCropChanged(ew)) {
+        changed = true;
+        rx = ew->cropX;
+        ry = ew->cropY;
+        rw = ew->cropW;
+        rh = ew->cropH;
+    } else if (ew->mode == ImageEditMode::Resize && IsResizeChanged(ew)) {
+        changed = true;
+    }
+    if (!changed) {
+        return;
+    }
+    Bitmap* canvas = ComposeWritebackBitmap(ew, result, rx, ry, rw, rh);
+    if (!canvas) {
+        return;
+    }
+    WCHAR tmpDir[MAX_PATH + 1]{};
+    WCHAR tmpPath[MAX_PATH + 64]{};
+    GetTempPathW(dimof(tmpDir), tmpDir);
+    if (swprintf_s(tmpPath, L"%stumatrapdf-imgwb-%u.png", tmpDir, GetCurrentProcessId()) < 0) {
+        delete canvas;
+        return;
+    }
+    bool ok = SaveBitmapPngAlpha(canvas, WStr(tmpPath));
+    delete canvas;
+    if (!ok) {
+        logf("[imgedit] writeback: could not write temp png\n");
+        return;
+    }
+    TempStr path8 = ToUtf8Temp(WStr(tmpPath));
+    int pageNo = gWriteback.pageNo;
+    int imageIdx = gWriteback.imageIdx;
+    void* engine = gWriteback.engine;
+    bool done = gImageEditHost.WriteBackToPdf(ew->hwndParent, path8, pageNo, imageIdx, engine);
+    logf("[imgedit] crop/resize writeback page %d idx %d: %s\n", pageNo, imageIdx,
+         done ? StrL("replaced (save the PDF via File > Save to persist)") : StrL("failed"));
+    file::Delete(path8);
+}
+
 static void UpdateModeButtons(ImageEditWindow* ew) {
     if (ew->mode == ImageEditMode::Crop) {
         ew->btnCrop->SetText(Tr("&Apply Crop"));
@@ -1355,6 +1521,11 @@ static void ApplyCrop(ImageEditWindow* ew) {
     if (cropped) {
         int prevW = ew->imgW;
         int prevH = ew->imgH;
+        // keep current->original mapping: the crop's origin becomes the new
+        // (0,0) of the current image
+        ew->tfOX += (double)ew->cropX * ew->tfSX;
+        ew->tfOY += (double)ew->cropY * ew->tfSY;
+        ew->edited = true;
         ReplaceSrcBitmap(ew, cropped);
         ew->cropX = 0;
         ew->cropY = 0;
@@ -1377,6 +1548,11 @@ static void ApplyResize(ImageEditWindow* ew) {
     if (resized) {
         int prevW = ew->imgW;
         int prevH = ew->imgH;
+        // keep current->original mapping: a feature at x_cur lands at
+        // x_cur * newW/imgW after the resize
+        ew->tfSX = ew->tfSX * (double)ew->imgW / (double)ew->newW;
+        ew->tfSY = ew->tfSY * (double)ew->imgH / (double)ew->newH;
+        ew->edited = true;
         Graphics g(resized);
         g.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic);
         g.DrawImage(ew->srcBitmap, 0, 0, ew->newW, ew->newH);
@@ -1677,6 +1853,16 @@ LRESULT CALLBACK WndProcImageEdit(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                         nh = ew->dragNewH + (imgDy * 2);
                     }
 
+                    // Shift keeps the aspect ratio of the current image:
+                    // edges that drive width derive height and vice versa
+                    if (GetKeyState(VK_SHIFT) & 0x8000) {
+                        if (edge == DragEdge::Top || edge == DragEdge::Bottom) {
+                            nw = (int)(((double)nh * ew->imgW / ew->imgH) + 0.5);
+                        } else {
+                            nh = (int)(((double)nw * ew->imgH / ew->imgW) + 0.5);
+                        }
+                    }
+
                     nw = std::max(nw, 1);
                     nh = std::max(nh, 1);
 
@@ -1868,7 +2054,9 @@ LRESULT CALLBACK WndProcImageEdit(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     return 0;
 }
 
-void ShowImageEditWindow(HWND parent, ImageEditMode mode, Str filePath, RenderedBitmap* rbmp, bool selectPdf) {
+HWND ShowImageEditWindow(HWND parent, ImageEditMode mode, Str filePath, RenderedBitmap* rbmp, bool selectPdf) {
+    // a new editor window invalidates any pending writeback context
+    gWriteback.valid = false;
     ProbeImageFormats();
 
     Bitmap* bmp = nullptr;
@@ -1878,29 +2066,29 @@ void ShowImageEditWindow(HWND parent, ImageEditMode mode, Str filePath, Rendered
         // create GDI+ bitmap from RenderedBitmap
         HBITMAP hbmp = rbmp->GetBitmap();
         if (!hbmp) {
-            return;
+            return nullptr;
         }
         bmp = new Bitmap(hbmp, nullptr);
         if (!bmp || bmp->GetWidth() == 0) {
             delete bmp;
-            return;
+            return nullptr;
         }
     } else {
         // the caller names the image; there is nothing to edit without one
         if (!filePath) {
-            return;
+            return nullptr;
         }
         Str data = file::ReadFile(filePath);
         if (len(data) == 0) {
-            return;
+            return nullptr;
         }
         str::Free(data);
         if (!gImageEditHost.LoadImageFile) {
-            return;
+            return nullptr;
         }
         bmp = gImageEditHost.LoadImageFile(filePath);
         if (!bmp) {
-            return;
+            return nullptr;
         }
     }
 
@@ -1908,7 +2096,7 @@ void ShowImageEditWindow(HWND parent, ImageEditMode mode, Str filePath, Rendered
     int imgH = (int)bmp->GetHeight();
     if (imgW <= 0 || imgH <= 0) {
         delete bmp;
-        return;
+        return nullptr;
     }
 
     auto* ew = new ImageEditWindow();
@@ -1918,6 +2106,8 @@ void ShowImageEditWindow(HWND parent, ImageEditMode mode, Str filePath, Rendered
     ew->srcBitmap = bmp;
     ew->imgW = imgW;
     ew->imgH = imgH;
+    ew->origW = imgW;
+    ew->origH = imgH;
 
     if (mode == ImageEditMode::Crop) {
         // initial crop = full image
@@ -1955,7 +2145,7 @@ void ShowImageEditWindow(HWND parent, ImageEditMode mode, Str filePath, Rendered
     if (!hwnd) {
         gImageEditWindows.Remove(ew);
         delete ew;
-        return;
+        return nullptr;
     }
 
     ew->hwnd = hwnd;
@@ -2144,6 +2334,7 @@ void ShowImageEditWindow(HWND parent, ImageEditMode mode, Str filePath, Rendered
     SetCurrentModelessDialog(hwnd);
     HwndToForeground(hwnd);
     RestoreImageEditFocus(ew);
+    return hwnd;
 }
 
 // Headless test for issue #5734: arrow keys must resize even when focus is on the dest path edit.

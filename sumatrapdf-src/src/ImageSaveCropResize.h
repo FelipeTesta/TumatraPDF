@@ -17,6 +17,11 @@ struct ImageEditHost {
     bool (*SaveBitmapAsPdf)(Gdiplus::Bitmap* bmp, Str destPath) = nullptr;
     // Called with what was just written, for a host that can display it.
     void (*OpenSavedFile)(HWND parent, Str path) = nullptr;
+    // Replace the PDF image the editor was opened from with the edited result
+    // (TUMATRA writeback). engine is the opaque engine pointer the context
+    // was set with; it no longer matches when the document was switched or
+    // closed, and the hook must do nothing then.
+    bool (*WriteBackToPdf)(HWND parent, Str path, int pageNo, int imageIdx, void* engine) = nullptr;
     // Translates a UI string; without it the English source string is used.
     Str (*Translate)(Str) = nullptr;
     // Applies the host's dark mode to a window the editor created.
@@ -43,8 +48,15 @@ enum class ImageEditMode {
 
 // parent is the window the editor is owned by and centred on. Either filePath
 // names an image to load or rbmp holds one already rendered; with neither
-// there is nothing to edit and the call does nothing.
-void ShowImageEditWindow(HWND parent, ImageEditMode mode, Str filePath = {}, RenderedBitmap* rbmp = nullptr,
+// there is nothing to edit and the call does nothing. Returns the editor's
+// window or null when nothing was opened.
+HWND ShowImageEditWindow(HWND parent, ImageEditMode mode, Str filePath = {}, RenderedBitmap* rbmp = nullptr,
                          bool selectPdf = false);
+
+// After ShowImageEditWindow returns a window that edits an image coming from
+// a PDF page, the caller registers which image it is; Save then also replaces
+// that image inside the document (TUMATRA writeback). engine is the opaque
+// engine pointer the host hook validates against the still-open document.
+void ImageEditSetWritebackContext(HWND editHwnd, int pageNo, int imageIdx, void* engine);
 
 TempStr ImageResizeArrowKeyResultTemp(Str imagePath, int* exitCodeOut = nullptr);

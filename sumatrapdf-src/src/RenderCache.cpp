@@ -1092,7 +1092,13 @@ static DWORD WINAPI RenderCacheThread(LPVOID data) {
                 COLORREF textCol = profile ? profile->foreground : cache->textColor;
                 COLORREF bgCol = profile ? profile->pageBackground : cache->backgroundColor;
                 COLORREF linkCol = profile ? profile->linkColor : cache->linkColor;
-                RecolorPixmap(bmp, textCol, bgCol, linkCol, skipRectsPtr);
+                if (GetInvertPageColors()) {
+                    // session invert: true negative (the ramp + link-color
+                    // substitution corrupts images — see InvertPixmap)
+                    InvertPixmap(bmp);
+                } else {
+                    RecolorPixmap(bmp, textCol, bgCol, linkCol, skipRectsPtr);
+                }
             }
             if (req.abort || req.darkModeEpoch != cache->darkModeEpoch) {
                 // colors changed while recoloring - discard result
@@ -1261,7 +1267,12 @@ int RenderCache::Paint(HDC hdc, Rect bounds, DisplayModel* dm, int pageNo, PageI
             // match the cached path: apply document-color-follow-theme / inversion
             // (trim forces the non-cached path, so without this the recolor is skipped)
             if (ShouldUpdateBitmapColorsLegacy(dm->GetEngine())) {
-                RecolorPixmap(bmp, this->textColor, this->backgroundColor, this->linkColor, nullptr);
+                if (GetInvertPageColors()) {
+                    // session invert: true negative (see InvertPixmap)
+                    InvertPixmap(bmp);
+                } else {
+                    RecolorPixmap(bmp, this->textColor, this->backgroundColor, this->linkColor, nullptr);
+                }
             }
         }
         bool success = bmp && BlitPixmap(bmp, hdc, bounds);

@@ -91,6 +91,9 @@
 #define IDC_FLASHCARD_LABEL_WITH_CLOSE 1110
 #define IDC_FLASHCARD_LIST 1111
 #define IDC_FLASHCARD_LIST_HEADER 1112
+// edit-mode UI (dedicated IDs - don't reuse the main toolbar's)
+#define IDC_EDIT_REBAR 1113
+#define IDC_EDIT_TOOLBAR 1114
 #define IDB_RELOADING_CUE 2010
 
 #define IDC_STATIC (-1)

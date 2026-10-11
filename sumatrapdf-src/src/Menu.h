@@ -24,6 +24,7 @@ HMENU BuildMenuFromDef(MenuDef* menuDefs, HMENU menu, BuildMenuCtx* ctx);
 void RemoveBadMenuSeparators(HMENU menu);
 HMENU BuildMenu(MainWindow* win);
 void OnWindowContextMenu(MainWindow* win, int x, int y);
+TempStr ContextMenuResultTemp(int x, int y, int* exitCodeOut);
 void OnAboutContextMenu(MainWindow* win, int x, int y);
 void ForgetFileFromFrequentlyRead(MainWindow* win, Str filePath);
 int CmdIdFromVirtualZoom(float virtualZoom);

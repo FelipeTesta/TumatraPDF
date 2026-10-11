@@ -110,6 +110,7 @@ static ToolbarButtonInfo gToolbarButtons[] = {
     {TbIcon::Text, CmdFlashcardToggle, _TRN("Flashcard")},
     {TbIcon::None, 0, nullptr}, // separator before Arch Tools toggle
     {TbIcon::Text, CmdArchToolsToggle, _TRN("Arch Tools")},
+    {TbIcon::Text, CmdEditToolsToggle, _TRN("Edit")},
 };
 // unicode chars: https://www.compart.com/en/unicode/U+25BC
 
@@ -310,12 +311,19 @@ static bool IsCmdEnabled(MainWindow* win, int cmdId) {
             }
             break;
         case CmdFlashcardToggle:
-            if (win->archTools.on) {
+            if (win->archTools.on || win->editTools.on) {
                 return false;
             }
             break;
         case CmdArchToolsToggle:
-            if (win->flashcard.on) {
+            if (win->flashcard.on || win->editTools.on) {
+                return false;
+            }
+            break;
+        case CmdEditToolsToggle:
+            // edit mode shares the toolbar-row slot logic with arch/flashcards:
+            // only one of the three secondary toolbars at a time
+            if (win->archTools.on || win->flashcard.on) {
                 return false;
             }
             break;
@@ -417,7 +425,7 @@ static TBBUTTON TbButtonFromButtonInfo(const ToolbarButtonInfo& bi, bool noTrans
     if (bi.cmdId == CmdFindToggleMatchCase || bi.cmdId == CmdFindToggleMatchWholeWord ||
         bi.cmdId == CmdContrastToggle || bi.cmdId == CmdAutoScrollToggle || bi.cmdId == CmdViewportCropToggle ||
         bi.cmdId == CmdViewportCropV2Toggle || bi.cmdId == CmdMarginTrimToggle || bi.cmdId == CmdArchToolsToggle ||
-        bi.cmdId == CmdToggleBookmarks) {
+        bi.cmdId == CmdEditToolsToggle || bi.cmdId == CmdToggleBookmarks) {
         b.fsStyle = BTNS_CHECK;
     }
     if (bi.bmpIndex == TbIcon::Text) {

@@ -589,6 +589,31 @@ void FlashcardSidebarToggle(MainWindow* win) {
     FlashcardToolbarUpdateState(win);
 }
 
+// Ensure the Lista panel is open (never hides it): used by the ctrl+click
+// routing on flashcard highlights. Requires flashcard mode on (turn it on at
+// the call site first).
+void FlashcardSidebarShow(MainWindow* win) {
+    if (!win->flashcard.on) {
+        return;
+    }
+    if (!win->flashcard.hwndListaBox) {
+        FlashcardSidebarCreate(win);
+        if (!win->flashcard.hwndListaBox) {
+            return;
+        }
+        win->uiState.fcListVisible = true;
+        FlashcardSidebarPopulate(win);
+    } else if (!win->uiState.fcListVisible) {
+        win->uiState.fcListVisible = true;
+        FlashcardSidebarPopulate(win);
+    } else {
+        return; // already visible
+    }
+    // apply the geometry change (canvas grows/shrinks)
+    ScheduleUiUpdate(win, kUiRelayout);
+    FlashcardToolbarUpdateState(win);
+}
+
 void FlashcardSidebarPopulate(MainWindow* win) {
     if (!win->flashcard.hwndListaBox || !win->flashcard.hwndListaView) {
         return;

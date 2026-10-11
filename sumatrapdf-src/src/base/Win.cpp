@@ -2954,6 +2954,89 @@ void UpdateBitmapColors(HBITMAP hbmp, COLORREF textColor, COLORREF bgColor, COLO
     DeleteDC(hDC);
 }
 
+// Session invert (CmdInvertColors): true per-pixel negative of the rendered
+// page. The theme-color ramp + link-color substitution in UpdateBitmapColors
+// distorts image hues (ramp endpoints are theme colors, not pure black/white)
+// and replaces bluish image pixels with a flat link color as soon as the
+// inverted page counts as "dark" — a true negative keeps text AND images
+// legible (user decision, 2026-10-10).
+void InvertBitmapColors(HBITMAP hbmp) {
+    if (!hbmp) {
+        return;
+    }
+    DIBSECTION info{};
+    int ret = GetObject(hbmp, sizeof(info), &info);
+    if (ret < (int)sizeof(info.dsBm)) {
+        return;
+    }
+    Size size(info.dsBm.bmWidth, info.dsBm.bmHeight);
+
+    // mapped 32-bit DI bitmaps: direct pixel access (keep alpha as-is)
+    if (info.dsBm.bmBits && 32 == info.dsBm.bmBitsPixel && size.dx * 4 == info.dsBm.bmWidthBytes) {
+        int bmpBytes = size.dx * size.dy * 4;
+        u8* bmpData = (u8*)info.dsBm.bmBits;
+        for (int i = 0; i < bmpBytes; i += 4) {
+            bmpData[i] = (u8)(255 - bmpData[i]);
+            bmpData[i + 1] = (u8)(255 - bmpData[i + 1]);
+            bmpData[i + 2] = (u8)(255 - bmpData[i + 2]);
+        }
+        return;
+    }
+    // mapped 24-bit DI bitmaps
+    if (info.dsBm.bmBits && 24 == info.dsBm.bmBitsPixel && info.dsBm.bmWidthBytes >= size.dx * 3) {
+        u8* bmpData = (u8*)info.dsBm.bmBits;
+        for (int y = 0; y < size.dy; y++) {
+            for (int x = 0; x < size.dx; x++) {
+                u8* px = bmpData + ((size_t)y * info.dsBm.bmWidthBytes) + ((size_t)x * 3);
+                px[0] = (u8)(255 - px[0]);
+                px[1] = (u8)(255 - px[1]);
+                px[2] = (u8)(255 - px[2]);
+            }
+        }
+        return;
+    }
+    // paletted DI bitmaps: invert the palette
+    if (sizeof(info) == ret && info.dsBmih.biBitCount && info.dsBmih.biBitCount <= 8) {
+        RGBQUAD palette[256];
+        HDC hDC = CreateCompatibleDC(nullptr);
+        DeleteObject(SelectObject(hDC, hbmp));
+        uint num = GetDIBColorTable(hDC, 0, dimof(palette), palette);
+        for (uint i = 0; i < num; i++) {
+            palette[i].rgbRed = (u8)(255 - palette[i].rgbRed);
+            palette[i].rgbGreen = (u8)(255 - palette[i].rgbGreen);
+            palette[i].rgbBlue = (u8)(255 - palette[i].rgbBlue);
+        }
+        if (num > 0) {
+            SetDIBColorTable(hDC, 0, num, palette);
+        }
+        DeleteDC(hDC);
+        return;
+    }
+    // fallback: round-trip through a 32bpp buffer
+    BITMAPINFO bmi{};
+    bmi.bmiHeader.biSize = sizeof(bmi.bmiHeader);
+    bmi.bmiHeader.biWidth = size.dx;
+    bmi.bmiHeader.biHeight = size.dy;
+    bmi.bmiHeader.biPlanes = 1;
+    bmi.bmiHeader.biBitCount = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
+
+    HDC hDC = CreateCompatibleDC(nullptr);
+    int bmpBytes = size.dx * size.dy * 4;
+    ScopedMem<u8> bmpData((u8*)malloc(bmpBytes));
+    ReportIf(!bmpData);
+    if (GetDIBits(hDC, hbmp, 0, size.dy, bmpData, &bmi, DIB_RGB_COLORS)) {
+        for (int i = 0; i < bmpBytes; i++) {
+            int k = i % 4;
+            if (k < 3) {
+                bmpData[i] = (u8)(255 - bmpData[i]);
+            }
+        }
+        SetDIBits(hDC, hbmp, 0, size.dy, bmpData, &bmi, DIB_RGB_COLORS);
+    }
+    DeleteDC(hDC);
+}
+
 HBITMAP CreateMemoryBitmap(Size size, HANDLE* hDataMapping) {
     BITMAPINFO bmi{};
     bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);

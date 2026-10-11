@@ -201,6 +201,8 @@ void FlashcardStopSession(MainWindow* win);
 void FlashcardSidebarCreate(MainWindow* win);
 void FlashcardSidebarDestroy(MainWindow* win);
 void FlashcardSidebarToggle(MainWindow* win);
+// ensure the Lista panel is open (never hides it)
+void FlashcardSidebarShow(MainWindow* win);
 void FlashcardSidebarPopulate(MainWindow* win);
 // re-lay out + repaint the Lista panel after RelayoutFrame moved it
 void RelayoutFlashcardListPanel(MainWindow* win);

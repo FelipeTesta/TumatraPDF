@@ -1,5 +1,44 @@
 # TumatraPDF — Development Log
 
+## 2026-10-10 (s34/s34-b) — Image tools fixed (Replace/Paint/Crop-writeback/Resize) + Edit mode (paste image into page) + bug batch (BUILD OK; s34-{replace,paint,crop,edit,reload}-e2e ALL PASS)
+
+### Fixed
+
+- **Right-click image menu "all dead":** submenu pruning was a NO-OP — base Win.cpp MenuRemove/MenuSetEnabled use MF_BYCOMMAND which does NOT descend into submenus → "&Image" submenu always showed ALL items on ANY right-click (fork regression fd7e6254). Added MenuRemoveDeep/MenuSetEnabledDeep (recursive GetSubMenu walk, Menu.cpp); items now appear only over images / image-engine docs.
+- **Replace Image did nothing:** (1) PickImageFileDup used `WStrL` (compile-time len) on a runtime `WCHAR*` → picked path always truncated (`C:\`); (2) engine never invalidated the cached page after swapping the XObject image. Fix: `WStr(wpath)` + EngineMupdf `InvalidatePageAfterImageReplace` (pagesLock→renderLock→docLock; drop displayList; re-extract images/elements; BuildElementsInfo). E2E: replaced=1, canvas changed.
+- **Edit With Paint opened blank mspaint:** HandleCmdEditImageWithPaint called StopPaintImageWatch (which zeroes gPaintWatchTmpPath) BEFORE building the mspaint params → ShellExecuteW got `""`. Fix: stop the watch first, build path/params after. Same bug broke TickPaintImageWatch (watch never fired).
+- **Crop/Resize never wrote back to the PDF:** ImageSaveCropResize editor was save-to-file only. Added transform tracking (tfSX/SY/OX/OY + edited flag) and on Save: compose a padded full-size PNG at the original draw position → host hook WriteBackToPdf → ReplaceImageByIdx + FreeForDisplayModel + MainWindowRerender. Aspect-safe by construction (padding, no squash). E2E 7/7 incl. Convert grayed.
+- **Resize proportional:** Shift during resize-drag + arrow keys keep aspect (newW/newH cross-derived from the imgW/imgH ratio).
+- **Convert button:** stays visible but GRAYED (user: "deixe ele desativado, depois voltamos nisso").
+- **Saving the document deactivated Invert + Contrast:** SaveAnnotationsToExistingFile → ReloadDocument built a FRESH FileState and never copied the fork's per-doc color fields → restore path reset them to defaults. Fix: ReloadDocument now carries `fs->invertColors/contrastEnabled/contrastOpacity` (same fields UpdateFileState persists) + `[reload]` log. E2E: post-reload canvas byte-identical to the pre-reload inverted page.
+- **Invert corrupted images:** legacy RecolorPixmap ramp (theme-color endpoints, not pure black/white → hue crush) + link-color substitution replacing bluish image pixels whenever the inverted page counts as "dark". Fix (user decision: true negative): session invert now applies per-pixel 255-v via new `InvertPixmap`/`InvertBitmapColors` (both RenderCache call sites; 32bpp/24bpp/paletted/GetDIBits paths) — text AND images stay legible.
+- **mupdf stamp-image bug (upstream latent):** pdf_set_annot_stamp_image only embeds Gray/RGB/CMYK; the clipboard pixmap (BGR8) was wrapped in fz_device_bgr → "unsupported error: only Gray, RGB, and CMYK ICC colorspaces supported" → CmdCreateAnnotImageFromClipboard always failed. Fix in Annotation.cpp: fz_convert_pixmap → fz_device_rgb before fz_new_image_from_pixmap. Debug aid: fz_set_error_callback around the create (mupdf errors never reach the GUI stderr).
+
+### Added
+
+- **Edit mode (user request):** main-toolbar "Edit" toggle (like Flashcard/Arch Tools) + second toolbar with "+Text"/"+Img". +Img (or Ctrl+V while in edit mode) grabs the clipboard image; the next left-click on a page places it as a Stamp annotation (click-to-place), clamped to 90% of the page, selected so it can be moved. New module Commands_Edit.{h,cpp} (commands 518-520 via gen-commands), EditToolsState in MainWindow.h, edit rebar in RelayoutFrame, Canvas click+crosshair branches, mutual-exclusion gates with arch/flashcards (buttons + FrameOnCommand; OFF always passes), availability lists (CHM/markdown/annots-unsupported). +Text forwards to CmdCreateAnnotFreeText (dedicated flow = TODO). E2E 10/10.
+- **Ctrl+click on a flashcard highlight opens the flashcard Lista panel** instead of the annotation editor (detects /T author "TumatraPDF-Flashcard" in the Canvas ctrl+click path; turns flashcard mode on first if needed; new FlashcardSidebarShow = ensure-open, never hides). Live-test pending.
+- **[perf] timing logs** in ShowEditAnnotationsWindow: first ctrl+click builds the window + EngineMupdfGetAnnotations = per-page load over the whole doc (FC-H2 class) — likely the reported slowness; numbers from a real book decide the async/lazy fix.
+
+### Resolved / decisions
+
+- Hover label "testa": that is the annotation /T author (defaultAuthor → %USERNAME%, Annotation.cpp GetUserTemp) — user reviewed and keeps it as-is ("(none)" in annotations.defaultAuthor suppresses it; only persists on File > Save).
+- Author /T is written into the PDF at annotation creation and persists after Save (any reader shows it) — user accepted.
+
+### Verified
+
+- tests/tmp: s34-replace-e2e, s34-paint-e2e, s34-crop-e2e (7/7), s34-edit-e2e (10/10), s34-reload-colors (invert+contrast preserved across reload; byte-identical canvas) — ALL PASS. Build 0 err/0 warn → Compiled.
+
+### Notes / traps
+
+- pdf_set_annot_stamp_image: pixmap must be Gray/RGB/CMYK; BGR clipboard pixmaps need fz_convert_pixmap first.
+- fz_report_error output is LOST in a GUI process (Bun stderr pipe captured nothing) — use fz_set_error_callback to route mupdf error text into sumlog.
+- EditAnnotations.h requires WindowTab.h BEFORE it (headers not self-sufficient).
+- New .cpp → add to BOTH vs2022/TumatraPDF.vcxproj and SumatraPDF-static.vcxproj (premake5.lua still unaware of fork files).
+- E2E clipboard image: `powershell -STA` System.Drawing Bitmap + Clipboard::SetImage works.
+- EngineMupdfGetAnnotations loads every page (GetFzPageInfo(i,false), 1..pageCount) — cost shows on first ctrl+click / annotations window open on big docs.
+- gen-code.ts regen shifts command IDs (Edit cmds = 518-520) — tests must use cmdId().
+
 ## 2026-10-09 (s33) — Arch Tools overhaul: scale accepted, calculator input, pan between clicks, conflict gates (BUILD OK, s33-arch-repro ALL PASS)
 
 ### Fixed

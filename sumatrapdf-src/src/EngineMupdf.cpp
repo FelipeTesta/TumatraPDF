@@ -5299,6 +5299,89 @@ int EngineMupdf::ReplaceImageWithFile(IPageElement* ipel, Str newImagePath) {
     return ReplaceImageByIdx(pageNo, imageIdx, newImagePath);
 }
 
+// an image entry can sit in the page's own /Resources/XObject dict or nested
+// inside Form XObjects (typical for scans): walk both. returns 1 on the first
+// entry that resolves to origImage and swaps it for newImage.
+static int ReplaceImageInXObjectResources(fz_context* ctx, pdf_document* doc, pdf_obj* resources, fz_image* origImage,
+                                           fz_image* newImage, int depth) {
+    if (!pdf_is_dict(ctx, resources) || depth > 8) {
+        return 0;
+    }
+    pdf_obj* xobj = pdf_dict_get(ctx, resources, PDF_NAME(XObject));
+    if (!pdf_is_dict(ctx, xobj)) {
+        return 0;
+    }
+    int n = pdf_dict_len(ctx, xobj);
+    for (int i = 0; i < n; i++) {
+        pdf_obj* key = pdf_dict_get_key(ctx, xobj, i);
+        pdf_obj* val = pdf_dict_get_val(ctx, xobj, i);
+        pdf_obj* st = pdf_dict_get(ctx, val, PDF_NAME(Subtype));
+        if (!pdf_is_name(ctx, st)) {
+            continue;
+        }
+        const char* name = pdf_to_name(ctx, st);
+        if (str::Eq(name, "Image")) {
+            fz_image* img = pdf_load_image(ctx, doc, val);
+            bool match = img == origImage;
+            fz_drop_image(ctx, img);
+            if (match) {
+                pdf_obj* newObj = pdf_add_image(ctx, doc, newImage);
+                pdf_dict_put(ctx, xobj, key, newObj);
+                pdf_drop_obj(ctx, newObj);
+                return 1;
+            }
+        } else if (str::Eq(name, "Form")) {
+            pdf_obj* formRes = pdf_dict_get(ctx, val, PDF_NAME(Resources));
+            if (ReplaceImageInXObjectResources(ctx, doc, formRes, origImage, newImage, depth + 1)) {
+                return 1;
+            }
+        }
+    }
+    return 0;
+}
+
+// the pdf now draws newImage but cached per-page state still captures the old
+// one: the display list (replaying it draws the old pixels), the kept fz_image
+// refs and the IPageElements built from them. mirrors the annotation-change
+// invalidation. deletes old image elements, so callers must not keep the
+// IPageElement they passed in (ReplaceImageWithFile doesn't).
+static void InvalidatePageAfterImageReplace(EngineMupdf* e, int pageNo, FzPageInfo* pageInfo) {
+    auto* ctx = e->Ctx();
+    // lock order: pagesLock -> renderLock -> docLock (running a page needs
+    // renderLock + docLock, like RenderPage does)
+    ScopedRecursiveMutex ps(&e->pagesLock);
+    ScopedMutex rl(&e->renderLock);
+    ScopedRecursiveMutex dl(&e->docLock);
+    if (pageInfo->displayList) {
+        fz_drop_display_list(ctx, pageInfo->displayList);
+        pageInfo->displayList = nullptr;
+    }
+    if (!pageInfo->fullyLoaded) {
+        return;
+    }
+    for (FitzPageImageInfo* img : pageInfo->images) {
+        if (img && img->image) {
+            fz_drop_image(ctx, img->image);
+        }
+    }
+    DeleteVecMembers(pageInfo->images);
+    fz_stext_page* stext = nullptr;
+    fz_var(stext);
+    fz_try(ctx) {
+        fz_stext_options opts = NewTextPageOptions(FZ_STEXT_PRESERVE_IMAGES);
+        stext = fz_new_stext_page_from_page(ctx, pageInfo->page, &opts);
+    }
+    fz_catch(ctx) {
+        fz_report_error(ctx);
+    }
+    FzFindImagePositions(ctx, pageNo, pageInfo->images, stext);
+    if (stext) {
+        fz_drop_stext_page(ctx, stext);
+    }
+    pageInfo->elementsNeedRebuilding = true;
+    BuildElementsInfo(pageInfo);
+}
+
 int EngineMupdf::ReplaceImageByIdx(int pageNo, int imageIdx, Str newImagePath) {
 #if !OS_WIN
     (void)pageNo;
@@ -5315,57 +5398,45 @@ int EngineMupdf::ReplaceImageByIdx(int pageNo, int imageIdx, Str newImagePath) {
         return 0;
     }
     auto* ctx = Ctx();
-    ScopedRecursiveMutex scope(&docLock);
-
-    fz_image* origImage = FzFindImageAtIdx(ctx, pageInfo, imageIdx);
-    if (!origImage) {
-        logf("[imgedit] ReplaceImageByIdx: no image at page %d idx %d\n", pageNo, imageIdx);
-        return 0;
-    }
 
     int replaced = 0;
-    fz_image* newImage = nullptr;
-    fz_var(newImage);
-    fz_try(ctx) {
-        // read via a buffer so non-ASCII (unicode) paths work
-        Str imgData = file::ReadFile(newImagePath);
-        if (!imgData.s) {
-            fz_throw(ctx, FZ_ERROR_GENERIC, "could not read image file");
+    {
+        ScopedRecursiveMutex scope(&docLock);
+
+        fz_image* origImage = FzFindImageAtIdx(ctx, pageInfo, imageIdx);
+        if (!origImage) {
+            logf("[imgedit] ReplaceImageByIdx: no image at page %d idx %d\n", pageNo, imageIdx);
+            return 0;
         }
-        fz_buffer* buf = fz_new_buffer_from_copied_data(ctx, (const unsigned char*)imgData.s, (size_t)len(imgData));
-        newImage = fz_new_image_from_buffer(ctx, buf);
-        fz_drop_buffer(ctx, buf);
-        pdf_page* ppage = pdf_page_from_fz_page(ctx, pageInfo->page);
-        pdf_obj* res = pdf_page_resources(ctx, ppage);
-        pdf_obj* xobj = pdf_dict_get(ctx, res, PDF_NAME(XObject));
-        if (pdf_is_dict(ctx, xobj)) {
-            int n = pdf_dict_len(ctx, xobj);
-            for (int i = 0; i < n && !replaced; i++) {
-                pdf_obj* key = pdf_dict_get_key(ctx, xobj, i);
-                pdf_obj* val = pdf_dict_get_val(ctx, xobj, i);
-                pdf_obj* st = pdf_dict_get(ctx, val, PDF_NAME(Subtype));
-                if (!pdf_is_name(ctx, st) || !str::Eq(pdf_to_name(ctx, st), "Image")) {
-                    continue;
-                }
-                fz_image* img = pdf_load_image(ctx, pdfdoc, val);
-                if (img == origImage) {
-                    pdf_obj* newObj = pdf_add_image(ctx, pdfdoc, newImage);
-                    pdf_dict_put(ctx, xobj, key, newObj);
-                    pdf_drop_obj(ctx, newObj);
-                    replaced = 1;
-                }
-                fz_drop_image(ctx, img);
+
+        fz_image* newImage = nullptr;
+        fz_var(newImage);
+        fz_try(ctx) {
+            // read via a buffer so non-ASCII (unicode) paths work
+            Str imgData = file::ReadFile(newImagePath);
+            if (!imgData.s) {
+                fz_throw(ctx, FZ_ERROR_GENERIC, "could not read image file");
             }
+            fz_buffer* buf = fz_new_buffer_from_copied_data(ctx, (const unsigned char*)imgData.s, (size_t)len(imgData));
+            newImage = fz_new_image_from_buffer(ctx, buf);
+            fz_drop_buffer(ctx, buf);
+            pdf_page* ppage = pdf_page_from_fz_page(ctx, pageInfo->page);
+            pdf_obj* res = pdf_page_resources(ctx, ppage);
+            replaced = ReplaceImageInXObjectResources(ctx, pdfdoc, res, origImage, newImage, 0);
         }
-    }
-    fz_always(ctx) {
-        if (newImage) {
-            fz_drop_image(ctx, newImage);
+        fz_always(ctx) {
+            if (newImage) {
+                fz_drop_image(ctx, newImage);
+            }
+            fz_drop_image(ctx, origImage);
         }
-        fz_drop_image(ctx, origImage);
-    }
-    fz_catch(ctx) {
-        fz_report_error(ctx);
+        fz_catch(ctx) {
+            fz_report_error(ctx);
+        }
+    } // docLock released before taking pagesLock/renderLock (lock order)
+
+    if (replaced) {
+        InvalidatePageAfterImageReplace(this, pageNo, pageInfo);
     }
     logf("[imgedit] ReplaceImageByIdx: page=%d idx=%d from '%s' -> replaced=%d\n", pageNo, imageIdx, newImagePath,
          replaced);

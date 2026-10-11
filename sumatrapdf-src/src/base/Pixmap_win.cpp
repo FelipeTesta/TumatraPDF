@@ -361,9 +361,36 @@ void RecolorPixmap(Pixmap* px, COLORREF textColor, COLORREF bgColor, COLORREF li
     }
 }
 
+// Session invert (CmdInvertColors): true per-pixel negative. RecolorPixmap's
+// theme-color ramp + link-color substitution corrupts images under invert
+// (hue crush on the ramp; bluish image pixels replaced by the flat link
+// color once the inverted page counts as "dark") — a real negative keeps
+// text AND images legible (user decision, 2026-10-10).
+void InvertPixmap(Pixmap* px) {
+    if (!px) {
+        return;
+    }
+    if (px->hbmp) {
+        InvertBitmapColors(px->hbmp);
+        return;
+    }
+    if (!px->data || px->width <= 0 || px->height <= 0 || px->format == PixmapFormat::RGBA8) {
+        return;
+    }
+    int bpp = PixmapBytesPerPixel(px->format);
+    for (int y = 0; y < px->height; y++) {
+        u8* pixel = px->data + ((size_t)y * px->stride);
+        for (int x = 0; x < px->width; x++, pixel += bpp) {
+            // BGRA8/BGR8 in memory: B,G,R (+ untouched alpha)
+            pixel[0] = (u8)(255 - pixel[0]);
+            pixel[1] = (u8)(255 - pixel[1]);
+            pixel[2] = (u8)(255 - pixel[2]);
+        }
+    }
+}
+
 // Returns a copy of the clipboard bitmap as a platform-independent Pixmap.
-Pixmap* GetClipboardImageAsPixmap() {
-    if (!IsClipboardFormatAvailable(CF_BITMAP) || !OpenClipboard(nullptr)) {
+Pixmap* GetClipboardImageAsPixmap() {    if (!IsClipboardFormatAvailable(CF_BITMAP) || !OpenClipboard(nullptr)) {
         return nullptr;
     }
 

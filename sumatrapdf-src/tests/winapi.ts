@@ -47,6 +47,10 @@ const user32 = dlopen("user32.dll", {
   GetSystemMetrics: { args: [FFIType.i32], returns: FFIType.i32 },
   SetProcessDpiAwarenessContext: { args: [FFIType.i64], returns: FFIType.bool },
   GetGUIThreadInfo: { args: [FFIType.u32, FFIType.ptr], returns: FFIType.bool },
+  GetMenuItemCount: { args: [FFIType.ptr], returns: FFIType.i32 },
+  GetMenuItemInfoW: { args: [FFIType.ptr, FFIType.u32, FFIType.bool, FFIType.ptr], returns: FFIType.bool },
+  GetSubMenu: { args: [FFIType.ptr, FFIType.i32], returns: FFIType.u64 },
+  IsMenu: { args: [FFIType.ptr], returns: FFIType.bool },
   GetCursorInfo: { args: [FFIType.ptr], returns: FFIType.bool },
   GetIconInfo: { args: [FFIType.u64, FFIType.ptr], returns: FFIType.bool },
   DrawIconEx: {
@@ -422,6 +426,66 @@ export function clientToScreen(hwnd: number, x: number, y: number): { x: number;
   const buf = new Int32Array([x, y]);
   user32.symbols.ClientToScreen(hwnd, ptr(buf));
   return { x: buf[0], y: buf[1] };
+}
+
+// ---- popup-menu inspection (HMENU handles are USER objects: readable cross-process) ----
+
+// MN_GETHMENU: ask a popup menu window (#32768) for its HMENU.
+export const MN_GETHMENU = 0x01e1;
+
+// HMENU of a popup menu window (#32768), else 0.
+export function getMenuFromWindow(hwnd: number): number {
+  return Number(sendMessage(hwnd, MN_GETHMENU, 0, 0)) || 0;
+}
+
+export type MenuItemInfo = {
+  id: number;
+  text: string;
+  enabled: boolean;
+  highlighted: boolean;
+  submenu: number;
+};
+
+// MENUITEMINFOW x64 layout: cbSize(0),fMask(4),fType(8),fState(12),wID(16),pad(20),
+// hSubMenu(24),hbmpChecked(32),hbmpUnchecked(40),dwItemData(48),dwTypeData(56),cch(64),pad,hbmpItem(72); size 80.
+export function getMenuItems(hmenu: number, depth = 0): MenuItemInfo[] {
+  const items: MenuItemInfo[] = [];
+  if (!hmenu || depth > 6) return items;
+  const n = user32.symbols.GetMenuItemCount(hmenu);
+  if (n <= 0) return items;
+  for (let i = 0; i < n; i++) {
+    const mii = new ArrayBuffer(80);
+    const dv = new DataView(mii);
+    const strBuf = new Uint16Array(256);
+    dv.setUint32(0, 80, true); // cbSize
+    dv.setUint32(4, 0x4f, true); // MIIM_STRING|MIIM_ID|MIIM_SUBMENU|MIIM_STATE
+    dv.setBigUint64(56, BigInt(ptr(strBuf)), true); // dwTypeData
+    dv.setUint32(64, 256, true); // cch in
+    if (!user32.symbols.GetMenuItemInfoW(hmenu, i, true, ptr(mii))) continue;
+    const fState = dv.getUint32(12, true);
+    const id = dv.getUint32(16, true);
+    const hSub = Number(dv.getBigUint64(24, true));
+    const cch = dv.getUint32(64, true);
+    const u16 = new Uint16Array(cch);
+    for (let j = 0; j < cch && j < 255; j++) u16[j] = strBuf[j]!;
+    const text = new TextDecoder("utf-16le").decode(u16).replace(/&/g, "").replace(/\t.*/s, "");
+    items.push({ id, text, enabled: (fState & 3) === 0, highlighted: (fState & 0x80) !== 0, submenu: hSub });
+  }
+  return items;
+}
+
+// pretty-print a (sub)menu tree for diagnostics.
+export function formatMenuTree(hmenu: number, depth = 0): string[] {
+  const lines: string[] = [];
+  for (const it of getMenuItems(hmenu)) {
+    const pad = "  ".repeat(depth);
+    const st = it.enabled ? "" : " [DISABLED]";
+    lines.push(`${pad}${it.id} '${it.text}'${st}${it.submenu ? " >" : ""}`);
+    if (it.submenu && it.text) {
+      for (const l of formatMenuTree(it.submenu, depth + 1)) lines.push(l);
+    }
+  }
+  return lines;
 }
 
 // full SCROLLINFO for a window scrollbar (SIF_ALL)

@@ -23,9 +23,15 @@
 #include "DocProperties.h"
 #include "DocController.h"
 #include "EngineBase.h"
+#include "DisplayModel.h"
+#include "Annotation.h"
+#include "mupdf/pdf.h"
+#include "EngineMupdf.h"
+#include "RenderCache.h"
 #include "PdfCreator.h"
 #include "SumatraPDF.h"
 #include "MainWindow.h"
+#include "WindowTab.h"
 #include "Theme.h"
 #include "DarkModeSubclass.h"
 #include "Translations.h"
@@ -118,11 +124,39 @@ static HWND GetOwnerHwnd() {
     return len(gWindows) > 0 ? gWindows[0]->hwndFrame : nullptr;
 }
 
+// Replace the PDF image the editor was opened from with the edited result.
+// engine is the EngineMupdf* captured when the context was set; if the
+// document was switched or closed in the meantime it no longer matches the
+// displayed one and we do nothing (same guard as the paint watch flow).
+static bool WriteBackToPdf(HWND parent, Str path, int pageNo, int imageIdx, void* engine) {
+    MainWindow* win = FindMainWindowByHwnd(parent);
+    if (!win && len(gWindows) > 0) {
+        win = gWindows[0];
+    }
+    if (!win) {
+        return false;
+    }
+    WindowTab* tab = win->CurrentTab();
+    DisplayModel* dm = tab ? tab->AsFixed() : nullptr;
+    EngineMupdf* em = dm ? AsEngineMupdf(dm->GetEngine()) : nullptr;
+    if (!em || (void*)em != engine) {
+        logf("[imgedit] writeback skipped: document changed or not a PDF\n");
+        return false;
+    }
+    int r = em->ReplaceImageByIdx(pageNo, imageIdx, path);
+    if (r > 0) {
+        gRenderCache->FreeForDisplayModel(dm);
+        MainWindowRerender(win);
+    }
+    return r > 0;
+}
+
 // fills the hooks above in with SumatraPDF's implementations
 void InitImageEditHost() {
     gImageEditHost.LoadImageFile = LoadImageFile;
     gImageEditHost.SaveBitmapAsPdf = SaveBitmapAsPdf;
     gImageEditHost.OpenSavedFile = OpenSavedFile;
+    gImageEditHost.WriteBackToPdf = WriteBackToPdf;
     gImageEditHost.Translate = TranslateStr;
     gImageEditHost.ApplyDarkMode = ApplyDarkMode;
     gImageEditHost.GetFont = GetAppFont;

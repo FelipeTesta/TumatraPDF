@@ -20,6 +20,7 @@
 #include "base/GuessFileType.h"
 #include "Commands.h"
 #include "FindWindow.h"
+#include "Menu.h"
 #include "Toolbar.h"
 #include "LinkFollow.h"
 #include "SelectTextKeyboard.h"
@@ -138,6 +139,7 @@ enum class ControlCmd : u16 {
     TestAIChatReplay = 42,
     TestMarkdownFollowLink = 43,
     TestHomeListRows = 44,
+    TestContextMenu = 45,
 };
 
 enum class ControlArgType : u16 {
@@ -711,6 +713,16 @@ static void ExecuteControlRequest(ControlRequest* req) {
         case ControlCmd::TestToolbarButtons: {
             int exitCode = 0;
             Str res = ToolbarButtonsResultTemp(&exitCode);
+            AppendTestResult(req, exitCode, res);
+            break;
+        }
+
+        case ControlCmd::TestContextMenu: {
+            i32 x = 0, y = 0;
+            IntArg(req, 0, x);
+            IntArg(req, 1, y);
+            int exitCode = 0;
+            Str res = ContextMenuResultTemp(x, y, &exitCode);
             AppendTestResult(req, exitCode, res);
             break;
         }

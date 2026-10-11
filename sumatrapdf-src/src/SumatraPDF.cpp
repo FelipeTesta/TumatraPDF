@@ -77,6 +77,7 @@ extern "C" {
 #include "Commands_ArchTools.h"
 #include "Commands_View.h"
 #include "Commands_Flashcard.h"
+#include "Commands_Edit.h"
 #include "MainWindowCreate.h"
 #include "Flags.h"
 #include "AppSettings.h"
@@ -2624,6 +2625,15 @@ void ReloadDocument(MainWindow* win, bool autoRefresh, bool canAskForPassword) {
     tab->ctrl->GetDisplayState(fs);
     UpdateDisplayStateWindowRect(win, fs);
     UpdateSidebarDisplayState(tab, fs);
+    // Preserve the per-document color state across the reload (same fields
+    // UpdateFileState persists). NewFileState defaults them to off, so without
+    // this the restore path reset invert + contrast to defaults — saving
+    // annotations visibly turned both off (TODO 2026-10-10).
+    fs->invertColors = GetInvertPageColors();
+    fs->contrastEnabled = win->contrastEnabled;
+    fs->contrastOpacity = win->contrastOpacity;
+    logf("[reload] preserving invert=%d contrast=%d opacity=%d\n", fs->invertColors ? 1 : 0,
+         fs->contrastEnabled ? 1 : 0, (int)win->contrastOpacity);
 
     DocController* ctrl = CreateControllerForEngineOrFile(nullptr, path, &pwdUI, win);
     // We don't allow PDF-repair if it is an autorefresh because
@@ -6295,6 +6305,7 @@ bool RelayoutFrame(MainWindow* win, bool updateToolbars, int sidebarDx) {
     if (IsCurrentDocMarkdown(win) && win->archTools.hwndReBar2) ShowWindow(win->archTools.hwndReBar2, SW_HIDE);
     if (IsCurrentDocMarkdown(win) && win->flashcard.hwndReBarFlashcard)
         ShowWindow(win->flashcard.hwndReBarFlashcard, SW_HIDE);
+    if (IsCurrentDocMarkdown(win) && win->editTools.hwndReBarEdit) ShowWindow(win->editTools.hwndReBarEdit, SW_HIDE);
 
     // skip redundant relayouts when all layout-affecting state is unchanged
     if (IsUiLayoutEq(&curState, &win->uiState.layout) && updateToolbars && sidebarDx == -1) {
@@ -6478,6 +6489,21 @@ bool RelayoutFrame(MainWindow* win, bool updateToolbars, int sidebarDx) {
         rc.dy -= rebarFCDy;
         if (!atBottom) {
             rc.y += rebarFCDy;
+        }
+    }
+    // Edit toolbar - positioned below the flashcard toolbar when visible
+    if (win->editTools.on && win->editTools.hwndReBarEdit) {
+        Rect rcRebarED = HwndWindowRect(win->editTools.hwndReBarEdit);
+        int rebarEDDy = rcRebarED.dy;
+        bool atBottom = ToolbarAtBottom();
+        int rebarEDY = atBottom ? (rc.y + rc.dy - rebarEDDy) : rc.y;
+        if (updateToolbars) {
+            dh.SetWindowPos(win->editTools.hwndReBarEdit, nullptr, rc.x, rebarEDY, rc.dx, rebarEDDy, SWP_NOZORDER);
+        }
+        // reserve the edit toolbar's space
+        rc.dy -= rebarEDDy;
+        if (!atBottom) {
+            rc.y += rebarEDDy;
         }
     }
     // in overlay mode the toolbar floats over the canvas and is positioned
@@ -9790,7 +9816,7 @@ static Str PickImageFileDup(HWND owner) {
         if (item) {
             WCHAR* wpath = nullptr;
             if (SUCCEEDED(item->GetDisplayName(SIGDN_FILESYSPATH, &wpath)) && wpath) {
-                res = str::Dup(ToUtf8Temp(WStrL(wpath)));
+                res = str::Dup(ToUtf8Temp(WStr(wpath)));
                 CoTaskMemFree(wpath);
             }
             item->Release();
@@ -9858,6 +9884,10 @@ static void HandleCmdEditImageWithPaint(MainWindow* win) {
         return;
     }
 
+    // stop any previous watch FIRST: it zeroes gPaintWatchTmpPath, so the new
+    // path must be built after, for both the ShellExecute arg and the watch timer
+    StopPaintImageWatch();
+
     WCHAR tmpDir[MAX_PATH]{};
     GetTempPathW(MAX_PATH, tmpDir);
     swprintf_s(gPaintWatchTmpPath, L"%stumatrapdf-paintedit-%u.png", tmpDir, GetCurrentProcessId());
@@ -9872,14 +9902,13 @@ static void HandleCmdEditImageWithPaint(MainWindow* win) {
     if (GetFileAttributesExW(gPaintWatchTmpPath, GetFileExInfoStandard, &fad)) {
         gPaintWatchMtime = fad.ftLastWriteTime;
     }
-    StopPaintImageWatch();
+    WCHAR params[MAX_PATH + 16]{};
+    swprintf_s(params, L"\"%s\"", gPaintWatchTmpPath);
     gPaintWatchWin = win;
     gPaintWatchEngine = emup;
     gPaintWatchPageNo = pageNo;
     gPaintWatchImageIdx = imageIdx;
 
-    WCHAR params[MAX_PATH + 16]{};
-    swprintf_s(params, L"\"%s\"", gPaintWatchTmpPath);
     HINSTANCE started = ShellExecuteW(win->hwndFrame, L"open", L"mspaint.exe", params, nullptr, SW_SHOWNORMAL);
     if ((INT_PTR)started <= 32) {
         logf("[imgedit] EditWithPaint: could not launch mspaint.exe\n");
@@ -10002,6 +10031,24 @@ static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, L
             return 0;
         }
     }
+    if (win && win->editTools.on) {
+        bool isGatedCmd = false;
+        bool featureOn = false;
+        switch (cmdId) {
+            case CmdArchToolsToggle:
+                isGatedCmd = true;
+                featureOn = win->archTools.on;
+                break;
+            case CmdFlashcardToggle:
+                isGatedCmd = true;
+                featureOn = win->flashcard.on;
+                break;
+        }
+        if (isGatedCmd && !featureOn) {
+            logf("[edit] blocked cmd %d while edit mode is on\n", cmdId);
+            return 0;
+        }
+    }
 
     if (win && HandleMenuBarCommand(win, cmdId)) {
         return 0;
@@ -10012,6 +10059,10 @@ static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, L
     }
 
     if (win && HandleCommandFlashcard(win, cmdId)) {
+        return 0;
+    }
+
+    if (win && HandleCommandEdit(win, cmdId)) {
         return 0;
     }
 
@@ -10337,7 +10388,14 @@ static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, L
             break;
 
         case CmdPasteClipboardImage:
-            PasteImageFromClipboard(win);
+            if (win && win->editTools.on) {
+                // edit mode: Ctrl+V pastes the clipboard image INTO the
+                // current page (click-to-place) instead of opening a new tab
+                logf("[edit] Ctrl+V routed to edit mode (paste image into page)\n");
+                HandleCommandEdit(win, CmdEditAddImage);
+            } else {
+                PasteImageFromClipboard(win);
+            }
             break;
 
         case CmdReplaceImage:

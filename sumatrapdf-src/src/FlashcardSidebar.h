@@ -9,6 +9,8 @@ struct MainWindow;
 void FlashcardSidebarCreate(MainWindow* win);
 void FlashcardSidebarDestroy(MainWindow* win);
 void FlashcardSidebarToggle(MainWindow* win);
+// ensure the Lista panel is open (never hides it)
+void FlashcardSidebarShow(MainWindow* win);
 void FlashcardSidebarPopulate(MainWindow* win);
 
 #endif

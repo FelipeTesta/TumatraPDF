@@ -1588,6 +1588,16 @@ Annotation* EngineMupdfCreateAnnotation(EngineBase* engine, int pageNo, PointF p
                                                   stamp->stride, stamp->data);
                     pix->xres = (int)stamp->xres;
                     pix->yres = (int)stamp->yres;
+                    if (pix->colorspace != fz_device_rgb(ctx)) {
+                        // pdf_set_annot_stamp_image() only embeds Gray/RGB/CMYK
+                        // images; a BGR-wrapped clipboard bitmap fails with
+                        // "unsupported error: only Gray, RGB, and CMYK ICC
+                        // colorspaces supported". Convert to RGB first.
+                        fz_pixmap* rgb = fz_convert_pixmap(ctx, pix, fz_device_rgb(ctx), nullptr, nullptr,
+                                                           fz_default_color_params, alpha);
+                        fz_drop_pixmap(ctx, pix); // wrapper only; stamp->data not owned
+                        pix = rgb;
+                    }
                     img = fz_new_image_from_pixmap(ctx, pix, nullptr);
                     pdf_set_annot_stamp_image(ctx, annot, img);
                     int xres = img->xres > 0 ? img->xres : 96;

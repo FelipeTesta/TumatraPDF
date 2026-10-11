@@ -1851,6 +1851,13 @@ static void LimitEditAnnotationsClientSizeToScreen(HWND hwnd, HWND hwndRelative,
 
 void ShowEditAnnotationsWindow(WindowTab* tab, Annotation* annot, EditAnnotFocus focus) {
     if (!tab) return;
+    // [perf] breadcrumb: how long the ctrl+click-to-edit path takes (first
+    // call builds the window + a full-document annotation scan)
+    ULONGLONG perfT0 = GetTickCount64();
+    auto perfLog = [perfT0](const char* what, int nAnnots) {
+        int ms = (int)(GetTickCount64() - perfT0);
+        logf("[perf] ShowEditAnnotationsWindow (%s): %dms (%d annots)\n", Str(what), ms, nAnnots);
+    };
     auto* engine = tab->GetEngine();
     auto canAnnotate = EngineSupportsAnnotations(engine);
     if (!canAnnotate) {
@@ -1865,8 +1872,12 @@ void ShowEditAnnotationsWindow(WindowTab* tab, Annotation* annot, EditAnnotFocus
         if (ew->listBox && ew->listBox->model->ItemsCount() > 0) {
             HwndSetFocus(ew->listBox->hwnd);
         }
-        if (!annot) return;
+        if (!annot) {
+            perfLog("existing window", len(ew->annotations));
+            return;
+        }
         SetSelectedAnnotation(tab, annot, isNew, focus);
+        perfLog("existing window + select", len(ew->annotations));
         return;
     }
     ew = new EditAnnotationsWindow();
@@ -1898,6 +1909,7 @@ void ShowEditAnnotationsWindow(WindowTab* tab, Annotation* annot, EditAnnotFocus
     UpdateSaveButtonLabels(ew);
 
     UpdateAnnotationsList(ew);
+    perfLog("created window", len(ew->annotations));
 
     Rect lastPos = tab->lastEditAnnotsWindowPos;
     // size our editor window to be the same height as main window

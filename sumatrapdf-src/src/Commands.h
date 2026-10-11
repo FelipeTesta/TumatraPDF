@@ -326,7 +326,10 @@ enum {
     CmdReplaceImage = 515,
     CmdEditImagePaint = 516,
     CmdViewportCropV2Toggle = 517,
-    CmdNone = 518,
+    CmdEditToolsToggle = 518,
+    CmdEditAddText = 519,
+    CmdEditAddImage = 520,
+    CmdNone = 521,
 
     /* range for file history */
     CmdFileHistoryFirst,
