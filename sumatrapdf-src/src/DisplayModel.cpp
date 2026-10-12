@@ -175,7 +175,9 @@ int DisplayModel::ColumnOfVirtual(int virtualPageNo) const {
 
 int DisplayModel::PhysicalToVirtualForRect(int physicalPageNo, RectF rect, RectF* rectOut) const {
     if (!IsViewportCropV2Active()) {
-        *rectOut = rect;
+        if (rectOut) {
+            *rectOut = rect;
+        }
         return physicalPageNo;
     }
     RectF mb = engine->PageMediabox(physicalPageNo);
@@ -188,7 +190,9 @@ int DisplayModel::PhysicalToVirtualForRect(int physicalPageNo, RectF rect, RectF
     int virtualPageNo = 2 * physicalPageNo - 1 + vCol;
     // keep the rect in PHYSICAL full-width coords; CvtToScreen/CvtFromScreen
     // apply the column shift internally (mirrors the render-time colX shift)
-    *rectOut = rect;
+    if (rectOut) {
+        *rectOut = rect;
+    }
     return virtualPageNo;
 }
 

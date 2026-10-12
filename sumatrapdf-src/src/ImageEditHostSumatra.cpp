@@ -30,6 +30,8 @@
 #include "RenderCache.h"
 #include "PdfCreator.h"
 #include "SumatraPDF.h"
+#include "Commands.h"
+#include "Toolbar.h"
 #include "MainWindow.h"
 #include "WindowTab.h"
 #include "Theme.h"
@@ -145,6 +147,8 @@ static bool WriteBackToPdf(HWND parent, Str path, int pageNo, int imageIdx, void
     }
     int r = em->ReplaceImageByIdx(pageNo, imageIdx, path);
     if (r > 0) {
+        em->modifiedAnnotations = true;          // same red "unsaved changes" marker as a new highlight
+        ToolbarUpdateStateForWindow(win, false); // lights the tab dot + Save marker
         gRenderCache->FreeForDisplayModel(dm);
         MainWindowRerender(win);
     }

@@ -59,6 +59,35 @@ void HandleCmdArchMeasure(MainWindow* win) {
     UpdateToolbar2State(win);
 }
 
+// HandleCmdArchMeasureRadius — toggle radius mode: 3 clicks (chord start,
+// chord end, arc bulge point) draw an arc through the 3 points and show its
+// radius in the current unit
+void HandleCmdArchMeasureRadius(MainWindow* win) {
+    if (!gGlobalPrefs->archToolsEnabled) return;
+    int oldMode = win->archTools.toolMode;
+    win->archTools.toolMode = (win->archTools.toolMode == 3) ? 0 : 3;
+    win->archTools.dragLine = 0;
+    if (win->hwndCanvas) {
+        SetCursor(LoadCursor(nullptr, win->archTools.toolMode ? IDC_CROSS : IDC_ARROW));
+    }
+    LogInfo("[arch] CmdArchMeasureRadius: archToolMode=%d -> %d", oldMode, win->archTools.toolMode);
+    UpdateToolbar2State(win);
+}
+
+// HandleCmdArchRefLine — toggle reference-line mode: 2 clicks place a subtle
+// continuous guide line that spans the page through both points
+void HandleCmdArchRefLine(MainWindow* win) {
+    if (!gGlobalPrefs->archToolsEnabled) return;
+    int oldMode = win->archTools.toolMode;
+    win->archTools.toolMode = (win->archTools.toolMode == 4) ? 0 : 4;
+    win->archTools.dragLine = 0;
+    if (win->hwndCanvas) {
+        SetCursor(LoadCursor(nullptr, win->archTools.toolMode ? IDC_CROSS : IDC_ARROW));
+    }
+    LogInfo("[arch] CmdArchRefLine: archToolMode=%d -> %d", oldMode, win->archTools.toolMode);
+    UpdateToolbar2State(win);
+}
+
 // HandleCmdArchClear — clear current page's measurements AND its scale line
 // (the green line + calibration persist otherwise and "Clean lines" would
 // appear to do nothing about the most visible line on the page)

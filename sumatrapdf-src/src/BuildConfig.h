@@ -6,5 +6,5 @@
 // BUMP THIS IN THE SAME COMMIT AS THE vN.N.N RELEASE TAG, or every released
 // exe keeps reporting the old version and the update check loops
 // (update.txt Latest is always compared against CURR_VERSION).
-#define CURR_VERSION 1.0.9
-#define CURR_VERSION_COMMA 1,0,9
+#define CURR_VERSION 1.0.10
+#define CURR_VERSION_COMMA 1,0,10

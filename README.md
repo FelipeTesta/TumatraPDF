@@ -181,6 +181,8 @@ The features below were developed on top of SumatraPDF and **do not exist in the
 - **Calculator input:** the length field accepts simple expressions — `100-20`, `2*50`, `25/2` (+ - * /, left-to-right). Enter (main or numpad) accepts the computed value.
 - **Pan between clicks:** after the first click pins point 1, drag with the RIGHT mouse button to pan the page (zoom also works) and click point 2 far away — the pinned point is stored in page coordinates and stays put.
 - **Measure:** draw lines; each shows its real x / y / length (in the chosen unit) as a label on the page.
+- **Radius ("Radius" button):** three clicks — chord start, chord end, then the arc bulge point — draws the arc through them and labels its radius in the page scale.
+- **Ref Line ("Ref Line" button):** two clicks → a thin subtle gray guide line spanning the whole page through both points (reference guides for alignment work).
 - **Clean lines** (`CmdArchClear`): clears all measurements + the scale line/calibration of the page. **Reset Scale** (`CmdArchResetScale`): clears scale calibration only.
 - **Erase:** hold `E` while Arch Tools is ON → red "+" cursor; click a drawn line to delete it individually.
 - **Esc:** cancels the current draw / closes the Scale dialog.
@@ -191,9 +193,11 @@ The features below were developed on top of SumatraPDF and **do not exist in the
 | Access                           | Action                          |
 | -------------------------------- | ------------------------------- |
 | Main toolbar "Arch Tools" toggle | Show/hide 2nd toolbar + lines   |
-| 2nd toolbar "Scale"              | Enter scale mode (opens dialog) |
-| 2nd toolbar "Measure"            | Toggle measure mode             |
-| 2nd toolbar "Clean lines"        | Clear measurements + scale line |
+| 2nd toolbar "Scale"              | Enter scale mode (opens dialog)       |
+| 2nd toolbar "Measure"            | Toggle measure mode                   |
+| 2nd toolbar "Radius"             | 3-click arc radius mode               |
+| 2nd toolbar "Ref Line"           | 2-click full-page guide line          |
+| 2nd toolbar "Clean lines"        | Clear measurements + scale line       |
 | 2nd toolbar "Reset Scale"        | Clear scale calibration         |
 | Right-drag (while drawing)       | Pan the page between clicks     |
 | Hold `E` + click                 | Erase individual line           |
@@ -274,15 +278,16 @@ Also: **Home (`⌂`) toolbar button** before Open — the Home tab no longer aut
 
 **Technical:** `src/Toolbar.cpp` (`AddAllToolbarButtons`, `RebuildToolbarButtonsForWidth`, `SetToolbarBandToRowHeight`, `WndProcToolbar` WM_SIZE/WM_TIMER), `src/ToolbarLayout.cpp` (timer trio anchored to the Autoscroll button rect), `src/Accelerators.cpp` (`isSafeAccel` bare-digit rule), `src/SvgIcons.cpp` (`gIconBookmarks`).
 
-### 10. ✏️ Edit Mode (paste images into the page)
+### 10. ✏️ Edit Mode (paste images into the page + in-page image editing)
 
-Toolbar toggle like Flashcards/Arch Tools. When ON:
+Toolbar toggle like Arch Tools/Flashcards. When ON:
 
-- A second toolbar offers **+Text** and **+Img** (minimal for now).
+- A second toolbar offers **+Text**, **+Img**, **Crop** and **Apply**.
 - **Ctrl+V** pastes the clipboard image INTO the current page — the next left-click places it (clamped to fit the page) as a stamp annotation. With Edit OFF, Ctrl+V keeps the old behavior (open the clipboard image as a new document).
+- **Click any embedded image** to select it: a bounding box with drag handles appears directly over the page (no separate window). Drag the border/edges to resize/crop the region, drag inside to move it. **Crop** dims the area outside the box; **Apply** writes all pending edits back into the PDF (File > Save persists). Right-click → Image → Crop/Resize opens this same flow.
 - Mutually exclusive with Arch Tools and Flashcards — enabling Edit turns those off.
 
-**Technical:** `src/Commands_Edit.{h,cpp}` (toggle, toolbars, placement), `MainWindow::EditToolsState` (`MainWindow.h`), `Canvas.cpp` click routing, `EngineMupdfCreateAnnotation` (stamp; clipboard BGR pixmaps converted to RGB before embedding — mupdf only accepts Gray/RGB/CMYK).
+**Technical:** `src/Commands_Edit.{h,cpp}` (toggle, toolbars, placement, bbox editing + Apply via `ReplaceImageByIdx` on a transparent padded canvas), `MainWindow::EditToolsState` (`MainWindow.h`), `Canvas.cpp` click/drag/cursor/paint routing, overlay painted on the screen DC post-flush, `EngineMupdfCreateAnnotation` (stamp; clipboard BGR pixmaps converted to RGB before embedding — mupdf only accepts Gray/RGB/CMYK).
 
 ### 📋 Technical Summary for Developers
 

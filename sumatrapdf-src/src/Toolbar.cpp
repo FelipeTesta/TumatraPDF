@@ -425,7 +425,8 @@ static TBBUTTON TbButtonFromButtonInfo(const ToolbarButtonInfo& bi, bool noTrans
     if (bi.cmdId == CmdFindToggleMatchCase || bi.cmdId == CmdFindToggleMatchWholeWord ||
         bi.cmdId == CmdContrastToggle || bi.cmdId == CmdAutoScrollToggle || bi.cmdId == CmdViewportCropToggle ||
         bi.cmdId == CmdViewportCropV2Toggle || bi.cmdId == CmdMarginTrimToggle || bi.cmdId == CmdArchToolsToggle ||
-        bi.cmdId == CmdEditToolsToggle || bi.cmdId == CmdToggleBookmarks) {
+        bi.cmdId == CmdFlashcardToggle || bi.cmdId == CmdEditToolsToggle || bi.cmdId == CmdToggleBookmarks ||
+        bi.cmdId == CmdInvertColors) {
         b.fsStyle = BTNS_CHECK;
     }
     if (bi.bmpIndex == TbIcon::Text) {
@@ -555,6 +556,23 @@ void ToolbarUpdateStateForWindow(MainWindow* win, bool setButtonsVisibility) {
             SetToolbarButtonToolTipByIdx(hwnd, i, cmdId, tip);
         }
     }
+
+    // keep every toggle button's checked (ON) marker in sync with its state.
+    // This is the central refresh (doc load, toggles, responsive rebuild), so
+    // the markers survive re-adding buttons — the rebuild resets all state
+    // and only this resync lights them again (user report: arch/fc/edit/invert
+    // markers went dark after a window resize / doc reload).
+    SetToolbarButtonCheckedState(win, CmdInvertColors, GetInvertPageColors());
+    SetToolbarButtonCheckedState(win, CmdArchToolsToggle, win->archTools.on);
+    SetToolbarButtonCheckedState(win, CmdFlashcardToggle, win->flashcard.on);
+    SetToolbarButtonCheckedState(win, CmdEditToolsToggle, win->editTools.on);
+    SetToolbarButtonCheckedState(win, CmdToggleBookmarks, win->uiState.tocVisible);
+    SetToolbarButtonCheckedState(win, CmdAutoScrollToggle, win->autoScroll.active);
+    SetToolbarButtonCheckedState(win, CmdContrastToggle, win->contrastEnabled);
+    SetToolbarButtonCheckedState(win, CmdViewportCropToggle, gGlobalPrefs->viewportCrop.enabled);
+    DisplayModel* dmChecked = win->AsFixed();
+    SetToolbarButtonCheckedState(win, CmdViewportCropV2Toggle, dmChecked ? dmChecked->viewportCropV2Enabled : false);
+    SetToolbarButtonCheckedState(win, CmdMarginTrimToggle, dmChecked ? dmChecked->marginTrimEnabled : false);
 
     // reposition the floating find bar over the search icon (and hide it if the
     // current document doesn't support find) when toolbar buttons change
@@ -1086,6 +1104,15 @@ static bool SetToolbarBandToRowHeight(HWND hwndToolbar) {
     if (!hwndRebar) {
         return false;
     }
+    // a toolbar not yet sized (client width 0, e.g. right after on-demand
+    // creation) lays every button on its own row; adopting that stacked row
+    // count as the band height would lock in a huge band. Skip until the
+    // toolbar has a real width.
+    RECT rcToolbarClient{};
+    GetClientRect(hwndToolbar, &rcToolbarClient);
+    if (rcToolbarClient.right <= 0) {
+        return false;
+    }
     // TB_GETBUTTONROWS isn't in this SDK's commctrl.h, so count distinct row
     // tops over all button rects (separators can report empty rects, skip them)
     RECT rcBtn{};
@@ -1238,7 +1265,13 @@ static LRESULT CALLBACK WndProcToolbar(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp
             if (SetToolbarBandToRowHeight(hwnd)) {
                 // band height changed -> rebar height changed -> the canvas
                 // and the other toolbars must move; deferred relayout is
-                // idempotent and won't re-trigger this when stable
+                // idempotent and won't re-trigger this when stable.
+                // Clear the cached layout snapshot: the scheduled relayout's
+                // snapshot equals the cached one (no flags changed) and the
+                // early-return would swallow the correction, leaving the
+                // canvas at a stale reserved height (e.g. the stacked-height
+                // flash after an on-demand secondary toolbar is created).
+                win->uiState.layout = {};
                 ScheduleUiUpdate(win, kUiRelayout);
             }
         }
@@ -1263,6 +1296,7 @@ static LRESULT CALLBACK WndProcToolbar(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp
                 sLastRewrapDx[0] = dx;
                 RebuildToolbarButtonsForWidth(win, hwnd);
                 if (SetToolbarBandToRowHeight(hwnd)) {
+                    win->uiState.layout = {}; // force the deferred relayout (see WM_SIZE)
                     ScheduleUiUpdate(win, kUiRelayout);
                 }
             }
@@ -2351,8 +2385,9 @@ void CreateToolbar2(MainWindow* win) {
         Str toolTip;
     };
     static ToolbarButtonInfo2 gToolbar2Buttons[] = {
-        {TbIcon::Text, CmdArchScale, _TRN("Scale")},        {TbIcon::Text, CmdArchMeasure, _TRN("Measure")},
-        {TbIcon::Text, CmdArchClear, _TRN("Clean lines")},  {TbIcon::Text, CmdArchResetScale, _TRN("Reset Scale")},
+        {TbIcon::Text, CmdArchScale, _TRN("Scale")},          {TbIcon::Text, CmdArchMeasure, _TRN("Measure")},
+        {TbIcon::Text, CmdArchMeasureRadius, _TRN("Radius")}, {TbIcon::Text, CmdArchRefLine, _TRN("Ref Line")},
+        {TbIcon::Text, CmdArchClear, _TRN("Clean lines")},    {TbIcon::Text, CmdArchResetScale, _TRN("Reset Scale")},
         {TbIcon::Text, CmdArchCleanAll, _TRN("Clean All")},
     };
     constexpr int kToolbar2ButtonsCount = dimof(gToolbar2Buttons);
@@ -2365,8 +2400,8 @@ void CreateToolbar2(MainWindow* win) {
         b.iBitmap = (int)bi.bmpIndex;
         b.fsState = TBSTATE_ENABLED;
         b.fsStyle = BTNS_BUTTON;
-        // Measure button is a toggle — needs BTNS_CHECK for visual checked state
-        if (bi.cmdId == CmdArchMeasure) {
+        // Measure/Radius/Ref Line buttons are toggles — need BTNS_CHECK
+        if (bi.cmdId == CmdArchMeasure || bi.cmdId == CmdArchMeasureRadius || bi.cmdId == CmdArchRefLine) {
             b.fsStyle |= BTNS_CHECK;
         }
         if (bi.bmpIndex == TbIcon::Text) {
@@ -2440,6 +2475,8 @@ void UpdateToolbar2State(MainWindow* win) {
     if (!win->archTools.hwndToolbar2) return;
     // Update Measure button checked state based on archToolMode
     SetToolbarButtonCheckedState(win, CmdArchMeasure, win->archTools.toolMode == 2);
+    SetToolbarButtonCheckedState(win, CmdArchMeasureRadius, win->archTools.toolMode == 3);
+    SetToolbarButtonCheckedState(win, CmdArchRefLine, win->archTools.toolMode == 4);
     // Scale button is not a toggle (it opens dialog), so no checked state needed
     // Reset Scale is a push button, no checked state
 }

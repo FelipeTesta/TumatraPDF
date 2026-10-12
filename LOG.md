@@ -1,5 +1,88 @@
 # TumatraPDF — Development Log
 
+## 2026-10-11 (s34-g) — Enlarge beyond original image (content-stream cm rewrite) + flicker-free drag + Arch Radius/RefLine + scale Enter fix + white label (BUILD OK, inpage 7/7 + arch ALL PASS + replace + doubletoggle)
+
+### Added
+
+- **Resize beyond the original image rect (the tool's purpose):** new `EngineMupdf::SetImageDrawRect(pageNo, imageIdx, newRect)` — parses the page /Contents stream(s), finds the image's `<w> 0 0 <h> <x> <y> cm /ImX Do` op by RECT-MATCH against the current draw rect (±2pt, axis-aligned only, ambiguity → fallback), and rewrites the six numbers to the new rect (sign pattern of a/d preserved). Apply then swaps the image DATA for exactly the content pixels (no padding/scaling — PDF scales at draw). Fallback (rotated pages / nested forms): clamped in-place padded swap. E2E s34c-inpage: `(draw rect moved)` path verified 7/7.
+- **Arch: Measure Radius** (`CmdArchMeasureRadius`, mode 3): 3 clicks — chord start, chord end, arc bulge point → arc through the 3 points (sampled polyline via circumcircle) + `r=` label in the document scale's unit; teal, dashed chord, 3 dots. **Arch: Ref Line** (`CmdArchRefLine`, mode 4): 2 clicks → thin subtle gray continuous line spanning the whole page through both points (slab-clipped at paint). Both persist via the measurements već: `ArchMeasurement` gained `p3x/p3y/kind` + the `,p3x,p3y,kind` tail in the FileState serialization (old rows read as kind=0 lines).
+- **Enter / numpad Enter applies the scale measurement** directly from the numeric field (WndProc subclass on the edit → OnOk — the default-button/IsDialogMessage route was unreliable for the modeless dialog).
+
+### Fixed
+
+- **CRASH on Ctrl+F (user's second dump `34131b`, debug symbols this time):** `DisplayModel::PhysicalToVirtualForRect` wrote `*rectOut` unconditionally on both branches; the FindThread `searchVisible` probe was the ONLY caller passing `nullptr` (14 call sites audited) → null-write on the find worker thread whenever the branch fired (any doc, TC2-independent). Guarded both branches. E2E on the user's actual CAD book (ACM query + Enter×2) crash-free.
+- **Flicker while dragging the image bbox:** the drag now invalidates only the affected strip (old ∪ new bbox ∪ image rect, +10px margin) instead of the whole canvas.
+- **Scale label unreadable:** white text on the semi-transparent dark bg.
+
+### Notes / traps
+
+- `pdf_update_stream(ctx, doc, ref, buf, compressed)` leaves /Filter + /DecodeParms untouched in the dict — storing RAW bytes with a stale /FlateDecode makes the next read blow up ("zlib error: incorrect header check"). Store with compressed=0 AND delete Filter/DecodeParms.
+- `fz_append_data`/`fz_append_string` are NOT in this vendored mupdf build (LNK2019) — splice with malloc+memcpy+fz_new_buffer_from_copied_data.
+- `fmt`/`logf` reject raw `char*`/`u8*` args (deleted ctor) — wrap with `Str(...)`; TempStr isn't `const char*` either (use `.s`).
+- Crash-hunt instrumentation (s34-g Ctrl+F NULL-write on the find worker): `[find] FindThread start` / `[find] CountThread start` logf breadcrumbs in SearchAndDDE.cpp — reproduce on the user's CAD book still pending (my sims on Semiologia + BRS CAD with typed query + Enters didn't crash). Crash txt survives: SumatraPDF-data\<hash>\crashinfo\sumatrapdfcrash.txt has full log + reg frame.
+
+### Verified
+
+- Build 0/0 → Compiled. E2E: s34c-inpage 7/7 (`-> replaced (draw rect moved)`), s33-arch-repro ALL PASS, s34-replace PASS, s34e-doubletoggle canvas y stable over 2 cycles.
+
+## 2026-10-11 (s34-f) — bbox editor: image-swap for ALL edits (stamp path removed), content tracking, 🔴 marker fixed (BUILD OK, s34c-inpage + s34-replace E2E PASS)
+
+### Fixed (user feedback round 3)
+
+- **Resize/Crop virava uma ANOTAÇÃO (stamp):** user: "era só uma edição de imagem dentro do PDF". Reverted: BOTH crop and resize now apply as a pure image-data swap (ReplaceImageByIdx); EditApplyAsStamp deleted. Consequence: the bbox is clamped to the image's ORIGINAL draw rect again (Resize can enlarge WITHIN the original area; never beyond — the content stream fixes the footprint).
+- **After Apply the bbox referenced the original image** (not the applied result): new `PageImageEdit.content` field — visible content region within imageRect (= bbox of last Apply, init imageRect). Apply now KEEPS the edit selected (content:=bbox, changed=false, preview cache dropped) instead of clearing; the bbox matches the visible image and iterative edits compose from the CURRENT content pixels (compose draws the content sub-rect, not the full padded bitmap — 9-arg DrawImage overload with RectF+UnitPixel). DragEnd change-check is content-relative.
+- **🔴 unsaved-changes marker did not light:** TabsOnChangedDoc only refreshes the tooltip — the red dot is painted from `tabsCtrl->SetTabDirty`, which only runs in `ToolbarUpdateStateForWindow`. All 5 mutation sites now call `em->modifiedAnnotations = true; ToolbarUpdateStateForWindow(win, false);` (EditApplyImageEdits, EditToolsPlacePendingImage, HandleCmdReplaceImage, TickPaintImageWatch, ImageEditHost WriteBackToPdf). Requires `#include "Commands.h"` before Toolbar.h (ToolbarIds.h derives IDs from CmdLast).
+
+### Verified
+
+- Build 0/0 → Compiled. E2E: s34c-inpage 7/7 (`-> replaced`, no stamp) + s34-replace PASS. E2E assert fixed to the common prefix (stamp/replaced). 🔴 verified by code path (identical to highlight creation chain) — user live-check.
+
+## 2026-10-11 (s34-e) — Toolbar double-toggle fix + bbox editor v2 (round/square handles, enlarge, live preview, 🔴 modified) (BUILD OK, doubletoggle probe clean ×2 cycles, s34c-inpage-e2e 7/7)
+
+### Fixed
+
+- **fc/edit 2nd toolbar ate the page on open/close 2× (arch OK):** root cause chain — fc/edit rebers are created on demand at w=0 → wrapable toolbar stacks every button on its own row → rebar auto-adopts the stacked height → first RelayoutFrame reserves THAT (HwndWindowRect) → WM_SIZE later fixes the band to the real row height and schedules a deferred RelayoutFrame(true, -1), but IsUiLayoutEq early-return KILLED the correction (snapshot identical → poisoned cache) → canvas never recovered. Fix (2 prongs): ① Toolbar.cpp WndProcToolbar WM_SIZE + WM_TIMER rewrap paths now zero `win->uiState.layout` before ScheduleUiUpdate(kUiRelayout) (forces the deferred relayout to run); ② FlashcardToolbar.cpp + EditToolbarCreate pre-size the rebar to the frame client width right after RB_INSERTBAND (first measurement is already correct — no stacked flash). Probe ×2 cycles: fc ON canvas y=81→129→81→129→81, edit ON 81→105→81→105→81 — zero dead space, zero drift.
+- **Resize could only shrink:** clamp is now per-mode — crop edits are limited to the image rect (region select); non-crop (resize/move) edits are limited to the PAGE (EngineBase::PageMediabox) → enlarging beyond the original image works.
+- **No live feedback during drag:** non-crop selection now draws the extracted source image STRETCHED INTO the bbox during drag (GDI+ bicubic live preview of the post-Apply state) with the rest of imageRect dimmed.
+
+### Added
+
+- **Handle shapes by mode (user spec):** resize = ROUND handles (FillEllipse), crop = SQUARE handles — standard editor convention.
+- **Non-crop edits apply as STAMP annotations:** union rect (bbox ∪ imageRect) canvas at image pixel scale, opaque white over the old image, source stretched into the bbox → PNG temp → PixmapFromData → EngineMupdfCreateAnnotation(Stamp) + SetRect — annotations render over page content (footprint can change, unlike crop writeback which is data-only, footprint fixed). `PageImageEdit.crop` flag decided at drag start/select (cropMode).
+- **🔴 modified marker everywhere (user request):** every document mutation now flags unsaved state like annotation creation — `em->modifiedAnnotations = true` + `TabsOnChangedDoc(win)` wired into: EditApplyImageEdits (both paths), HandleCmdReplaceImage, TickPaintImageWatch (Paint save), ImageEditHost WriteBackToPdf, EditToolsPlacePendingImage. Tab shows the red dot + '(unsaved annotations)' tooltip, Save button highlights, close prompts.
+
+### Notes / traps
+
+- IsUiLayoutEq cache poisoning: ANY feature that changes chrome height outside the snapshot must clear `win->uiState.layout` before ScheduleUiUpdate(kUiRelayout) — the force-clear comment at SumatraPDF.cpp:6796 documented the mechanism, nobody called it.
+- Commands_Edit.cpp include order additions: RenderCache.h must come AFTER DisplayModel.h (kInvalidPageNo lives in DisplayModel.h; RenderCache.h:232 uses it); base/File.h needed for file::ReadFile.
+- E2E assert update: non-crop apply logs `-> stamp` (was `-> replaced` pre-v2); test now matches the common prefix `[edit] apply: page 1 idx 0 ->`.
+
+## 2026-10-11 (s34-d) — In-page image bbox editing (edit mode) + toolbar/marker bug batch (BUILD OK, s34c-inpage-e2e 7/7)
+
+### Added
+
+- **In-page crop/resize for embedded images (user redesign):** while Edit mode is on, a left-click on a PDF image selects it and draws a bounding box WITH handles directly over the page (no separate editor window). Dragging the border/edges resizes the region (clamped to the image), dragging inside moves it; the whole border line is draggable (not just the midpoint handles — standard image-editor marquee behavior). "Crop" (edit toolbar, BTNS_CHECK toggle) dims everything outside the bbox; "Apply" writes ALL pending edits back into the PDF at once: the region is composed onto a TRANSPARENT canvas with the ORIGINAL image size and swapped via ReplaceImageByIdx (crop = rest turns transparent, move = offset, shrink = scaled inside the same area; File > Save persists). Multi-image pending edits (Vec<PageImageEdit>, keyed page+imageIdx; dropped on tab switch via filePath compare). New commands CmdEditImageCrop (521) / CmdEditImageApply (522). Context-menu Crop/Resize on PDF images now routes to this flow (EditToolsSelectImageFromMenu: turns edit mode ON via synchronous HwndSendCommand, selects the image, Crop sets crop mode); the separate editor window remains for standalone image tabs. Overlay drawn on the screen DC AFTER the buffer flush (trim-lines pattern) so it shows on pure overlay repaints.
+- **Cursors:** SIZEALL/SIZEWE/SIZENS/SIZENWSE/SIZENESW over the bbox by hover zone.
+
+### Fixed
+
+- **Edit toolbar was never laid out (and squashed the view):** RelayoutFrame's redundant-layout early-return compares a UILayout snapshot that had archToolsOn/flashcardOn but NOT editToolsOn — toggling Edit changed nothing else in the snapshot, so the whole relayout was skipped: the edit rebar kept w=0 at y=1 with its buttons stacked vertically (58x75px), overlapping the caption. Added editToolsOn to the snapshot + IsUiLayoutEq. Probe-verified: edit rebar now h=24 w=full like arch. (Root cause of "edit/flashcard destroy the zoom / eat the top of the screen" class of bugs.)
+- **Toggle markers (ON underline) lost after responsive rebuild / doc load:** ToolbarUpdateStateForWindow now re-syncs checked state for ALL toggle buttons (invert, arch, flashcard, edit, bookmarks, autoscroll, contrast, crop v1/v2, trim) — the responsive rebuild re-adds every button and only this resync relights them. CmdFlashcardToggle + CmdInvertColors added to the BTNS_CHECK style list (were missing); CmdInvertColors handler now sets its own marker (nobody ever did — "invert não está ficando").
+- **Huge secondary-toolband lock-in guard:** SetToolbarBandToRowHeight no longer adopts a stacked row count while the toolbar has zero client width (on-demand creation at w=0 lays every button on its own row; locking that as the band height = giant top band).
+- **Editor Save no longer opens the exported image as a new tab when the writeback applied** (user: "não quero que abra a imagem em outra aba ao editar"): WriteBackEditedImage returns bool; OpenSavedFile only runs for the plain save-to-file flow.
+
+### Verified
+
+- tests/tmp/s34c-inpage-e2e.ts OVERALL 7/7: select (bbox drawn) → border drag (bbox 420x600 → 420x518, top shrunk 82pt) → Apply (log `apply: page 1 idx 0 -> replaced`, canvas bytes change) + all log assertions. Toolbar probe: edit rebar h=24/w=full (was h=48/w=0 stacked).
+
+### Notes / traps
+
+- **Posted mouse coords are DPI-virtualized ×1.25 (sometimes raw, run-to-run!)** for this DPI-aware app when posted from an unaware bun process; window cascade also shifts zoom/inset. Robust E2E recipe: moveWindow to a fixed size + target the page TOP border (y≈2 is invariant: page top ≈3px at scroll 0 under any mapping/zoom) for border drags; center clicks work under any mapping.
+- GetPageNoByPoint/GetElementAtPos silence on off-page clicks made early E2E attempts look like feature bugs — the [edit] select/deselect logs disambiguated.
+- Str/str::Dup: WindowTab has NO ID field — tab identity for pending edits = owned copy of filePath (str::FreePtr + str::Eq).
+- IPageElement::GetRect() (not GetRect2 — that's a different class).
+- Overlay-in-buffer pattern (arch) only shows when a tile actually rendered (flush gate); pure-overlay UI must draw on the screen DC post-flush like the trim lines.
+
 ## 2026-10-11 (s34-c) — Image cmds modularized (Commands_Image), docs (README/CHANGELOG), render perf audit (BUILD OK, post-move E2E PASS)
 
 ### Changed

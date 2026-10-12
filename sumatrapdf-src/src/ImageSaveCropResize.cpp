@@ -244,7 +244,7 @@ static void UpdateInfoLabel(ImageEditWindow* ew);
 static void UpdateModeButtons(ImageEditWindow* ew);
 static void InvalidateImageArea(ImageEditWindow* ew);
 static bool HandleImageEditArrowKey(ImageEditWindow* ew, WPARAM wp);
-static void WriteBackEditedImage(ImageEditWindow* ew, Bitmap* result);
+static bool WriteBackEditedImage(ImageEditWindow* ew, Bitmap* result);
 
 static LRESULT CALLBACK WndProcDestEditSubclass(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR /*idSubclass*/,
                                                 DWORD_PTR data) {
@@ -1324,20 +1324,22 @@ static void OnSave(ImageEditWindow* ew) {
         return;
     }
 
-    // if this edits an image inside a PDF, replace it there too
-    WriteBackEditedImage(ew, result);
+    // if this edits an image inside a PDF, replace it there too; when the
+    // writeback applied, don't open the exported file as a new tab (the edit
+    // is already visible in the page; opening a tab was unwanted)
+    bool wroteBack = WriteBackEditedImage(ew, result);
     delete result;
     OptimizePngFileAsync(dest);
     logf("[imgedit] OnSave: dest saved, closing editor\n");
 
-    // load the saved image
+    // load the saved image (only for the plain save-to-file flow)
     HWND hwndParent = ew->hwndParent;
     Str savedPath = str::Dup(dest);
     if (!DestroyWindow(ew->hwnd)) {
         logf("[imgedit] OnSave: DestroyWindow failed gle=%ld\n", (long)GetLastError());
     }
 
-    if (gImageEditHost.OpenSavedFile) {
+    if (!wroteBack && gImageEditHost.OpenSavedFile) {
         gImageEditHost.OpenSavedFile(hwndParent, savedPath);
     }
     str::Free(savedPath);
@@ -1440,13 +1442,16 @@ static Bitmap* ComposeWritebackBitmap(ImageEditWindow* ew, Bitmap* result, int r
 // If this editor was opened from a PDF image (context set via
 // ImageEditSetWritebackContext) and the content actually changed, replace
 // that image in the document with the padded result. One-shot.
-static void WriteBackEditedImage(ImageEditWindow* ew, Bitmap* result) {
+// returns true when the edit was written back into the PDF (replacing the
+// embedded image); false when there was no valid PDF writeback context or the
+// writeback failed
+static bool WriteBackEditedImage(ImageEditWindow* ew, Bitmap* result) {
     if (!gWriteback.valid || gWriteback.editHwnd != ew->hwnd) {
-        return;
+        return false;
     }
     gWriteback.valid = false;
     if (!gImageEditHost.WriteBackToPdf || !result) {
-        return;
+        return false;
     }
     bool changed = ew->edited;
     int rx = 0, ry = 0, rw = ew->imgW, rh = ew->imgH;
@@ -1460,24 +1465,24 @@ static void WriteBackEditedImage(ImageEditWindow* ew, Bitmap* result) {
         changed = true;
     }
     if (!changed) {
-        return;
+        return false;
     }
     Bitmap* canvas = ComposeWritebackBitmap(ew, result, rx, ry, rw, rh);
     if (!canvas) {
-        return;
+        return false;
     }
     WCHAR tmpDir[MAX_PATH + 1]{};
     WCHAR tmpPath[MAX_PATH + 64]{};
     GetTempPathW(dimof(tmpDir), tmpDir);
     if (swprintf_s(tmpPath, L"%stumatrapdf-imgwb-%u.png", tmpDir, GetCurrentProcessId()) < 0) {
         delete canvas;
-        return;
+        return false;
     }
     bool ok = SaveBitmapPngAlpha(canvas, WStr(tmpPath));
     delete canvas;
     if (!ok) {
         logf("[imgedit] writeback: could not write temp png\n");
-        return;
+        return false;
     }
     TempStr path8 = ToUtf8Temp(WStr(tmpPath));
     int pageNo = gWriteback.pageNo;
@@ -1487,6 +1492,7 @@ static void WriteBackEditedImage(ImageEditWindow* ew, Bitmap* result) {
     logf("[imgedit] crop/resize writeback page %d idx %d: %s\n", pageNo, imageIdx,
          done ? StrL("replaced (save the PDF via File > Save to persist)") : StrL("failed"));
     file::Delete(path8);
+    return done;
 }
 
 static void UpdateModeButtons(ImageEditWindow* ew) {

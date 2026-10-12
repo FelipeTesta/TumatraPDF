@@ -4,7 +4,7 @@ Per-version changelog for TumatraPDF — new functions + bug fixes, newest first
 Feature details live in [README.md](README.md); full per-session development
 history in [LOG.md](LOG.md).
 
-## v1.0.10 (pending)
+## v1.0.10 (2026-10-11)
 
 - **Right-click Image tools fixed + Crop/Resize writeback.** The Image menu
   (Replace Image, Edit With Paint, Crop, Resize, Save) was effectively dead —
@@ -15,10 +15,39 @@ history in [LOG.md](LOG.md).
   in addition to exporting the file. Shift while dragging a resize edge keeps
   the aspect ratio. "Convert page to PDF" is grayed out pending a revisit.
 - **New "Edit" mode** — toolbar toggle (like Flashcards/Arch Tools) with a
-  +Text/+Img toolbar. While on, Ctrl+V pastes the clipboard image INTO the
-  current page: the next left-click places it (clamped to the page) as a
+  +Text/+Img/Crop/Apply toolbar. While on, Ctrl+V pastes the clipboard image
+  INTO the current page: the next left-click places it (clamped to the page) as a
   stamp annotation. With Edit off, Ctrl+V still opens the clipboard image
   as a new document.
+- **In-page image crop/resize:** clicking an embedded image in Edit mode (or
+  right-click → Image → Crop/Resize) draws an editable bounding box directly
+  over the page — drag its border/edges to crop/resize, drag inside to move.
+  "Crop" dims the outside area; "Apply" writes all pending image edits back
+  into the PDF (image stays an image — a pure data swap, no annotation; File >
+  Save persists). Resize handles are round, crop handles square (standard
+  editor convention); the preview shows the result live during the drag, and
+  edits can be composed iteratively (Apply keeps the selection on the edited
+  region).
+- **Unsaved-changes marker on every edit:** replacing/pasting/cropping an
+  image (and every annotation) now shows the red "document modified" dot in
+  the tab and highlights Save, so it's clear the PDF must be saved to persist.
+- **Resize can go BEYOND the original image area** — Apply rewrites the
+  image's draw rectangle in the page content stream itself, so images really
+  grow/move on the page (no annotation, no padding). Pages with rotated or
+  nested-drawn images fall back to clamping inside the original area.
+- **Flicker-free bbox drag** — repaints only the affected strip during drags.
+- **Arch Tools: Radius + Ref Line.** "Radius" (3 clicks: chord start, chord
+  end, arc bulge point) draws the arc through them and labels the radius in
+  the page scale. "Ref Line" (2 clicks) draws a thin subtle gray guide line
+  spanning the whole page through both points.
+- **Scale dialog: Enter / numpad Enter applies from the length field** (no
+  mouse needed); scale labels are white now (were unreadable on dark pages).
+- **Fixed: crash on Ctrl+F** — a rect-remap helper wrote through a null
+  pointer on the find worker thread (second search after a match).
+- **Fixed: edit/flashcard toolbars broke the layout** (the edit toolbar never
+  got positioned — a missing field in the layout-snapshot cache made the
+  relayout a no-op) and **toggle ON markers** (Invert, Flashcards, Arch, Edit)
+  now survive window resizes and document reloads instead of going dark.
 - **Fixed: Invert no longer corrupts images** — inverted pages render a true
   per-pixel negative instead of the theme recolor ramp (which crushed hues
   and repainted "link-colored" pixels inside scanned images).

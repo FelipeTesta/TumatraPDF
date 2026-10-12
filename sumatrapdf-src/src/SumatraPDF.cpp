@@ -829,8 +829,8 @@ static Str SerializeMeasurements(const Vec<ArchMeasurement>& measurements) {
     for (int i = 0; i < len(measurements); i++) {
         const ArchMeasurement& m = measurements[i];
         if (i > 0) sb.Append(StrL(";"));
-        TempStr item = fmt("%d,%g,%g,%g,%g,%g,%g,%g,%d,%d", m.pageNo, m.p1x, m.p1y, m.p2x, m.p2y, m.len, m.x, m.y,
-                           (int)m.unit, m.scaled ? 1 : 0);
+        TempStr item = fmt("%d,%g,%g,%g,%g,%g,%g,%g,%d,%d,%g,%g,%d", m.pageNo, m.p1x, m.p1y, m.p2x, m.p2y, m.len, m.x,
+                           m.y, (int)m.unit, m.scaled ? 1 : 0, m.p3x, m.p3y, m.kind);
         sb.Append(item);
     }
     return sb.TakeStr();
@@ -842,10 +842,15 @@ static Vec<ArchMeasurement> DeserializeMeasurements(const char* s) {
     while (*s) {
         ArchMeasurement m = {};
         int scaledInt = 0;
-        int n = sscanf(s, "%d,%g,%g,%g,%g,%g,%g,%g,%d,%d", &m.pageNo, &m.p1x, &m.p1y, &m.p2x, &m.p2y, &m.len, &m.x,
-                       &m.y, (int*)&m.unit, &scaledInt);
-        if (n == 10) {
+        int n = sscanf(s, "%d,%g,%g,%g,%g,%g,%g,%g,%d,%d,%g,%g,%d", &m.pageNo, &m.p1x, &m.p1y, &m.p2x, &m.p2y, &m.len,
+                       &m.x, &m.y, (int*)&m.unit, &scaledInt, &m.p3x, &m.p3y, &m.kind);
+        if (n >= 10) {
             m.scaled = (scaledInt != 0);
+            if (n < 13) {
+                m.p3x = 0;
+                m.p3y = 0;
+                m.kind = 0; // legacy row = plain measured segment
+            }
             result.Append(m);
         }
         const char* next = strchr(s, ';');
@@ -6271,7 +6276,7 @@ static bool IsUiLayoutEq(UILayout* s1, UILayout* s2) {
            s1->showFavorites == s2->showFavorites && s1->favoritesAsTab == s2->favoritesAsTab &&
            s1->showMenuBarRebar == s2->showMenuBarRebar && s1->aiChatVisible == s2->aiChatVisible &&
            s1->aiChatDx == s2->aiChatDx && s1->archToolsOn == s2->archToolsOn && s1->flashcardOn == s2->flashcardOn &&
-           s1->fcListVisible == s2->fcListVisible && s1->fcListDx == s2->fcListDx;
+           s1->editToolsOn == s2->editToolsOn && s1->fcListVisible == s2->fcListVisible && s1->fcListDx == s2->fcListDx;
 }
 
 bool RelayoutFrame(MainWindow* win, bool updateToolbars, int sidebarDx) {
@@ -6300,6 +6305,7 @@ bool RelayoutFrame(MainWindow* win, bool updateToolbars, int sidebarDx) {
     curState.aiChatDx = win->aiChatDx;
     curState.archToolsOn = win->archTools.on;
     curState.flashcardOn = win->flashcard.on;
+    curState.editToolsOn = win->editTools.on;
     curState.fcListVisible = win->uiState.fcListVisible;
     curState.fcListDx = win->flashcard.listaDx;
 
@@ -10555,6 +10561,12 @@ static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, L
         case CmdArchMeasure:
             HandleCmdArchMeasure(win);
             break;
+        case CmdArchMeasureRadius:
+            HandleCmdArchMeasureRadius(win);
+            break;
+        case CmdArchRefLine:
+            HandleCmdArchRefLine(win);
+            break;
         case CmdArchClear:
             HandleCmdArchClear(win);
             break;
@@ -11298,6 +11310,8 @@ static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, L
             // change how (or whether) pages follow the theme (issue #5887)
             SetInvertPageColors(!GetInvertPageColors());
             UpdateDocumentColors();
+            // keep the toolbar toggle marker in sync with the session state
+            SetToolbarButtonCheckedState(win, CmdInvertColors, GetInvertPageColors());
             break;
         }
 

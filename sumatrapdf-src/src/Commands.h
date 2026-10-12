@@ -329,7 +329,11 @@ enum {
     CmdEditToolsToggle = 518,
     CmdEditAddText = 519,
     CmdEditAddImage = 520,
-    CmdNone = 521,
+    CmdEditImageCrop = 521,
+    CmdEditImageApply = 522,
+    CmdArchMeasureRadius = 523,
+    CmdArchRefLine = 524,
+    CmdNone = 525,
 
     /* range for file history */
     CmdFileHistoryFirst,

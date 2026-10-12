@@ -134,6 +134,17 @@ void FlashcardToolbarCreate(MainWindow* win) {
     rbBand.cx = 0;
     SendMessageW(hwndRebar, RB_INSERTBAND, (WPARAM)-1, (LPARAM)&rbBand);
 
+    // size the rebar to the frame width right away: at width 0 the wrapable
+    // toolbar stacks every button on its own row and the rebar adopts that
+    // huge stacked height, which the first RelayoutFrame then reserves as
+    // toolbar space. With the real width the toolbar wraps correctly and the
+    // band height settles (SetToolbarBandToRowHeight via WndProcToolbar)
+    // before RelayoutFrame measures us.
+    {
+        Rect rcFrame = HwndClientRect(hwndParent);
+        SetWindowPos(hwndRebar, nullptr, 0, 0, rcFrame.dx, rc.dy + (2 * rc.y), SWP_NOZORDER | SWP_NOMOVE);
+    }
+
     ShowWindow(hwndRebar, SW_SHOW);
 
     win->flashcard.hwndReBarFlashcard = hwndRebar;

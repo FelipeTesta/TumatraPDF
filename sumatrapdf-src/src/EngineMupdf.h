@@ -108,6 +108,10 @@ class EngineMupdf : public EngineBase {
     int ReplaceImageWithFile(IPageElement* ipel, Str newImagePath);
     // same by explicit identity — used by the "Edit with Paint" watch flow
     int ReplaceImageByIdx(int pageNo, int imageIdx, Str newImagePath);
+    // rewrite the content stream so the image is drawn into newRectTL
+    // (top-left page coords); false = not possible (rotated/nested) — the
+    // caller falls back to an in-place data swap clamped to the old rect
+    bool SetImageDrawRect(int pageNo, int imageIdx, RectF newRectTL);
     // out-identity of an image element for the watch flow
     bool GetImageElementCoords(IPageElement* ipel, int* pageNoOut, int* imageIdxOut);
 

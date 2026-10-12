@@ -40,6 +40,7 @@
 #include "Toolbar.h"
 #include "Accelerators.h"
 #include "ImageSaveCropResize.h"
+#include "Commands_Edit.h"
 #include "CommandAvailability.h"
 #include "Menu.h"
 #include "NavFilesInFolder.h"
@@ -2328,9 +2329,38 @@ void OnWindowContextMenu(MainWindow* win, int x, int y) {
     }
 
     switch (cmdId) {
-        case CmdSaveImage:
         case CmdCropImage:
-        case CmdResizeImage:
+        case CmdResizeImage: {
+            if (!pageEl || !pageEl->Is(kindPageElementImage)) {
+                HwndSendCommand(win->hwndFrame, cmdId);
+                return;
+            }
+            // PDF page images edit IN PLACE (edit mode bbox overlay); the
+            // separate editor window stays for standalone image tabs
+            EngineMupdf* emCrop = AsEngineMupdf(dm->GetEngine());
+            if (emCrop) {
+                int pg = 0, imgIdx = -1;
+                if (emCrop->GetImageElementCoords(pageEl, &pg, &imgIdx) && pg > 0 && imgIdx >= 0) {
+                    EditToolsSelectImageFromMenu(win, pg, imgIdx, pageEl->GetRect(), cmdId == CmdCropImage);
+                }
+                return;
+            }
+            // non-mupdf image docs: fall back to the editor window
+            RenderedBitmap* bmpCrop = dm->GetEngine()->GetImageForPageElement(pageEl);
+            if (!bmpCrop) {
+                return;
+            }
+            TempStr dirCrop = path::GetDirTemp(filePath);
+            TempStr baseCrop = path::GetBaseNameTemp(filePath);
+            TempStr noExtCrop = path::GetPathNoExtTemp(baseCrop);
+            TempStr destPathCrop = path::JoinTemp(dirCrop, fmt("%s_page_%d.png", noExtCrop, pageNoUnderCursor));
+            ImageEditMode mCrop = (cmdId == CmdCropImage) ? ImageEditMode::Crop : ImageEditMode::Resize;
+            ShowImageEditWindow(win->hwndFrame, mCrop, destPathCrop, bmpCrop, false);
+            delete bmpCrop;
+            return;
+        }
+
+        case CmdSaveImage:
         case CmdConvertImageToPdf: {
             if (!pageEl || !pageEl->Is(kindPageElementImage)) {
                 HwndSendCommand(win->hwndFrame, cmdId);

@@ -52,9 +52,13 @@ struct FindMatch {
 struct ArchMeasurement {
     int pageNo;               // page number this measurement belongs to
     float p1x, p1y, p2x, p2y; // PAGE coords of the two points
+    float p3x = 0, p3y = 0;   // arc bulge point (kind 1 only)
     float x, y, len;          // measured values in real units (or page units if no scale)
     int unit;                 // 0=mm,1=cm,2=m,3=in,4=ft
     bool scaled;              // true if values are in real units (scale applied)
+    // 0 = measured segment (two points); 1 = radius arc (three points, len =
+    // radius); 2 = reference guide line (two points, drawn across the page)
+    int kind = 0;
 };
 
 // factor by how large the non-maximized caption should be in relation to the tabbar
@@ -365,7 +369,7 @@ struct MainWindow {
 
     // --- arch tools state ---
     struct ArchToolsState {
-        int toolMode = 0; // 0=off, 1=scale, 2=measure
+        int toolMode = 0; // 0=off, 1=scale, 2=measure, 3=radius (3 clicks), 4=reference line (2 clicks)
         int unit = 2;     // 0=mm,1=cm,2=m,3=in,4=ft
 
         // Per-page scale state
@@ -402,6 +406,7 @@ struct MainWindow {
         bool scaleLineDefined = false; // true when a scale line has been drawn (for dialog ✅)
         PointF point1;                 // page coords during draw (survives pan/zoom between clicks)
         PointF point2;
+        PointF point3;    // radius arc bulge point (mode 3)
         int dragLine = 0; // 0 none, 1 first point placed, 2 done
         bool snap = true; // default true
         Vec<ArchMeasurement> measurements;
@@ -466,14 +471,41 @@ struct MainWindow {
 
     // --- edit tools state ---
     // "Edit" mode (toolbar toggle like Arch Tools / Flashcards). When on,
-    // a second toolbar offers +Text / +Img; +Img (or Ctrl+V) grabs the
-    // clipboard image and the next left-click on the page places it as a
-    // Stamp annotation (click-to-place).
+    // a second toolbar offers +Text / +Img / Crop / Apply; +Img (or Ctrl+V)
+    // grabs the clipboard image and the next left-click on the page places it
+    // as a Stamp annotation (click-to-place). Clicking an embedded image
+    // selects it for in-page crop/resize (bbox overlay with handles); Apply
+    // writes all pending image edits back into the PDF.
     struct EditToolsState {
         bool on = false;                       // edit mode active
         struct Pixmap* pendingImage = nullptr; // clipboard image armed for placement (owned)
         HWND hwndReBarEdit = nullptr;          // second toolbar rebar
         HWND hwndToolbarEdit = nullptr;        // second toolbar
+
+        // in-page image editing: one pending edit per touched image
+        struct PageImageEdit {
+            int pageNo = 0;
+            int imageIdx = 0;
+            RectF imageRect{}; // original draw rect, page coords (fixed by the content stream)
+            RectF content{};   // visible content region within imageRect (bbox of the last Apply)
+            RectF bbox{};      // current edit bbox, page coords (always inside imageRect)
+            bool changed = false;
+            // crop edits are region selections; both crop and resize apply as
+            // an image-data swap via ReplaceImageByIdx (page footprint fixed)
+            bool crop = false;
+            // lazily extracted source image (owned; preview + Apply)
+            struct RenderedBitmap* preview = nullptr;
+        };
+        Vec<PageImageEdit> imageEdits; // pending edits; Apply writes them all
+        int selEditIdx = -1;           // selected imageEdit index (or -1)
+        // path of the document the edits belong to (owned; drop on tab switch)
+        Str editsTabPath{};
+        bool cropMode = false; // Crop toggle: darken outside the bbox
+        // live drag state
+        int dragEditIdx = -1;   // imageEdit index being dragged (or -1)
+        int dragEdge = 0;       // 0 = move inside, 1..8 = edge/handle
+        PointF dragStartPage{}; // mouse pos (page coords) when the drag began
+        RectF dragStartBbox{};  // bbox when the drag began
     } editTools;
     // --- end edit tools state ---
 
@@ -594,6 +626,7 @@ struct MainWindow {
             int aiChatDx = 0;
             bool archToolsOn = false;
             bool flashcardOn = false;
+            bool editToolsOn = false;
             bool fcListVisible = false;
             int fcListDx = 0;
         };

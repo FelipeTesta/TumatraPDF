@@ -1489,6 +1489,8 @@ bool IsDragDistance(int x1, int x2, int y1, int y2) {
 // Forward declaration
 static RectF CalculateResizedRect(MainWindow* win, int x, int y);
 static void FinalizeArchMeasurement(MainWindow* win, DisplayModel* dm, int pageNo);
+static void FinalizeArchRadius(MainWindow* win, int pageNo);
+static void FinalizeArchReferenceLine(MainWindow* win, int pageNo);
 
 // --- touch text selection (issue #538) --------------------------------------
 // Everything here logs under "touch:" so a session on a real touchscreen can be
@@ -1717,6 +1719,12 @@ static void OnMouseMove(MainWindow* win, int x, int y, WPARAM key) {
     // Track mouse position for erase mode overlay
     win->archTools.mousePos = Point{x, y};
 
+    // Edit mode: live bbox drag on the selected image
+    if (win->editTools.dragEditIdx >= 0) {
+        EditToolsImageDragMove(win, x, y);
+        return;
+    }
+
     if (win->trimDragging) {
         auto* dm = win->AsFixed();
         if (dm) {
@@ -1782,6 +1790,19 @@ static void OnMouseMove(MainWindow* win, int x, int y, WPARAM key) {
                             win->archTools.toolMode);
                 }
             }
+            ScheduleRepaint(win, 0);
+            return;
+        }
+    }
+
+    // Arch radius: between clicks 2 and 3 the arc follows the cursor (no
+    // button held) — track the bulge point (page coords) for the live preview
+    if (gGlobalPrefs->archToolsEnabled && win->archTools.toolMode == 3 && win->archTools.dragLine == 2 &&
+        win->AsFixed() && !(key & MK_RBUTTON)) {
+        DisplayModel* dmA = win->AsFixed();
+        int pageNo = dmA->CurrentPageNo();
+        if (dmA->ValidPageNo(pageNo)) {
+            win->archTools.point3 = ArchSnapScreenPoint(win, dmA, pageNo, Point{x, y});
             ScheduleRepaint(win, 0);
             return;
         }
@@ -2205,6 +2226,18 @@ static void OnMouseLeftButtonDown(MainWindow* win, int x, int y, WPARAM key) {
         }
     }
 
+    // Edit mode: in-page image bbox editing — click an image to select it,
+    // or start dragging a handle of the selected bbox (crop/resize/move)
+    if (win->editTools.on && !win->editTools.pendingImage) {
+        if (EditToolsImageMouseDown(win, x, y)) {
+            if (win->editTools.dragEditIdx >= 0) {
+                SetCapture(win->hwndCanvas);
+                win->mouseAction = MouseAction::Dragging;
+            }
+            return; // consumed by edit mode image selection
+        }
+    }
+
     // Arch Tools: erase mode — works whenever Arch Tools is ON, regardless of draw mode
     if (gGlobalPrefs->archToolsEnabled && win->archTools.on && win->AsFixed()) {
         DisplayModel* dm = win->AsFixed();
@@ -2337,6 +2370,52 @@ static void OnMouseLeftButtonDown(MainWindow* win, int x, int y, WPARAM key) {
                     LogInfo("[arch] Measure: line finalized by 2nd click, finalizing measurement");
                     // Finalize measurement
                     FinalizeArchMeasurement(win, dm, pageNo);
+                    return;
+                }
+            } else if (win->archTools.toolMode == 3) {
+                // Radius measure: 3 clicks — chord start, chord end, arc bulge
+                if (win->archTools.dragLine == 0) {
+                    win->archTools.point1 = pagePt;
+                    win->archTools.dragLine = 1;
+                    win->archTools.dragStartPos = Point{x, y};
+                    win->archTools.dragMoved = false;
+                    SetCapture(win->hwndCanvas);
+                    win->mouseAction = MouseAction::Dragging;
+                    LogInfo("[arch] Radius: chord start placed, waiting for chord end");
+                    ScheduleRepaint(win, 0);
+                    return;
+                } else if (win->archTools.dragLine == 1 && !win->archTools.dragMoved) {
+                    win->archTools.point2 = pagePt;
+                    win->archTools.dragLine = 2; // await the arc bulge point
+                    win->archTools.dragMoved = false;
+                    ReleaseCapture();
+                    win->mouseAction = MouseAction::None;
+                    LogInfo("[arch] Radius: chord set, waiting for arc bulge point");
+                    ScheduleRepaint(win, 0);
+                    return;
+                } else if (win->archTools.dragLine == 2 && !win->archTools.dragMoved) {
+                    win->archTools.point3 = pagePt;
+                    FinalizeArchRadius(win, pageNo);
+                    return;
+                }
+            } else if (win->archTools.toolMode == 4) {
+                // Reference line: 2 clicks — infinite guide through both points
+                if (win->archTools.dragLine == 0) {
+                    win->archTools.point1 = pagePt;
+                    win->archTools.dragLine = 1;
+                    win->archTools.dragStartPos = Point{x, y};
+                    win->archTools.dragMoved = false;
+                    SetCapture(win->hwndCanvas);
+                    win->mouseAction = MouseAction::Dragging;
+                    LogInfo("[arch] RefLine: first point placed, waiting for 2nd");
+                    ScheduleRepaint(win, 0);
+                    return;
+                } else if (win->archTools.dragLine == 1 && !win->archTools.dragMoved) {
+                    win->archTools.point2 = pagePt;
+                    win->archTools.dragLine = 0;
+                    ReleaseCapture();
+                    win->mouseAction = MouseAction::None;
+                    FinalizeArchReferenceLine(win, pageNo);
                     return;
                 }
             }
@@ -2582,6 +2661,17 @@ static void FinalizeArchMeasurement(MainWindow* win, DisplayModel* /*dm*/, int p
 }
 
 static void OnMouseLeftButtonUp(MainWindow* win, int x, int y, WPARAM key) {
+    // Edit mode: finish the image bbox drag
+    if (win->editTools.dragEditIdx >= 0) {
+        if (GetCapture() == win->hwndCanvas) {
+            ReleaseCapture();
+        }
+        EditToolsImageDragEnd(win);
+        win->mouseAction = MouseAction::None;
+        HwndInvalidate(win->hwndCanvas);
+        return;
+    }
+
     if (win->trimDragging) {
         if (GetCapture() == win->hwndCanvas) ReleaseCapture();
         win->trimDragging = false;
@@ -2641,6 +2731,18 @@ static void OnMouseLeftButtonUp(MainWindow* win, int x, int y, WPARAM key) {
                     }
                     LogInfo("[arch] OnMouseLeftButtonUp: drag finalized mode=measure, finalizing measurement");
                     FinalizeArchMeasurement(win, dm, pageNo);
+                } else if (win->archTools.toolMode == 3) {
+                    // Radius mode: the drag drew the chord — next click drops
+                    // the arc bulge point
+                    win->archTools.dragLine = 2;
+                    win->archTools.dragMoved = false;
+                    win->archTools.dragStartPos = Point{x, y};
+                    LogInfo("[arch] Radius: chord dragged, waiting for arc bulge point");
+                    ScheduleRepaint(win, 0);
+                } else if (win->archTools.toolMode == 4) {
+                    // Reference line: a drag finalizes the guide immediately
+                    win->archTools.dragLine = 0;
+                    FinalizeArchReferenceLine(win, pageNo);
                 }
             } else {
                 // Click case: keep archDragLine=1, wait for second click
@@ -3691,6 +3793,230 @@ void InvalidateCanvasKeyboardFocus(MainWindow* win) {
     HwndInvalidate(win->hwndCanvas);
 }
 
+// ---- arch radius + reference line -------------------------------------------
+
+// circumcircle through three points; false on a (near-)collinear set
+static bool ArchCircumcircle3F(float ax, float ay, float bx, float by, float cx, float cy, float* ccxOut, float* ccyOut,
+                               float* rOut) {
+    float d = 2.0f * (ax * (by - cy) + bx * (cy - ay) + cx * (ay - by));
+    if (fabsf(d) < 1e-9f) {
+        return false;
+    }
+    float a2 = ax * ax + ay * ay;
+    float b2 = bx * bx + by * by;
+    float c2 = cx * cx + cy * cy;
+    float ux = (a2 * (by - cy) + b2 * (cy - ay) + c2 * (ay - by)) / d;
+    float uy = (a2 * (cx - bx) + b2 * (ax - cx) + c2 * (bx - ax)) / d;
+    float dx = ax - ux;
+    float dy = ay - uy;
+    *ccxOut = ux;
+    *ccyOut = uy;
+    *rOut = sqrtf(dx * dx + dy * dy);
+    return *rOut > 0.0001f;
+}
+
+// sampled screen-space arc from a to b whose sweep passes through the bulge
+// side; all arguments are PAGE points (circles stay circles: the display
+// transform is uniform-scale + translation/rotation). Returns point count.
+static int ArchArcScreenPoints(DisplayModel* dm, int pageNo, PointF a, PointF b, PointF bulge, Gdiplus::PointF* out,
+                               int maxOut) {
+    if (maxOut < 2) {
+        return 0;
+    }
+    Point sa = dm->CvtToScreen(pageNo, a);
+    Point sb = dm->CvtToScreen(pageNo, b);
+    Point sc = dm->CvtToScreen(pageNo, bulge);
+    float ccx = 0.0f, ccy = 0.0f, r = 0.0f;
+    if (!ArchCircumcircle3F((float)sa.x, (float)sa.y, (float)sb.x, (float)sb.y, (float)sc.x, (float)sc.y, &ccx, &ccy,
+                            &r)) {
+        return 0;
+    }
+    float a1 = atan2f((float)sa.y - ccy, (float)sa.x - ccx);
+    float a2 = atan2f((float)sb.y - ccy, (float)sb.x - ccx);
+    const float twoPi = 6.2831853f;
+    float sweep = a2 - a1;
+    while (sweep > twoPi) {
+        sweep -= twoPi;
+    }
+    while (sweep < -twoPi) {
+        sweep += twoPi;
+    }
+    float sweepAlt = sweep - (sweep > 0 ? twoPi : -twoPi);
+    // pick the sweep whose mid-angle point lands nearer the bulge point
+    float m1 = a1 + sweep * 0.5f;
+    float m2 = a1 + sweepAlt * 0.5f;
+    float q1x = ccx + r * cosf(m1);
+    float q1y = ccy + r * sinf(m1);
+    float q2x = ccx + r * cosf(m2);
+    float q2y = ccy + r * sinf(m2);
+    float d1 = (q1x - (float)sc.x) * (q1x - (float)sc.x) + (q1y - (float)sc.y) * (q1y - (float)sc.y);
+    float d2 = (q2x - (float)sc.x) * (q2x - (float)sc.x) + (q2y - (float)sc.y) * (q2y - (float)sc.y);
+    float use = (d1 <= d2) ? sweep : sweepAlt;
+    int n = 32;
+    if (n > maxOut - 1) {
+        n = maxOut - 1;
+    }
+    for (int i = 0; i <= n; i++) {
+        float t = a1 + use * ((float)i / (float)n);
+        out[i] = Gdiplus::PointF(ccx + r * cosf(t), ccy + r * sinf(t));
+    }
+    return n + 1;
+}
+
+// full-page guide line through two page points (thin, subtle gray)
+static void PaintArchReferenceLine(DisplayModel* dm, int pageNo, PointF a, PointF b, Gdiplus::Graphics* gs) {
+    static Gdiplus::Pen refPen(Gdiplus::Color(150, 130, 130, 130), 1.0f);
+    if (!dm->ValidPageNo(pageNo)) {
+        return;
+    }
+    Point sa = dm->CvtToScreen(pageNo, a);
+    Point sb = dm->CvtToScreen(pageNo, b);
+    float dx = (float)(sb.x - sa.x);
+    float dy = (float)(sb.y - sa.y);
+    if (fabsf(dx) < 1e-4f && fabsf(dy) < 1e-4f) {
+        return;
+    }
+    RectF mb = dm->GetEngine()->PageMediabox(pageNo);
+    Point q0 = dm->CvtToScreen(pageNo, PointF{mb.x, mb.y});
+    Point q1 = dm->CvtToScreen(pageNo, PointF{mb.x + mb.dx, mb.y + mb.dy});
+    float x0 = std::min((float)q0.x, (float)q1.x);
+    float x1 = std::max((float)q0.x, (float)q1.x);
+    float y0 = std::min((float)q0.y, (float)q1.y);
+    float y1 = std::max((float)q0.y, (float)q1.y);
+    // slab clip: intersect the infinite line's t-range with the page rect
+    float tLo = -1e18f;
+    float tHi = 1e18f;
+    if (fabsf(dx) > 1e-6f) {
+        float ta = (x0 - sa.x) / dx;
+        float tb = (x1 - sa.x) / dx;
+        tLo = std::max(tLo, std::min(ta, tb));
+        tHi = std::min(tHi, std::max(ta, tb));
+    } else if (sa.x < x0 || sa.x > x1) {
+        return;
+    }
+    if (fabsf(dy) > 1e-6f) {
+        float ta = (y0 - sa.y) / dy;
+        float tb = (y1 - sa.y) / dy;
+        tLo = std::max(tLo, std::min(ta, tb));
+        tHi = std::min(tHi, std::max(ta, tb));
+    } else if (sa.y < y0 || sa.y > y1) {
+        return;
+    }
+    if (tLo > tHi) {
+        return;
+    }
+    gs->DrawLine(&refPen, (int)(sa.x + tLo * dx), (int)(sa.y + tLo * dy), (int)(sa.x + tHi * dx),
+                 (int)(sa.y + tHi * dy));
+}
+
+// saved radius measurement: dashed chord + teal arc + "r=" label at the bulge
+static void PaintArchRadiusMeasurement(DisplayModel* dm, int pageNo, const ArchMeasurement& meas, int unit,
+                                       Gdiplus::Graphics* gs) {
+    static Gdiplus::Pen radiusPen(Gdiplus::Color(255, 0, 180, 160), 2.0f); // teal
+    static Gdiplus::Pen chordPen(Gdiplus::Color(255, 0, 180, 160), 1.0f);
+    static Gdiplus::SolidBrush radiusBrush(Gdiplus::Color(255, 0, 180, 160));
+    static Gdiplus::Font labelFont(L"MS Shell Dlg", 9);
+    static Gdiplus::SolidBrush labelTextBrush(Gdiplus::Color(255, 255, 255, 255)); // white label (legibility)
+    static Gdiplus::SolidBrush labelBgBrush(Gdiplus::Color(180, 30, 30, 30));
+    chordPen.SetDashStyle(Gdiplus::DashStyleDash);
+    PointF a{meas.p1x, meas.p1y};
+    PointF b{meas.p2x, meas.p2y};
+    PointF bulge{meas.p3x, meas.p3y};
+    Gdiplus::PointF pts[33];
+    int n = ArchArcScreenPoints(dm, pageNo, a, b, bulge, pts, dimof(pts));
+    if (n < 2) {
+        return;
+    }
+    Point sa = dm->CvtToScreen(pageNo, a);
+    Point sb = dm->CvtToScreen(pageNo, b);
+    Point sc = dm->CvtToScreen(pageNo, bulge);
+    gs->DrawLine(&chordPen, sa.x, sa.y, sb.x, sb.y);
+    gs->DrawLines(&radiusPen, pts, n);
+    int r = 3;
+    gs->FillEllipse(&radiusBrush, sa.x - r, sa.y - r, 2 * r, 2 * r);
+    gs->FillEllipse(&radiusBrush, sb.x - r, sb.y - r, 2 * r, 2 * r);
+    gs->FillEllipse(&radiusBrush, sc.x - r, sc.y - r, 2 * r, 2 * r);
+    const WCHAR* unitNames[] = {L"mm", L"cm", L"m", L"in", L"ft"};
+    WCHAR label[128];
+    float dispLen = meas.len / kMeterPerUnit[unit];
+    swprintf_s(label, L"r=%.2f %s", dispLen, unitNames[unit]);
+    if (gGlobalPrefs->archDecimalSeparator == 1) {
+        for (WCHAR* p = label; *p; ++p) {
+            if (*p == L'.') {
+                *p = L',';
+            }
+        }
+    }
+    Gdiplus::RectF textSize;
+    gs->MeasureString(label, -1, &labelFont, Gdiplus::PointF(0, 0), &textSize);
+    Gdiplus::RectF bgRect((float)sc.x + 6, (float)sc.y - 16, textSize.Width + 8, textSize.Height + 4);
+    gs->FillRectangle(&labelBgBrush, bgRect);
+    gs->DrawString(label, -1, &labelFont, Gdiplus::PointF(bgRect.X + 4, bgRect.Y + 2), &labelTextBrush);
+}
+
+static void FinalizeArchRadius(MainWindow* win, int pageNo) {
+    PointF p1 = win->archTools.point1;
+    PointF p2 = win->archTools.point2;
+    PointF p3 = win->archTools.point3;
+    float ccx = 0.0f, ccy = 0.0f, rPage = 0.0f;
+    if (!ArchCircumcircle3F(p1.x, p1.y, p2.x, p2.y, p3.x, p3.y, &ccx, &ccy, &rPage)) {
+        LogInfo("[arch] Radius: degenerate 3-point set (collinear?) — nothing added");
+        win->archTools.dragLine = 0;
+        ScheduleRepaint(win, 0);
+        return;
+    }
+    ArchMeasurement meas{};
+    meas.pageNo = pageNo;
+    meas.p1x = p1.x;
+    meas.p1y = p1.y;
+    meas.p2x = p2.x;
+    meas.p2y = p2.y;
+    meas.p3x = p3.x;
+    meas.p3y = p3.y;
+    meas.kind = 1;
+    meas.unit = win->archTools.unit;
+    auto& ps = win->archTools.GetScaleForPage(pageNo);
+    if (ps.scaleSet && ps.scaleFactor > 0.0f) {
+        // archScaleFactor is page units per METER (canonical)
+        meas.x = ccx / ps.scaleFactor;
+        meas.y = ccy / ps.scaleFactor;
+        meas.len = rPage / ps.scaleFactor; // radius in meters
+        meas.scaled = true;
+    } else {
+        meas.x = ccx;
+        meas.y = ccy;
+        meas.len = rPage;
+        meas.scaled = false;
+    }
+    int idx = win->archTools.measurements.Append(meas);
+    LogInfo("[arch] FinalizeArchRadius: idx=%d r=%.4g (page %.2f pt)", idx, meas.len, rPage);
+    win->archTools.dragLine = 0;
+    ScheduleRepaint(win, 0);
+}
+
+static void FinalizeArchReferenceLine(MainWindow* win, int pageNo) {
+    PointF p1 = win->archTools.point1;
+    PointF p2 = win->archTools.point2;
+    float dx = p2.x - p1.x;
+    float dy = p2.y - p1.y;
+    if (dx * dx + dy * dy < 1e-4f) {
+        LogInfo("[arch] RefLine: degenerate same-point click — nothing added");
+        return;
+    }
+    ArchMeasurement meas{};
+    meas.pageNo = pageNo;
+    meas.p1x = p1.x;
+    meas.p1y = p1.y;
+    meas.p2x = p2.x;
+    meas.p2y = p2.y;
+    meas.kind = 2;
+    meas.unit = win->archTools.unit;
+    meas.scaled = false;
+    int idx = win->archTools.measurements.Append(meas);
+    LogInfo("[arch] RefLine: added idx=%d p1=(%.2f,%.2f) p2=(%.2f,%.2f)", idx, p1.x, p1.y, p2.x, p2.y);
+    ScheduleRepaint(win, 0);
+}
+
 static void OnPaintDocument(MainWindow* win) {
     auto t = TimeGet();
     PAINTSTRUCT ps;
@@ -3736,7 +4062,7 @@ static void OnPaintDocument(MainWindow* win) {
                     static Gdiplus::Pen scalePen(Gdiplus::Color(255, 0, 200, 0), 2); // green
                     static Gdiplus::SolidBrush scaleBrush(Gdiplus::Color(255, 0, 200, 0));
                     static Gdiplus::Font fontBold(L"MS Shell Dlg", 9, Gdiplus::FontStyleBold);
-                    static Gdiplus::SolidBrush scaleTextBrush(Gdiplus::Color(255, 0, 150, 0));
+                    static Gdiplus::SolidBrush scaleTextBrush(Gdiplus::Color(255, 255, 255, 255)); // white on dark bg
                     static Gdiplus::SolidBrush bgBrush(Gdiplus::Color(180, 30, 30, 30));
                     static Gdiplus::Pen measurePen(Gdiplus::Color(255, 0, 100, 255), 2); // blue
                     static Gdiplus::SolidBrush measureBrush(Gdiplus::Color(255, 0, 100, 255));
@@ -3789,9 +4115,19 @@ static void OnPaintDocument(MainWindow* win) {
                         }
                     }
 
-                    // Draw saved measurements (blue)
+                    // Draw saved measurements: segment (blue) / radius arc
+                    // (teal, kind 1) / full-page reference line (kind 2)
                     for (const ArchMeasurement& meas : win->archTools.measurements) {
                         if (meas.pageNo != curPageNo) continue;
+                        if (meas.kind == 2) {
+                            PaintArchReferenceLine(dm, curPageNo, PointF{meas.p1x, meas.p1y},
+                                                   PointF{meas.p2x, meas.p2y}, &gs);
+                            continue;
+                        }
+                        if (meas.kind == 1) {
+                            PaintArchRadiusMeasurement(dm, curPageNo, meas, scaleState.unit, &gs);
+                            continue;
+                        }
                         if (dm->ValidPageNo(curPageNo)) {
                             Point p1 = dm->CvtToScreen(curPageNo, PointF{meas.p1x, meas.p1y});
                             Point p2 = dm->CvtToScreen(curPageNo, PointF{meas.p2x, meas.p2y});
@@ -3827,18 +4163,36 @@ static void OnPaintDocument(MainWindow* win) {
                         }
                     }
 
-                    // Draw in-progress line (orange highlight). point1/point2 are
-                    // page coords, so the pinned line follows the page while the
-                    // user pans/zoomes between clicks.
+                    // Draw in-progress line. point1/point2 are page coords, so
+                    // the pinned line follows the page while the user
+                    // pans/zooms between clicks. Mode 4 shows the final guide
+                    // line directly; mode 3 (radius) previews the arc at the
+                    // tracked bulge point after the chord is set.
                     if (win->archTools.dragLine > 0 && dm->ValidPageNo(curPageNo)) {
-                        Point p1 = dm->CvtToScreen(curPageNo, win->archTools.point1);
-                        Point p2 = dm->CvtToScreen(curPageNo, win->archTools.point2);
-                        dragPen.SetDashStyle(Gdiplus::DashStyleDash); // idempotent; shared pen
-                        gs.DrawLine(&dragPen, p1.x, p1.y, p2.x, p2.y);
-                        // Endpoint circles
-                        int r = 4;
-                        gs.FillEllipse(&dragBrush, p1.x - r, p1.y - r, 2 * r, 2 * r);
-                        gs.FillEllipse(&dragBrush, p2.x - r, p2.y - r, 2 * r, 2 * r);
+                        int archMode = win->archTools.toolMode;
+                        if (archMode == 4) {
+                            PaintArchReferenceLine(dm, curPageNo, win->archTools.point1, win->archTools.point2, &gs);
+                        } else {
+                            Point p1 = dm->CvtToScreen(curPageNo, win->archTools.point1);
+                            Point p2 = dm->CvtToScreen(curPageNo, win->archTools.point2);
+                            dragPen.SetDashStyle(Gdiplus::DashStyleDash); // idempotent; shared pen
+                            gs.DrawLine(&dragPen, p1.x, p1.y, p2.x, p2.y);
+                            // Endpoint circles
+                            int r = 4;
+                            gs.FillEllipse(&dragBrush, p1.x - r, p1.y - r, 2 * r, 2 * r);
+                            gs.FillEllipse(&dragBrush, p2.x - r, p2.y - r, 2 * r, 2 * r);
+                            if (archMode == 3 && win->archTools.dragLine == 2) {
+                                // chord is set: arc preview follows the cursor
+                                static Gdiplus::Pen arcPreviewPen(Gdiplus::Color(255, 0, 180, 160), 2.0f);
+                                Gdiplus::PointF arcPts[33];
+                                int nArc =
+                                    ArchArcScreenPoints(dm, curPageNo, win->archTools.point1, win->archTools.point2,
+                                                        win->archTools.point3, arcPts, dimof(arcPts));
+                                if (nArc >= 2) {
+                                    gs.DrawLines(&arcPreviewPen, arcPts, nArc);
+                                }
+                            }
+                        }
                     }
 
                     // Erase mode: draw red "+" crosshair overlay at mouse position
@@ -3854,6 +4208,14 @@ static void OnPaintDocument(MainWindow* win) {
 
             win->buffer->Flush(hdc);
         }
+    }
+
+    // Edit mode: in-page image bbox overlays. Drawn on the screen DC after
+    // the flush (trim-lines pattern) so they show up on pure overlay
+    // repaints too — the offscreen buffer is only flushed when a tile
+    // actually rendered.
+    if (win->editTools.on && win->editTools.imageEdits.len > 0 && win->AsFixed()) {
+        EditToolsPaintImageOverlays(win, win->AsFixed(), hdc);
     }
 
     // trim config: draw the context-aware draggable red lines on top of the
@@ -3972,6 +4334,29 @@ static LRESULT OnSetCursor(MainWindow* win, HWND hwnd) {
         SetCursorCached(IDC_CROSS);
         win->DeleteToolTip();
         return TRUE;
+    }
+
+    // Edit mode: move/resize cursors over the selected image bbox
+    if (win->editTools.on && !win->editTools.pendingImage && win->AsFixed()) {
+        POINT pt{};
+        GetCursorPos(&pt);
+        ScreenToClient(hwnd, &pt);
+        int hov = EditToolsImageHoverTest(win, pt.x, pt.y);
+        if (hov >= 0) {
+            if (hov == 0) {
+                SetCursorCached(IDC_SIZEALL);
+            } else if (hov == 1 || hov == 2) {
+                SetCursorCached(IDC_SIZEWE);
+            } else if (hov == 3 || hov == 4) {
+                SetCursorCached(IDC_SIZENS);
+            } else if (hov == 5 || hov == 8) {
+                SetCursorCached(IDC_SIZENWSE);
+            } else {
+                SetCursorCached(IDC_SIZENESW);
+            }
+            win->DeleteToolTip();
+            return TRUE;
+        }
     }
 
     // Arch Tools: crosshair cursor when Arch Tools is ON

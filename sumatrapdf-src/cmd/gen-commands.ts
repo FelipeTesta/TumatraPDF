@@ -329,6 +329,10 @@ export const commands = [
     "CmdEditToolsToggle", "Toggle Edit Mode",
     "CmdEditAddText", "Edit: Add Text Box",
     "CmdEditAddImage", "Edit: Paste Image At Click",
+    "CmdEditImageCrop", "Edit: Toggle Crop Mode",
+    "CmdEditImageApply", "Edit: Apply Image Edits",
+    "CmdArchMeasureRadius", "Arch: Measure Radius (3 clicks)",
+    "CmdArchRefLine", "Arch: Reference Line",
     "CmdNone", "Do nothing",
 ];
 

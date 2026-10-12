@@ -5303,7 +5303,7 @@ int EngineMupdf::ReplaceImageWithFile(IPageElement* ipel, Str newImagePath) {
 // inside Form XObjects (typical for scans): walk both. returns 1 on the first
 // entry that resolves to origImage and swaps it for newImage.
 static int ReplaceImageInXObjectResources(fz_context* ctx, pdf_document* doc, pdf_obj* resources, fz_image* origImage,
-                                           fz_image* newImage, int depth) {
+                                          fz_image* newImage, int depth) {
     if (!pdf_is_dict(ctx, resources) || depth > 8) {
         return 0;
     }
@@ -5441,6 +5441,227 @@ int EngineMupdf::ReplaceImageByIdx(int pageNo, int imageIdx, Str newImagePath) {
     logf("[imgedit] ReplaceImageByIdx: page=%d idx=%d from '%s' -> replaced=%d\n", pageNo, imageIdx, newImagePath,
          replaced);
     return replaced;
+#endif
+}
+
+// ---- TUMATRA: move/resize an embedded image's draw rect equal to our bbox ---
+
+static inline bool PdfWsChar(char c) {
+    return c == 0 || c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == '\f';
+}
+static inline bool PdfNumChar(char c) {
+    return (c >= '0' && c <= '9') || c == '+' || c == '-' || c == '.' || c == 'e' || c == 'E';
+}
+// PDF token delimiter (whitespace or structural)
+static inline bool PdfDelimChar(char c) {
+    return PdfWsChar(c) || c == '(' || c == ')' || c == '<' || c == '>' || c == '[' || c == ']' || c == '{' ||
+           c == '}' || c == '/' || c == '%';
+}
+
+// parse the six numeric tokens ending before pos (pos = byte after the last
+// one, i.e. just left of the `cm` token); firstPosOut = start of the first
+// number, lastPosOut = end of the sixth. Returns false on non-numeric junk.
+static bool ParseSixFloatsBefore(const char* data, ptrdiff_t pos, float v[6], ptrdiff_t* firstPosOut,
+                                 ptrdiff_t* lastPosOut) {
+    for (int k = 5; k >= 0; --k) {
+        while (pos > 0 && PdfWsChar(data[pos - 1])) {
+            --pos;
+        }
+        ptrdiff_t end = pos;
+        while (pos > 0 && PdfNumChar(data[pos - 1])) {
+            --pos;
+        }
+        if (pos == end || end - pos > 63) {
+            return false;
+        }
+        char tok[64];
+        memcpy(tok, data + pos, (size_t)(end - pos));
+        tok[end - pos] = 0;
+        v[k] = (float)strtod(tok, nullptr);
+        if (k == 5 && lastPosOut) {
+            *lastPosOut = end;
+        }
+        if (k == 0 && firstPosOut) {
+            *firstPosOut = pos;
+        }
+    }
+    return true;
+}
+
+// find "<a> <b> <c> <d> <e> <f> cm /Name Do" in a decompressed content stream
+// whose unit-square rect matches (ex,ey,ew,eh) within 2pt, axis-aligned only
+// (b,c ~0 — rotation/skew is refused), and replace the six numbers with the
+// new rect (sign pattern of a/d preserved). More than one match = ambiguous →
+// nullptr. Returns a new buffer for pdf_update_stream, or nullptr.
+static fz_buffer* EditImageDrawRectInStream(fz_context* ctx, pdf_obj* stream, float ex, float ey, float ew, float eh,
+                                            float nx, float ny, float nw, float nh) {
+    fz_buffer* buf = pdf_load_stream(ctx, stream);
+    const char* data = (const char*)buf->data;
+    ptrdiff_t len = (ptrdiff_t)buf->len;
+    ptrdiff_t numStart = -1;
+    ptrdiff_t numEnd = -1;
+    float sa = 0.0f;
+    float sd = 0.0f;
+    float se = 0.0f;
+    float sf = 0.0f;
+    int matches = 0;
+    for (ptrdiff_t i = 1; i + 3 < len; i++) {
+        if (data[i] != 'c' || data[i + 1] != 'm' || !PdfDelimChar(data[i + 2]) || !PdfDelimChar(data[i - 1])) {
+            continue;
+        }
+        // require the op right after to be "/Name Do" (an XObject draw; text
+        // matrices (Tm) etc. never look like this)
+        ptrdiff_t p = i + 2;
+        while (p < len && PdfWsChar(data[p])) {
+            p++;
+        }
+        if (p >= len || data[p] != '/') {
+            continue;
+        }
+        p++;
+        ptrdiff_t nameLen = 0;
+        while (p < len && !PdfDelimChar(data[p])) {
+            p++;
+            nameLen++;
+        }
+        if (nameLen < 1 || nameLen > 64) {
+            continue;
+        }
+        while (p < len && PdfWsChar(data[p])) {
+            p++;
+        }
+        if (p + 2 >= len || data[p] != 'D' || data[p + 1] != 'o' || !PdfDelimChar(data[p + 2])) {
+            continue;
+        }
+        float v[6];
+        ptrdiff_t first = 0;
+        ptrdiff_t last = 0;
+        if (!ParseSixFloatsBefore(data, i, v, &first, &last)) {
+            continue;
+        }
+        if (fabsf(v[1]) > 0.01f || fabsf(v[2]) > 0.01f) {
+            continue;
+        }
+        float x0 = std::min(v[4], v[4] + v[0]);
+        float x1 = std::max(v[4], v[4] + v[0]);
+        float y0 = std::min(v[5], v[5] + v[3]);
+        float y1 = std::max(v[5], v[5] + v[3]);
+        if (fabsf(x0 - ex) > 2.0f || fabsf(y0 - ey) > 2.0f || fabsf((x1 - x0) - ew) > 2.0f ||
+            fabsf((y1 - y0) - eh) > 2.0f) {
+            continue;
+        }
+        matches++;
+        numStart = first;
+        numEnd = last;
+        sa = v[0] >= 0 ? nw : -nw;
+        sd = v[3] >= 0 ? nh : -nh;
+        se = v[0] >= 0 ? nx : nx + nw;
+        sf = v[3] >= 0 ? ny : ny + nh;
+    }
+    logf("[imgedit] EditImageDrawRectInStream: matches=%d (expect exactly 1)\n", matches);
+    if (matches != 1) {
+        fz_drop_buffer(ctx, buf);
+        return nullptr;
+    }
+    // %.3f so the number never comes out in e-notation (pdf lexer is picky)
+    TempStr nums = fmt("%.3f 0.0 0.0 %.3f %.3f %.3f", (double)sa, (double)sd, (double)se, (double)sf);
+    size_t numLen = strlen(nums.s);
+    size_t outLen = (size_t)(numStart + (ptrdiff_t)numLen + (len - numEnd));
+    // fz_append_* is not in this vendored build — splice with plain copies
+    u8* raw = (u8*)malloc(outLen);
+    memcpy(raw, data, (size_t)numStart);
+    memcpy(raw + numStart, nums.s, numLen);
+    memcpy(raw + numStart + numLen, data + numEnd, (size_t)(len - numEnd));
+    fz_buffer* out = fz_new_buffer_from_copied_data(ctx, raw, outLen);
+    free(raw);
+    fz_drop_buffer(ctx, buf);
+    return out;
+}
+
+bool EngineMupdf::SetImageDrawRect(int pageNo, int imageIdx, RectF newRectTL) {
+#if !OS_WIN
+    (void)pageNo;
+    (void)imageIdx;
+    (void)newRectTL;
+    return false;
+#else
+    ReportIf(!pdfdoc);
+    if (!pdfdoc || imageIdx < 0 || newRectTL.dx <= 0 || newRectTL.dy <= 0) {
+        return false;
+    }
+    FzPageInfo* pageInfo = GetFzPageInfo(pageNo, false);
+    if (!pageInfo || !pageInfo->page || imageIdx >= len(pageInfo->images)) {
+        return false;
+    }
+    RectF curTL = ToRectF(pageInfo->images[imageIdx]->rect);
+    if (curTL.dx <= 0 || curTL.dy <= 0) {
+        return false;
+    }
+    // raw PDF coords are y-up; our page coords are y-down. Valid only for
+    // rotation-0 pages — when the op match below misses (rotated/nested
+    // geometry), the caller falls back to a clamped in-place data swap.
+    float pageH = pageInfo->mediabox.dy;
+    float ex = curTL.x;
+    float ey = pageH - (curTL.y + curTL.dy);
+    float nx = newRectTL.x;
+    float ny = pageH - (newRectTL.y + newRectTL.dy);
+
+    bool ok = false;
+    {
+        ScopedRecursiveMutex scope(&docLock);
+        fz_context* ctx = Ctx();
+        pdf_page* ppage = nullptr;
+        pdf_obj* contents = nullptr;
+        fz_buffer* newBuf = nullptr;
+        fz_var(ppage);
+        fz_var(contents);
+        fz_var(newBuf);
+        fz_try(ctx) {
+            ppage = pdf_page_from_fz_page(ctx, pageInfo->page);
+            contents = pdf_dict_getp(ctx, ppage->obj, "Contents");
+            if (pdf_is_array(ctx, contents)) {
+                int nStreams = pdf_array_len(ctx, contents);
+                for (int i = 0; i < nStreams && !newBuf; i++) {
+                    pdf_obj* s = pdf_array_get(ctx, contents, i);
+                    newBuf = EditImageDrawRectInStream(ctx, s, ex, ey, curTL.dx, curTL.dy, nx, ny, newRectTL.dx,
+                                                       newRectTL.dy);
+                    if (newBuf) {
+                        // store RAW (uncompressed) and drop the filter — a
+                        // stale /FlateDecode on raw bytes breaks the re-parse
+                        pdf_update_stream(ctx, pdfdoc, s, newBuf, 0);
+                        pdf_dict_del(ctx, s, PDF_NAME(Filter));
+                        pdf_dict_del(ctx, s, PDF_NAME(DecodeParms));
+                        fz_drop_buffer(ctx, newBuf);
+                        newBuf = nullptr;
+                        ok = true;
+                    }
+                }
+            } else if (contents) {
+                newBuf = EditImageDrawRectInStream(ctx, contents, ex, ey, curTL.dx, curTL.dy, nx, ny, newRectTL.dx,
+                                                   newRectTL.dy);
+                if (newBuf) {
+                    pdf_update_stream(ctx, pdfdoc, contents, newBuf, 0);
+                    pdf_dict_del(ctx, contents, PDF_NAME(Filter));
+                    pdf_dict_del(ctx, contents, PDF_NAME(DecodeParms));
+                    fz_drop_buffer(ctx, newBuf);
+                    newBuf = nullptr;
+                    ok = true;
+                }
+            }
+        }
+        fz_always(ctx) {
+            if (newBuf) {
+                fz_drop_buffer(ctx, newBuf);
+            }
+        }
+        fz_catch(ctx) {
+            fz_report_error(ctx);
+            ok = false;
+        }
+    }
+    logf("[imgedit] SetImageDrawRect: page=%d idx=%d (%.1f,%.1f %.1fx%.1f) -> (%.1f,%.1f %.1fx%.1f) = %d\n", pageNo,
+         imageIdx, curTL.x, curTL.y, curTL.dx, curTL.dy, newRectTL.x, newRectTL.y, newRectTL.dx, newRectTL.dy, (int)ok);
+    return ok;
 #endif
 }
 

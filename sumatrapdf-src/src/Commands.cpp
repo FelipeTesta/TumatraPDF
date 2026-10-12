@@ -336,6 +336,10 @@ static SeqStrings gCommandNames =
     "CmdEditToolsToggle\0"
     "CmdEditAddText\0"
     "CmdEditAddImage\0"
+    "CmdEditImageCrop\0"
+    "CmdEditImageApply\0"
+    "CmdArchMeasureRadius\0"
+    "CmdArchRefLine\0"
     "CmdNone\0"
     "\0";
 
@@ -660,6 +664,10 @@ static i32 gCommandIds[] = {
     CmdEditToolsToggle,
     CmdEditAddText,
     CmdEditAddImage,
+    CmdEditImageCrop,
+    CmdEditImageApply,
+    CmdArchMeasureRadius,
+    CmdArchRefLine,
     CmdNone,
 };
 
@@ -984,6 +992,10 @@ SeqStrings gCommandDescriptions =
     "Toggle Edit Mode\0"
     "Edit: Add Text Box\0"
     "Edit: Paste Image At Click\0"
+    "Edit: Toggle Crop Mode\0"
+    "Edit: Apply Image Edits\0"
+    "Arch: Measure Radius (3 clicks)\0"
+    "Arch: Reference Line\0"
     "Do nothing\0"
     "\0";
 // clang-format on

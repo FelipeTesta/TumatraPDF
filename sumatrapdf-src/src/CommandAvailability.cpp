@@ -235,6 +235,8 @@ static UINT_PTR removeIfChm[] = {
     CmdTrimConfig,
     CmdArchScale,
     CmdArchMeasure,
+    CmdArchMeasureRadius,
+    CmdArchRefLine,
     CmdRotateLeft,
     CmdRotateRight,
     CmdTogglePresentationMode,
@@ -287,6 +289,8 @@ static UINT_PTR removeIfMarkdown[] = {
     CmdArchToolsToggle,
     CmdArchScale,
     CmdArchMeasure,
+    CmdArchMeasureRadius,
+    CmdArchRefLine,
     CmdArchClear,
     CmdArchResetScale,
     // flashcards are PDF-only (annotation-based; need DisplayModel)

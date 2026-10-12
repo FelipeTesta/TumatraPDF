@@ -1035,6 +1035,10 @@ static Vec<FindMatch>* CloneMatchesRange(Vec<FindMatch>* matches, int from, int 
 static void CountThread(CountThreadData* d) {
     MainWindow* win = d->win;
     EngineBase* engine = d->engine;
+    // breadcrumb for the find-on-scroll crash hunt (2026-10-11, s34-g): the
+    // NULL-write crash happens on this worker while the CAD doc is open; see
+    // dump df56c4. Which position in this loop crashes = last log before it.
+    logf("[find] CountThread start: epoch=%d startPage=%d text='%s'\n", d->epoch, d->startPage, d->text);
 
     auto* positions = new Vec<u64>();
     Vec<FindMatch>* matches = d->wantMatchList ? new Vec<FindMatch>() : nullptr;
@@ -1334,6 +1338,7 @@ static void FindThread(FindThreadData* ftd) {
     DisplayModel* dm = win->AsFixed();
     auto* textSearch = dm->textSearch;
     auto* ctrl = win->ctrl;
+    logf("[find] FindThread start: text='%s' wasModified=%d\n", Str(ftd->text), (int)ftd->wasModified);
 
     auto* engine = dm->GetEngine();
     engine->AddRef();

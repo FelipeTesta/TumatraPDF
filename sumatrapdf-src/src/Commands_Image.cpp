@@ -23,6 +23,8 @@ extern "C" {
 #include "DisplayModel.h"
 #include "RenderCache.h"
 #include "SumatraPDF.h"
+#include "Commands.h"
+#include "Toolbar.h"
 #include "MainWindow.h"
 #include "WindowTab.h"
 #include "Commands_Image.h"
@@ -140,6 +142,8 @@ void HandleCmdReplaceImage(MainWindow* win) {
     int replaced = emup->ReplaceImageWithFile(pageEl, picked);
     str::Free(picked);
     if (replaced) {
+        emup->modifiedAnnotations = true;        // same red "unsaved changes" marker as a new highlight
+        ToolbarUpdateStateForWindow(win, false); // lights the tab dot + Save marker
         gRenderCache->FreeForDisplayModel(dm);
         MainWindowRerender(win);
         logf("[imgedit] ReplaceImage: done; save the PDF (File > Save) to persist\n");
@@ -228,6 +232,8 @@ void TickPaintImageWatch() {
     logf("[imgedit] paint edit saved; replaced=%d\n", r);
     StopPaintImageWatch();
     if (r > 0 && dm) {
+        em->modifiedAnnotations = true;          // same red "unsaved changes" marker as a new highlight
+        ToolbarUpdateStateForWindow(win, false); // lights the tab dot + Save marker
         gRenderCache->FreeForDisplayModel(dm);
         MainWindowRerender(win);
         logf("[imgedit] external edit applied; save the PDF (File > Save) to persist\n");

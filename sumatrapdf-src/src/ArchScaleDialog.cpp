@@ -153,6 +153,19 @@ static bool EvalCalcExpr(const char* s, float& result) {
     return true;
 }
 
+// Enter / numpad-Enter inside the length field applies the measurement
+// straight away. The default-button route (IsDialogMessage + DEFPUSHBUTTON) is
+// fragile for modeless windows, so catch the key in the edit itself.
+static LRESULT CALLBACK WndProcArchScaleLenEdit(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR,
+                                                DWORD_PTR refData) {
+    auto* wnd = (ArchScaleDialogWnd*)refData;
+    if (msg == WM_KEYDOWN && wp == VK_RETURN && wnd) {
+        wnd->OnOk();
+        return 0;
+    }
+    return DefSubclassProc(hwnd, msg, wp, lp);
+}
+
 void ArchScaleDialogWnd::OnOk() {
     if (!win) return;
 
@@ -353,6 +366,7 @@ bool ArchScaleDialogWnd::Create(MainWindow* mainWin) {
         eargs.isRtl = isRtl;
         editLen = new Edit();
         editLen->Create(eargs);
+        SetWindowSubclass(editLen->hwnd, WndProcArchScaleLenEdit, 1, (DWORD_PTR)this);
         hbox->AddChild(new Padding(editLen, pad));
         vbox->AddChild(hbox);
     }
