@@ -4600,6 +4600,14 @@ static LRESULT CanvasOnMouseWheel(MainWindow* win, UINT msg, WPARAM wp, LPARAM l
     }
 
     bool hScroll = (LOWORD(wp) & MK_SHIFT) || IsShiftPressed();
+    // v2 quick view: Shift is the quick-view modifier (held the whole time),
+    // not a horizontal-scroll intent — the touchpad's vertical two-finger
+    // swipes would arrive with MK_SHIFT and get misrouted to a horizontal
+    // scroll that has no room (quick view fits the full page width), i.e.
+    // "can't scroll with Shift held". Force vertical while it's on.
+    if (dm && dm->viewportCropV2QuickToggled) {
+        hScroll = false;
+    }
     bool vScroll = !hScroll;
     bool isCont = !IsContinuous(win->ctrl->GetDisplayMode());
 

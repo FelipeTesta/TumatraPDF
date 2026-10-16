@@ -389,15 +389,27 @@ void AutoScrollContinuousTick(MainWindow* win, HWND hwnd) {
         if (dm->viewportCropV2QuickToggled) {
             win->autoScroll.accum = 0;
             win->autoScroll.lastScrollTick = GetTickCount();
+            logf("[autoscroll-dbg] stall: viewportCropV2QuickToggled\n");
             return;
         }
         // Check end of document (quick view returns above, so this only sees
-        // the column layout)
+        // the column layout). GUARD: during layout rebuilds (zoom/TC2/trim
+        // toggles mid-scroll) the canvas geometry is transient and
+        // CanScrollDown()/row-wrap can falsely report "at the end" — which
+        // would kill the autoscroll for good just because the user moved the
+        // mouse while scrolling. Skip the tick when the canvas isn't valid.
+        if (dm->GetCanvasSize().dy <= 0) {
+            win->autoScroll.lastScrollTick = GetTickCount();
+            logf("[autoscroll-dbg] stall guard: layout mid-rebuild, tick skipped\n");
+            return;
+        }
         if (dm->IsAtDocumentEnd()) {
             win->autoScroll.active = false;
             KillTimer(hwnd, kContinuousAutoScrollTimerID);
             UpdateToolbarEtaText(win, -1);
             SetToolbarButtonCheckedState(win, CmdAutoScrollToggle, false);
+            logf("[autoscroll-dbg] stall: IsAtDocumentEnd(vp=%.1f of %.1f)\n", (float)dm->GetViewPort().y,
+                 (float)dm->GetCanvasSize().dy);
             return;
         }
         // Timer check
@@ -429,6 +441,14 @@ void AutoScrollContinuousTick(MainWindow* win, HWND hwnd) {
         if (dy != 0) {
             win->autoScroll.accum -= dy;
             win->MoveDocBy(0, dy);
+        }
+        // TEMP s35: once per second, log scroll state so we can see where a
+        // stall comes from (gates vs scroll amount)
+        static int dbgTick = 0;
+        if ((++dbgTick % 60) == 0) {
+            logf("[autoscroll-dbg] tick accum=%.2f dy=%d vpY=%.1f/%.1f%s\n", win->autoScroll.accum, dy,
+                 (float)dm->GetViewPort().y, (float)dm->GetCanvasSize().dy,
+                 dm->IsAtDocumentEnd() ? StrL(" [END]") : StrL(""));
         }
         // ETA: recompute each tick from remaining pixels / declared speed and
         // dedupe label updates. Purely positional: pauses and manual drags

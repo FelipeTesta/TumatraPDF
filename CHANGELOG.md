@@ -4,6 +4,26 @@ Per-version changelog for TumatraPDF — new functions + bug fixes, newest first
 Feature details live in [README.md](README.md); full per-session development
 history in [LOG.md](LOG.md).
 
+## v1.0.11 (2026-10-15)
+
+- **Fixed: autoscroll could stall permanently** when Two Columns / Trim /
+  Contrast / Invert were toggled mid-scroll — transient layout rebuilds were
+  misread as "document end" and killed the timer. Mid-rebuild ticks are now
+  skipped safely. (Diagnostic `[autoscroll-dbg]` lines stay in the log for a
+  while to confirm the fix in daily use — they're low-volume.)
+- **Fixed: page drag felt heavy with Two Columns on** — every scroll tick
+  rebuilt the whole page layout (twice under the doubled virtual pages).
+  The visible-parts computation now updates pages in place.
+- **Fixed: couldn't select OCR text in the RIGHT column** (Two Columns) —
+  the text hit-test mixed up virtual and physical page numbers, so dragging
+  on the right column panned instead of selecting. Selecting now works on
+  both columns.
+- **Fixed: Shift-hold quick view (Two Columns)** — while holding Shift to
+  peek at the full page, touchpad vertical scrolling did nothing (the wheel
+  was misrouted as horizontal scroll because Shift was held). And releasing
+  Shift now returns to the column you were reading (it always jumped back to
+  the LEFT column before).
+
 ## v1.0.10 (2026-10-11)
 
 - **Right-click Image tools fixed + Crop/Resize writeback.** The Image menu

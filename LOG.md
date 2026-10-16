@@ -1,5 +1,33 @@
 # TumatraPDF — Development Log
 
+## 2026-10-15 (s35-b) — Quick-view (Shift-hold) fixes: touchpad wheel dead + right-column restore (BUILD OK, s35b-quickview PASS, s35-tc2-auto no-repro)
+
+### Fixed
+
+- **A1 — "shift:hold no twocolumns: não consigo arrastar a página com o touchpad"**: root cause = the touchpad's vertical two-finger swipe arrives as WM_MOUSEWHEEL carrying MK_SHIFT (Shift is BY DEFINITION held during the quick view) and CanvasOnMouseWheel's `hScroll = (LOWORD(wp) & MK_SHIFT) || IsShiftPressed()` remapped it as a HORIZONTAL scroll — the quick view fits the full page width, so there is zero horizontal room and the wheel did nothing. Fix: while `viewportCropV2QuickToggled`, force vertical (Shift is the quick-view modifier, not a scroll-intent). Left-button drag was never broken (mouse-down already forces drag-pan under Shift).
+- **A2 — "lendo o lado DIREITO → shift:hold → shift:release volta ao lado ESQUERDO"**: QuickToggleViewportCropV2 always restored `restorePage = physAnchor*2-1` (left column), ignoring the column the user was reading. Fix: capture `viewportCropV2SavedColumn` (ColumnOfVirtual) on quick-view ENTRY, restore to `physAnchor*2-1+savedColumn` on exit; RestoreViewportAfterV2Toggle gained an explicit `column` param (default 0 — the regular v2 toggle path unchanged).
+
+### Verified
+
+- tests/tmp/s35b-quickview.ts: TC2 on → virtual page 2 (RIGHT column) via page-edit → autoscroll on → Shift down (quick view) → WM_MOUSEWHEEL+MK_SHIFT scrollY 3→23 (wheel ALIVE), drag pan 3→248 OK → Shift up → page 2→2 (stayed on the right column). Regression: s35-tc2-auto.ts no-repro (autoscroll keeps scrolling through toggle storms).
+
+### Notes
+
+- WM_MOUSEWHEEL wparam layout: HIWORD = signed wheel delta, LOWORD = key flags — `wp = (delta<<16) | MK_SHIFT` (NOT the other way around).
+- Synthetic Shift works for the quick-view toggle because the handler is message-based (frame WM_KEYDOWN/UP VK_SHIFT → HandleV2ShiftHold); it does NOT set GetKeyState cross-process, so IsShiftPressed() reads false during synthetic mouse tests — fine, the wheel path carries MK_SHIFT in the message itself.
+
+## 2026-10-12 (s35 start) — TC2 batch: hover-stall fix + drag-slow cost kill + OCR selection fix (BUILD OK, probes 3/3 clean, s35-tc2-sel PASS)
+
+### Fixed
+
+- **Autoscroll "stops when the mouse moves" (TC2 combo, flaky):** the tick reads `IsAtDocumentEnd()` — during a layout REBUILD (TC2/trim/invert/contrast toggles inside a scroll) the canvas geometry is transient → the end flag can spike true → KillTimer silences auto-scroll forever. New guard: when `GetCanvasSize().dy <= 0` (layout mid-rebuild), skip the tick instead of ending the scroll. `[autoscroll-dbg]` tick/stall logs added (temporarily — keep until user confirms the fix).
+- **Drag slow under TC2:** `DisplayModel::RecalcVisibleParts` built a full `DocumentLayout` (Reset + per-page copies) then round-tripped the result on EVERY scroll/drag tick — with TC2's doubled virtual pages that dominated. Now recomputes `visibleRatio` + `pageOnScreen` directly on `PageInfo` (identical math, minus the layout churn).
+- **TC2: can't select text (OCR books):** `DisplayModel::IsOverText` passed the VIRTUAL pageNo into the physical-page TextSelection store → failed on right column / any virtual≠physical mapping → click-drag panned instead of selecting. One-line fix: `VirtualToPhysical(pageNo)` before the glyph hit-test (same convention as the other callers). Probe: `tests/tmp/s35-tc2-sel.ts` — right-column drag selects 254 chars post-fix.
+
+### Verified
+
+- Build 0/0 → Compiled. s35-tc2-auto ×3 storms all SCROLLING, s35-tc2-sel: left/right/baseline all select. s34-replace regression PASS.
+
 ## 2026-10-11 (s34-g) — Enlarge beyond original image (content-stream cm rewrite) + flicker-free drag + Arch Radius/RefLine + scale Enter fix + white label (BUILD OK, inpage 7/7 + arch ALL PASS + replace + doubletoggle)
 
 ### Added

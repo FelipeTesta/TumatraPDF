@@ -436,18 +436,23 @@ void DisplayModel::ApplyViewportCropV2() {
     Relayout(GetZoomVirtual(), rotation);
 }
 
-void DisplayModel::RestoreViewportAfterV2Toggle(int physAnchor, int dyInPage) {
+void DisplayModel::RestoreViewportAfterV2Toggle(int physAnchor, int dyInPage, int column) {
     // Called AFTER the N<->2N relayout. physAnchor is the PHYSICAL page the user
     // was looking at before the toggle. If the v2 column layout is now active,
-    // that page shows as virtual page 2*physAnchor-1 (left column); if it's not
-    // (v2 off, or the quick view showing full pages), it's the physical page
-    // itself. Restore the same in-page vertical offset.
+    // that page shows as virtual page 2*physAnchor-1 (left column) + column
+    // (0 left / 1 right — the quick view passes the column the user was
+    // actually reading); if it's not (v2 off, or the quick view showing full
+    // pages), it's the physical page itself. Restore the same in-page
+    // vertical offset.
     // NOTE: must check IsViewportCropV2Active(), NOT viewportCropV2Enabled -
     // the setting stays on during the quick view, but the layout has N pages.
     if (!ValidPageNo(physAnchor)) {
         return;
     }
-    int restorePage = IsViewportCropV2Active() ? physAnchor * 2 - 1 : physAnchor;
+    if (column < 0) {
+        column = 0;
+    }
+    int restorePage = IsViewportCropV2Active() ? physAnchor * 2 - 1 + column : physAnchor;
     if (!ValidPageNo(restorePage)) {
         return;
     }
@@ -480,8 +485,11 @@ void DisplayModel::QuickToggleViewportCropV2() {
     }
     if (!viewportCropV2QuickToggled) {
         // entering the full-page quick view: remember the current (virtual)
-        // zoom so releasing Shift restores exactly the previous column zoom
+        // zoom so releasing Shift restores exactly the previous column zoom,
+        // and WHICH column the user was reading — releasing Shift must land
+        // back on the same column, not always the left one
         viewportCropV2SavedZoom = GetZoomVirtual();
+        viewportCropV2SavedColumn = IsViewportCropV2Active() ? std::max(0, ColumnOfVirtual(CurrentPageNo())) : 0;
     }
     viewportCropV2QuickToggled = !viewportCropV2QuickToggled;
     // IsViewportCropV2Active() now reflects the new flag. Rebuild pagesInfo
@@ -494,14 +502,14 @@ void DisplayModel::QuickToggleViewportCropV2() {
     Relayout(zoom, rotation);
     // map the captured fraction back to pixels in the NEW layout and restore
     int dyInPage = 0;
-    int restorePage = IsViewportCropV2Active() ? physAnchor * 2 - 1 : physAnchor;
+    int restorePage = IsViewportCropV2Active() ? physAnchor * 2 - 1 + viewportCropV2SavedColumn : physAnchor;
     if (ValidPageNo(restorePage)) {
         PageInfo* pi = GetPageInfo(restorePage);
         if (pi) {
             dyInPage = (int)(dyFrac * (float)pi->pos.dy);
         }
     }
-    RestoreViewportAfterV2Toggle(physAnchor, dyInPage);
+    RestoreViewportAfterV2Toggle(physAnchor, dyInPage, viewportCropV2SavedColumn);
     // full scroll pipeline (background renders queued + scrollbars updated +
     // PageNoChanged + async repaint), matching the v2 toggle and SetDisplayMode
     // paths - a bare RecalcVisibleParts + RepaintDisplay left the scrollbars
@@ -1707,22 +1715,27 @@ void DisplayModel::RecalcVisibleParts() const {
         return;
     }
 
+    // direct recompute: pages don't move during a scroll, only the viewport
+    // does — the previous version built a full DocumentLayout (Reset/copies
+    // per page + a second full pass) EVERY scroll tick, which dominated drag
+    // and autoscroll cost with two-columns v2 (2× virtual pages)
+    Rect vp = viewPort;
     int nPages = PageCount();
-    DocumentLayout layout;
-    layout.Reset(nPages);
-    layout.viewPort = viewPort;
     for (int pageNo = 1; pageNo <= nPages; ++pageNo) {
-        DocumentLayoutPage* layoutPage = layout.GetPage(pageNo);
         PageInfo* pageInfo = GetPageInfo(pageNo);
-        if (!layoutPage || !pageInfo) {
+        if (!pageInfo) {
             continue;
         }
-        layoutPage->pos = pageInfo->pos;
-        layoutPage->isShown = pageInfo->isShown;
-        layoutPage->zoomReal = pageInfo->zoomReal;
+        Rect pageRect = pageInfo->pos;
+        Rect visiblePart = pageRect.Intersect(vp);
+        pageInfo->visibleRatio = 0.0;
+        if (!visiblePart.IsEmpty() && !pageRect.IsEmpty()) {
+            pageInfo->visibleRatio =
+                1.0f * (float)visiblePart.dx * (float)visiblePart.dy / ((float)pageRect.dx * (float)pageRect.dy);
+        }
+        pageInfo->pageOnScreen = pageRect;
+        pageInfo->pageOnScreen.Offset(-vp.x, -vp.y);
     }
-    layout.RecalcVisibleParts();
-    CopyDocumentLayoutToPageInfo(this, layout);
 }
 
 int DisplayModel::GetPageNoByPoint(Point pt) const {
@@ -1954,7 +1967,12 @@ bool DisplayModel::IsOverText(Point pt) {
     }
 
     PointF pos = CvtFromScreen(pt, pageNo);
-    return textSelection->IsOverGlyph(pageNo, pos.x, pos.y);
+    // textSelection is engine-bound: it needs the PHYSICAL pageNo — with
+    // two-columns v2, pageNo here is virtual (page 2L/2R), so a raw pass hit
+    // nothing on the right column or any virtual≠physical page (TC2 bug:
+    // "can't select OCR text") — every other caller uses VirtualToPhysical.
+    int physPageNo = VirtualToPhysical(pageNo);
+    return textSelection->IsOverGlyph(physPageNo, pos.x, pos.y);
 }
 
 void DisplayModel::RenderVisibleParts() {

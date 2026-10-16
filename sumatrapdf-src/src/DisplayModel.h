@@ -247,7 +247,7 @@ struct DisplayModel : DocController {
     bool ColumnOffsetXForPage(int pageNo, float* offset) const;
     // restore the vertical scroll position after the N<->2N relayout so toggling
     // v2 doesn't jump the view. physAnchor + dyInPage captured BEFORE the toggle.
-    void RestoreViewportAfterV2Toggle(int physAnchor, int dyInPage);
+    void RestoreViewportAfterV2Toggle(int physAnchor, int dyInPage, int column = 0);
     int VirtualToPhysical(int virtualPageNo) const;
     int ColumnOfVirtual(int virtualPageNo) const;
     int VirtualPageCount() const;
@@ -356,6 +356,7 @@ struct DisplayModel : DocController {
     bool viewportCropV2Enabled = false;
     bool viewportCropV2QuickToggled = false; // currently showing full page
     float viewportCropV2SavedZoom = 1.0f;    // column zoom restored on quick-view release
+    int viewportCropV2SavedColumn = 0; // column (0 left / 1 right) the user was reading when the quick view started
 
     // margin trim (independent of viewport crop)
     bool marginTrimEnabled = false;
