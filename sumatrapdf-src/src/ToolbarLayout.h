@@ -15,15 +15,38 @@ struct ToolbarSlotSpec;
 
 // Centralized design tokens for toolbar layout (DPI base units; wrap with DpiScale at use site)
 struct ToolbarTokens {
-    int ctrlGapX = 4;     // horizontal gap between adjacent custom controls
-    int ctrlH = 18;       // standard height for checkbox / edit controls
-    int labelW = 40;      // "Timer:" label fallback width
-    int timerSlotW = 130; // timer controls slot fallback width
-    int etaW = 50;        // ETA label fallback width
-    int pagePadX = 12;    // page box padding
-    int buttonGapX = 8;   // gap between button and floating label
-    int edgeMargin = 4;   // toolbar edge margin
+    int ctrlGapX = 4;   // horizontal gap between adjacent custom controls
+    int ctrlH = 18;     // standard height for checkbox / edit controls
+    int labelW = 40;    // "Timer:" label fallback width
+    int etaW = 50;      // ETA label fallback width
+    int pagePadX = 12;  // page box padding
+    int buttonGapX = 8; // gap between button and floating label
+    int edgeMargin = 4; // toolbar edge margin
 };
+
+// --- Shared design tokens: colors + fonts (toolbar + home) ---
+// Theme-aware: resolve DsAccentsGet() at paint time. A theme switch only
+// repaints (it never re-runs cached setup), so these must not be baked into a
+// class brush or a static.
+struct DsAccents {
+    COLORREF text;         // body text (labels, ticks, totals)
+    COLORREF textStrong;   // emphasized text (values, titles)
+    COLORREF textHot;      // interactive text / accent
+    COLORREF silver;       // silver accent (bars, curve)
+    COLORREF silverHi;     // hovered cell (bright silver)
+    COLORREF today;        // TODAY marker (orange)
+    COLORREF cellEmpty;    // heatmap: no-data cell fill
+    COLORREF cellOutline;  // heatmap: outline around an empty cell
+    COLORREF separator;    // section separator line
+    COLORREF axis;         // chart axis + nav triangle glyphs
+    COLORREF cellGrade[4]; // heatmap fill by minutes (<30, <60, <120, else)
+};
+DsAccents DsAccentsGet();
+
+// Font tokens: family + GDI+ point sizes (shared with GDI text helpers)
+const WCHAR* DsFontFamily();
+float DsFontSizeLabel();
+float DsFontSizeTitle();
 
 // Specification for a single child window within a toolbar slot
 struct ToolbarChildSpec {

@@ -606,6 +606,8 @@ struct FileState {
     int iconIdx;
     // Autoscroll speed multiplier for this document
     float autoScrollSpeedMultiplier;
+    // total seconds of reading time (auto-scroll active) for this document
+    int readingTimeSec;
     // invert page colors for this document
     bool invertColors;
     // contrast overlay enabled for this document
@@ -1641,6 +1643,7 @@ static const FieldInfo gFileStateFields[] = {
     {offsetof(FileState, reparseIdx), SettingType::Int, 0},
     {offsetof(FileState, tocState), SettingType::IntArray, 0},
     {offsetof(FileState, autoScrollSpeedMultiplier), SettingType::Float, (intptr_t)"0.008"},
+    {offsetof(FileState, readingTimeSec), SettingType::Int, 0},
     {offsetof(FileState, invertColors), SettingType::Bool, false},
     {offsetof(FileState, contrastEnabled), SettingType::Bool, false},
     {offsetof(FileState, contrastOpacity), SettingType::Int, 50},
@@ -1659,13 +1662,13 @@ static const FieldInfo gFileStateFields[] = {
 };
 static StructInfo gFileStateInfo = {
     sizeof(FileState),
-    37,
+    38,
     gFileStateFields,
     "FilePath\0Favorites\0IsPinned\0IsMissing\0OpenCount\0DecryptionKey\0UseDefaultState\0DisplayMode\0ScrollPos\0PageN"
     "o\0Zoom\0Rotation\0WindowState\0WindowPos\0ShowToc\0SidebarDx\0DisplayR2L\0BgCol\0TabCol\0ReparseIdx\0TocState\0Au"
-    "toScrollSpeedMultiplier\0InvertColors\0ContrastEnabled\0ContrastOpacity\0ArchScaleFactor\0ArchScaleAnchorX\0ArchSc"
-    "aleAnchorY\0ArchScaleLineP2x\0ArchScaleLineP2y\0ArchScaleLineDefined\0ArchScaleLineP1x\0ArchScaleLineP1y\0ArchUnit"
-    "\0ArchScaleSet\0ArchMeasurements\0ArchScaleStates",
+    "toScrollSpeedMultiplier\0ReadingTimeSec\0InvertColors\0ContrastEnabled\0ContrastOpacity\0ArchScaleFactor\0ArchScal"
+    "eAnchorX\0ArchScaleAnchorY\0ArchScaleLineP2x\0ArchScaleLineP2y\0ArchScaleLineDefined\0ArchScaleLineP1x\0ArchScaleL"
+    "ineP1y\0ArchUnit\0ArchScaleSet\0ArchMeasurements\0ArchScaleStates",
     "path of the document\0pages of this document bookmarked in the Favorites menu\0if true, the document is "
     "\"pinned\" to the Frequently Read list, so that recently opened documents don't displace it\0if true, the file is "
     "considered missing and won't be shown in any list\0number of times this document has been opened recently\0data "
@@ -1680,13 +1683,13 @@ static StructInfo gFileStateInfo = {
     "right-to-left in facing and book view modes (only used for comic book documents)\0if given, overrides the "
     "background color for this document\0if given, overrides the tab color for this document\0data required to restore "
     "the last read page in the ebook UI\0data required to determine which parts of the table of contents have been "
-    "expanded\0Autoscroll speed multiplier for this document\0invert page colors for this document\0contrast overlay "
-    "enabled for this document\0contrast overlay opacity for this document (0-100)\0arch tools scale factor (page "
-    "units per real unit)\0arch scale anchor X in page coords\0arch scale anchor Y in page coords\0arch scale line "
-    "point 2 X in page coords\0arch scale line point 2 Y in page coords\0whether arch scale line endpoints are "
-    "defined\0arch scale line point 1 X in page coords\0arch scale line point 1 Y in page coords\0arch unit: "
-    "0=mm,1=cm,2=m,3=in,4=ft\0whether arch scale is defined for this doc\0arch tools measurements serialized for this "
-    "document\0per-page scale states serialized for this document",
+    "expanded\0Autoscroll speed multiplier for this document\0total seconds of reading time (auto-scroll active) for "
+    "this document\0invert page colors for this document\0contrast overlay enabled for this document\0contrast overlay "
+    "opacity for this document (0-100)\0arch tools scale factor (page units per real unit)\0arch scale anchor X in "
+    "page coords\0arch scale anchor Y in page coords\0arch scale line point 2 X in page coords\0arch scale line point "
+    "2 Y in page coords\0whether arch scale line endpoints are defined\0arch scale line point 1 X in page coords\0arch "
+    "scale line point 1 Y in page coords\0arch unit: 0=mm,1=cm,2=m,3=in,4=ft\0whether arch scale is defined for this "
+    "doc\0arch tools measurements serialized for this document\0per-page scale states serialized for this document",
     false};
 
 static const FieldInfo gPointF_1_Fields[] = {

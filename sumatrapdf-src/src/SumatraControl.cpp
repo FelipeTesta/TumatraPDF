@@ -140,6 +140,7 @@ enum class ControlCmd : u16 {
     TestMarkdownFollowLink = 43,
     TestHomeListRows = 44,
     TestContextMenu = 45,
+    TestStatsToggleGraph = 46,
 };
 
 enum class ControlArgType : u16 {
@@ -723,6 +724,13 @@ static void ExecuteControlRequest(ControlRequest* req) {
             IntArg(req, 1, y);
             int exitCode = 0;
             Str res = ContextMenuResultTemp(x, y, &exitCode);
+            AppendTestResult(req, exitCode, res);
+            break;
+        }
+
+        case ControlCmd::TestStatsToggleGraph: {
+            int exitCode = 0;
+            Str res = StatsToggleGraphResultTemp(&exitCode);
             AppendTestResult(req, exitCode, res);
             break;
         }

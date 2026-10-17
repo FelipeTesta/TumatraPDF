@@ -790,6 +790,7 @@ const fileSettings: Field[] = [
   field("Himl", { name: "", ctype: "HIMAGELIST" }, "NULL", "image list holding the file's shell icon").notSaved(),
   field("IconIdx", Int, -1, "index of the file's shell icon in Himl, -1 if not loaded yet").notSaved(),
   field("AutoScrollSpeedMultiplier", Float, 0.008, "Autoscroll speed multiplier for this document"),
+  field("ReadingTimeSec", Int, 0, "total seconds of reading time (auto-scroll active) for this document"),
   field("InvertColors", Bool, false, "invert page colors for this document"),
   field("ContrastEnabled", Bool, false, "contrast overlay enabled for this document"),
   field("ContrastOpacity", Int, 50, "contrast overlay opacity for this document (0-100)"),

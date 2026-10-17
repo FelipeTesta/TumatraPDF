@@ -12,22 +12,75 @@
 #include "MainWindow.h"
 #include "AutoScroll.h"
 #include "Translations.h"
+#include "Theme.h"
 
 // Global design tokens instance
 ToolbarTokens gToolbarTokens;
 
+// --- shared design tokens (colors + fonts) ---
+// True when the current theme is dark: decided from the window background
+// luminance so it follows any theme (incl. custom ones), not a fixed list.
+static bool DsIsDarkTheme() {
+    COLORREF bg = ThemeWindowBackgroundColor();
+    int lum = (GetRValue(bg) * 299 + GetGValue(bg) * 587 + GetBValue(bg) * 114) / 1000;
+    return lum < 128;
+}
+
+DsAccents DsAccentsGet() {
+    DsAccents a{};
+    if (DsIsDarkTheme()) {
+        a.text = RGB(130, 130, 130);
+        a.textStrong = RGB(60, 60, 60);
+        a.textHot = RGB(120, 130, 140);
+        a.silver = RGB(120, 130, 140);
+        a.silverHi = RGB(198, 209, 215);
+        a.today = RGB(255, 140, 0);
+        a.cellEmpty = RGB(20, 20, 20);
+        a.cellOutline = RGB(90, 90, 90);
+        a.separator = RGB(200, 200, 200);
+        a.axis = RGB(120, 120, 120);
+        a.cellGrade[0] = RGB(120, 120, 120);
+        a.cellGrade[1] = RGB(150, 150, 150);
+        a.cellGrade[2] = RGB(190, 190, 190);
+        a.cellGrade[3] = RGB(225, 225, 225);
+    } else {
+        a.text = RGB(90, 90, 90);
+        a.textStrong = RGB(30, 30, 30);
+        a.textHot = RGB(90, 100, 120);
+        a.silver = RGB(140, 150, 165);
+        a.silverHi = RGB(90, 110, 140);
+        a.today = RGB(215, 110, 0);
+        a.cellEmpty = RGB(235, 235, 235);
+        a.cellOutline = RGB(205, 205, 205);
+        a.separator = RGB(210, 210, 210);
+        a.axis = RGB(150, 150, 150);
+        a.cellGrade[0] = RGB(200, 200, 200);
+        a.cellGrade[1] = RGB(175, 175, 175);
+        a.cellGrade[2] = RGB(150, 150, 150);
+        a.cellGrade[3] = RGB(120, 120, 120);
+    }
+    return a;
+}
+
+const WCHAR* DsFontFamily() {
+    return L"MS Shell Dlg";
+}
+
+float DsFontSizeLabel() {
+    return 9.5f;
+}
+
+float DsFontSizeTitle() {
+    return 11.0f;
+}
+
 // Slot specifications - declarative definition of all toolbar child windows
+// NOTE: the timer trio no longer has a slot button — it lives INSIDE the
+// widened Autoscroll button (Toolbar.cpp EnforceToolbarTextButtonWidths +
+// PositionToolbarChildWindows below). The old TimerInfoId slot wrapped apart
+// from its group on narrow windows: the trio lost its room and hid, and the
+// slot's rect landed over row 1 as a dead zone (user 2026-10-16).
 const ToolbarSlotSpec gToolbarSlots[] = {
-    {TimerInfoId,
-     "timer",
-     {
-         {CmdAutoScrollTimerToggle, "Button", BS_AUTOCHECKBOX | WS_CHILD | WS_VISIBLE, "", 18, false, 0},
-         {0, "Static", SS_CENTER | WS_CHILD | WS_VISIBLE, "Timer:", 40, true, 6},
-         {CmdAutoScrollTimerEdit, "Edit", ES_NUMBER | ES_AUTOHSCROLL | WS_CHILD | WS_VISIBLE, "30", 20, false, 0},
-     },
-     3,
-     4,
-     18},
     {PageInfoId,
      "page",
      {
@@ -93,10 +146,7 @@ void UpdateToolbarSlotWidths(MainWindow* win) {
 
         // Apply minimum fallback
         int fallbackWidth = 0;
-        if (slot.placeholderId == TimerInfoId)
-            fallbackWidth = DpiScale(win->hwndFrame, gToolbarTokens.timerSlotW);
-        else if (slot.placeholderId == PageInfoId)
-            fallbackWidth = DpiScale(win->hwndFrame, 150); // page box wider
+        if (slot.placeholderId == PageInfoId) fallbackWidth = DpiScale(win->hwndFrame, 150); // page box wider
 
         TbSetButtonDx(hwndToolbar, slot.placeholderId, std::max(neededWidth, fallbackWidth));
     }
@@ -107,13 +157,27 @@ void PositionToolbarChildWindows(MainWindow* win) {
     HWND hwndToolbar = win->hwndToolbar;
     if (!hwndToolbar) return;
 
-    // Timer trio (checkbox | "Timer:" | minutes edit). Anchored to the REAL
-    // CmdAutoScrollToggle button, laid out right-to-left ending at its left
-    // edge. The old anchor was the TimerInfoId separator; when comctl absorbs
-    // that separator at a wrap point its TB_GETRECT goes empty and the controls
-    // kept stale "flying" coordinates on every resize. A real button's rect is
-    // always valid (or clearly hidden), and the trio follows its group to
-    // whichever row the Autoscroll button wrapped into.
+    // D5 (user 2026-10-16: timer controls kept showing with home=on): the
+    // anchor button below is HIDDEN in focused mode and TB_GETRECT fails for
+    // hidden buttons (debug report res==0), so check BEFORE asking for the
+    // rect. Hide the trio for as long as the overlay is up; the regular
+    // layout passes re-show it once the anchor is back.
+    if (win->showHomeOverlay) {
+        for (HWND h : {win->autoScroll.hwndTimerCheck, win->autoScroll.hwndTimerLabel, win->autoScroll.hwndTimerEdit}) {
+            if (h && IsWindowVisible(h)) {
+                ShowWindow(h, SW_HIDE);
+            }
+        }
+        return;
+    }
+
+    // Timer trio (checkbox | "Timer:" | minutes edit). It lives INSIDE the
+    // Autoscroll button's rect: EnforceToolbarTextButtonWidths widens that
+    // button by exactly the trio's width, so the group is a single wrap unit
+    // and can never be split by a row wrap. (The old scheme reserved a
+    // dedicated slot button left of Autoscroll — on narrow windows comctl's
+    // balanced wrap moved that slot to another row, the trio lost its room
+    // and hid, and the slot's rect landed over row 1 as a dead zone.)
     HWND hwndCheck = win->autoScroll.hwndTimerCheck;
     HWND hwndLabel = win->autoScroll.hwndTimerLabel;
     HWND hwndEdit = win->autoScroll.hwndTimerEdit;
@@ -127,19 +191,20 @@ void PositionToolbarChildWindows(MainWindow* win) {
     Size editSz = HwndMeasureText(hwndEdit, "8888");
     int editW = std::max(editSz.dx, DpiScale(win->hwndFrame, 20));
     Size labelSz = HwndMeasureText(hwndLabel, "Timer:");
-    int xEdit = anchor.x - gap - editW;
-    int xLabel = xEdit - gap - labelSz.dx;
-    int xCheck = xLabel - gap - ctrlH;
+    int trioDx = gap + ctrlH + gap + labelSz.dx + gap + editW;
 
-    // no anchor (button hidden / not created yet) or no room for the whole
-    // trio before it -> hide; show otherwise (all-or-nothing, keeps the group
-    // from visually tearing apart on narrow windows)
-    bool show = !anchor.IsEmpty() && xCheck > gap;
+    // no anchor (button hidden / not created yet) or a button narrower than
+    // the trio (should not happen — Enforce widens it) -> hide; lay the trio
+    // left-to-right from the button's left edge otherwise
+    bool show = !anchor.IsEmpty() && anchor.dx >= trioDx + DpiScale(win->hwndFrame, 4);
     if (show) {
         int y = anchor.y + (anchor.dy - ctrlH) / 2;
-        MoveWindow(hwndEdit, xEdit, y, editW, ctrlH, TRUE);
-        MoveWindow(hwndLabel, xLabel, y, labelSz.dx, ctrlH, TRUE);
-        MoveWindow(hwndCheck, xCheck, y, ctrlH, ctrlH, TRUE);
+        int x = anchor.x + gap;
+        MoveWindow(hwndCheck, x, y, ctrlH, ctrlH, TRUE);
+        x += ctrlH + gap;
+        MoveWindow(hwndLabel, x, y, labelSz.dx, ctrlH, TRUE);
+        x += labelSz.dx + gap;
+        MoveWindow(hwndEdit, x, y, editW, ctrlH, TRUE);
     }
     for (HWND h : {hwndCheck, hwndLabel, hwndEdit}) {
         bool visible = IsWindowVisible(h) != FALSE;

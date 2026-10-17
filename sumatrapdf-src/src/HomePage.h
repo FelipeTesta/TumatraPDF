@@ -40,3 +40,4 @@ Str HomePageFilePathAtTemp(MainWindow* win, int x, int y);
 void HomePageClearActiveEntry(MainWindow* win);
 
 TempStr HomeListRowsResultTemp(int* exitCodeOut);
+TempStr StatsToggleGraphResultTemp(int* exitCodeOut);

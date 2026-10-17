@@ -4,6 +4,44 @@ Per-version changelog for TumatraPDF — new functions + bug fixes, newest first
 Feature details live in [README.md](README.md); full per-session development
 history in [LOG.md](LOG.md).
 
+## v1.0.12 (pending)
+
+- **Reading statistics ("Stats").** Time spent reading with auto-scroll
+  active is now tracked per document and per day, and shown in a new stats
+  band at the TOP of the Home page (its own "Stats" section; recently-opened
+  books + search moved below it, separated by a divider line): most-read
+  books with proportional silver bars (wheel-scrolls when long),
+  "Today / last 7 days" totals, a 365-day calendar heatmap (silver gradient
+  by minutes read, black cells for empty days, hover = silver +
+  per-day tooltip, TODAY outlined orange, year navigation arrows) and an
+  annual days×hours bar chart. The calendar toggles to a **line-graph mode**
+  (day × hours curve with month ticks, data points and a TODAY marker).
+  Per-document time persists with the file history; the daily data lives in
+  a plain `reading-stats.txt` sidecar next to the settings file.
+- **Stats heatmap reads like a calendar.** The 365-day grid is now
+  month-separated — 12 blocks with gaps, weekday letters (M T W T F S S,
+  Monday-first) on the left of every row and 3-letter month names centered
+  under the columns they span; the line graph labels each month segment on
+  the axis. Year navigation starts at 2026 (the first year with data).
+- **Toolbar wraps in coherent groups.** On narrow windows buttons move down
+  whole functional blocks instead of spilling half a group: file buttons
+  stay together with the page-number box and the Previous/Next page
+  buttons, fit/rotate/zoom stay together, and the timer controls
+  ("Timer:" box + −/+) now live INSIDE the Autoscroll button, wrapping with
+  it. No more half-groups or dead empty rows.
+- **Home = focus mode.** While the Home page overlay is on, every toolbar
+  button hides except Home (shown active, now an icon-only house button);
+  toggling Home off restores the toolbar.
+- **Auto-scroll auto-pauses** when the window is minimized or loses focus
+  (nobody is reading), and resumes automatically when the app is
+  reactivated — with a fresh time base so nothing jumps. A manual toggle
+  always overrides.
+- **Fixed: toolbar buttons could vanish during window drag-resize.**
+  Progressively shrinking or expanding the window could leave the toolbar
+  empty until the next resize; the layout now recovers by itself and a
+  drag-end forces a rebuild. Toolbar text buttons also no longer truncate
+  ("Auto-s...") at 100% DPI.
+
 ## v1.0.11 (2026-10-15)
 
 - **Fixed: autoscroll could stall permanently** when Two Columns / Trim /

@@ -14,6 +14,7 @@
 
 #include "Settings.h"
 #include "Commands.h"
+#include "ReadingStats.h"
 #include "DisplayMode.h"
 #include "DocController.h"
 #include "EngineBase.h"
@@ -697,6 +698,10 @@ bool SaveSettings() {
     if (!HasPermission(Perm::SavePreferences)) {
         return false;
     }
+
+    // flush pending reading-time stats with the same cadence (the sidecar is
+    // independent from the settings file, but this is the natural save point)
+    ReadingStatsFlush(true);
     logf("SaveSettings\n");
     // update display states for all tabs
     // we snapshot the list because SaveSettings() can be called re-entrantly

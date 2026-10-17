@@ -62,6 +62,7 @@
 #include "Toolbar.h"
 #include "FileHistory.h"
 #include "AutoScroll.h"
+#include "ReadingStats.h"
 #include "Translations.h"
 
 #include "RefHover.h"
@@ -206,6 +207,9 @@ void AutoScrollToggle(MainWindow* win) {
         return;
     }
     win->autoScroll.active = !win->autoScroll.active;
+    // a manual toggle overrides the focus-pause state (never auto-resume after
+    // the user explicitly turned it off, never double-resume after a manual on)
+    win->autoScroll.autoPausedByFocus = false;
     if (win->autoScroll.active) {
         win->autoScroll.accum = 0;
         win->autoScroll.startTick = GetTickCount();
@@ -229,6 +233,7 @@ void AutoScrollToggle(MainWindow* win) {
             win->autoScroll.webviewCtrlDown = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
             SetWebviewAutoScroll(win, win->autoScroll.webviewCtrlDown ? 0 : win->autoScroll.webviewPxPerSec);
         }
+        ReadingStatsResetTick();
     } else {
         KillTimer(win->hwndCanvas, kContinuousAutoScrollTimerID);
         if (mm) {
@@ -236,10 +241,54 @@ void AutoScrollToggle(MainWindow* win) {
             win->autoScroll.webviewCtrlDown = false;
         }
         UpdateToolbarEtaText(win, -1);
+        ReadingStatsFlush(true);
         LogInfo("[autoscroll] stop");
     }
     SetToolbarButtonCheckedState(win, CmdAutoScrollToggle, win->autoScroll.active);
     UpdateToolbarSpeedLabel(win);
+}
+
+// Pause the auto-scroll when the frame loses activation (minimized or focus
+// lost): nobody is reading then. Re-activation (AutoScrollResumeFromFocus)
+// continues where it left off. No-op when not scrolling or already paused.
+void AutoScrollPauseForFocus(MainWindow* win) {
+    if (!win || !win->autoScroll.active || win->autoScroll.autoPausedByFocus) {
+        return;
+    }
+    win->autoScroll.autoPausedByFocus = true;
+    win->autoScroll.active = false;
+    KillTimer(win->hwndCanvas, kContinuousAutoScrollTimerID);
+    if (win->AsMarkdown()) {
+        SetWebviewAutoScroll(win, 0);
+        win->autoScroll.webviewCtrlDown = false;
+    }
+    UpdateToolbarEtaText(win, -1);
+    SetToolbarButtonCheckedState(win, CmdAutoScrollToggle, false);
+    LogInfo("[autoscroll] paused: frame deactivated (minimized / focus lost)");
+}
+
+// Resume an auto-scroll that AutoScrollPauseForFocus paused. No-op otherwise
+// (manual-off stays off).
+void AutoScrollResumeFromFocus(MainWindow* win) {
+    if (!win || !win->autoScroll.autoPausedByFocus) {
+        return;
+    }
+    win->autoScroll.autoPausedByFocus = false;
+    win->autoScroll.active = true;
+    win->autoScroll.accum = 0;
+    win->autoScroll.startTick = GetTickCount();
+    // time-based scroll: measure elapsed from "now" so resuming doesn't jump
+    win->autoScroll.lastScrollTick = win->autoScroll.startTick;
+    RecalcAutoScrollEta(win);
+    UpdateToolbarEtaText(win, win->autoScroll.etaMinutes);
+    SetTimer(win->hwndCanvas, kContinuousAutoScrollTimerID, USER_TIMER_MINIMUM, nullptr);
+    if (win->AsMarkdown()) {
+        win->autoScroll.webviewPxPerSec = AutoScrollPxPerSec(win);
+        win->autoScroll.webviewCtrlDown = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+        SetWebviewAutoScroll(win, win->autoScroll.webviewCtrlDown ? 0 : win->autoScroll.webviewPxPerSec);
+    }
+    SetToolbarButtonCheckedState(win, CmdAutoScrollToggle, true);
+    LogInfo("[autoscroll] resumed: frame reactivated");
 }
 
 // Adjust continuous auto-scroll speed multiplier (step of 0.01)
@@ -279,14 +328,23 @@ static constexpr wchar_t kTimerDoneOverlayClass[] = L"TumatraTimerDoneOverlay";
 
 static LRESULT CALLBACK TimerDoneOverlayProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
+        case WM_ERASEBKGND: {
+            // painted per-erase (not a class brush) so a live theme switch is honoured
+            RECT rc;
+            GetClientRect(hwnd, &rc);
+            HBRUSH br = CreateSolidBrush(ThemeWindowBackgroundColor());
+            FillRect((HDC)wp, &rc, br);
+            DeleteObject(br);
+            return 1;
+        }
         case WM_PAINT: {
             PAINTSTRUCT ps;
             HDC hdc = BeginPaint(hwnd, &ps);
             RECT rc;
             GetClientRect(hwnd, &rc);
             SetBkMode(hdc, TRANSPARENT);
-            SetTextColor(hdc, RGB(255, 165, 0));
-            HFONT hFont = CreateFontW(52, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
+            SetTextColor(hdc, ThemeWindowTextColor());
+            HFONT hFont = CreateFontW(DpiScale(hwnd, 52), 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
                                       CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
             HFONT hOld = (HFONT)SelectObject(hdc, hFont);
             DrawTextW(hdc, L"\u2234", -1, &rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
@@ -323,7 +381,7 @@ static void RegisterTimerDoneOverlayClass() {
     wc.lpfnWndProc = TimerDoneOverlayProc;
     wc.hInstance = GetModuleHandleW(nullptr);
     wc.lpszClassName = kTimerDoneOverlayClass;
-    wc.hbrBackground = CreateSolidBrush(RGB(30, 30, 30));
+    wc.hbrBackground = nullptr; // WM_ERASEBKGND paints the theme surface
     RegisterClassExW(&wc);
 }
 
@@ -336,10 +394,10 @@ static void ShowTimerDoneOverlay(MainWindow* win) {
     RegisterTimerDoneOverlayClass();
     int screenW = GetSystemMetrics(SM_CXSCREEN);
     int screenH = GetSystemMetrics(SM_CYSCREEN);
-    int overlayW = 200;
-    int overlayH = 80;
+    int overlayW = DpiScale(win->hwndFrame, 200);
+    int overlayH = DpiScale(win->hwndFrame, 80);
     int x = (screenW - overlayW) / 2;
-    int y = screenH - overlayH - 40;
+    int y = screenH - overlayH - DpiScale(win->hwndFrame, 40);
     HWND hwndPopup = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, kTimerDoneOverlayClass, L"",
                                      WS_POPUP | WS_VISIBLE, x, y, overlayW, overlayH, nullptr, nullptr,
                                      GetModuleHandleW(nullptr), nullptr);
@@ -382,6 +440,7 @@ void AutoScrollContinuousTick(MainWindow* win, HWND hwnd) {
         // here would starve it and Ctrl would never pause the .md scroll.
         if (GetKeyState(VK_CONTROL) & 0x8000) {
             win->autoScroll.lastScrollTick = GetTickCount();
+            ReadingStatsResetTick();
             return;
         }
         // v2 quick view (shift-hold): temporarily pause the auto-scroll so the
@@ -389,6 +448,7 @@ void AutoScrollContinuousTick(MainWindow* win, HWND hwnd) {
         if (dm->viewportCropV2QuickToggled) {
             win->autoScroll.accum = 0;
             win->autoScroll.lastScrollTick = GetTickCount();
+            ReadingStatsResetTick();
             logf("[autoscroll-dbg] stall: viewportCropV2QuickToggled\n");
             return;
         }
@@ -400,6 +460,7 @@ void AutoScrollContinuousTick(MainWindow* win, HWND hwnd) {
         // mouse while scrolling. Skip the tick when the canvas isn't valid.
         if (dm->GetCanvasSize().dy <= 0) {
             win->autoScroll.lastScrollTick = GetTickCount();
+            ReadingStatsResetTick();
             logf("[autoscroll-dbg] stall guard: layout mid-rebuild, tick skipped\n");
             return;
         }
@@ -408,6 +469,7 @@ void AutoScrollContinuousTick(MainWindow* win, HWND hwnd) {
             KillTimer(hwnd, kContinuousAutoScrollTimerID);
             UpdateToolbarEtaText(win, -1);
             SetToolbarButtonCheckedState(win, CmdAutoScrollToggle, false);
+            ReadingStatsFlush(true);
             logf("[autoscroll-dbg] stall: IsAtDocumentEnd(vp=%.1f of %.1f)\n", (float)dm->GetViewPort().y,
                  (float)dm->GetCanvasSize().dy);
             return;
@@ -422,6 +484,7 @@ void AutoScrollContinuousTick(MainWindow* win, HWND hwnd) {
                 SetToolbarButtonCheckedState(win, CmdAutoScrollToggle, false);
                 MessageBeep(MB_OK);
                 ShowTimerDoneOverlay(win);
+                ReadingStatsFlush(true);
                 return;
             }
         }
@@ -436,6 +499,7 @@ void AutoScrollContinuousTick(MainWindow* win, HWND hwnd) {
         if (elapsedSec < 0.0f || elapsedSec > 1.0f) {
             elapsedSec = 0.0f; // clock wraparound or timer starvation: skip, don't jump
         }
+        ReadingStatsAddSeconds(win, elapsedSec);
         win->autoScroll.accum += AutoScrollPxPerSec(win) * elapsedSec;
         int dy = (int)win->autoScroll.accum;
         if (dy != 0) {
@@ -476,6 +540,9 @@ void AutoScrollContinuousTick(MainWindow* win, HWND hwnd) {
         if (ctrlDown != win->autoScroll.webviewCtrlDown) {
             win->autoScroll.webviewCtrlDown = ctrlDown;
             SetWebviewAutoScroll(win, ctrlDown ? 0 : win->autoScroll.webviewPxPerSec);
+            if (ctrlDown) {
+                ReadingStatsResetTick();
+            }
         }
         // Timer check (same as fixed-page)
         if (win->autoScroll.timerMinutes > 0 && win->autoScroll.startTick > 0) {
@@ -489,8 +556,14 @@ void AutoScrollContinuousTick(MainWindow* win, HWND hwnd) {
                 SetToolbarButtonCheckedState(win, CmdAutoScrollToggle, false);
                 MessageBeep(MB_OK);
                 ShowTimerDoneOverlay(win);
+                ReadingStatsFlush(true);
                 return;
             }
+        }
+        // Reading time: the rAF loop scrolls continuously — credit the
+        // wall-clock delta since the last tick (reset on Ctrl-pause)
+        if (!win->autoScroll.webviewCtrlDown) {
+            ReadingStatsTickWebview(win);
         }
         // ETA: the rAF loop inside the page throttles an 'autoscrollProgress'
         // notify every ~10s (see SetWebviewAutoScroll); OnAutoScrollProgress

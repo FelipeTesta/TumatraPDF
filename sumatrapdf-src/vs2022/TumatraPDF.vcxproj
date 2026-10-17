@@ -1480,6 +1480,7 @@ cd ../out/rel64_prefast_asan &amp; if not exist InstallerData.dat ..\..\bin\Make
     <ClCompile Include="..\src\PngOptimizer.cpp" />
     <ClCompile Include="..\src\Print.cpp" />
     <ClCompile Include="..\src\ReadAloudHighlight.cpp" />
+    <ClCompile Include="..\src\ReadingStats.cpp" />
     <ClCompile Include="..\src\ReadAloudPlaybackBar.cpp" />
     <ClCompile Include="..\src\RefHover.cpp" />
     <ClCompile Include="..\src\RefHoverCanvas.cpp" />

@@ -289,6 +289,18 @@ Toolbar toggle like Arch Tools/Flashcards. When ON:
 
 **Technical:** `src/Commands_Edit.{h,cpp}` (toggle, toolbars, placement, bbox editing + Apply via `ReplaceImageByIdx` on a transparent padded canvas), `MainWindow::EditToolsState` (`MainWindow.h`), `Canvas.cpp` click/drag/cursor/paint routing, overlay painted on the screen DC post-flush, `EngineMupdfCreateAnnotation` (stamp; clipboard BGR pixmaps converted to RGB before embedding — mupdf only accepts Gray/RGB/CMYK).
 
+### 11. 📊 Reading Stats (auto-scroll time tracking + Home dashboard)
+
+Time spent reading with **auto-scroll** active is tracked per document and per calendar day, and shown in a **stats band on the Home page** (top half, above the file thumbnails):
+
+- **Most-read ranking** — top 8 documents with right-aligned reading time.
+- **Today / last 7 days totals.**
+- **365-day heatmap** (GitHub/Anki style) — green gradient by minutes read per day, gray for empty days, month letters above, weekday letters (M W F S) on the left, ◀/▶ arrows to navigate years, hover shows "YYYY-MM-DD: time".
+- **Annual chart** — days × hours-read bar chart with the max labeled.
+- **Auto-pause:** minimizing the window or switching apps pauses the auto-scroll automatically; re-activation resumes it with a fresh time base (a manual toggle always overrides).
+
+**Technical:** `src/ReadingStats.{h,cpp}` (capture + daily sidecar `reading-stats.txt` — plain `YYYYMMDD <sec>` lines next to the settings file; per-doc `FileState.readingTimeSec` via gen-settings), hooks in `AutoScroll.cpp` (credit per tick, reset on every stall/pause, flush at stops + `SaveSettings`), focus pause in `WM_ACTIVATE` (`SumatraPDF.cpp`), `HomeStatsWnd` (VirtWnd in the home chrome tree) + `HomePageLayout.rcStats` band in `HomePage.cpp`.
+
 ### 📋 Technical Summary for Developers
 
 | Feature                    | Main files                                                                                                                       | Hook point                                                                                              |
@@ -301,6 +313,7 @@ Toolbar toggle like Arch Tools/Flashcards. When ON:
 | Flashcards (Cloze SRS)     | `src/Flashcard.{h,cpp}`, `src/Commands_Flashcard.cpp`, `src/FlashcardToolbar.cpp`, `src/FlashcardSidebar.cpp`, `src/WindowTab.h` | `FrameOnCommand()` flashcard branch, `LoadModelIntoTab` (per-tab state), `OnPaintDocument` (mask paint) |
 | Image Editing              | `src/Commands_Image.cpp`, `src/EngineMupdf.cpp`, `src/ImageSaveCropResize.cpp`, `src/ImageEditHostSumatra.cpp`, `src/Menu.cpp` | right-click Image menu, `FrameOnCommand()`, WM_TIMER paint watch |
 | Edit Mode                  | `src/Commands_Edit.{h,cpp}`, `src/Canvas.cpp`, `src/MainWindow.h`                                                              | `CmdEditToolsToggle`, Ctrl+V routing, canvas click placement                                        |
+| Reading Stats              | `src/ReadingStats.{h,cpp}`, `src/HomePage.cpp` (`HomeStatsWnd`), `src/AutoScroll.cpp`, `src/AppSettings.cpp`                    | autoscroll tick credit, WM_ACTIVATE pause, Home stats band                                            |
 
 **How to build:** See "Build" section below.
 

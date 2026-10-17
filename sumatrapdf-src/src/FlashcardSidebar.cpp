@@ -438,7 +438,7 @@ static void OnFcListSplitterMove(Splitter::MoveEvent* ev) {
     // when the AI chat panel is also open it keeps its width; the Lista
     // panel must fit in what remains
     if (win->uiState.aiChatVisible && win->hwndAiChatBox) {
-        dx -= win->aiChatDx + kFcSplitterDx;
+        dx -= win->aiChatDx + DpiScale(win->hwndFrame, kFcSplitterDx);
     }
     int minDx = DpiScale(win->hwndFrame, kFcListMinDx);
     if (dx < minDx || dx > rFrame.dx / 2) {

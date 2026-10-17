@@ -355,6 +355,10 @@ struct MainWindow {
         HWND hwndTimerEdit = nullptr;
         float webviewPxPerSec = 0;    // px/sec fed to the JS rAF autoscroll loop (markdown)
         bool webviewCtrlDown = false; // last Ctrl state seen by the webview guardian tick
+        // true when auto-scroll was paused because the frame lost activation
+        // (minimized / focus lost): re-activation resumes it automatically; a
+        // manual toggle clears it (the user decided)
+        bool autoPausedByFocus = false;
     } autoScroll;
     // --- end auto-scroll feature ---
 

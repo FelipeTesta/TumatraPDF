@@ -265,6 +265,15 @@ static const char* gIconBookmarks =
   <path d="M11 3h5a3 3 0 0 1 3 3v11" />
 </svg>)";
 
+// https://github.com/tabler/tabler-icons/blob/master/icons/home.svg — styling
+// matched to gIconBookmarks (Tabler, MIT); monochrome house for the Home button
+static const char* gIconHome =
+    R"(<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" stroke-width="1" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round">
+  <rect x="0" y="0" width="24" height="24" stroke="none"></rect>
+  <path d="M5 11l7 -7l7 7" />
+  <path d="M6 10v10h5v-6h2v6h5v-10" />
+</svg>)";
+
 // must match order in enum class TbIcon
 // clang-format off
 static const char* gIcons[] = {
@@ -297,6 +306,7 @@ static const char* gIcons[] = {
     gIconHomeThumbnails,
     gIconPin,
     gIconBookmarks,
+    gIconHome,
 };
 // clang-format on
 

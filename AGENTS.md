@@ -50,6 +50,7 @@ TumatraPDF is a fork of SumatraPDF (upstream baseline ~912ecf2, Aug 2026) — Wi
 | `CHANGELOG.md` (root) | per-version public changelog (v1.0.x releases, Keep a Changelog style, release checklist) | agents/users |
 | `LICENSE` / `SECURITY.md` / `CONTRIBUTING.md` (root) | GitHub community-health files: GPL-3.0 (verbatim text), vuln reporting, contributor ground rules | users |
 | `update.txt` (root) | update metadata served to running apps (`Latest:` + download URLs) — bumped by the release workflow, do NOT hand-edit except the URL keys | agents |
+| `Design_Guidelines.md` (root) | conventions + known traps distilled from sessions. **§6 / §6.1 = UI rules for Win32 dialogs, panels, toolbar, overlays — read before ANY visible UI change; §6.1 ends with the mandatory screenshot verification loop (dark + light)** | agents |
 | `FLOW/*.dot` | process maps only (never code architecture — §0b) | agents |
 | `TEMP/` | deprecated informativos (gitignored) | — |
 | `sumatrapdf-src/agents.md`, `sumatrapdf-src/docs/**` | upstream SumatraPDF reference, verbatim | upstream |
@@ -262,6 +263,11 @@ _Living document — append patterns/gotchas discovered during development._
 - **2026-09-12**: `AddUniquePageNo` is static in SumatraPDF.cpp — must reimplement locally if needed.
 - **2026-10-09**: `Commands_ArchTools.cpp` needs the same chain as Commands_Flashcard.cpp (DocController → DocProperties → TreeModel → EngineBase → DisplayModel) to touch DisplayModel members (`viewportCropV2Enabled` etc.) — C2027 otherwise.
 - **2026-10-09**: `tests/winapi.ts` `getClientRect` returns `{left,top,right,bottom}` — NOT dx/dy; `.dx` → NaN → `packCoords` masks to 0 → synthetic clicks land at (0,0).
+- **2026-10-16 (D8 audit, recurring bug family)**: **coordinate-space mismatch** is a recurring bug class here. Convention — which space each API speaks:
+  - `DisplayModel::CvtToScreen/CvtFromScreen`: PAGE coords ↔ CANVAS-CLIENT coords (includes scroll+zoom). Heaviest users: Canvas.cpp (~43 calls), DisplayModel.cpp (~26), Selection, Commands_Edit, ReadAloudHighlight, SearchAndDDE.
+  - `VirtWnd` tree: `ev.pt` (after `BubbleMouse`, VirtWnd.cpp:595) and `OnSetCursor(Point)`/`GetTooltipTemp(Point)` args are **LOCAL to the target's bounds**; `ptWindow` and `ctx.bounds`/`VirtWnd::bounds` are **ROOT-relative**. Rects computed in `Paint` from `ctx.bounds` are root-space → hit-test with `pt + bounds.{x,y}` (the canonical local→root bridge; see HomeStatsWnd OnMouseUp/Move/SetCursor). Trim precedent: same class (page/viewport Y mixing), R4 unified 3 drag-line math copies → `TrimComputeLineInfoForPage`.
+  - E2E posted coords may arrive DPI-virtualized ×1.25 (non-deterministic) — verify with page-top-border invariants, not assumed raw pixels.
+  - RULE: before any hit-test, name the space of BOTH operands out loud (local / root / client / page). Mixed = bug.
 
 # 13. Informativos: English + Caveman (MANDATORY)
 

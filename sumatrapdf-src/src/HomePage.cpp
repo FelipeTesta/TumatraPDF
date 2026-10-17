@@ -21,6 +21,7 @@
 #include "SumatraConfig.h"
 #include "FileHistory.h"
 #include "GlobalPrefs.h"
+#include "ReadingStats.h"
 #include "SumatraPDF.h"
 #include "MainWindow.h"
 #include "Commands.h"
@@ -29,6 +30,7 @@
 #include "FilterHighlightDraw.h"
 #include "FileThumbnails.h"
 #include "Menu.h"
+#include "ToolbarLayout.h"
 #include "TipText.h"
 #include "HomePage.h"
 #include "Translations.h"
@@ -860,6 +862,8 @@ struct HomePageLayout {
     int totalContentDy = 0;          // total height of all thumbnail rows
     int thumbsVisibleDy = 0;         // visible height for thumbnails area
     Rect rcThumbsArea;               // clip rect for thumbnails
+    Rect rcStats;                    // reading-stats band (empty = hidden)
+    Rect rcBooksHdr;                 // books-section title rect (D1)
 
     // search filter
     StrVec filterWords;
@@ -985,10 +989,14 @@ struct HomeTipWnd : VirtWnd {
 
 static Kind kindHomeChromeWnd = "homeChromeWnd";
 
+struct HomeStatsWnd; // defined below (before HomePageLayoutCache)
+
 struct HomeChromeWnd : VirtWnd {
     HomeTipWnd* tip = nullptr;
+    HomeStatsWnd* stats = nullptr;
     HomeEntriesWnd* entries = nullptr;
     VirtWndText* hdr = nullptr;
+    VirtWndText* booksHdr = nullptr; // D1: books-section title (below stats)
     HomeViewIconWnd* thumbView = nullptr;
     HomeViewIconWnd* listView = nullptr;
     HomeOpenDocWnd* openDoc = nullptr;
@@ -1123,6 +1131,673 @@ static TempStr HomeThumbTooltipTemp(Str path) {
 
 // --- scroll-friendly layout cache: full LayoutHomePage only when content/size/
 // filter changes; pure scrollY changes just offset stored thumb rects ---
+// ---- reading-stats band (FASE B "Stats") ------------------------------------
+
+// one `<` `>` triangle for year navigation
+static void HomeStatsDrawTriangle(Gdiplus::Graphics* g, const Gdiplus::PointF* pts, Gdiplus::Color c) {
+    Gdiplus::SolidBrush b(c);
+    g->FillPolygon(&b, pts, 3);
+}
+
+// day-of-year (1..366) → month/day/weekday (local time). mktime normalizes
+// the mday overflow, so doy > 31 rolls into the right month.
+static bool HomeStatsDateFromDayOfYear(int year, int doy, int* mmOut, int* ddOut, int* wdOut) {
+    struct tm t{};
+    t.tm_year = year - 1900;
+    t.tm_mon = 0;
+    t.tm_mday = doy;
+    t.tm_isdst = -1;
+    time_t tt = mktime(&t);
+    if (tt == (time_t)-1) {
+        return false;
+    }
+    struct tm lt{};
+    if (localtime_s(&lt, &tt) != 0) {
+        return false;
+    }
+    if (mmOut) {
+        *mmOut = lt.tm_mon + 1;
+    }
+    if (ddOut) {
+        *ddOut = lt.tm_mday;
+    }
+    if (wdOut) {
+        *wdOut = lt.tm_wday; // 0 = Sunday
+    }
+    return true;
+}
+
+static int HomeStatsDaysInYear(int year) {
+    bool leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
+    return leap ? 366 : 365;
+}
+
+static TempStr HomeStatsFormatMinTemp(int totalSec) {
+    int mins = totalSec / 60;
+    if (mins < 60) {
+        return fmt("%dm", mins);
+    }
+    if (mins < 60 * 24) {
+        return fmt("%dh %02dm", mins / 60, mins % 60);
+    }
+    return fmt("%dh", mins / 60);
+}
+
+// the stats band on the home page: most-read ranking (left), 365-day reading
+// heatmap with year navigation (right), annual per-day bar chart under it.
+// Data: FileState.readingTimeSec (per doc) + reading-stats.txt (per day).
+// theme design token (COLORREF) -> opaque GDI+ color
+static Gdiplus::Color GpCol(COLORREF c) {
+    return Gdiplus::Color(255, GetRValue(c), GetGValue(c), GetBValue(c));
+}
+
+struct HomeStatsWnd : VirtWnd {
+    MainWindow* win = nullptr;
+    int year = 0; // browsed year; 0 = initialize to the current year on paint
+    // geometry recomputed in Paint(); used by hover/click handling
+    Rect rcPrev;
+    Rect rcNext;
+    Rect rcGrid; // heatmap cells origin (after the weekday label column)
+    int cellDx = 10;
+    int cellDy = 10;
+    int firstCol = 0;  // weekday row of Jan 1 (Monday-first)
+    int hoverDay = -1; // day-of-year under the mouse, -1 = none
+    // D7: calendar mode — grid (heatmap) or line graph (day x hours)
+    bool graphMode = false;
+    Rect rcMode; // the Grid/Graph toggle (window coords)
+    // D3: most-read list — internal scroll (wheel) + ranking column rect
+    Rect rcRank;        // window coords (same convention as rcGrid)
+    int rankScroll = 0; // first visible row
+    int rankRows = 0;   // rows that fit (recomputed in Paint)
+    int rankCount = 0;  // total ranked books (recomputed in Paint)
+    // month-separated grid geometry (Paint refreshes; shared with handlers):
+    // monthGapPx = extra x separation between month blocks; monthStartCol[m]
+    // = first week column of month m (index 1..12)
+    int monthGapPx = 0;
+    int monthStartCol[13] = {};
+
+    int ColX(int col) const;
+    void Paint(VirtWndPaintCtx&) override;
+    void PaintGraph(Gdiplus::Graphics* g, Rect b, int heatX0, int heatW, int pad); // D7
+    bool OnMouseDown(VirtWndMouseEvent&) override;
+    bool OnMouseUp(VirtWndMouseEvent&) override;
+    bool OnMouseMove(VirtWndMouseEvent&) override;
+    bool OnMouseWheel(VirtWndMouseEvent&) override;
+    bool OnSetCursor(Point) override;
+    TempStr GetTooltipTemp(Point) override;
+};
+
+// 3-letter month names for the stats grid + graph labels (user 2026-10-16)
+static const WCHAR* kStatsMonthNames[12] = {L"Jan", L"Feb", L"Mar", L"Apr", L"May", L"Jun",
+                                            L"Jul", L"Aug", L"Sep", L"Oct", L"Nov", L"Dec"};
+
+// day-of-year of the 1st of month m (1-based) in the browsed year
+static int HomeStatsDoyOfMonthFirst(int year, int m) {
+    int doy = 1;
+    for (int mm = 1; mm < m; mm++) {
+        doy += HomeStatsDaysInYear(year) == 366
+                   ? (mm == 2 ? 29 : (mm == 4 || mm == 6 || mm == 9 || mm == 11 ? 30 : 31))
+                   : (mm == 2 ? 28 : (mm == 4 || mm == 6 || mm == 9 || mm == 11 ? 30 : 31));
+    }
+    return doy;
+}
+
+// x of week column `col` in the month-separated grid: month blocks add a
+// wider gap before each month's first column; grid paint + hover share this
+int HomeStatsWnd::ColX(int col) const {
+    int x = rcGrid.x + col * (cellDx + 2);
+    for (int m = 2; m <= 12; m++) {
+        if (monthStartCol[m] <= col) {
+            x += monthGapPx;
+        }
+    }
+    return x;
+}
+
+void HomeStatsWnd::Paint(VirtWndPaintCtx& ctx) {
+    Rect b = ctx.bounds;
+    // 320/520 are DIP breakpoints (band dx is already in scaled px)
+    if (b.IsEmpty() || b.dx < DpiScale(win->hwndFrame, 320)) {
+        return;
+    }
+    if (year == 0) {
+        SYSTEMTIME st{};
+        GetLocalTime(&st);
+        year = (int)st.wYear;
+    }
+    // app code painting with gdiplus directly: pull the raw HDC out of Gfx
+    HDC hdc = GfxHdc(ctx.gfx);
+    if (!hdc) {
+        return;
+    }
+    Gdiplus::Graphics gStorage(hdc);
+    if (gStorage.GetLastStatus() != Gdiplus::Ok) {
+        return;
+    }
+    Gdiplus::Graphics* g = &gStorage;
+    // DpiScale needs an HWND (frame), not the HDC
+    auto dpi = [this](int v) { return DpiScale(win->hwndFrame, v); };
+    DsAccents ac = DsAccentsGet(); // theme design tokens (D4); resolved per paint
+    Gdiplus::Font fontLabel(DsFontFamily(), DsFontSizeLabel());
+    Gdiplus::Font fontTitle(DsFontFamily(), DsFontSizeTitle(), Gdiplus::FontStyleBold);
+    Gdiplus::SolidBrush txtBrush(GpCol(ac.text));
+    Gdiplus::SolidBrush valBrush(GpCol(ac.textStrong));
+    Gdiplus::SolidBrush hotBrush(GpCol(ac.textHot));     // silver accent
+    Gdiplus::SolidBrush emptyBrush(GpCol(ac.cellEmpty)); // no-data cells
+    Gdiplus::SolidBrush silverBrush(GpCol(ac.silverHi)); // hovered data cell
+    Gdiplus::Pen emptyOutlinePen(GpCol(ac.cellOutline));
+
+    // --- left column: most-read ranking + totals ---
+    int pad = dpi(8);
+    int rankW = (b.dx * 30) / 100;
+    if (b.dx < DpiScale(win->hwndFrame, 520)) {
+        rankW = 0; // too narrow: heatmap only
+    }
+    int heatX0 = b.x + rankW + (rankW > 0 ? pad * 2 : 0);
+    int heatW = b.x + b.dx - heatX0;
+    if (rankW > 0) {
+        g->DrawString(L"Most read", -1, &fontTitle, Gdiplus::PointF((float)b.x, (float)b.y), &valBrush);
+        Vec<FileState*> all;
+        gFileHistory.GetRecentlyOpenedOrder(all);
+        // sort by reading time desc (selection: top 8 with time > 0)
+        Vec<FileState*> ranked;
+        for (int i = 0; i < len(all); i++) {
+            FileState* fs = all[i];
+            if (fs && fs->readingTimeSec > 0 && len(fs->filePath) > 0) {
+                ranked.Append(fs);
+            }
+        }
+        // insertion sort desc by readingTimeSec (Vec has no iterators)
+        for (int i = 1; i < len(ranked); i++) {
+            FileState* e = ranked[i];
+            int j = i - 1;
+            while (j >= 0 && ranked[j]->readingTimeSec < e->readingTimeSec) {
+                ranked[j + 1] = ranked[j];
+                j--;
+            }
+            ranked[j + 1] = e;
+        }
+        int y = b.y + pad + dpi(18);
+        int rowDy = dpi(17);
+        // D3: internal scroll — rows window over the ranked list (wheel-driven)
+        int totalsDy = dpi(14);
+        int listTop = y;
+        int listBottom = b.y + b.dy - pad - totalsDy - dpi(4);
+        rankRows = (listBottom - listTop) / rowDy;
+        if (rankRows < 1) {
+            rankRows = 1;
+        }
+        rankCount = len(ranked);
+        if (rankScroll > rankCount - rankRows) {
+            rankScroll = rankCount - rankRows;
+        }
+        if (rankScroll < 0) {
+            rankScroll = 0;
+        }
+        rcRank = {b.x, listTop, rankW, listBottom - listTop};
+        // bars are proportional to the top reader (ranked[0] after the sort)
+        int maxSecRanked = rankCount > 0 ? ranked[0]->readingTimeSec : 1;
+        if (maxSecRanked < 1) {
+            maxSecRanked = 1;
+        }
+        Gdiplus::SolidBrush barBrush(GpCol(ac.silver)); // silver (D4)
+        int nRows = std::min(rankCount - rankScroll, rankRows);
+        for (int i = 0; i < nRows; i++) {
+            FileState* fs = ranked[rankScroll + i];
+            TempStr baseName = path::GetBaseNameTemp(fs->filePath);
+            TempStr timeTxt = HomeStatsFormatMinTemp(fs->readingTimeSec);
+            int rowY = listTop + i * rowDy;
+            // name column (approximate clip to ~55% of the ranking width)
+            int nameW = (rankW * 55) / 100 - pad;
+            Str nameStr(baseName);
+            while (len(nameStr) > 4) {
+                Gdiplus::RectF nameRc;
+                g->MeasureString(ToWStrTemp(nameStr).s, -1, &fontLabel, Gdiplus::PointF(0, 0), &nameRc);
+                if ((int)nameRc.Width <= nameW) {
+                    break;
+                }
+                nameStr = Str(nameStr.s, len(nameStr) - 1);
+            }
+            g->DrawString(ToWStrTemp(nameStr).s, -1, &fontLabel, Gdiplus::PointF((float)(b.x + pad), (float)rowY),
+                          &txtBrush);
+            // time text, then a bar proportional to the reading time (D3)
+            Gdiplus::RectF txtRc;
+            g->MeasureString(ToWStrTemp(Str(timeTxt)).s, -1, &fontLabel, Gdiplus::PointF(0, 0), &txtRc);
+            int barX = b.x + pad + nameW + dpi(6);
+            g->DrawString(ToWStrTemp(Str(timeTxt)).s, -1, &fontLabel, Gdiplus::PointF((float)barX, (float)rowY),
+                          &valBrush);
+            int barStartX = barX + (int)txtRc.Width + dpi(6);
+            int barMaxW = b.x + rankW - pad - barStartX;
+            if (barMaxW < dpi(10)) {
+                barMaxW = dpi(10);
+            }
+            int barW = (int)(((float)fs->readingTimeSec / (float)maxSecRanked) * (float)barMaxW);
+            if (fs->readingTimeSec > 0 && barW < 2) {
+                barW = 2;
+            }
+            g->FillRectangle(&barBrush, barStartX, rowY + dpi(4), barW, rowDy - dpi(9));
+        }
+        if (rankCount == 0) {
+            g->DrawString(L"Read with auto-scroll to collect stats", -1, &fontLabel,
+                          Gdiplus::PointF((float)(b.x + pad), (float)y), &txtBrush);
+        } else if (rankCount > rankRows) {
+            // scroll hint
+            TempStr more = fmt("%d books - scroll", rankCount);
+            g->DrawString(ToWStrTemp(Str(more)).s, -1, &fontLabel,
+                          Gdiplus::PointF((float)(b.x + pad), (float)(listBottom - dpi(14))), &txtBrush);
+        }
+        // totals line at the bottom of the ranking column
+        SYSTEMTIME st{};
+        GetLocalTime(&st);
+        int todayKey = (int)st.wYear * 10000 + (int)st.wMonth * 100 + (int)st.wDay;
+        int todaySec = ReadingStatsGetDaySec(todayKey);
+        int weekSec = 0;
+        for (int back = 0; back < 7; back++) {
+            SYSTEMTIME d = st;
+            // go back `back` days via mktime
+            struct tm t{};
+            t.tm_year = st.wYear - 1900;
+            t.tm_mon = st.wMonth - 1;
+            t.tm_mday = st.wDay - back;
+            t.tm_isdst = -1;
+            time_t tt = mktime(&t);
+            struct tm lt{};
+            if (tt != (time_t)-1 && localtime_s(&lt, &tt) == 0) {
+                weekSec += ReadingStatsGetDaySec((lt.tm_year + 1900) * 10000 + (lt.tm_mon + 1) * 100 + lt.tm_mday);
+            }
+        }
+        TempStr totals =
+            fmt("Today %s / 7d %s", Str(HomeStatsFormatMinTemp(todaySec)), Str(HomeStatsFormatMinTemp(weekSec)));
+        g->DrawString(ToWStrTemp(Str(totals)).s, -1, &fontLabel,
+                      Gdiplus::PointF((float)(b.x + pad), (float)(b.y + b.dy - pad - dpi(14))), &txtBrush);
+    }
+
+    // --- year navigation row ---
+    int yearRowDy = dpi(16);
+    rcPrev = {heatX0, b.y, dpi(14), yearRowDy};
+    rcNext = {b.x + b.dx - pad - dpi(14), b.y, dpi(14), yearRowDy};
+    Gdiplus::PointF p1[3] = {{(float)(rcPrev.x + 10), (float)rcPrev.y},
+                             {(float)(rcPrev.x + 10), (float)(rcPrev.y + rcPrev.dy)},
+                             {(float)(rcPrev.x + 2), (float)(rcPrev.y + rcPrev.dy / 2)}};
+    HomeStatsDrawTriangle(g, p1, GpCol(ac.axis));
+    Gdiplus::PointF p2[3] = {{(float)(rcNext.x + 4), (float)rcNext.y},
+                             {(float)(rcNext.x + 4), (float)(rcNext.y + rcNext.dy)},
+                             {(float)(rcNext.x + 12), (float)(rcNext.y + rcNext.dy / 2)}};
+    HomeStatsDrawTriangle(g, p2, GpCol(ac.axis));
+    TempStr yearTxt = fmt("%d", year);
+    Gdiplus::StringFormat sf(Gdiplus::StringFormatFlagsNoWrap);
+    sf.SetAlignment(Gdiplus::StringAlignmentCenter);
+    Gdiplus::RectF yearRc((float)heatX0, (float)b.y, (float)heatW, (float)yearRowDy);
+    g->DrawString(ToWStrTemp(Str(yearTxt)).s, -1, &fontTitle, yearRc, &sf, &valBrush);
+
+    // D7: mode toggle (shows the mode you switch TO), left of the year arrows
+    {
+        TempStr modeLabel = graphMode ? _TRA("Grid") : _TRA("Graph");
+        Gdiplus::RectF modeRc;
+        g->MeasureString(ToWStrTemp(Str(modeLabel)).s, -1, &fontLabel, Gdiplus::PointF(0, 0), &modeRc);
+        int modeDx = (int)modeRc.Width + dpi(10);
+        rcMode = {rcNext.x - dpi(6) - modeDx, b.y, modeDx, yearRowDy};
+        g->DrawString(ToWStrTemp(Str(modeLabel)).s, -1, &fontLabel, Gdiplus::PointF((float)rcMode.x, (float)rcMode.y),
+                      &hotBrush);
+    }
+
+    // D7: line-graph mode replaces the heatmap with the day x hours chart
+    if (graphMode) {
+        PaintGraph(g, b, heatX0, heatW, pad);
+        return;
+    }
+
+    // --- heatmap grid (Monday-first rows, GitHub/Anki style) ---
+    // month-separated layout (user 2026-10-16): a wider gap between month
+    // blocks; weekday letters for ALL 7 rows, vertically centered with their
+    // row; 3-letter month names BELOW each block, centered over it
+    int labelDx = dpi(12);
+    int gridW = heatW - labelDx;
+    int cellGap = 2;
+    monthGapPx = dpi(6);
+    cellDx = (gridW - 52 * cellGap - 11 * monthGapPx) / 53;
+    cellDy = dpi(9);
+    int rowGap = 2;
+    // containment over legibility: a higher floor can push the grid past the
+    // band's right edge on narrow windows (53 columns + 11 month gaps).
+    // 53*(2+2)+11*6=278px always fits because Paint early-returns below 320.
+    if (cellDx < 2) {
+        cellDx = 2;
+    }
+    // grid mode = ONLY the heatmap (no annual bar chart here — that is graph
+    // mode's job). Center the grid between the year row and the month names.
+    int gridDy = 7 * (cellDy + rowGap);
+    int monthLblDy = dpi(14);
+    int topUsable = b.y + yearRowDy;
+    int bottomUsable = b.y + b.dy - pad - monthLblDy;
+    int extra = bottomUsable - topUsable - gridDy;
+    if (extra < 0) {
+        extra = 0;
+    }
+    rcGrid = {heatX0 + labelDx, topUsable + extra / 2, 53 * (cellDx + cellGap) + 11 * monthGapPx, gridDy};
+    int jan1Wd = 0;
+    HomeStatsDateFromDayOfYear(year, 1, nullptr, nullptr, &jan1Wd);
+    firstCol = (jan1Wd + 6) % 7; // Monday-first row index of Jan 1
+    for (int m = 1; m <= 12; m++) {
+        monthStartCol[m] = (firstCol + HomeStatsDoyOfMonthFirst(year, m) - 1) / 7;
+    }
+    // weekday labels: one letter per day, Monday-first, vertically centered
+    // with the row it names
+    {
+        Gdiplus::RectF wdRc;
+        g->MeasureString(L"M", 1, &fontLabel, Gdiplus::PointF(0, 0), &wdRc);
+        float wdH = wdRc.Height;
+        const WCHAR* weekdayLetters = L"MTWTFSS";
+        for (int row = 0; row < 7; row++) {
+            WCHAR letter[2] = {weekdayLetters[row], 0};
+            float y = (float)rcGrid.y + (float)(row * (cellDy + rowGap)) + ((float)cellDy - wdH) / 2.0f;
+            g->DrawString(letter, 1, &fontLabel, Gdiplus::PointF((float)heatX0, y), &txtBrush);
+        }
+    }
+    // month names below each block, centered over the columns it spans
+    for (int m = 1; m <= 12; m++) {
+        int c0 = monthStartCol[m];
+        int c1 = (m < 12) ? monthStartCol[m + 1] : 53;
+        int x0 = ColX(c0);
+        int x1 = ColX(c1) - cellGap; // right edge of the month's last column
+        Gdiplus::RectF nameRc;
+        g->MeasureString(kStatsMonthNames[m - 1], 3, &fontLabel, Gdiplus::PointF(0, 0), &nameRc);
+        if (x1 - x0 >= (int)nameRc.Width + 4) { // skip on very narrow blocks
+            float cx = (float)(x0 + x1) / 2.0f - nameRc.Width / 2.0f;
+            g->DrawString(kStatsMonthNames[m - 1], 3, &fontLabel,
+                          Gdiplus::PointF(cx, (float)(rcGrid.y + rcGrid.dy + dpi(2))), &txtBrush);
+        }
+    }
+    // cells — D2 styling: empty = black w/ slight gray outline; filled = graded
+    // silver-grays by reading time; hovered = silver; TODAY = orange outline
+    int todayDoy = 0;
+    {
+        SYSTEMTIME st{};
+        GetLocalTime(&st);
+        if ((int)st.wYear == year) {
+            struct tm t{};
+            t.tm_year = st.wYear - 1900;
+            t.tm_mon = st.wMonth - 1;
+            t.tm_mday = st.wDay;
+            t.tm_isdst = -1;
+            time_t tt = mktime(&t);
+            struct tm lt{};
+            if (tt != (time_t)-1 && localtime_s(&lt, &tt) == 0) {
+                todayDoy = lt.tm_yday + 1;
+            }
+        }
+    }
+    Gdiplus::Pen todayPen(GpCol(ac.today), 1.6f); // orange: TODAY
+    int daysInYear = HomeStatsDaysInYear(year);
+    for (int doy = 1; doy <= daysInYear; doy++) {
+        int mm = 0, dd = 0;
+        HomeStatsDateFromDayOfYear(year, doy, &mm, &dd, nullptr);
+        int sec = ReadingStatsGetDaySec(year * 10000 + mm * 100 + dd);
+        int idx = firstCol + doy - 1;
+        int row = idx % 7;
+        int col = idx / 7;
+        int cx = ColX(col);
+        int cy = rcGrid.y + row * (cellDy + rowGap);
+        if (sec == 0) {
+            g->FillRectangle(&emptyBrush, cx, cy, cellDx, cellDy);
+            g->DrawRectangle(&emptyOutlinePen, cx, cy, cellDx, cellDy);
+        } else if (doy == hoverDay) {
+            g->FillRectangle(&silverBrush, cx, cy, cellDx, cellDy);
+        } else {
+            int mins = sec / 60;
+            Gdiplus::ARGB c;
+            if (mins < 30) {
+                c = GpCol(ac.cellGrade[0]).GetValue();
+            } else if (mins < 60) {
+                c = GpCol(ac.cellGrade[1]).GetValue();
+            } else if (mins < 120) {
+                c = GpCol(ac.cellGrade[2]).GetValue();
+            } else {
+                c = GpCol(ac.cellGrade[3]).GetValue();
+            }
+            Gdiplus::SolidBrush cellBrush(c);
+            g->FillRectangle(&cellBrush, cx, cy, cellDx, cellDy);
+        }
+        if (doy == todayDoy) {
+            g->DrawRectangle(&todayPen, cx - 1, cy - 1, cellDx + 2, cellDy + 2);
+        }
+    }
+
+    // D1: section separator — subtle line at the bottom edge of the band
+    Gdiplus::Pen sepPen(GpCol(ac.separator));
+    g->DrawLine(&sepPen, (float)b.x, (float)(b.y + b.dy - 1), (float)(b.x + b.dx), (float)(b.y + b.dy - 1));
+}
+
+// D7: line-graph calendar mode — day-of-year (x) x reading hours (y) for the
+// browsed year. Month ticks on the x axis, data points + a smooth curve,
+// hours scale on the left. Same data as the heatmap, one point per day with
+// reading time > 0.
+void HomeStatsWnd::PaintGraph(Gdiplus::Graphics* g, Rect b, int heatX0, int heatW, int pad) {
+    auto dpi = [this](int v) { return DpiScale(win->hwndFrame, v); };
+    DsAccents ac = DsAccentsGet(); // theme design tokens (D4); resolved per paint
+    Gdiplus::Font fontLabel(DsFontFamily(), DsFontSizeLabel());
+    Gdiplus::SolidBrush txtBrush(GpCol(ac.text));
+    Gdiplus::SolidBrush valBrush(GpCol(ac.textStrong));
+    Gdiplus::SolidBrush silverBrush(GpCol(ac.silverHi));
+    Gdiplus::Pen axisPen(GpCol(ac.axis));
+    Gdiplus::Pen curvePen(GpCol(ac.silver), 1.8f);
+    Gdiplus::Pen todayPen(GpCol(ac.today), 1.6f); // orange: TODAY
+
+    int chartTop = b.y + dpi(16) + dpi(12);
+    // extra reserve below the axis: the month | ticks + 3-letter names
+    int chartBottom = b.y + b.dy - pad - dpi(17);
+    int chartH = chartBottom - chartTop;
+    if (chartH < dpi(40)) {
+        return;
+    }
+    int labelDx = dpi(12);
+    rcGrid = {heatX0 + labelDx, chartTop, heatW - labelDx, chartH};
+
+    int daysInYear = HomeStatsDaysInYear(year);
+    // pass 1: max seconds (y scale)
+    int maxSec = 1;
+    for (int doy = 1; doy <= daysInYear; doy++) {
+        int mm = 0, dd = 0;
+        HomeStatsDateFromDayOfYear(year, doy, &mm, &dd, nullptr);
+        int sec = ReadingStatsGetDaySec(year * 10000 + mm * 100 + dd);
+        if (sec > maxSec) {
+            maxSec = sec;
+        }
+    }
+    // pass 2: points for days with data
+    Vec<Gdiplus::PointF> pts;
+    int todayDoy = 0;
+    {
+        SYSTEMTIME st{};
+        GetLocalTime(&st);
+        if ((int)st.wYear == year) {
+            struct tm t{};
+            t.tm_year = st.wYear - 1900;
+            t.tm_mon = st.wMonth - 1;
+            t.tm_mday = st.wDay;
+            t.tm_isdst = -1;
+            time_t tt = mktime(&t);
+            struct tm lt{};
+            if (tt != (time_t)-1 && localtime_s(&lt, &tt) == 0) {
+                todayDoy = lt.tm_yday + 1;
+            }
+        }
+    }
+    for (int doy = 1; doy <= daysInYear; doy++) {
+        int mm = 0, dd = 0;
+        HomeStatsDateFromDayOfYear(year, doy, &mm, &dd, nullptr);
+        int sec = ReadingStatsGetDaySec(year * 10000 + mm * 100 + dd);
+        if (sec <= 0) {
+            continue;
+        }
+        float x = (float)rcGrid.x + ((float)(doy - 1) / (float)(daysInYear - 1)) * (float)rcGrid.dx;
+        float y = (float)chartBottom - ((float)sec / (float)maxSec) * (float)chartH;
+        pts.Append(Gdiplus::PointF(x, y));
+        if (doy == todayDoy) {
+            // TODAY marker: small orange cross-hair on the point
+            g->DrawLine(&todayPen, x - dpi(4), y, x + dpi(4), y);
+            g->DrawLine(&todayPen, x, y - dpi(4), x, y + dpi(4));
+        }
+    }
+    // axes: x along the bottom
+    g->DrawLine(&axisPen, (float)rcGrid.x, (float)chartBottom, (float)(rcGrid.x + rcGrid.dx), (float)chartBottom);
+    // y label: hours at the top-left
+    TempStr maxTxt = HomeStatsFormatMinTemp(maxSec);
+    g->DrawString(ToWStrTemp(Str(maxTxt)).s, -1, &fontLabel,
+                  Gdiplus::PointF((float)rcGrid.x, (float)(chartTop - dpi(14))), &txtBrush);
+    // month boundaries on the x axis (user 2026-10-16): a | tick at each
+    // month's start and the 3-letter name centered inside its segment
+    auto xOfDoy = [&](int doy) {
+        return (float)rcGrid.x + ((float)(doy - 1) / (float)(daysInYear - 1)) * (float)rcGrid.dx;
+    };
+    for (int m = 1; m <= 12; m++) {
+        float xStart = xOfDoy(HomeStatsDoyOfMonthFirst(year, m));
+        float xEnd = (m < 12) ? xOfDoy(HomeStatsDoyOfMonthFirst(year, m + 1)) : (float)(rcGrid.x + rcGrid.dx);
+        g->DrawLine(&axisPen, xStart, (float)chartBottom - (float)dpi(1), xStart, (float)chartBottom + (float)dpi(3));
+        Gdiplus::RectF nameRc;
+        g->MeasureString(kStatsMonthNames[m - 1], 3, &fontLabel, Gdiplus::PointF(0, 0), &nameRc);
+        if (xEnd - xStart > nameRc.Width + 4.0f) { // skip on very narrow segments
+            float cx = (xStart + xEnd) / 2.0f - nameRc.Width / 2.0f;
+            g->DrawString(kStatsMonthNames[m - 1], 3, &fontLabel, Gdiplus::PointF(cx, (float)(chartBottom + dpi(4))),
+                          &txtBrush);
+        }
+    }
+    // curve + data points
+    int nPts = len(pts);
+    if (nPts >= 2) {
+        g->DrawCurve(&curvePen, pts.LendData(), nPts);
+    }
+    for (int i = 0; i < nPts; i++) {
+        const Gdiplus::PointF& p = pts[i];
+        g->FillEllipse(&silverBrush, p.X - 2.5f, p.Y - 2.5f, 5.0f, 5.0f);
+    }
+    if (nPts == 0) {
+        g->DrawString(L"Read with auto-scroll to collect stats", -1, &fontLabel,
+                      Gdiplus::PointF((float)rcGrid.x, (float)(chartTop + dpi(6))), &txtBrush);
+    }
+    // D1: section separator (the grid path draws it at the end of Paint)
+    Gdiplus::Pen sepPen(GpCol(ac.separator));
+    g->DrawLine(&sepPen, (float)b.x, (float)(b.y + b.dy - 1), (float)(b.x + b.dx), (float)(b.y + b.dy - 1));
+}
+
+bool HomeStatsWnd::OnMouseDown(VirtWndMouseEvent& e) {
+    // capture everywhere in the band so the arrow click doesn't leak
+    return !bounds.IsEmpty();
+}
+
+bool HomeStatsWnd::OnMouseUp(VirtWndMouseEvent& e) {
+    // ev.pt is LOCAL to our bounds (VirtWnd::BubbleMouse recomputes it from
+    // ptWindow), while the rc* rects are in WINDOW coords (set in Paint from
+    // ctx.bounds) — convert before hit-testing
+    Point pt{e.pt.x + bounds.x, e.pt.y + bounds.y};
+    // D7: Grid <-> Graph toggle
+    if (rcMode.Contains(pt)) {
+        graphMode = !graphMode;
+        hoverDay = -1;
+        HwndInvalidate(win->hwndCanvas);
+        return true;
+    }
+    if (rcPrev.Contains(pt)) {
+        // stats exist only since the feature shipped (2026) — no point
+        // browsing empty earlier years (user 2026-10-16)
+        if (year > 2026) {
+            year--;
+            hoverDay = -1;
+            HwndInvalidate(win->hwndCanvas);
+        }
+        return true;
+    }
+    if (rcNext.Contains(pt)) {
+        if (year < 2200) {
+            year++;
+            hoverDay = -1;
+            HwndInvalidate(win->hwndCanvas);
+        }
+        return true;
+    }
+    return true;
+}
+
+bool HomeStatsWnd::OnMouseMove(VirtWndMouseEvent& e) {
+    // same local→window conversion as OnMouseUp (see the comment there)
+    Point pt{e.pt.x + bounds.x, e.pt.y + bounds.y};
+    int newHover = -1;
+    // D7: cell hover only exists in grid mode. The grid is month-separated
+    // (ColX), so invert that mapping instead of dividing by the column pitch.
+    if (!graphMode && !rcGrid.IsEmpty() && pt.y >= rcGrid.y && pt.y < rcGrid.y + 7 * (cellDy + 2)) {
+        int col = -1;
+        for (int c = 52; c >= 0; c--) {
+            if (pt.x >= ColX(c)) {
+                col = c;
+                break;
+            }
+        }
+        if (col >= 0 && pt.x < ColX(col) + cellDx + 2) {
+            int row = (pt.y - rcGrid.y) / (cellDy + 2);
+            int idx = col * 7 + row - firstCol + 1;
+            if (idx >= 1 && idx <= HomeStatsDaysInYear(year)) {
+                newHover = idx;
+            }
+        }
+    }
+    if (newHover != hoverDay) {
+        hoverDay = newHover;
+        HwndInvalidate(win->hwndCanvas);
+    }
+    return true;
+}
+
+bool HomeStatsWnd::OnSetCursor(Point pt) {
+    // pt arrives LOCAL to our bounds; rcPrev/rcNext/rcMode are in window coords
+    Point ptAbs{pt.x + bounds.x, pt.y + bounds.y};
+    if (rcPrev.Contains(ptAbs) || rcNext.Contains(ptAbs) || rcMode.Contains(ptAbs)) {
+        SetCursorCached(IDC_HAND);
+    } else {
+        SetCursorCached(IDC_ARROW);
+    }
+    return true;
+}
+
+bool HomeStatsWnd::OnMouseWheel(VirtWndMouseEvent& e) {
+    // D3: internal scroll of the most-read list — wheel over the ranking
+    // column scrolls its rows (the home page itself doesn't scroll then).
+    // ev.pt is LOCAL (see OnMouseUp); rcRank is in window coords.
+    Point pt{e.pt.x + bounds.x, e.pt.y + bounds.y};
+    if (!rcRank.Contains(pt) || rankCount <= rankRows) {
+        return false; // not ours: let the home page scroll
+    }
+    // e.wheelDelta: positive = wheel up (earlier rows), negative = down
+    int step = e.wheelDelta > 0 ? -1 : 1;
+    if (e.wheelDelta == 0) {
+        return false;
+    }
+    int newScroll = rankScroll + step * 3;
+    if (newScroll > rankCount - rankRows) {
+        newScroll = rankCount - rankRows;
+    }
+    if (newScroll < 0) {
+        newScroll = 0;
+    }
+    if (newScroll != rankScroll) {
+        rankScroll = newScroll;
+        HwndInvalidate(win->hwndCanvas);
+    }
+    return true; // consumed
+}
+
+TempStr HomeStatsWnd::GetTooltipTemp(Point pt) {
+    if (hoverDay < 1) {
+        return {};
+    }
+    int mm = 0, dd = 0;
+    if (!HomeStatsDateFromDayOfYear(year, hoverDay, &mm, &dd, nullptr)) {
+        return {};
+    }
+    int sec = ReadingStatsGetDaySec(year * 10000 + mm * 100 + dd);
+    TempStr t = HomeStatsFormatMinTemp(sec);
+    return fmt("%d-%02d-%02d: %s", year, mm, dd, Str(t));
+}
+
 struct HomePageLayoutCache {
     bool valid = false;
     Rect canvasRc;
@@ -1137,6 +1812,8 @@ struct HomePageLayoutCache {
 
     Rect rcThumbsArea;
     Rect rcSearchBorder;
+    Rect rcStats;    // reading-stats band (empty = hidden)
+    Rect rcBooksHdr; // books-section title rect (D1)
     Rect rcIconOpen;
     Rect rcIconListView;
     Rect rcIconThumbnailView;
@@ -1281,6 +1958,8 @@ static void SaveHomeLayoutCache(const HomePageLayout& l, Str filterText, int scr
     str::ReplaceWithCopy(&c.filterText, filterText);
     c.rcThumbsArea = l.rcThumbsArea;
     c.rcSearchBorder = l.rcSearchBorder;
+    c.rcStats = l.rcStats;
+    c.rcBooksHdr = l.rcBooksHdr;
     c.rcIconOpen = l.rcIconOpen;
     c.rcIconListView = l.rcIconListView;
     c.rcIconThumbnailView = l.rcIconThumbnailView;
@@ -1319,6 +1998,8 @@ static void ApplyHomeLayoutCache(HomePageLayout& l, int scrollY) {
 
     l.rcThumbsArea = c.rcThumbsArea;
     l.rcSearchBorder = c.rcSearchBorder;
+    l.rcStats = c.rcStats;
+    l.rcBooksHdr = c.rcBooksHdr;
     l.rcIconOpen = c.rcIconOpen;
     l.rcIconListView = c.rcIconListView;
     l.rcIconThumbnailView = c.rcIconThumbnailView;
@@ -1335,17 +2016,25 @@ static void ApplyHomeLayoutCache(HomePageLayout& l, int scrollY) {
     HFONT hdrFont = HdcCreateSimpleFont(hdc, "MS Shell Dlg", 24);
     HFONT fontText = HdcCreateSimpleFont(hdc, "MS Shell Dlg", 14);
 
-    Str txt = _TRA("Recently Opened");
-    if (gGlobalPrefs->homePageSortByFrequentlyRead) {
-        txt = _TRA("Frequently Read");
-    }
     HomeChromeWnd* chrome = EnsureHomeChrome(win);
+    // D1: the top header is the STATS section title; the books-section title
+    // lives in chrome->booksHdr (restored from c.rcBooksHdr below)
     VirtWndText* hdr = chrome->hdr;
-    hdr->SetText(txt);
+    hdr->SetText(_TRA("Stats"));
     hdr->font = GetPlatformFont(hdrFont);
     hdr->isRtl = isRtl;
     hdr->SetBounds(c.rcFreqRead);
     l.freqRead = hdr;
+
+    Str booksTxt = _TRA("Recently Opened");
+    if (gGlobalPrefs->homePageSortByFrequentlyRead) {
+        booksTxt = _TRA("Frequently Read");
+    }
+    VirtWndText* booksHdr = chrome->booksHdr;
+    booksHdr->SetText(booksTxt);
+    booksHdr->font = GetPlatformFont(hdrFont);
+    booksHdr->isRtl = isRtl;
+    booksHdr->SetBounds(c.rcBooksHdr);
 
     VirtWndText* openDoc = chrome->openDoc->text;
     openDoc->SetText(_TRA("Open a document..."));
@@ -1432,42 +2121,72 @@ static void LayoutHomePage(HomePageLayout& l) {
     }
     int thumbsContentWidth = (thumbsColsForLayout * kThumbnailDx) + ((thumbsColsForLayout - 1) * kThumbsSpaceBetweenX);
 
-    // --- Step 1: layout header at the top ---
+    // --- Step 1: section headers (D1: STATS section on top, books below) ---
     l.himlOpen = TbGetImageList(win->hwndToolbar);
     Rect rcIconView(0, 0, 0, 0);
     ImageList_GetIconSize(l.himlOpen, &rcIconView.dx, &rcIconView.dy);
 
-    Str txt = _TRA("Recently Opened");
-    if (gGlobalPrefs->homePageSortByFrequentlyRead) {
-        txt = _TRA("Frequently Read");
-    }
     HomeChromeWnd* chrome = EnsureHomeChrome(win);
+    int hdrY = DpiScale(hdc, 8);
+    int iconGap = DpiScale(hdc, 4);
+    int titleGap = DpiScale(hdc, 8);
+
+    // stats section title ("Stats") at the very top, left-aligned with thumbs
     VirtWndText* hdr = chrome->hdr;
-    hdr->SetText(txt);
+    hdr->SetText(_TRA("Stats"));
     hdr->font = GetPlatformFont(hdrFont);
     l.freqRead = hdr;
     hdr->isRtl = isRtl;
     Size txtSize = hdr->GetIdealSize(true);
+    Rect rcHdr(thumbsStartX, hdrY, txtSize.dx, txtSize.dy);
+    hdr->SetBounds(rcHdr);
 
-    int hdrY = DpiScale(hdc, 8);
-    int iconGap = DpiScale(hdc, 4);
-    int titleGap = DpiScale(hdc, 8);
+    // --- reading-stats band (FASE B3/D1): its own section under the title,
+    // dropped when the remaining space can't fit books + search + thumbs ---
+    l.rcStats = Rect{};
+    {
+        int statsGapY = DpiScale(hdc, 8);
+        int statsBandDy = DpiScale(hdc, 200);
+        int bandTop = rcHdr.y + rcHdr.dy + statsGapY;
+        int rcDy = rc.dy - DpiScale(hdc, 32); // kThumbsMiddleMargin at the bottom
+        // reserve: books hdr + search area + a usable thumbs region (~140)
+        int reserve = DpiScale(hdc, 140) + DpiScale(hdc, 16) +
+                      DpiScale(hdc, kHeaderSearchGapY + kSearchEditDy + 2 + kSearchThumbnailsGapY);
+        if (rcDy - bandTop - statsBandDy > reserve) {
+            l.rcStats = Rect{thumbsStartX, bandTop, thumbsContentWidth, statsBandDy};
+        }
+    }
+
+    // --- books-section header (recently opened + view icons + open link) ---
+    int sepGapY = DpiScale(hdc, 12);
+    int booksHdrY = l.rcStats.IsEmpty() ? hdrY : l.rcStats.y + l.rcStats.dy + sepGapY;
+    Str txt = _TRA("Recently Opened");
+    if (gGlobalPrefs->homePageSortByFrequentlyRead) {
+        txt = _TRA("Frequently Read");
+    }
+    VirtWndText* booksHdr = chrome->booksHdr;
+    booksHdr->SetText(txt);
+    booksHdr->font = GetPlatformFont(hdrFont);
+    booksHdr->isRtl = isRtl;
+    txtSize = booksHdr->GetIdealSize(true);
     int viewIconsDx = (2 * rcIconView.dx) + iconGap;
-    Rect rcHdr(thumbsStartX + viewIconsDx + titleGap, hdrY, txtSize.dx, txtSize.dy);
-    l.rcIconThumbnailView = {thumbsStartX, rcHdr.y + ((rcHdr.dy - rcIconView.dy) / 2), rcIconView.dx, rcIconView.dy};
+    Rect rcBooksHdr(thumbsStartX + viewIconsDx + titleGap, booksHdrY, txtSize.dx, txtSize.dy);
+    l.rcIconThumbnailView = {thumbsStartX, rcBooksHdr.y + ((rcBooksHdr.dy - rcIconView.dy) / 2), rcIconView.dx,
+                             rcIconView.dy};
     l.rcIconListView = {l.rcIconThumbnailView.x + rcIconView.dx + iconGap, l.rcIconThumbnailView.y, rcIconView.dx,
                         rcIconView.dy};
     if (isRtl) {
-        int groupDx = viewIconsDx + titleGap + rcHdr.dx;
+        int groupDx = viewIconsDx + titleGap + rcBooksHdr.dx;
         int groupX = rc.dx - thumbsStartX - groupDx;
-        rcHdr.x = groupX;
-        l.rcIconListView = {rcHdr.x + rcHdr.dx + titleGap, l.rcIconListView.y, rcIconView.dx, rcIconView.dy};
+        rcBooksHdr.x = groupX;
+        l.rcIconListView = {rcBooksHdr.x + rcBooksHdr.dx + titleGap, l.rcIconListView.y, rcIconView.dx, rcIconView.dy};
         l.rcIconThumbnailView = {l.rcIconListView.x + rcIconView.dx + iconGap, l.rcIconThumbnailView.y, rcIconView.dx,
                                  rcIconView.dy};
     }
-    hdr->SetBounds(rcHdr);
+    booksHdr->SetBounds(rcBooksHdr);
+    l.rcBooksHdr = rcBooksHdr;
 
-    /* "Open a document" link next to header */
+    /* "Open a document" link next to the books header */
     Rect rcIconOpen(0, 0, 0, 0);
     ImageList_GetIconSize(l.himlOpen, &rcIconOpen.dx, &rcIconOpen.dy);
 
@@ -1480,14 +2199,15 @@ static void LayoutHomePage(HomePageLayout& l) {
     txtSize = openDoc->GetIdealSize(true);
 
     int openDocSpacing = DpiScale(hdc, 16);
-    rcIconOpen.x = rcHdr.x + rcHdr.dx + openDocSpacing;
-    rcIconOpen.y = rcHdr.y + rcHdr.dy - rcIconOpen.dy - kOpenDocumentYShift + 3;
+    rcIconOpen.x = rcBooksHdr.x + rcBooksHdr.dx + openDocSpacing;
+    rcIconOpen.y = rcBooksHdr.y + rcBooksHdr.dy - rcIconOpen.dy - DpiScale(hdc, kOpenDocumentYShift) + DpiScale(hdc, 3);
     if (isRtl) {
-        rcIconOpen.x = rcHdr.x - openDocSpacing - rcIconOpen.dx;
+        rcIconOpen.x = rcBooksHdr.x - openDocSpacing - rcIconOpen.dx;
     }
     l.rcIconOpen = rcIconOpen;
 
-    Rect rcOpenDoc(rcIconOpen.x + rcIconOpen.dx + 3, rcHdr.y + rcHdr.dy - txtSize.dy - kOpenDocumentYShift, txtSize.dx,
+    Rect rcOpenDoc(rcIconOpen.x + rcIconOpen.dx + DpiScale(hdc, 3),
+                   rcBooksHdr.y + rcBooksHdr.dy - txtSize.dy - DpiScale(hdc, kOpenDocumentYShift), txtSize.dx,
                    txtSize.dy);
     if (isRtl) {
         rcOpenDoc.x = rcIconOpen.x - rcOpenDoc.dx - 3;
@@ -1496,7 +2216,7 @@ static void LayoutHomePage(HomePageLayout& l) {
 
     l.openDoc = openDoc;
 
-    int headerBottomY = rcHdr.y + rcHdr.dy;
+    int headerBottomY = rcBooksHdr.y + rcBooksHdr.dy;
 
     // --- Position search edit below header ---
     EnsureHomeSearchCreated(win);
@@ -1539,7 +2259,7 @@ static void LayoutHomePage(HomePageLayout& l) {
     // --- Step 3: middle area for thumbnails/list ---
     // content starts directly after headerBottomY (which includes kSearchThumbnailsGapY)
     int thumbsTopY = headerBottomY;
-    int thumbsBottomY = rc.dy - tipHeight - kThumbsMiddleMargin;
+    int thumbsBottomY = rc.dy - tipHeight - DpiScale(hdc, kThumbsMiddleMargin);
     int thumbsVisibleDy = std::max(0, thumbsBottomY - thumbsTopY);
 
     l.rcThumbsArea = {0, thumbsTopY, rc.dx, thumbsVisibleDy};
@@ -1866,6 +2586,35 @@ static void DrawHomeHelpButton(HDC hdc, Rect r) {
     SetTextColor(hdc, RGB(0, 0, 0));
     HdcDrawText(hdc, "?", r, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX, font);
     SetBkMode(hdc, oldBk);
+}
+
+// Flip the home-page stats band between the heatmap grid and the line-graph
+// mode (D7) and report the resulting mode. Deterministic test hook for the
+// -dbg-control protocol: synthetic mouse clicks are useless here because the
+// posted coords are DPI-virtualized non-deterministically.
+TempStr StatsToggleGraphResultTemp(int* exitCodeOut) {
+    if (len(gWindows) == 0) {
+        if (exitCodeOut) {
+            *exitCodeOut = 2;
+        }
+        return StrL("NOWINDOW");
+    }
+    MainWindow* win = gWindows[0];
+    HomeChromeWnd* chrome = EnsureHomeChrome(win);
+    if (!chrome || !chrome->stats || !win->homeRoot) {
+        if (exitCodeOut) {
+            *exitCodeOut = 2;
+        }
+        return StrL("NOCHROME");
+    }
+    chrome->stats->graphMode = !chrome->stats->graphMode;
+    chrome->stats->hoverDay = -1;
+    HwndInvalidate(win->hwndCanvas);
+    TempStr mode = chrome->stats->graphMode ? StrL("graph") : StrL("grid");
+    if (exitCodeOut) {
+        *exitCodeOut = 0;
+    }
+    return mode;
 }
 
 // What the home page list drew for each row: the path, the size text as drawn,
@@ -2233,6 +2982,12 @@ static HomeChromeWnd* EnsureHomeChrome(MainWindow* win) {
     chrome->entries->flags |= vwfClipChildren;
     chrome->AddChild(chrome->entries);
 
+    // reading-stats band (FASE B3): between the tip and the entries so both
+    // hit-testing and painting sit under the rest of the chrome
+    chrome->stats = new HomeStatsWnd();
+    chrome->stats->win = win;
+    chrome->AddChild(chrome->stats);
+
     chrome->thumbView = new HomeViewIconWnd();
     chrome->thumbView->win = win;
     chrome->thumbView->listView = false;
@@ -2247,6 +3002,9 @@ static HomeChromeWnd* EnsureHomeChrome(MainWindow* win) {
 
     chrome->hdr = new VirtWndText(StrL(""));
     chrome->AddChild(chrome->hdr);
+
+    chrome->booksHdr = new VirtWndText(StrL(""));
+    chrome->AddChild(chrome->booksHdr);
 
     chrome->openDoc = new HomeOpenDocWnd();
     chrome->openDoc->win = win;
@@ -2327,6 +3085,9 @@ static void HomePageSyncChrome(HomePageLayout& l) {
 
     chrome->tip->Sync(l.rcTip, l.rcTipText);
 
+    // reading-stats band (FASE B3): empty bounds = hidden (HitTest false)
+    chrome->stats->SetBounds(l.rcStats);
+
     // file entries: clipped to the thumbnails band, like the static links were
     HomeEntriesWnd* entries = chrome->entries;
     entries->SetBounds(l.rcThumbsArea);
@@ -2367,6 +3128,9 @@ static void HomePageSyncChrome(HomePageLayout& l) {
     chrome->hdr->textColor = ThemeWindowTextColor();
     // re-apply: the bounds were set before the parent was positioned
     chrome->hdr->SetBounds(l.freqRead->lastBounds);
+
+    chrome->booksHdr->textColor = ThemeWindowTextColor();
+    chrome->booksHdr->SetBounds(l.rcBooksHdr);
 
     // one click target covering the icon and the link text
     Rect rcOpen = l.rcIconOpen.Union(l.openDoc->lastBounds);

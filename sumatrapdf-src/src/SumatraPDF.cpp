@@ -111,6 +111,7 @@ extern "C" {
 #include "Tabs.h"
 #include "ArchVector.h"
 #include "Toolbar.h"
+#include "ToolbarLayout.h"
 #include "AutoScroll.h"
 #include "FindBar.h"
 #include "FindWindow.h"
@@ -6454,8 +6455,32 @@ bool RelayoutFrame(MainWindow* win, bool updateToolbars, int sidebarDx) {
         rc.dy -= menuBarDy;
     }
     if (win->isToolbarVisible) {
+        // D6: the rebar WINDOW must follow its BAND height (which follows the
+        // wrapped toolbar rows). The old code re-measured the rebar's own
+        // current height and re-applied it, so after a wrap the band grew but
+        // the rebar window kept its stale height and clipped the taller band
+        // — the user-visible "bottom sliver" of the toolbar eaten on narrow
+        // windows. Sum the bands' cyChild and add the window's non-client
+        // chrome instead; fall back to the measured height when there is no
+        // readable band info.
+        int bandDy = 0;
+        int nBands = (int)SendMessageW(win->hwndReBar, RB_GETBANDCOUNT, 0, 0);
+        for (int bi = 0; bi < nBands; bi++) {
+            REBARBANDINFOW rbiBand{};
+            rbiBand.cbSize = sizeof(rbiBand);
+            rbiBand.fMask = RBBIM_CHILDSIZE;
+            if (SendMessageW(win->hwndReBar, RB_GETBANDINFO, (WPARAM)bi, (LPARAM)&rbiBand)) {
+                bandDy += (int)rbiBand.cyChild;
+            }
+        }
         Rect rcRebar = HwndWindowRect(win->hwndReBar);
         int rebarDy = rcRebar.dy;
+        if (bandDy > 0) {
+            Rect rcRebarClient = HwndClientRect(win->hwndReBar);
+            int chrome = rcRebar.dy - rcRebarClient.dy;
+            rebarDy = bandDy + chrome;
+        }
+        logf("[d6] relayout bandDy=%d rebarDy=%d\n", bandDy, rebarDy);
         bool atBottom = ToolbarAtBottom();
         int rebarY = atBottom ? (rc.y + rc.dy - rebarDy) : rc.y;
         if (updateToolbars) {
@@ -11284,6 +11309,18 @@ static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, L
             InvalidateRect(win->hwndCanvas, nullptr, TRUE);
             SetFocus(win->hwndCanvas);
             SetToolbarButtonCheckedState(win, CmdOpenHome, win->showHomeOverlay);
+            // D5: home=on hides every other toolbar button (Home stays, active);
+            // home=off restores the regular visibility
+            ToolbarUpdateStateForWindow(win, true);
+            // re-anchor the page-number controls: home=on hides them (they
+            // would otherwise float at the top-left once their anchor button
+            // hides), home=off brings them back right away
+            UpdateToolbarPageText(win, win->ctrl ? win->ctrl->PageCount() : -1);
+            // timer trio + contrast veil follow the same rule (user
+            // 2026-10-16): hidden/suspended while home=on, repositioned and
+            // resumed on home=off
+            LayoutToolbarChildWindows(win);
+            EnsureContrastOverlayState(win);
             return true;
 
         case CmdToggleFavoritesSort:
@@ -13767,6 +13804,14 @@ LRESULT CALLBACK WndProcSumatraFrame(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) 
                 } else {
                     win->deferDpiChromeRefresh = false;
                 }
+                // drag/resize ended: FORCE the toolbar rewrap now (user: "no
+                // click-release, forcar a correcao e reaparicao dos botoes")
+                // — bypasses the width guard so a drag that ended in a
+                // degenerate state (collapsed client, glued rows) is repaired
+                // immediately
+                if (win->isToolbarVisible && win->hwndToolbar) {
+                    ToolbarRewrapAfterSizing(win, win->hwndToolbar, /*force=*/true);
+                }
             }
             return 0;
 
@@ -13849,11 +13894,15 @@ LRESULT CALLBACK WndProcSumatraFrame(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) 
         case WM_ACTIVATE:
             if (wp != WA_INACTIVE) {
                 gLastActiveFrameHwnd = hwnd;
-                // restore home-page keyboard-selection tooltip if applicable
                 if (win) {
+                    // auto-resume a scroll paused by minimize/focus loss
+                    AutoScrollResumeFromFocus(win);
+                    // restore home-page keyboard-selection tooltip if applicable
                     HomePageOnWindowActivate(win, true);
                 }
             } else if (win) {
+                // stop scrolling when nobody is reading (minimize / focus loss)
+                AutoScrollPauseForFocus(win);
                 // hide the topmost citation-hover popup when switching to
                 // another application (no WM_MOUSELEAVE is generated then)
                 RefHoverHide(win->refHover, win->hwndCanvas);

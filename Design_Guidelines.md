@@ -154,6 +154,44 @@ Code smells to avoid (refactoring.guru):
 - **Feedback**: every mutation → log line + count update + (if list open)
   list refresh. Silent state change = bug factory.
 
+### 6.1 Visual system for fork-authored UI (added 2026-10-16, design-canon audit)
+
+Scope: OWN UI (autoscroll toolbar/overlay, contrast overlay, flashcard dialogs +
+sidebar, AI-chat panel, home-page additions). Upstream look stays upstream.
+
+- **Space/metric scale**: every pad/gap/margin/min-size/pos = `DpiScale(hwnd, n)`
+  with n ∈ {4, 8, 12, 16, 24, 32}. Raw pixel literals in layout math = bug
+  (audit s25 found the timer-done overlay 200x80 box, 40px offset and 52px font
+  all unscaled → wrong size + position on 125%+ DPI).
+- **Theme colors only**: no `RGB(...)` for surfaces/text in fork UI — use
+  `Theme.h` (`ThemeWindowBackgroundColor`, `ThemeWindowTextColor`,
+  `ThemeWindowControlBackgroundColor`, `ThemeEdgeColor`, `ThemeHotBackgroundColor`).
+  Raw literals allowed ONLY for semantic state dots/badges, and then as a
+  dark/light pair (blue/orange/purple/green set, s23). A hardcoded surface =
+  broken light/dark theme (s25: overlay painted dark-on-dark).
+- **Theme switch = repaint**: never bake a theme color into a class brush at
+  registration — paint the surface in `WM_ERASEBKGND`/`WM_PAINT` so a live theme
+  change is honoured.
+- **Contrast floor**: text ≥ 4.5:1, large text + UI edges ≥ 3:1 against the actual
+  background, in BOTH themes. Prefer an existing theme pair (text-on-window,
+  text-on-control) instead of inventing colors.
+- **Toolbar**: group related controls; thin vertical separator `DpiScale(hwnd, 1)`
+  between groups; gap inside group `DpiScale(hwnd, 8)`, between groups
+  `DpiScale(hwnd, 16)`; all controls vertically centered, min hit height
+  `DpiScale(hwnd, 24)`.
+- **Icon vs text**: monochrome icon buttons matching upstream first; a text label
+  only when the action is ambiguous ("Timer"); no emoji/glyphs in product chrome.
+  Deliberate exception: transient overlays (the "∴" timer-done marker).
+- **Dialog anatomy**: title (bold, `DpiScale(hwnd, 16)` top pad) → content
+  (`DpiScale(hwnd, 12)` side pad, `DpiScale(hwnd, 8)` vertical rhythm) → actions
+  bottom-right (`DpiScale(hwnd, 12)` from edges): primary, secondary, destructive
+  (destructive still hold-to-confirm).
+- **Verification loop (mandatory)**: any new/changed dialog, panel, toolbar or
+  overlay needs a DPI-aware window capture in dark AND light before "done":
+  `& "C:\Users\Testa\.config\opencode\scripts\capture-window.ps1" -Title "TumatraPDF" -Out <png>`
+  (`-Client WxH` to pin a size, `-List` to find a popup/overlay by class).
+  No screenshot = not done; name the PNG in the LOG.md entry.
+
 ## 7. Dual namespaces — HARD rules (project bug history)
 
 - **virtual pageNo vs physical pageNo** (TC2 crop): features MUST route through

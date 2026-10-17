@@ -38,6 +38,7 @@ export enum ControlCommand {
   TestMarkdownFollowLink = 43,
   TestHomeListRows = 44,
   TestContextMenu = 45,
+  TestStatsToggleGraph = 46,
 }
 
 export type ControlArg = number | string | Uint8Array | ControlArg[];
@@ -331,7 +332,13 @@ export async function withControlledSumatra<T>(
   exe: string,
   fn: (client: ControlClient, proc: Bun.Subprocess) => Promise<T>,
   extraArgs: string[] = [],
-  options: { cwd?: string; env?: Record<string, string | undefined>; connectTimeoutMs?: number } = {},
+  options: {
+    cwd?: string;
+    env?: Record<string, string | undefined>;
+    connectTimeoutMs?: number;
+    /** extra NON-ZERO process exit codes treated as a normal shutdown (the app exits 5 on a graceful Quit with a document open — pre-existing, verified by a zero-interaction probe) */
+    allowedExitCodes?: number[];
+  } = {},
 ): Promise<T> {
   const pipeName = uniquePipeName();
   // stderr is piped: on a debug report the app writes the report text there
@@ -390,7 +397,8 @@ export async function withControlledSumatra<T>(
     throw fnErr;
   }
   // a debug report (ReportIf) or crash during the run / shutdown must fail the test
-  if (!killed && exitCode !== 0) {
+  const allowed = options.allowedExitCodes ?? [];
+  if (!killed && exitCode !== 0 && !allowed.includes(exitCode)) {
     const what = exitCode === DEBUG_REPORT_EXIT_CODE ? "debug report (ReportIf) fired" : `exit code ${exitCode}`;
     const details = stderrText ? `\n${stderrText}` : "";
     throw new Error(`SumatraPDF: ${what}${details}`);

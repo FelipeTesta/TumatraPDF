@@ -9,6 +9,11 @@ struct MainWindow;
 // Toggle continuous auto-scroll on/off
 void AutoScrollToggle(MainWindow* win);
 
+// Pause when the frame is deactivated (minimized / focus lost) and auto-resume
+// on re-activation; a manual toggle clears the paused-by-focus state
+void AutoScrollPauseForFocus(MainWindow* win);
+void AutoScrollResumeFromFocus(MainWindow* win);
+
 // Adjust continuous auto-scroll speed multiplier (+1 = faster, -1 = slower)
 void AutoScrollSpeedAdjust(MainWindow* win, int direction);
 

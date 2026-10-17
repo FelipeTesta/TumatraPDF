@@ -134,6 +134,12 @@ void EnsureContrastOverlayState(MainWindow* win) {
         } else {
             UpdateContrastOverlay(win);
         }
+        // home overlay = focused mode (user 2026-10-16: "home=on -> contrast
+        // off (temporariamente)"): the home page renders its own UI over the
+        // canvas, so suspend the veil while the overlay is up and resume on
+        // home=off. Show/hide only — creation/destruction stays bound to
+        // contrastEnabled, so the BUG-4 self-healing invariant is untouched.
+        ShowWindow(win->hwndContrastOverlay, win->showHomeOverlay ? SW_HIDE : SW_SHOW);
     } else if (win->hwndContrastOverlay) {
         DestroyContrastOverlay(win);
     }

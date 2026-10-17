@@ -5,6 +5,10 @@ struct MainWindow;
 
 void CreateToolbar(MainWindow*);
 void ReCreateToolbar(MainWindow* win);
+// delete+re-add the toolbar buttons for the current width (re-wrap) and
+// re-fit the rebar band; called after a resize settles (WM_TIMER debounce)
+// and synchronously on the frame's WM_EXITSIZEMOVE
+void ToolbarRewrapAfterSizing(MainWindow* win, HWND hwndToolbar, bool force = false);
 void ToolbarUpdateStateForWindow(MainWindow*, bool setButtonsVisibility);
 void UpdateToolbarButtonsToolTipsForWindow(MainWindow*);
 void UpdateToolbarFindText(MainWindow*);

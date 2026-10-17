@@ -10,6 +10,7 @@
 
 #include "Settings.h"
 #include "GlobalPrefs.h"
+#include "DocController.h"
 #include "SumatraPDF.h"
 #include "MainWindow.h"
 #include "Commands.h"
@@ -20,6 +21,7 @@
 #include "FileHistory.h"
 #include "AppSettings.h"
 #include "Toolbar.h"
+#include "ToolbarLayout.h"
 
 static void OnPaintAbout(MainWindow* win) {
     auto t = TimeGet();
@@ -180,6 +182,14 @@ LRESULT WndProcCanvasAbout(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, LPAR
                         InvalidateRect(win->hwndCanvas, nullptr, TRUE);
                         SetToolbarButtonCheckedState(win, CmdOpenHome, false);
                         logf("[home] overlay %s\n", StrL("OFF"));
+                        // D5: same restore job as the CmdOpenHome toggle —
+                        // without this every button stayed hidden after
+                        // closing the overlay with Esc (and the page/timer
+                        // controls with them)
+                        ToolbarUpdateStateForWindow(win, true);
+                        UpdateToolbarPageText(win, win->ctrl ? win->ctrl->PageCount() : -1);
+                        LayoutToolbarChildWindows(win);
+                        EnsureContrastOverlayState(win);
                         return 0;
                     }
                     break;

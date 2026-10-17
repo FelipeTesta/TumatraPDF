@@ -52,11 +52,9 @@ extern "C" {
 
 static int kButtonSpacingX = 4;
 
-// Toolbar custom-control design tokens (DPI base units; wrap with DpiScale at use site)
-constexpr int kCtrlGapX = 4;     // horizontal gap between adjacent custom controls
-constexpr int kCtrlH = 18;       // standard height for checkbox / edit controls
-constexpr int kLabelW = 40;      // "Timer:" label fallback width
-constexpr int kTimerSlotW = 130; // timer controls slot fallback width
+// Toolbar custom-control design tokens (kCtrlGapX / kCtrlH / kLabelW /
+// kTimerSlotW) now live in ONE place: ToolbarLayout.h `gToolbarTokens`
+// (DPI base units; wrap with DpiScale at the use site).
 
 // true if any toolbar toggle button (BTNS_CHECK) is currently checked;
 // used by WndProcToolbar WM_PAINT overlay to early-out when no highlight needed
@@ -74,7 +72,9 @@ struct ToolbarButtonInfo {
 };
 
 static ToolbarButtonInfo gToolbarButtons[] = {
-    {TbIcon::Text, CmdOpenHome, _TRN("⌂ Home")},
+    // icon-only toggle (Tabler "home", MIT) — §6.1: monochrome icon first, no
+    // glyph/emoji in product chrome (the old label was "⌂ Home")
+    {TbIcon::Home, CmdOpenHome, _TRN("Home")},
     {TbIcon::Open, CmdOpenFile, _TRN("Open")},
     // symbol-only toggle (Tabler "bookmarks", MIT) — checked = sidebar visible
     {TbIcon::Bookmarks, CmdToggleBookmarks, _TRN("Bookmarks")},
@@ -93,9 +93,9 @@ static ToolbarButtonInfo gToolbarButtons[] = {
     {TbIcon::ZoomIn, CmdZoomIn, _TRN("Zoom In")},
     {TbIcon::None, 0, nullptr}, // separator
     {TbIcon::Search, CmdFindFirst, _TRN("Find")},
-    {TbIcon::None, 0, nullptr},           // separator
-    {TbIcon::None, 0, nullptr},           // separator before autoscroll group
-    {TbIcon::None, TimerInfoId, nullptr}, // timer control placeholder reserving space
+    {TbIcon::None, 0, nullptr}, // separator before autoscroll group
+    // (timer trio rides INSIDE the widened Autoscroll button — no slot button;
+    // see EnforceToolbarTextButtonWidths + PositionToolbarChildWindows)
     {TbIcon::Text, CmdAutoScrollToggle, _TRN("Autoscroll")},
     {TbIcon::Text, CmdAutoScrollSpeedDown, _TRN("-")},
     {TbIcon::Text, CmdAutoScrollSpeedUp, _TRN("+")},
@@ -534,7 +534,9 @@ void ToolbarUpdateStateForWindow(MainWindow* win, bool setButtonsVisibility) {
         auto& tb = GetToolbarButtonInfoByIdx(i);
         int cmdId = tb.cmdId;
         if (setButtonsVisibility && cmdId != WarningMsgId) {
-            bool hide = !IsCmdAvailable(win, cmdId);
+            // D5: home overlay = focused mode — the Home button stays (checked,
+            // active) and every other button hides until the overlay is off
+            bool hide = win->showHomeOverlay ? cmdId != CmdOpenHome : !IsCmdAvailable(win, cmdId);
             UpdateToolbarButtonStateByIdx(hwnd, i, hide, TBSTATE_HIDDEN);
         }
         if (SkipBuiltInButton(tb)) {
@@ -869,6 +871,19 @@ void UpdateFindbox(MainWindow* win) {
     }
 }
 
+// Width the timer trio (checkbox | "Timer:" | minutes edit) needs INSIDE the
+// Autoscroll button, left of its label. Measured with the toolbar's own font
+// (WM_GETFONT — the same font the controls receive), because it runs before
+// the control HWNDs exist (button (re-)add time).
+static int MeasureTimerTrioDx(MainWindow* win, HWND hwndToolbar) {
+    int gap = DpiScale(win->hwndFrame, gToolbarTokens.ctrlGapX);
+    int ctrlH = DpiScale(win->hwndFrame, gToolbarTokens.ctrlH);
+    Size lbl = HwndMeasureText(hwndToolbar, "Timer:");
+    Size edit = HwndMeasureText(hwndToolbar, "8888");
+    int editW = std::max(edit.dx, DpiScale(win->hwndFrame, 20));
+    return gap + ctrlH + gap + lbl.dx + gap + editW;
+}
+
 static LRESULT CALLBACK ReBarWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam, UINT_PTR uIdSubclass,
                                      DWORD_PTR /*dwRefData*/) {
     if (WM_ERASEBKGND == uMsg && ThemeColorizeControls()) {
@@ -931,7 +946,7 @@ static LRESULT CALLBACK ReBarWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM
                         int idx2 = (int)custDraw->nmcd.dwItemSpec;
                         TBBUTTONINFOW bi2{};
                         bi2.cbSize = sizeof(bi2);
-                        bi2.dwMask = TBIF_STYLE | TBIF_TEXT;
+                        bi2.dwMask = TBIF_STYLE | TBIF_TEXT | TBIF_COMMAND;
                         WCHAR txtBuf[256]{};
                         bi2.pszText = txtBuf;
                         bi2.cchText = dimof(txtBuf);
@@ -939,10 +954,27 @@ static LRESULT CALLBACK ReBarWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM
                         if (!(bi2.fsStyle & BTNS_SHOWTEXT) || !txtBuf[0]) return CDRF_DODEFAULT;
                         RECT rcBtn{};
                         SendMessageW(hwndToolbar2, TB_GETITEMRECT, idx2, (LPARAM)&rcBtn);
+                        WCHAR* txt = txtBuf;
+                        if (bi2.idCommand == CmdAutoScrollToggle) {
+                            // this button also hosts the timer trio on its left
+                            // (widened for exactly that): keep the label inside
+                            // the remaining right part so it can't slide under
+                            // the edit box
+                            MainWindow* win2 = FindMainWindowByHwnd(hwndToolbar2);
+                            if (win2) {
+                                rcBtn.left += MeasureTimerTrioDx(win2, hwndToolbar2);
+                            }
+                            // the width was reserved by prefixing the label
+                            // with spaces (see AddAllToolbarButtons) — draw
+                            // only the real label, inside the shifted rect
+                            while (*txt == L' ') {
+                                txt++;
+                            }
+                        }
                         HFONT fnt = (HFONT)SendMessageW(hwndToolbar2, WM_GETFONT, 0, 0);
                         HGDIOBJ oldF = SelectObject(custDraw->nmcd.hdc, fnt);
                         SetBkMode(custDraw->nmcd.hdc, TRANSPARENT);
-                        DrawTextW(custDraw->nmcd.hdc, txtBuf, -1, &rcBtn, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+                        DrawTextW(custDraw->nmcd.hdc, txt, -1, &rcBtn, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
                         SelectObject(custDraw->nmcd.hdc, oldF);
                         return CDRF_DODEFAULT;
                     }
@@ -1008,10 +1040,48 @@ static LRESULT CALLBACK WndProcEditBg(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 // buttons are added (TB_SETROWS with the current row count is a no-op and a
 // TB_SETBUTTONSIZE nudge doesn't re-wrap either), so a resize re-wrap means
 // deleting and re-adding every button at the current width.
-static void AddAllToolbarButtons(HWND hwndToolbar) {
+static void AddAllToolbarButtons(MainWindow* win, HWND hwndToolbar, const bool* wrapAfter = nullptr) {
     TBBUTTON tbButtons[kButtonsCount];
     for (int i = 0; i < kButtonsCount; i++) {
         tbButtons[i] = TbButtonFromButtonInfo(gToolbarButtons[i]);
+        // group-coherent wrap plan (see RebuildToolbarButtonsForWidth): the
+        // caller measured the live indices, which match this table's order
+        if (wrapAfter && wrapAfter[i]) {
+            tbButtons[i].fsState |= TBSTATE_WRAP;
+        }
+    }
+    // The Autoscroll button hosts the timer trio inside its rect (see
+    // PositionToolbarChildWindows). comctl RECOMPUTES the width of text
+    // buttons from their label on every layout pass, so an explicit
+    // TB_SETBUTTONINFO cx never sticks (measured: Enforce sends set=193, the
+    // button stays cx=78). The comctl-native way to reserve that room is to
+    // bake it into the label: leading spaces widen the BTNS_AUTOSIZE button
+    // and wrap WITH the group; the item-postpaint draw trims them and draws
+    // the real label right of the trio (user 2026-10-16).
+    {
+        // a space is much narrower than an 'n' (comctl measured 14 'n'-based
+        // spaces at ~4px each): derive the real space width from the
+        // difference of two measured strings, then over-reserve by one
+        int spaceDx = HwndMeasureText(hwndToolbar, "n n").dx - HwndMeasureText(hwndToolbar, "nn").dx;
+        int trioDx = MeasureTimerTrioDx(win, hwndToolbar);
+        int nSpaces = spaceDx > 0 ? (trioDx + spaceDx - 1) / spaceDx + 1 : 0;
+        for (int i = 0; i < kButtonsCount; i++) {
+            if (gToolbarButtons[i].cmdId != CmdAutoScrollToggle || nSpaces <= 0) {
+                continue;
+            }
+            WCHAR* oldLbl = (WCHAR*)tbButtons[i].iString;
+            if (!oldLbl) {
+                continue;
+            }
+            int oldLen = lstrlenW(oldLbl);
+            WCHAR* buf = AllocArrayTemp<WCHAR>(nSpaces + oldLen + 1);
+            for (int k = 0; k < nSpaces; k++) {
+                buf[k] = L' ';
+            }
+            memcpy(buf + nSpaces, oldLbl, oldLen * sizeof(WCHAR));
+            buf[nSpaces + oldLen] = 0;
+            tbButtons[i].iString = (INT_PTR)buf;
+        }
     }
     TbAddButtons(hwndToolbar, kButtonsCount, tbButtons);
 
@@ -1019,8 +1089,157 @@ static void AddAllToolbarButtons(HWND hwndToolbar) {
     for (int i = 0; i < gCustomButtonsCount; i++) {
         ToolbarButtonInfo& tbi = gCustomButtons[i];
         buttons[i] = TbButtonFromButtonInfo(tbi, true);
+        if (wrapAfter && kButtonsCount + i < 128 && wrapAfter[kButtonsCount + i]) {
+            buttons[i].fsState |= TBSTATE_WRAP;
+        }
     }
     TbAddButtons(hwndToolbar, gCustomButtonsCount, buttons);
+}
+
+// Greedy GROUP packing for the wrap-on-narrow rebuild (user: "revisar os
+// blocos e criar algo mais coerente"). comctl's TB_SETROWS BALANCES row
+// widths (half the buttons drop to the next row at once) and its own
+// auto-wrap splits groups mid-way. Instead: groups = button segments split
+// at BTNS_SEP (each separator trails the group it closes); a row break is
+// planned only at a group boundary, when the next group no longer fits.
+// wrapAfter[i] = break AFTER button i (live index, same order as the add
+// table); returns true when at least one break was planned.
+static bool PackToolbarGroupsByWidth(HWND hwndToolbar, int nBtns, int availDx, bool* wrapAfter, int wrapAfterCap) {
+    if (nBtns <= 0 || nBtns > wrapAfterCap || availDx <= 0) {
+        return false;
+    }
+    for (int i = 0; i < nBtns; i++) {
+        wrapAfter[i] = false;
+    }
+    // walk once collecting group extents: [groupStart .. sepIdx], dx = sum of
+    // visible widths (hidden buttons report empty rects and are skipped)
+    struct GroupSpan {
+        int lastVis;
+        int lastVisNonSep; // last visible button that is NOT a separator
+        int dx;
+    };
+    GroupSpan* groups = AllocArrayTemp<GroupSpan>(nBtns);
+    int nGroups = 0;
+    int gDx = 0;
+    int gLastVis = -1;
+    int gLastVisNonSep = -1;
+    for (int i = 0; i < nBtns; i++) {
+        TBBUTTON tbb{};
+        bool isSep = SendMessageW(hwndToolbar, TB_GETBUTTON, (WPARAM)i, (LPARAM)&tbb) && (tbb.fsStyle & BTNS_SEP);
+        RECT rc{};
+        bool vis = SendMessageW(hwndToolbar, TB_GETITEMRECT, (WPARAM)i, (LPARAM)&rc) && rc.right > rc.left;
+        if (vis) {
+            gDx += rc.right - rc.left;
+            gLastVis = i;
+            if (!isSep) {
+                gLastVisNonSep = i;
+            }
+        }
+        if (isSep || i == nBtns - 1) {
+            groups[nGroups++] = {gLastVis, gLastVisNonSep, gDx};
+            gDx = 0;
+            gLastVis = -1;
+            gLastVisNonSep = -1;
+        }
+    }
+    // greedy pack: break before a group that doesn't fit (never when the row
+    // is still empty — an oversized group overflows its own row). The break
+    // is marked on the last visible NON-separator button of the row being
+    // closed: the trailing separator becomes hidden right after the rebuild
+    // (ToolbarUpdateStateForWindow) and a TBSTATE_WRAP on a hidden button is
+    // lost; zero-width groups (all-hidden members) are skipped — indexing
+    // wrapAfter[-1] would corrupt the stack.
+    int rowRight = 0;
+    bool any = false;
+    for (int g = 0; g < nGroups; g++) {
+        if (rowRight > 0 && rowRight + groups[g].dx > availDx) {
+            for (int p = g - 1; p >= 0; p--) {
+                int mark = groups[p].lastVisNonSep >= 0 ? groups[p].lastVisNonSep : groups[p].lastVis;
+                if (mark >= 0) {
+                    wrapAfter[mark] = true;
+                    any = true;
+                    break;
+                }
+            }
+            rowRight = 0;
+        }
+        rowRight += groups[g].dx;
+    }
+    return any;
+}
+
+// D12: comctl's BTNS_AUTOSIZE can under-size text buttons — the label is
+// measured once at insert time (stale/default font, icon-slot heuristics),
+// so the drawn label ends up clipped/ellipsized ("Auto-s..."). Enforce a
+// measured minimum width per text button: label dx via the toolbar's own
+// font (WM_GETFONT — the same font the CDDS_ITEMPOSTPAINT centered draw
+// uses) plus padding. Only ever widens, never shrinks. Callers run this
+// right after (re-)adding the buttons, BEFORE the wrap loop so row wrapping
+// sees the final widths.
+// j-roundtrip debug: what the last Enforce pass computed / attempted (read
+// back by the d6b pipe line — -for-testing writes no log files)
+static int sDbgAutoscrollNeeded = -1;
+static int sDbgAutoscrollSet = -1;
+// the width the last group-pack planned against (d6 pipe: packAvail) — also
+// the self-heal key in ToolbarRewrapAfterSizing: a pack that ran at a stale
+// rebar width mid-transition is redone when the rebar settles
+static int sLastPackedAvailDx = -1;
+static int sDbgPackRebarDx = -1;
+static int sDbgPackRows = -1;
+static int sDbgPackMarkIdx[4] = {-1, -1, -1, -1}; // first planned break indices
+
+static void EnforceToolbarTextButtonWidths(MainWindow* win, HWND hwndToolbar) {
+    sDbgAutoscrollNeeded = -1;
+    sDbgAutoscrollSet = -1;
+    int n = (int)SendMessageW(hwndToolbar, TB_BUTTONCOUNT, 0, 0);
+    for (int i = 0; i < n; i++) {
+        TBBUTTONINFOW bi{};
+        bi.cbSize = sizeof(bi);
+        bi.dwMask = TBIF_BYINDEX | TBIF_STYLE | TBIF_TEXT | TBIF_SIZE | TBIF_COMMAND;
+        WCHAR txtBuf[256]{};
+        bi.pszText = txtBuf;
+        bi.cchText = dimof(txtBuf);
+        if (!TbGetButtonInfo(hwndToolbar, i, &bi)) {
+            continue;
+        }
+        if (!(bi.fsStyle & BTNS_SHOWTEXT) || !txtBuf[0]) {
+            continue;
+        }
+        TempStr label = ToUtf8Temp(WStr(txtBuf));
+        Size sz = HwndMeasureText(hwndToolbar, label);
+        int pad = DpiScale(win->hwndFrame, 12);
+        int needed = sz.dx + pad;
+        if (bi.idCommand == CmdAutoScrollToggle) {
+            // the timer trio lives inside this button, left of the label (see
+            // PositionToolbarChildWindows): widen it by the trio's width so the
+            // whole group is ONE wrap unit. The old dedicated slot button
+            // wrapped apart from Autoscroll on narrow windows — the trio lost
+            // its room and vanished, and the slot's rect landed over row 1 as
+            // a dead zone (user 2026-10-16)
+            needed += MeasureTimerTrioDx(win, hwndToolbar);
+            sDbgAutoscrollNeeded = needed;
+        }
+        if ((int)bi.cx < needed) {
+            TBBUTTONINFOW biSet{};
+            biSet.cbSize = sizeof(biSet);
+            biSet.dwMask = TBIF_SIZE;
+            biSet.idCommand = bi.idCommand;
+            biSet.cx = needed;
+            if (bi.idCommand == CmdAutoScrollToggle) {
+                // BTNS_AUTOSIZE makes comctl IGNORE TBIF_SIZE (the width never
+                // stuck) — clear the style so the explicit width (label + the
+                // timer trio the button hosts) actually applies
+                biSet.dwMask |= TBIF_STYLE;
+                biSet.fsStyle = (BYTE)(bi.fsStyle & ~BTNS_AUTOSIZE);
+                sDbgAutoscrollSet = needed;
+            }
+            // NOTE: must go through TbSetButtonInfo — the helper sends
+            // TB_SETBUTTONINFOW; a raw SendMessage with TB_SETBUTTONINFO sends
+            // the ANSI message number and comctl silently ignores the
+            // TBBUTTONINFOW struct (the width never stuck)
+            TbSetButtonInfo(hwndToolbar, bi.idCommand, &biSet);
+        }
+    }
 }
 
 // Delete and re-add every button so comctl lays out FRESH wrap points for the
@@ -1038,39 +1257,67 @@ static void RebuildToolbarButtonsForWidth(MainWindow* win, HWND hwndToolbar) {
     for (int i = 0; i < count; i++) {
         SendMessageW(hwndToolbar, TB_DELETEBUTTON, 0, 0);
     }
-    AddAllToolbarButtons(hwndToolbar);
+    AddAllToolbarButtons(win, hwndToolbar);
     if (dxBtn > 0 && dyBtn > 0) {
         TbSetButtonSize(hwndToolbar, Size(dxBtn, dyBtn));
     }
+    EnforceToolbarTextButtonWidths(win, hwndToolbar);
 
-    // comctl's wrap BALANCES row widths (row1 ~= row2) and tolerates small
-    // overflows past the right edge. Keep asking for one more row (TB_SETROWS
-    // recomputes only when the requested count differs from the current one)
-    // until every row fits the client width.
+    // Group-coherent wrap (user: wrap por blocos, não "varios de uma vez"):
+    // force one row to measure true per-button widths, greedily pack GROUPS
+    // (segments split at separators) into rows, and re-add with the break
+    // points baked in as TBSTATE_WRAP (a separator's state can't be written
+    // back by id — they share cmdId 0). No TB_SETROWS balancing.
     RECT rcClient{};
     GetClientRect(hwndToolbar, &rcClient);
     int nBtns = (int)SendMessageW(hwndToolbar, TB_BUTTONCOUNT, 0, 0);
-    for (int tries = 0; tries < 8 && nBtns > 0; tries++) {
-        int maxRight = 0;
-        int rows = 0;
-        int lastTop = INT_MIN;
-        for (int i = 0; i < nBtns; i++) {
-            RECT rc{};
-            if (!SendMessageW(hwndToolbar, TB_GETITEMRECT, (WPARAM)i, (LPARAM)&rc) || rc.right <= rc.left) {
-                continue;
+    if (nBtns > 0 && rcClient.right > 0) {
+        SendMessageW(hwndToolbar, TB_SETROWS, MAKEWPARAM(1, TRUE), 0);
+        // pack against the REBAR's client width: the toolbar child's own
+        // client can lag mid-transition (a stale transient width measured
+        // during an earlier layout pass), while the rebar client is the
+        // authoritative target — the Design B band write below sets the
+        // band cx to exactly this, so the child ends up this wide
+        HWND hwndRebarP = GetParent(hwndToolbar);
+        int availDx = hwndRebarP ? HwndClientRect(hwndRebarP).dx : rcClient.right;
+        sLastPackedAvailDx = availDx;
+        sDbgPackRebarDx = hwndRebarP ? HwndClientRect(hwndRebarP).dx : -1;
+        bool wrapAfter[kButtonsCount + 8];
+        sDbgPackRows = 1;
+        sDbgPackMarkIdx[0] = sDbgPackMarkIdx[1] = sDbgPackMarkIdx[2] = sDbgPackMarkIdx[3] = -1;
+        if (availDx > 0 && PackToolbarGroupsByWidth(hwndToolbar, nBtns, availDx, wrapAfter, dimof(wrapAfter))) {
+            sDbgPackRows = 0;
+            for (int i = 0, m = 0; i < nBtns; i++) {
+                if (wrapAfter[i]) {
+                    sDbgPackRows++;
+                    if (m < 4) {
+                        sDbgPackMarkIdx[m++] = i;
+                    }
+                }
             }
-            if (rc.right > maxRight) {
-                maxRight = rc.right;
+            for (int i = 0; i < nBtns; i++) {
+                SendMessageW(hwndToolbar, TB_DELETEBUTTON, 0, 0);
             }
-            if (rc.top > lastTop) {
-                rows++;
-                lastTop = rc.top;
-            }
+            AddAllToolbarButtons(win, hwndToolbar, wrapAfter);
+            // the re-add reset the enforced text widths; re-apply (same
+            // deterministic measurements, so the wrap plan stays valid)
+            EnforceToolbarTextButtonWidths(win, hwndToolbar);
         }
-        if (maxRight <= rcClient.right || rows >= nBtns) {
-            break;
+    }
+
+    // Design B: the REBUILD is the only writer of the band's ideal width
+    // (RBBIM_SIZE cx): set it to the rebar's client width so the band always
+    // fills the rebar (never exceeds it -> no child collapse), independent of
+    // whatever transient width the rebar reported during the resize storm.
+    {
+        HWND hwndRebar = GetParent(hwndToolbar);
+        if (hwndRebar) {
+            REBARBANDINFOW rbiC{};
+            rbiC.cbSize = sizeof(rbiC);
+            rbiC.fMask = RBBIM_SIZE;
+            rbiC.cx = (UINT)HwndClientRect(hwndRebar).dx;
+            SendMessageW(hwndRebar, RB_SETBANDINFO, 0, (LPARAM)&rbiC);
         }
-        SendMessageW(hwndToolbar, TB_SETROWS, MAKEWPARAM(rows + 1, TRUE), 0);
     }
 
     // adding buttons reset every per-button state: re-apply visibility /
@@ -1111,13 +1358,26 @@ static bool SetToolbarBandToRowHeight(HWND hwndToolbar) {
     RECT rcToolbarClient{};
     GetClientRect(hwndToolbar, &rcToolbarClient);
     if (rcToolbarClient.right <= 0) {
+        // collapsed-child recovery (user: "so uma toolbar vazia"): the rebar
+        // clamped the band child to 0 width (a stale band cx from a wider
+        // window). Re-assert the band cx to the rebar's client width so the
+        // child gets its room back; the next rewrap then measures real rows.
+        // Steady-state passes NEVER write cx (Design B), so this cannot be
+        // re-glued by a later height pass.
+        REBARBANDINFOW rbiW{};
+        rbiW.cbSize = sizeof(rbiW);
+        rbiW.fMask = RBBIM_SIZE;
+        rbiW.cx = (UINT)HwndClientRect(hwndRebar).dx;
+        SendMessageW(hwndRebar, RB_SETBANDINFO, 0, (LPARAM)&rbiW);
         return false;
     }
-    // TB_GETBUTTONROWS isn't in this SDK's commctrl.h, so count distinct row
-    // tops over all button rects (separators can report empty rects, skip them)
+    // measure the REAL button extent. Row heights are NOT uniform — icon rows
+    // are shorter than BTNS_SHOWTEXT rows that also draw their label — so the
+    // old rows*first-button-height formula under-counted mixed layouts
+    // (e.g. 2*30=60 for a 30+38 content) and clipped the last row.
     RECT rcBtn{};
-    int rows = 0;
     int lastRowTop = -1;
+    int maxBottom = 0;
     int nBtns = (int)SendMessageW(hwndToolbar, TB_BUTTONCOUNT, 0, 0);
     for (int i = 0; i < nBtns; i++) {
         RECT rcIt{};
@@ -1125,39 +1385,109 @@ static bool SetToolbarBandToRowHeight(HWND hwndToolbar) {
             continue;
         }
         if (rcBtn.bottom <= rcBtn.top) {
-            rcBtn = rcIt; // first real button: reference rect for row height
+            rcBtn = rcIt; // first real button: reference rect for margins
+        }
+        if (rcIt.bottom > maxBottom) {
+            maxBottom = rcIt.bottom;
         }
         if (rcIt.top > lastRowTop) {
-            rows++;
             lastRowTop = rcIt.top;
         }
     }
-    if (rows < 1 || rcBtn.bottom <= rcBtn.top) {
+    if (lastRowTop < 0 || rcBtn.bottom <= rcBtn.top) {
         return false;
     }
-    int bandH = rows * (rcBtn.bottom - rcBtn.top) + 2 * rcBtn.top;
+    int contentDy = maxBottom + rcBtn.top; // buttons + symmetric bottom margin
 
     REBARBANDINFOW rbi{};
     rbi.cbSize = sizeof(rbi);
-    rbi.fMask = RBBIM_STYLE | RBBIM_CHILDSIZE | RBBIM_SIZE;
+    // Design B: height passes write ONLY RBBIM_CHILDSIZE — never RBBIM_SIZE.
+    // Writing back the cx read from RB_GETBANDINFO closed a feedback loop
+    // (the rebar's transient laid-out width got glued into the band and later
+    // collapsed the child to 0 width = the user's empty toolbar).
+    rbi.fMask = RBBIM_STYLE | RBBIM_CHILDSIZE;
     if (!SendMessageW(hwndRebar, RB_GETBANDINFO, 0, (LPARAM)&rbi)) {
         return false;
     }
     if (!(rbi.fStyle & RBBS_VARIABLEHEIGHT)) {
         return false; // band not allowed to change height
     }
-    if ((int)rbi.cyChild == bandH) {
+    int bandH = contentDy;
+    // no-op only when the band already asks for the right height AND the
+    // toolbar window actually got it (the rebar insets the child by the band
+    // edge, so cyChild == content can still leave the child short)
+    RECT rcTb0{};
+    GetWindowRect(hwndToolbar, &rcTb0);
+    bool childFits = (rcTb0.bottom - rcTb0.top) >= contentDy;
+    logf("[d6] contentDy=%d cyChild(old)=%d childDy=%d\n", contentDy, (int)rbi.cyChild,
+         (int)(rcTb0.bottom - rcTb0.top));
+    if ((int)rbi.cyChild == bandH && childFits) {
         return false;
     }
-    rbi.cyChild = bandH;
-    rbi.cyMinChild = bandH;
-    rbi.cyMaxChild = bandH;
-    SendMessageW(hwndRebar, RB_SETBANDINFO, 0, (LPARAM)&rbi);
+    // The rebar fits the child INSIDE the band (RBBS_CHILDEDGE insets it), so
+    // setting cyChild = content is not enough: verify the toolbar window
+    // really received >= contentDy and grow the band by any shortfall. Self-
+    // correcting at any DPI/theme; converges in 1-2 passes.
+    for (int attempt = 0; attempt < 3; attempt++) {
+        rbi.cyChild = bandH;
+        rbi.cyMinChild = bandH;
+        rbi.cyMaxChild = bandH;
+        SendMessageW(hwndRebar, RB_SETBANDINFO, 0, (LPARAM)&rbi);
+        RECT rcTbWin{};
+        GetWindowRect(hwndToolbar, &rcTbWin);
+        int gotDy = rcTbWin.bottom - rcTbWin.top;
+        logf("[d6] attempt=%d set bandH=%d gotDy=%d\n", attempt, bandH, gotDy);
+        if (gotDy >= contentDy) {
+            break;
+        }
+        bandH += contentDy - gotDy;
+    }
     return true;
 }
 // timer id for the debounced toolbar re-wrap (WM_SIZE restarts the timer, the
 // WM_TIMER handler does the actual rebuild once the drag has settled)
 static const int kRewrapToolbarTimerId = 0x4242;
+
+// the debounced rewrap state (see ToolbarRewrapAfterSizing): ONE width of
+// memory is enough to kill rebuild loops — a rebuild at the same width cannot
+// change the band height, so no new WM_SIZE fires — and it makes
+// shrink-to-grow round-trips rebuild correctly (the old two-width memory
+// SKIPPED the grow-back rebuild, leaving the toolbar wrapped forever).
+static int sLastBuiltDx = -1;
+
+// Delete+re-add the buttons for the CURRENT toolbar width and re-fit the
+// rebar band. Called after a resize settles: from the debounced WM_TIMER and
+// synchronously on WM_EXITSIZEMOVE (the Win32 drag-end signal). During a
+// progressive drag the 200ms timer could interleave with the stale rebar
+// height from RelayoutFrame, leaving buttons laid out off-viewport
+// (user: "os botoes se localizavam fora da viewport ficando so uma toolbar
+// vazia").
+void ToolbarRewrapAfterSizing(MainWindow* win, HWND hwndToolbar, bool force) {
+    if (!win || !hwndToolbar || win->isBeingClosed) {
+        return;
+    }
+    RECT rcClient{};
+    GetClientRect(hwndToolbar, &rcClient);
+    int dx = rcClient.right - rcClient.left;
+    // self-heal: a pack that ran at a STALE width mid-transition (the rebar
+    // client lags during a resize storm) must be redone once the rebar
+    // reaches its final width, even when the toolbar's own client didn't
+    // change since
+    HWND hwndRebar = GetParent(hwndToolbar);
+    int rebarDx = hwndRebar ? HwndClientRect(hwndRebar).dx : dx;
+    // force=true (WM_EXITSIZEMOVE = the user's click-release on the border)
+    // bypasses the width guard: a drag can end in a degenerate state (client
+    // collapsed / rows glued) that a width-gated rebuild would skip
+    if (dx <= 0 || (dx == sLastBuiltDx && rebarDx == sLastPackedAvailDx && !force)) {
+        return;
+    }
+    sLastBuiltDx = dx;
+    RebuildToolbarButtonsForWidth(win, hwndToolbar);
+    if (SetToolbarBandToRowHeight(hwndToolbar)) {
+        win->uiState.layout = {}; // force the deferred relayout (see WM_SIZE)
+        ScheduleUiUpdate(win, kUiRelayout);
+    }
+}
 
 static LRESULT CALLBACK WndProcToolbar(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     if (WM_CTLCOLORSTATIC == msg || WM_CTLCOLOREDIT == msg || WM_CTLCOLORBTN == msg) {
@@ -1282,24 +1612,10 @@ static LRESULT CALLBACK WndProcToolbar(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp
         KillTimer(hwnd, kRewrapToolbarTimerId);
         MainWindow* win = FindMainWindowByHwnd(hwnd);
         if (win && !win->isBeingClosed && hwnd == win->hwndToolbar) {
-            // only rebuild when the width actually changed since the last
-            // rebuilds (WM_SIZE may have restarted the timer many times).
-            // Remember the last TWO widths: if a relayout ever oscillates
-            // between two sizes, the revisited width is skipped and the
-            // loop dies instead of rebuilding forever.
-            static int sLastRewrapDx[2] = {-1, -1};
-            RECT rcClient{};
-            GetClientRect(hwnd, &rcClient);
-            int dx = rcClient.right - rcClient.left;
-            if (dx > 0 && dx != sLastRewrapDx[0] && dx != sLastRewrapDx[1]) {
-                sLastRewrapDx[1] = sLastRewrapDx[0];
-                sLastRewrapDx[0] = dx;
-                RebuildToolbarButtonsForWidth(win, hwnd);
-                if (SetToolbarBandToRowHeight(hwnd)) {
-                    win->uiState.layout = {}; // force the deferred relayout (see WM_SIZE)
-                    ScheduleUiUpdate(win, kUiRelayout);
-                }
-            }
+            // only rebuild when the width differs from the width the buttons
+            // were last laid out for (WM_SIZE may have restarted the timer
+            // many times) — see ToolbarRewrapAfterSizing
+            ToolbarRewrapAfterSizing(win, hwnd);
         }
         return 0;
     }
@@ -1440,8 +1756,26 @@ void UpdateToolbarPageText(MainWindow* win, int pageCount, bool updateOnly) {
     // TB_GETRECT fails for hidden buttons, so anchor on a button that's still
     // visible. CmdPrint is hidden when PrinterAccess is revoked via
     // sumatrapdfrestrict.ini (issue #5563); fall back to CmdOpenFile in that case.
+    // D5: home overlay = focused mode — every toolbar button except Home is
+    // hidden then, so the anchor below is gone too. TB_GETRECT FAILS for a
+    // hidden button (the debug build reports res==0 from Win.cpp TbGetRect),
+    // so this must be checked BEFORE asking for the anchor rect. Without it
+    // the page controls stayed visible, parked at the toolbar's top-left
+    // corner; hide them for as long as the focused mode is on — the regular
+    // refreshes re-show them once the anchor is back.
+    if (win->showHomeOverlay) {
+        ShowWindow(win->hwndPageLabel, SW_HIDE);
+        ShowWindow(win->hwndPageBg, SW_HIDE);
+        ShowWindow(win->hwndPageEdit, SW_HIDE);
+        ShowWindow(win->hwndPageTotal, SW_HIDE);
+        return;
+    }
     int anchorCmd = HasPermission(Perm::PrinterAccess) ? CmdPrint : CmdOpenFile;
     Rect r = TbGetRect(win->hwndToolbar, anchorCmd);
+    ShowWindow(win->hwndPageLabel, SW_SHOW);
+    ShowWindow(win->hwndPageBg, SW_SHOW);
+    ShowWindow(win->hwndPageEdit, SW_SHOW);
+    ShowWindow(win->hwndPageTotal, SW_SHOW);
     int currX = r.x + r.dx + DpiScale(win->hwndFrame, 10);
     int currY = (r.y + r.dy - pageWndRect.dy) / 2;
 
@@ -1533,16 +1867,8 @@ void UpdateToolbarPageText(MainWindow* win, int pageCount, bool updateOnly) {
     if (bi.cx != size2.dx || !updateOnly) {
         TbSetButtonDx(win->hwndToolbar, PageInfoId, size2.dx);
     }
-    // Reserve dynamic width for timer controls slot — measure "Timer:" label when available
-    int timerSlotW = DpiScale(win->hwndFrame, kTimerSlotW);
-    if (win->autoScroll.hwndTimerLabel) {
-        Size tmrLblSz = HwndMeasureText(win->autoScroll.hwndTimerLabel, "Timer:");
-        int ctrlGapX = DpiScale(win->hwndFrame, kCtrlGapX);
-        int ctrlH = DpiScale(win->hwndFrame, kCtrlH);
-        int needed = ctrlGapX + ctrlH + ctrlGapX + tmrLblSz.dx + ctrlGapX + 20;
-        timerSlotW = std::max(needed, timerSlotW);
-    }
-    TbSetButtonDx(win->hwndToolbar, TimerInfoId, timerSlotW);
+    // (the timer trio no longer has a slot button to size — it lives inside the
+    // widened Autoscroll button; see EnforceToolbarTextButtonWidths)
     HwndInvalidate(win->hwndToolbar, true);
 }
 
@@ -1551,6 +1877,11 @@ void UpdateToolbarPageText(MainWindow* win, int pageCount, bool updateOnly) {
 // transparent child of the canvas parent that ignores mouse input.
 static constexpr wchar_t kEtaOverlayClass[] = L"TumatraPDFEtaOverlay";
 // Color-key used to make the overlay background transparent (magenta).
+// D10 audit decision: the key itself never shows (fully keyed out) and the
+// visible pill is black bg + white text ON PURPOSE — this overlay floats over
+// PAGE CONTENT, not app chrome, so theme colors would blend into the page
+// (white pill on a white page). Content-anchored overlays stay high-contrast
+// by design, like the timer-done marker.
 static constexpr COLORREF kEtaOverlayKeyColor = RGB(255, 0, 255);
 
 static LRESULT CALLBACK WndProcEtaOverlay(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
@@ -1702,13 +2033,14 @@ void UpdateToolbarSpeedLabel(MainWindow* win) {
     }
 }
 
-// Creates the timer controls for autoscroll: [checkbox] [static "Timer:"] [numeric edit]
-// Placed in the TimerInfoId slot (before Autoscroll button)
+// Creates the timer controls for autoscroll: [checkbox] [static "Timer:"] [numeric edit].
+// They live INSIDE the widened Autoscroll button — initial coordinates come
+// from its rect, then PositionToolbarChildWindows lays them out properly.
 static void CreateTimerControls(MainWindow* win) {
     if (win->autoScroll.hwndTimerCheck != nullptr) {
         return; // already created
     }
-    Rect r = TbGetRect(win->hwndToolbar, TimerInfoId);
+    Rect r = TbGetRect(win->hwndToolbar, CmdAutoScrollToggle);
     HFONT font = (HFONT)SendMessageW(win->hwndToolbar, WM_GETFONT, 0, 0);
     if (!font) {
         font = GetDefaultGuiFontOfSize(GetAppFontSize(win->hwndFrame));
@@ -1716,8 +2048,8 @@ static void CreateTimerControls(MainWindow* win) {
     auto* h = GetModuleHandle(nullptr);
 
     // DPI-scaled constants from design tokens
-    const int ctrlGapX = DpiScale(win->hwndFrame, kCtrlGapX);
-    const int ctrlH = DpiScale(win->hwndFrame, kCtrlH);
+    const int ctrlGapX = DpiScale(win->hwndFrame, gToolbarTokens.ctrlGapX);
+    const int ctrlH = DpiScale(win->hwndFrame, gToolbarTokens.ctrlH);
 
     // Checkbox: left-aligned, vertically centered in slot
     win->autoScroll.hwndTimerCheck = CreateWindowExW(
@@ -1753,11 +2085,8 @@ static void CreateTimerControls(MainWindow* win) {
     StringCchPrintfW(buf, 16, L"%u", win->autoScroll.timerMinutesSetting);
     SetWindowTextW(win->autoScroll.hwndTimerEdit, buf);
 
-    // Dynamically size the TimerInfoId slot to fit the actual controls
-    Size labelSize = HwndMeasureText(win->autoScroll.hwndTimerLabel, "Timer:");
-    int neededW =
-        ctrlGapX + ctrlH + ctrlGapX + labelSize.dx + ctrlGapX + 20; // checkbox + gaps + label + gap + edit(min)
-    TbSetButtonDx(win->hwndToolbar, TimerInfoId, neededW);
+    // (no slot to size anymore — the Autoscroll button itself carries the
+    // trio's width; see EnforceToolbarTextButtonWidths)
 
     PositionToolbarChildWindows(win);
 }
@@ -2153,19 +2482,60 @@ TempStr ToolbarButtonsResultTemp(int* exitCodeOut) {
     HWND hwndTt = (HWND)SendMessageW(hwnd, TB_GETTOOLTIPS, 0, 0);
     int nTools = hwndTt ? (int)SendMessageW(hwndTt, TTM_GETTOOLCOUNT, 0, 0) : -1;
     out.Append(fmt("buttons=%d tooltipTools=%d\n", n, nTools));
+    // D6 diagnostics: band height vs the toolbar/rebar windows (clip probe)
+    {
+        HWND hwndRebar = GetParent(hwnd);
+        int bandCy = 0;
+        int nBands = 0;
+        int rebarWinDy = 0;
+        int rebarClientDy = 0;
+        if (hwndRebar) {
+            REBARBANDINFOW rbi{};
+            rbi.cbSize = sizeof(rbi);
+            rbi.fMask = RBBIM_CHILDSIZE;
+            if (SendMessageW(hwndRebar, RB_GETBANDINFO, 0, (LPARAM)&rbi)) {
+                bandCy = (int)rbi.cyChild;
+            }
+            nBands = (int)SendMessageW(hwndRebar, RB_GETBANDCOUNT, 0, 0);
+            Rect rr = HwndWindowRect(hwndRebar);
+            rebarWinDy = rr.dy;
+            Rect rcClient = HwndClientRect(hwndRebar);
+            rebarClientDy = rcClient.dy;
+        }
+        Rect rw = HwndWindowRect(hwnd);
+        Rect rcTbClient = HwndClientRect(hwnd);
+        out.Append(
+            fmt("d6 band=%d nBands=%d toolbarDy=%d toolbarClientDx=%d rebarWinDy=%d rebarClientDy=%d packAvail=%d "
+                "packRebar=%d packRows=%d marks=%d,%d,%d,%d\n",
+                bandCy, nBands, rw.dy, rcTbClient.dx, rebarWinDy, rebarClientDy, sLastPackedAvailDx, sDbgPackRebarDx,
+                sDbgPackRows, sDbgPackMarkIdx[0], sDbgPackMarkIdx[1], sDbgPackMarkIdx[2], sDbgPackMarkIdx[3]));
+        // D12/j diagnostics: the Autoscroll button hosts the timer trio and
+        // gets an explicit width from EnforceToolbarTextButtonWidths — dump
+        // its live style+width so the E2E can verify the widening stuck
+        {
+            TBBUTTONINFOW biAs{};
+            biAs.cbSize = sizeof(biAs);
+            biAs.dwMask = TBIF_COMMAND | TBIF_STYLE | TBIF_SIZE;
+            if (TbGetButtonInfo(hwnd, CmdAutoScrollToggle, &biAs) >= 0) {
+                out.Append(fmt("d6b autoscroll style=0x%02X cx=%d needed=%d set=%d\n", (int)biAs.fsStyle, (int)biAs.cx,
+                               sDbgAutoscrollNeeded, sDbgAutoscrollSet));
+            }
+        }
+    }
     for (int i = 0; i < n; i++) {
         WCHAR buf[512]{};
         TBBUTTONINFOW bi{};
         bi.cbSize = sizeof(bi);
-        bi.dwMask = TBIF_BYINDEX | TBIF_COMMAND | TBIF_TEXT | TBIF_STATE;
+        bi.dwMask = TBIF_BYINDEX | TBIF_COMMAND | TBIF_TEXT | TBIF_STATE | TBIF_STYLE | TBIF_SIZE;
         bi.pszText = buf;
         bi.cchText = dimof(buf);
         TbGetButtonInfo(hwnd, i, &bi);
         RECT r{};
         SendMessageW(hwnd, TB_GETITEMRECT, (WPARAM)i, (LPARAM)&r);
         bool hidden = (bi.fsState & TBSTATE_HIDDEN) != 0;
-        out.Append(fmt("idx=%d cmd=%d hidden=%d rect=%d,%d,%d,%d text=%s\n", i, (int)bi.idCommand, hidden ? 1 : 0,
-                       (int)r.left, (int)r.top, (int)r.right, (int)r.bottom, ToUtf8Temp(buf)));
+        out.Append(fmt("idx=%d cmd=%d hidden=%d rect=%d,%d,%d,%d style=0x%02X cx=%d text=%s\n", i, (int)bi.idCommand,
+                       hidden ? 1 : 0, (int)r.left, (int)r.top, (int)r.right, (int)r.bottom, (int)bi.fsStyle,
+                       (int)bi.cx, ToUtf8Temp(buf)));
     }
     for (int i = 0; i < nTools; i++) {
         TTTOOLINFOW ti{};
@@ -2212,7 +2582,12 @@ void CreateToolbar(MainWindow* win) {
     }
 
     style = WS_CHILD | WS_CLIPSIBLINGS | TBSTYLE_TOOLTIPS | TBSTYLE_FLAT;
-    style |= TBSTYLE_LIST | CCS_NODIVIDER | CCS_NOPARENTALIGN | TBSTYLE_WRAPABLE;
+    // NO TBSTYLE_WRAPABLE: in a wrapable toolbar comctl OWNS the wrap states
+    // and recomputes them (sequential at the child's transient width),
+    // discarding the app's group plan. Rows are controlled EXCLUSIVELY by the
+    // TBSTATE_WRAP breaks baked in by RebuildToolbarButtonsForWidth
+    // (PackToolbarGroupsByWidth) — the classic manual multi-row technique.
+    style |= TBSTYLE_LIST | CCS_NODIVIDER | CCS_NOPARENTALIGN;
     exStyle = 0;
     if (isRtl) exStyle |= WS_EX_LAYOUTRTL;
     HMENU cmd = (HMENU)IDC_TOOLBAR;
@@ -2248,8 +2623,9 @@ void CreateToolbar(MainWindow* win) {
     exstyle |= TBSTYLE_EX_DRAWDDARROWS;
     TbSetExtendedStyle(hwndToolbar, exstyle);
 
-    AddAllToolbarButtons(hwndToolbar);
+    AddAllToolbarButtons(win, hwndToolbar);
     TbSetButtonSize(hwndToolbar, Size(iconSize, iconSize));
+    EnforceToolbarTextButtonWidths(win, hwndToolbar);
 
     Rect rc = TbGetItemRect(hwndToolbar, 0);
 
@@ -2258,11 +2634,13 @@ void CreateToolbar(MainWindow* win) {
     REBARBANDINFOW rbBand{};
     rbBand.cbSize = sizeof(REBARBANDINFOW);
     rbBand.fMask = RBBIM_STYLE | RBBIM_CHILD | RBBIM_CHILDSIZE;
-    // RBBS_FIXEDSIZE only blocks the user's resize gripper; RBBS_VARIABLEHEIGHT
-    // lets the band's height track the toolbar's wrapped row count
-    // (see SetToolbarBandToRowHeight). cxMinChild must be one button, not the
-    // whole row, or the toolbar never narrows and never wraps.
-    rbBand.fStyle = RBBS_FIXEDSIZE | RBBS_VARIABLEHEIGHT;
+    // RBBS_VARIABLEHEIGHT lets the band's height track the toolbar's wrapped
+    // row count (see SetToolbarBandToRowHeight). cxMinChild must be one
+    // button, not the whole row, or the toolbar never narrows and never wraps.
+    // NO RBBS_FIXEDSIZE: with it, comctl can pin the child to a transient
+    // width during a resize storm and later collapse it to 0 (empty toolbar).
+    // Single-band rebar shows no gripper without it, so the look is unchanged.
+    rbBand.fStyle = RBBS_VARIABLEHEIGHT;
     if (IsAppThemed() && IsCurrentThemeDefault()) {
         rbBand.fStyle |= RBBS_CHILDEDGE;
     }

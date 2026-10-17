@@ -34,6 +34,7 @@ enum class TbIcon {
     HomeThumbnails,
     Pin,
     Bookmarks,
+    Home,
     kMax
 };
 

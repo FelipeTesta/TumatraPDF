@@ -985,6 +985,9 @@ FileStates [
     ; Autoscroll speed multiplier for this document
     AutoScrollSpeedMultiplier = 0.008
 
+    ; total seconds of reading time (auto-scroll active) for this document
+    ReadingTimeSec = 0
+
     ; invert page colors for this document
     InvertColors = false
 
