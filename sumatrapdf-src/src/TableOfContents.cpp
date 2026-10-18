@@ -933,10 +933,12 @@ static void TocContextMenu(ContextMenuEvent* ev) {
 
     Str path;
     Str fileName;
-    Kind destKind = dest ? dest->GetKind() : nullptr;
+    Kind destKind = dest ? dest->GetKind() : kindDestinationNone;
 
     // TODO: this is pontentially not used at all
-    if (destKind == kindDestinationLaunchEmbedded) {
+    // dest && : the cast below dereferences dest, and the analyzer cannot know that
+    // the kind globals (extern const char*, interned) are non-null across TUs.
+    if (dest && destKind == kindDestinationLaunchEmbedded) {
         auto* embeddedFile = (PageDestinationFile*)dest;
         // this is a path to a file on disk, e.g. a path to opened PDF
         // with the embedded stream number
@@ -954,7 +956,7 @@ static void TocContextMenu(ContextMenuEvent* ev) {
     }
 
     int attachmentNo = -1;
-    if (destKind == kindDestinationAttachment) {
+    if (dest && destKind == kindDestinationAttachment) {
         auto* attachment = (PageDestinationFile*)dest;
         // this is a path to a file on disk, e.g. a path to opened PDF
         // with the embedded stream number

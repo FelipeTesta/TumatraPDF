@@ -226,6 +226,9 @@ void FreeStrNode(Arena* a, StrNode* head) {
 // Append n as the new last node. Clears n->next. List does not free nodes.
 void StrNodeListPush(StrNodeList* list, StrNode* n) {
     ReportIf(!list || !n);
+    if (!list || !n) {
+        return;
+    }
     n->next = nullptr;
     if (list->tail) {
         list->tail->next = n;

@@ -32,7 +32,7 @@ Rules:
 - The user has repeatedly had to insist that agents use tree-sitter — **do not skip it**. If a task involves "map", "trace", "where is X called", "audit call-sites", use tree-sitter FIRST.
 - Project must be registered before use; the server forgets the project between sessions (empty `list_projects_tool`).
 
-Recommended flow: register → `analyze_project` → `get_symbols` / `get_ast` / `get_dependencies` → `find_usage` → `run_query` (advanced).
+Recommended flow: register → `analyze_project` → `get_symbols` / `get_ast` / `get_dependencies` → `find_usage` → `run_query` (advanced). Semantic questions tree-sitter cannot answer (which overload/namespace a name resolves to, every call-site of a shared type across files, compiler diagnostics for one TU): use the **Serena MCP** (clangd backend) — see §6b.
 Warning: `tree-sitter_find_text` AVOID repo-wide on this large C++ tree with vendored subfolders (`mupdf/`, `ext/`) — risk MCP timeout (-32001). Scope with `file_pattern` or use targeted grep.
 
 # 1. Overview
@@ -192,7 +192,8 @@ TumatraPDF/                   # repo root
 - **Runtime control:** `-dbg-control <pipe>` + `cmd/control.ts` — Test* commands (Ping/Quit/TestSearch/TestToc/TestToolbarButtons/TestAIChat)
 - **UI automation:** `tests/winapi.ts`, `tests/win-automation.ts` — FFI win32, postMessage cross-process, `captureWindowToPng` (works occluded)
 - **Flags:** `-for-testing -console -log -stress-test -bench -render -extract-text -set-color-range`
-- **Static analysis:** `cmd/clang-tidy.ts`, `cmd/cppcheck.ts`
+- **Static analysis:** `cmd/clang-tidy.ts`, `cmd/cppcheck.ts`, `cmd/analyze.ts` (MSVC `/analyze` sweep → `out/analyze/{msvc-analyze.log,warnings-summary.txt}`). CI: root `.github/workflows/codeql.yml` (CodeQL c-cpp, push/PR/weekly, advisory) + `static-analysis.yml` (weekly MSVC `/analyze`, artifacts only, never fails). The workflows under `sumatrapdf-src/.github/` are INERT — repo root is TumatraPDF. Details: BUILD.md § Static analysis
+- **Semantic navigation:** `bun cmd/gen-compile-commands.ts` → `compile_commands.json` (gitignored; MUST live in `sumatrapdf-src/` — `compile_flags.txt` there shadows a root-level DB), then `clangd --check=<file>` for diagnostics, or the **Serena MCP** (clangd backend, `--project` = `sumatrapdf-src`; tools `find_symbol`, `find_referencing_symbols`, `get_symbols_overview`, `get_diagnostics_for_file`). Use for semantic questions tree-sitter can't answer (which overload/namespace, all call-sites of a shared type); keep tree-sitter for structure/AST. Details: BUILD.md § Semantic navigation
 - **Logging:** `SumatraLog.h/.cpp` auto-log → `%LOCALAPPDATA%\SumatraPDF\<hash>\sumatra-log.txt`, rotation >5MB; tags `[fc]` `[arch]` `[autoscroll]` `[md]` `[webview]`
 
 **Known issues (fix when touched):**

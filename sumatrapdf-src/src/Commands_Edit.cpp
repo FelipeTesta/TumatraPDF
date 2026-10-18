@@ -711,8 +711,14 @@ static bool EditSaveArgbBitmapAsPng(Gdiplus::Bitmap* bmp, const WCHAR* path) {
         return false;
     }
     char* buf = (char*)malloc(size);
+    if (!buf) {
+        return false;
+    }
     auto* codecs = (Gdiplus::ImageCodecInfo*)buf;
-    Gdiplus::GetImageEncoders(num, size, codecs);
+    if (Gdiplus::GetImageEncoders(num, size, codecs) != Gdiplus::Ok) {
+        free(buf);
+        return false;
+    }
     CLSID pngClsid{};
     bool found = false;
     for (UINT i = 0; i < num; i++) {

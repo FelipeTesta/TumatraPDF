@@ -1,0 +1,72 @@
+# MSVC native code analysis (/analyze) for TumatraPDF — weekly, advisory.
+#
+# Slow by nature: a full /analyze sweep rebuilds the Release x64 tree with the
+# analyzer enabled on every project, so it is NOT wired to push/PR. Findings are
+# published as artifacts (log + per-rule summary); the job never fails on them.
+#
+# Local equivalents:
+#   cd sumatrapdf-src
+#   bun cmd/analyze.ts                 # full sweep (slow)
+#   bun cmd/analyze.ts -files src\Toolbar.cpp;src\HomePage.cpp   # fast subset
+name: "MSVC static analysis"
+
+on:
+  schedule:
+    - cron: "30 11 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  analyze:
+    name: MSVC /analyze (Release x64)
+    runs-on: windows-2022
+    timeout-minutes: 360
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      # NASM required by ext/libjpeg-turbo and ext/dav1d SIMD .asm custom build steps
+      - name: Setup NASM
+        uses: ilammy/setup-nasm@v1
+
+      # WebView2 SDK (nuget package referenced by vs2022/*.vcxproj, not tracked in git)
+      - name: Restore WebView2 nuget
+        working-directory: sumatrapdf-src
+        run: nuget install Microsoft.Web.WebView2 -Version 1.0.4022.49 -OutputDirectory packages -NonInteractive
+
+      # The analysis pass rebuilds only the app project (BuildProjectReferences=false),
+      # so dependencies must exist first — build the tree normally (no /analyze).
+      - name: Build (Release x64, no analysis)
+        working-directory: sumatrapdf-src
+        run: msbuild vs2022\TumatraPDF.sln /t:TumatraPDF /p:Configuration=Release /p:Platform=x64 /m
+
+      - name: Build with /analyze
+        continue-on-error: true
+        working-directory: sumatrapdf-src
+        run: bun ./cmd/analyze.ts
+
+      - name: Show analysis summary
+        if: always()
+        working-directory: sumatrapdf-src
+        shell: pwsh
+        run: |
+          $p = "out/analyze/warnings-summary.txt"
+          if (Test-Path $p) { Get-Content $p -TotalCount 60 } else { "no summary produced" }
+
+      - name: Upload analysis log + summary
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v6
+        with:
+          name: msvc-analyze
+          path: sumatrapdf-src/out/analyze
+          retention-days: 30

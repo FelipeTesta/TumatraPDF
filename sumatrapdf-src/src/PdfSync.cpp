@@ -645,12 +645,14 @@ static TempStr DealPlainSync(TempStr pathSync) {
     Str converted = ConvertLocalToUTF8(srcZ);
     if (!converted) {
         logfa("DealPlainSync: unable to convert '%s' from local ansi to utf-8.\n", pathSync);
+        str::Free(converted);
         return {};
     }
     Str dst = converted;
 
     if (len(dst) == 0) {
         logfa("DealPlainSync: decoded content is empty.\n", pathSync);
+        str::Free(dst);
         return {};
     }
     TempStr tempPath = GetTempFilePathTemp("stx"); // stxabcdef.tmp

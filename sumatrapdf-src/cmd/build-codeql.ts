@@ -24,9 +24,9 @@ async function main() {
   await genDocs();
 
   const { msbuildPath } = detectVisualStudio();
-  const slnPath = join("vs2022", "SumatraPDF.sln");
+  const slnPath = join("vs2022", "TumatraPDF.sln");
 
-  await runLogged(msbuildPath, [slnPath, `/t:SumatraPDF-static:Rebuild`, `/p:Configuration=Release;Platform=x64`, `/m`]);
+  await runLogged(msbuildPath, [slnPath, `/t:TumatraPDF:Rebuild`, `/p:Configuration=Release;Platform=x64`, `/m`]);
 
   await revertBuildConfig();
 

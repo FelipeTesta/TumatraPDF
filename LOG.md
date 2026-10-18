@@ -1,5 +1,103 @@
 # TumatraPDF — Development Log
 
+## 2026-10-18 (s36-r) — roadmap B1/B2/B3 + C1: CodeQL + MSVC `/analyze` CI jobs + clang-tidy sweep
+
+### Added
+
+- **`.github/workflows/codeql.yml`** (repo ROOT, not `sumatrapdf-src/` — GitHub runs workflows only from the repo root and this fork's root is `TumatraPDF/`; the copy under `sumatrapdf-src/.github/workflows/` is upstream leftover, inert). CodeQL `c-cpp`, `build-mode: manual`, triggers push/PR to `main` limited to paths `sumatrapdf-src/src/**`, `sumatrapdf-src/cmd/**`, `sumatrapdf-src/vs2022/**`, plus weekly cron `45 10 * * 1` and `workflow_dispatch`. Steps: checkout@v4 → setup-bun@v2 → setup-msbuild@v2 → setup-nasm@v1 → WebView2 `nuget install` into `packages/` → codeql `init@v4` → `bun ./cmd/build-codeql.ts` → `analyze@v4` (`upload: failure-only`) → `filter-sarif@v1` (keep only `sumatrapdf-src/src/**`) → `upload-sarif@v4` → artifact `sarif-results` (14 days). Every CodeQL step is `continue-on-error: true`: advisory — a fork PR's read-only `GITHUB_TOKEN` (no `security-events`) is a warning, not a red X.
+- **`.github/workflows/static-analysis.yml`** (root): weekly MSVC `/analyze` job (cron `30 11 * * 1` + dispatch, windows-2022). Plain Release x64 `msbuild vs2022\TumatraPDF.sln /t:TumatraPDF` first — the analysis pass sets `BuildProjectReferences=false`, so dependencies must pre-exist — then `bun ./cmd/analyze.ts`, print the head of `out/analyze/warnings-summary.txt`, upload `out/analyze` (30 days). Never fails on findings.
+- **`cmd/analyze.ts`**: local MSVC `/analyze` sweep. Drives the PROJECT `vs2022\TumatraPDF.vcxproj` — NOT the solution, which would drag `PdfFilter`/`PdfPreview`/`test_util` into the run — with `/t:Rebuild /p:BuildProjectReferences=false`, `/analyze:ruleset ...NativeRecommendedRules.ruleset`, `/analyze:plugin EspXEngine.dll`, `/sdl`. Parses the MSBuild log into `out/analyze/msvc-analyze.log` + `warnings-summary.txt` (per-rule ranking + distinct-rule count). `-files a;b` = fast subset (touches the sources, then builds only the owning project: `src/base/**` → `base.vcxproj`, else `TumatraPDF.vcxproj`), `-with-deps` = full cascade, `-parse-only` = re-parse the existing log. `VSLANG=1033` forces English diagnostics so the parsing is locale-independent.
+- `cmd/clang-tidy.ts`: **`-sweep`** (continue past per-file failures, aggregate per-check counts, print top-25 + failure list) and **`-jobs N`** (N clang-tidy processes in parallel — a TU costs ~15-20 s with the Windows + mupdf headers, so the 275-file sweep is ~90 min sequential vs ~18 min at 6 jobs; `-fix` stays sequential so concurrent runs cannot race on shared headers). **`-parse-only`** re-derives the summary from an existing `clangtidy.out.txt` without running clang-tidy and writes `out/lint/clang-tidy-summary.txt` (full check ranking + every `clang-analyzer-*` finding with its location).
+
+### Changed
+
+- `cmd/clang-tidy.ts` aggregation now drops diagnostics whose path is under `mupdf/`, `ext/` or `packages/`: clang-tidy 23's header filter leaks vendored headers (e.g. `ext/darkmodelib/include/DarkModeSubclass.h`) despite `ExcludeHeaderFilterRegex`. Drops are counted and reported, not hidden.
+- `BUILD.md`: new `## Static analysis / CI workflows (CodeQL, MSVC /analyze, clang-tidy)` section — the commands, both traps below, and the fork-only scope.
+- `AGENTS.md` §6b: the `- **Static analysis:**` bullet now covers `cmd/analyze.ts` + `out/analyze/`, the clang-tidy sweep, and the two root workflows (with a note that `sumatrapdf-src/.github/` workflows are inert).
+- `TODO.md`: B1/B2 → `DONE s36-r` (B2 row carries the baseline), B3 → `DONE s36-r`, new **B5** row (triage the 120 `/analyze` findings), new **B6** row (triage the clang-tidy baseline, analyzer findings first), C1 → `DONE s36-r` (repaired + verified), B6 → `WIP s36-r` (wave 1 triaged: 11 real fixes + FP verdicts).
+
+### Fixed
+
+- **`cmd/clang-tidy.ts` picked a broken clang-tidy**: `detectVisualStudio().clangTidyPath` points at the VS-bundled `VC\Tools\Llvm\bin\clang-tidy.exe` (LLVM **19.1.5**), which crashes with an access violation (`0xC0000005`, exit 5) on EVERY TU of this codebase — the first sweep reported 275/275 files crashed with 0 warnings. Now prefers the standalone `%ProgramFiles%\LLVM\bin\clang-tidy.exe` (**23.1.1**, same family as the clangd already in use) and falls back to the VS one; the `CLANG_TIDY` env var overrides.
+- `cmd/build-codeql.ts`: dead upstream targets `vs2022\SumatraPDF.sln` / `SumatraPDF-static:Rebuild` → `vs2022\TumatraPDF.sln` / `TumatraPDF:Rebuild`.
+- **`cmd/build-asan.ts` repaired (C1)** — it could not run at all: `detectVisualStudio2026()` throws on this machine (only VS 2022 is installed) and it ran `bin/premake5.exe vs2022` first, the documented trap that regenerates `vs2022/*.vcxproj` from the upstream `premake5.lua` and strips the 10 fork-added sources (the failure then surfaces much later as `LNK1120`). It also pointed at the non-existent `vs2022\SumatraPDF.sln` and the upstream target `SumatraPDF-static`. Now: `detectVisualStudio()`, no premake step (with a comment), `vs2022\TumatraPDF.sln` + `/t:TumatraPDF` + `/p:Configuration=Debug|Release;Platform=x64_asan`, both `-clean` and `--clean`. The project files already carry the `x64_asan` configurations and a `PostBuildEvent` that copies `clang_rt.asan_dynamic-x86_64.dll` next to the exe, so the script's own copy is only a safety net and no longer a hard failure.
+
+- **B6 wave 1 (analyzer findings, real bugs)**: `TableOfContents.cpp` — `destKind` was initialized from `nullptr` (a `Kind` is `const char*` and the kind constants are extern globals, so both MSVC C28182 and clang NonNullParamChecker saw a possibly-null compare) → init from `kindDestinationNone` + explicit `dest &&` guards. `Commands_Edit.cpp`/`Commands_Image.cpp` — the duplicated GDI+ encoder idiom never checked `malloc` nor `GetImageEncoders` (C6011/C6387) → both checked with cleanup. `base/Str.cpp` `StrNodeListPush` proceeded to `n->next` after the non-aborting `ReportIf(!n)` → early return. `base/StrFormatParse.cpp` `addRawStr` could write past the fixed 32-instruction table (guarded-but-unprotected) → early return. `PdfSync.cpp` `DealPlainSync` leaked the malloc'd `ConvertLocalToUTF8` result on both early-return paths (`!converted` and empty) → `str::Free` added. `PdfDarkModeImageBgBlend.cpp` — `SampleMaskBilinear` clamped only x1/y1, so x0/y0 could index outside the mask heap block when u/v round past [0,1] (either direction) → 4-way clamp; `BuildEdgeConnectedBgMask`'s `fgMask` was freed only on the boolean-failure path, skipped on an fz-throw → free in `fz_catch` + `fz_rethrow`. `Canvas.cpp` — 3 mouse handlers dereferenced `win->AsFixed()` after the non-aborting `ReportIf(!dm)` → early returns. `SumatraStartup.cpp` — a null `win` (from `CreateAndShowMainWindow` failure, or `restoreSession` with an empty session-data list never entering the creation loop) reached `win->AsFixed()` in the fileNames loop → guards at both spots.
+
+### Verified
+
+- **B2 end-to-end**: `bun cmd/analyze.ts` → msbuild exit 0 in 86.2 s, **120 fork warnings / 0 errors, 17 distinct rules** in `out/analyze/warnings-summary.txt`. Ranking: C26495 ×57, C28159 ×21 (`GetTickCount` → `GetTickCount64`), C6387 7, C6011 5, C6001 5, C6385 4, C6031 4, C28182 3, C6287 3, C6386 2, C26813 2, C6262 2, singles C26110 / C28183 / C26454 / C33005 / C26819. Two further warnings sit in vendored code.
+- Corruption found and repaired while working on B2: `out/rel64/obj-s/base.lib` held only `BasePch.obj` → 781 `LNK2001`/`LNK1120` at link. Rebuilt with `msbuild vs2022\base.vcxproj /t:Rebuild /p:Configuration=Release /p:Platform=x64 /m`; a healthy archive has ~49 members (`dumpbin /archivemembers out/rel64/obj-s/base.lib`).
+- `cmd/clang-tidy.ts` sanity-check on one TU before the full sweep: 103 displayed diagnostics / 16 distinct checks, all in the fork's own `src/base/` headers; clang-tidy's trailing "N warnings generated" (12 000+) counts compiler diagnostics it suppressed (12 352 in non-user code + 9 NOLINT), so the sweep's honest count comes from the parsed diagnostics.
+- **B3 full sweep**: 275 TUs at `-jobs 6`, 267 of them producing diagnostics (no clang-tidy crash, no non-zero exit). Baseline `out/lint/clang-tidy-summary.txt`: **29 922 user diagnostics / 95 distinct checks / 8 errors**, 0 vendored paths leaked into the count. The distribution is dominated by style, not defects — `bugprone-signed-bitwise` 5694, `modernize-macro-to-enum` 4052, `readability-named-parameter` 3117, `modernize-use-designated-initializers` 2392, `readability-redundant-parentheses` 2305, `readability-use-concise-preprocessor-directives` 1881, `misc-explicit-constructor` 1619. The actionable core is the **42 `clang-analyzer-*` path findings** (core.CallAndMessage 9, security.ArrayBound 8, core.NullDereference 7, deadcode.DeadStores 6, cplusplus.NewDeleteLeaks 4, unix.Malloc 3, core.NonNullParamChecker 2, core.StackAddressEscape 1, core.NullPointerArithm 1, unix.cstring.NullArg 1) plus the real `bugprone-*` classes (`switch-missing-default-case` 128, `unhandled-code-paths` 102, `narrowing-conversions` 48, `undefined-memory-manipulation` 24, `bitwise-pointer-cast` 22, `integer-division` 19, `derived-method-shadowing-base-method` 19, `incorrect-roundings` 17). Several land on fork-only code: `FlashcardSidebar.cpp:229`, `FlashcardToolbar.cpp:1720/2047`, `EditAnnotations.cpp:376/1089`, `Canvas.cpp:2479/2831/2838`, `PdfDarkModeImageBgBlend.cpp:111/112/347`, `ScreenshotCapture.cpp:1136`, `SumatraStartup.cpp:2716`, `Toolbar.cpp:1503`, `HomePage.cpp:512`. Triage tracked as **B6** in `TODO.md`.
+- **C1 end-to-end**: `bun cmd/build-asan.ts` → `out/dbg64_asan/TumatraPDF.exe` (33.9 MB, 0 errors, 277 s) with `clang_rt.asan_dynamic-x86_64.dll` deployed next to it, and the `x64_asan` configurations really do carry `<EnableASAN>true</EnableASAN>` (`TumatraPDF`/`base`/`test_util` vcxproj). `bun cmd/run-unit-tests.ts -asan` then built `test_util.exe` and ran the base unit tests under ASan: exit 0, "unit tests passed".
+- **B6 wave 1 verified**: MSVC `/analyze` **120 → 114** fork warnings (C6011 5→3, C6387 7→5, C28182 3→1), deltas read from `cmd/analyze.ts -files` runs (25-107 s; `RunCodeAnalysis` re-emits the whole app-project set from its XML cache, so the summary stays project-wide). The TOC `NonNullParamChecker`, `Str.cpp:229`, `StrFormatParse:89`, Canvas ×3, `PdfSync:647`, `PdfDarkModeImageBgBlend:111/112` and `SumatraStartup:2716` findings confirmed gone with `cmd/clang-tidy.ts -files` (18-40 s per TU, both baselines left untouched). FP verdicts recorded (no code change): FlashcardSidebar 229/232 (`buf[256]` provably ≤249 via 3 guards), FileWatcher:312, DirScan:69 (self-referential iterator invariant), Str.cpp 985/1137/1274, Win.cpp:124, LzmaSimpleArchive:68, HtmlWindow:1107, ChmModel:1011 (same callback-ownership idiom as SumatraPDF.cpp:1215), ScreenshotCapture:1136 (`WM_DESTROY` frees), DisplayModel:611, PdfDarkModeAnalysis:44, PdfDarkModeImageBgBlend 123/371 (analyzer cannot model the setjmp-based `fz_always`), FlashcardToolbar:2047; DeadStores ×4 accepted as style. Remaining B6: `EngineDump.cpp:365`, `base/Base.h:743` (2-args-called-with-1), real `bugprone-*` classes, the 8 `clang-diagnostic-error` TUs.
+
+### Notes
+
+- Trap: `SelectedFiles` is a GLOBAL MSBuild property. `/p:SelectedFiles=a;b` breaks other projects (`MSB4044` in `ResourceCompile`) and can rewrite `base.lib`/`*.lib` from the filtered item list — the corruption above. Banned from `cmd/analyze.ts`, which is why `-files` touches sources instead of filtering items.
+- Trap: MSBuild `/analyze` needs `/t:Rebuild` — with `/t:Build` everything is up-to-date and nothing is analyzed. The honest warning count comes from parsing the log (strip the `\d+>` node prefix, `.trim()`, strip the trailing `[C:\...\vcxproj]` project annotation) — MSBuild's own trailing "N Aviso(s)" covers the compile step only and double-counts otherwise.
+- `ReportIf(cond)` (Base.h) reports to the crash system and CONTINUES in every build — it never aborts. MSVC's embedded `__analysis_assume` hides follow-up derefs from the compiler, while clang-analyzer (which ignores the annotation) still flags them. Where the condition guards a deref, pair `ReportIf` with an explicit `if (cond) { return; }`.
+
+## 2026-10-18 (s36-q) — clangd semantic navigation: compile_commands.json + Serena MCP
+
+### Added
+
+- **`cmd/gen-compile-commands.ts`** (+ new **`cmd/clang-flags.ts`** shared flag list: include dirs, defines, `-std=c++23`): writes `compile_commands.json` (282 TUs, gitignored) so clangd parses the tree with the REAL build flags. MSBuild/premake cannot emit a database — that was the blocker. WebView2 include dir resolved at runtime from `packages/`. Regenerate after adding/removing a `.cpp` or bumping the WebView2 NuGet.
+- **Serena MCP** (clangd backend; installed via `uv tool install --from git+https://github.com/oraios/serena serena-agent` → `C:\Users\Testa\.local\bin\serena.exe`), wired in the global `opencode.json` as `mcp.servers.serena` with `--context agent --agent-interface tools --project <sumatrapdf-src>`. 28 semantic tools (`find_symbol`, `find_referencing_symbols`, `get_symbols_overview`, `get_diagnostics_for_file`, `rename_symbol`, ...). Client-agnostic MCP (nothing Claude-specific: the `claude-code` context name is just one of Serena's presets and `ide-assistant` is its deprecated alias). Complements tree-sitter: syntax/AST from tree-sitter, real name resolution + cross-file call-sites from clangd.
+- `cmd/clang-tidy.ts` refactored to import the shared flags from `cmd/clang-flags.ts` (was duplicating them) — lint and navigation now agree, and lint uses `-std=c++23` like the projects (`stdcpplatest`) instead of `c++20`.
+- `TODO.md`: new section `## Dev tooling / analysis roadmap (s36-q)` — single table (Fase / ID / Task / Effort / Status / **Expected improvement**), FASE A rows marked DONE+verified, B–E pending with recommended order. Header uses English (`Expected improvement`) per the informativos language rule (§13).
+
+### Changed
+
+- `.clangd`: `-std=c++17` → `-std=c++23`. `CompileFlags.Add` is applied AFTER the compilation-database flags, so the old standard silently downgraded parsing of every TU.
+- `compile_flags.txt`: WebView2 include path refreshed `1.0.992.28` → installed `1.0.4022.49`. Fallback only — `compile_commands.json` in the same dir shadows it.
+- `sumatrapdf-src/.gitignore`: `compile_commands.json`, `.cache/`, `.serena/`.
+- `sumatrapdf-src/.serena/project.local.yml` (machine-local, gitignored): `ignored_paths` excludes vendored trees (`ext/**`, `mupdf/**`, `out/**`, `packages/**`, `bin/**`, `.work/**`, `.cache/**`, `vs2022/**`) — a fuzzy `find_symbol` had matched `ext/dav1d/tests/libfuzzer/...` and aborted with `SolidLSPException: trying to get AST for non-added document (-32602)`, since only `src/` is in the database.
+- `BUILD.md` § Semantic navigation (how to generate + the DB-location trap), `AGENTS.md` §0b/§6b (when to reach for clangd/Serena instead of tree-sitter).
+
+### Verified
+
+- `clangd --check=src/wingui/WebView.cpp`: WITHOUT the database = `'WebView2EnvironmentOptions.h' file not found` → `fatal_too_many_errors` (TU unparseable); WITH it = parses clean, 0 real diagnostics (the 130 "errors" are clangd's own extract-function self-test failures; `src/base/Str.cpp` 17 and `src/Toolbar.cpp` 52 unchanged before/after).
+- DB location: clangd walks up from the file and `compile_flags.txt` in `sumatrapdf-src/` is loaded as a database that SHADOWS a `compile_commands.json` at the repo root — tested both places, DB must stay in `sumatrapdf-src/`.
+- Serena: starts in ~2.6 s, activates project `sumatrapdf-src`, spawns its bundled clangd 19.1.2 with `--background-index` (finds the DB in its cwd). opencode live-reloaded the MCP entry (2 → 28 tools). First `find_symbol` hit Serena's 240 s tool timeout while clangd built the project index (one-time; shards persist in `%LOCALAPPDATA%\clangd\index`).
+
+## 2026-10-18 (s36-p) — flashcard upcoming-card prefetch (user idea) (BUILD OK; cloze harness PASS)
+
+### Added
+
+- **`FlashcardPrefetchUpcoming(win, fromIdx, count)`** (Commands_Flashcard.cpp, user request "fila pré-carregada dos próximos 4 cards"): page-parses (`GetFzPageInfo(pageNo, /*loadQuick=*/true)` — page dict + annotations, NO stext, NO render) the next N study-queue cards' pages + cross-page cards' `extraPages`, so advancing between cards never pays a first-touch `fz_load_page` on the UI thread. Sub-ms when cached, a few ms for a first-touch parse. Fires at session start (`FlashcardApplyStudyOrder` + `CmdFlashcardStudy` toggle ON, 5 cards incl. current) and on every rate-advance (4 cards). `[fc][perf] prefetch idx=… page=… extra=…: Nms` logs for real-book measurement.
+- Scope note: this kills the NAVIGATION delay; the Toggle ON full-document scan (`FlashcardLoadFromDocument`, FC-H2 remainder) is a separate, still-open item — the prefetch queue needs the complete card list to know what "next" is.
+
+### Verified
+
+- Build 0 err/0 warn → Compiled. `s36i-roundtrip` PASS; `tests/ad-hoc-flashcard-cloze.ts` PASS end-to-end (add cloze → study toggle → order → **prefetch fired: `[fc][perf] prefetch idx=0 card=0 page=1 extra=0: 0ms`** → navigate → reveal → rate → history/backup intact).
+
+## 2026-10-18 (s36-o) — FC-H2/R-P3 annot-scan freeze: stext extraction was the killer + per-page API (BUILD OK; s36i PASS)
+
+### Fixed
+
+- **Root cause (FC-H2/R-P3 class)**: `EngineMupdfGetAnnotations` looped ALL pages with `GetFzPageInfo(i, /*loadQuick=*/false)` — and loadQuick=false means "full load": after fz_load_page + annot scan it runs `fz_new_stext_page_from_page2` (FULL TEXT EXTRACTION) for every never-visited page. First ctrl+click / annot-edit on a big book = hundreds of stext extractions on the UI thread = multi-second freeze. Fix: `loadQuick=true` (annots only) — the scan no longer pays for text it never reads.
+- **New single-page API**: `EngineGetPageAnnotations(engine, pageNo, out)` (EngineAll.h + EngineCreate.cpp dispatch + `EngineMupdfGetPageAnnotations` in EngineMupdf.cpp — ensures that ONE page is loaded + annots scanned). Migrated the two callers that only ever needed one page: `FindMatchingAnnotation` (SumatraPDF.cpp — its loop filtered `a->pageNo == key.pageNo` yet scanned the whole doc!) and the EditAnnotations focus-lookup (EditAnnotations.cpp:187). The EditAnnotations dialog list (line 1305) keeps the full-doc scan, now stext-free.
+- **NOT touched**: `FlashcardLoadFromDocument` (Flashcard.cpp:121) does its own raw `fz_load_page` scan under `docLock` (bypasses FzPageInfo) — flashcard Toggle ON on huge books still loads every page; TODO FC-H2 stays OPEN, narrowed to this one site (pre-check /Annots or async build).
+
+### Verified
+
+- Build 0 err/0 warn → Compiled. `s36i-roundtrip` PASS WITH doc (25 buttons, marks=17,21).
+
+## 2026-10-18 (s36-n) — R-P2 render-perf audit closed: 1 live fix + 3 stale items (BUILD OK; roundtrip PASS)
+
+### Changed
+- **RenderCache::Find + GetRenderDelay scan NEWEST-FIRST** (RenderCache.cpp): the hot hit (PaintTile) is almost always the most recently added entry (render thread appends to cache[cacheCount]; requests are appended and popped from the tail by GetNextRequest), so the common case drops from a full linear walk to O(1). Full hash keyed (dm,pageNo,rot,zoom,tile) considered and REJECTED: no STL in base — a hand-rolled map would have to survive DropCacheEntry compaction (last entry moves into the dropped slot) and darkModeEpoch invalidation, for a ~0.5-1ms/frame worst-case win. Bad cost/benefit for a core cache.
+
+### Verified stale (audit items that no longer exist in the current code)
+- **hbmp blit DC churn**: render tiles are MALLOC pixmaps (EngineMupdf.cpp:1642 `AllocPixmap` sets no hbmp) → BlitPixmapRegion takes the StretchDIBits path — no per-tile CreateCompatibleDC. The hbmp DC path now serves only DIB-backed pixmaps (icons, thumbnails).
+- **HdcCreateSimpleFont per paint**: already cached via FindCreatedFont/RememberCreatedFont (base/Win.cpp:2155) — per-paint calls are a lookup; no caller DeleteObjects the shared font.
+- **RecalcVisibleParts layout copy**: fixed in s35 (recomputes directly on pagesInfo; DocumentLayout::Reset has no per-tick caller — verified by grep).
+
+### Verified
+- Build 0 err/0 warn → Compiled. `s36i-roundtrip` PASS with a real doc (25 visible buttons — the `Edit` button only appears when a document is loaded; marks=17,21 stable; kids {Static:4,Edit:2,Button:1}).
+
 ## 2026-10-18 (s36-m) — Flashcard cross-page cloze: one card per multi-page selection (BUILD OK, app untouched logs; crosspage + cloze PASS)
 
 ### Fixed

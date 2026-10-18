@@ -86,6 +86,9 @@ static void addRawStr(Fmt& fmt, int off, size_t n) {
         return;
     }
     ReportIf(fmt.nInst >= dimof(fmt.instructions));
+    if (fmt.nInst >= dimof(fmt.instructions)) {
+        return; // never write past the fixed instruction table
+    }
     auto& i = fmt.instructions[fmt.nInst++];
     i.t = FmtArg::Kind::RawStr;
     i.rawOff = off;

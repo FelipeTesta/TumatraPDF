@@ -97,6 +97,19 @@ static float SampleMaskBilinear(const float* mask, int maskW, int maskH, float u
     float fy = v * (float)(maskH - 1);
     int x0 = (int)fx;
     int y0 = (int)fy;
+    // u/v can round slightly past 1.0 or below 0, so clamp x0/y0 like x1/y1 below
+    if (x0 < 0) {
+        x0 = 0;
+    }
+    if (y0 < 0) {
+        y0 = 0;
+    }
+    if (x0 >= maskW) {
+        x0 = maskW - 1;
+    }
+    if (y0 >= maskH) {
+        y0 = maskH - 1;
+    }
     int x1 = x0 + 1;
     int y1 = y0 + 1;
     if (x1 >= maskW) {
@@ -286,7 +299,18 @@ fz_pixmap* PdfDarkModeProcessLightBackgroundPixmap(fz_context* ctx, fz_pixmap* s
     if (!fgMask) {
         return nullptr;
     }
-    if (!BuildEdgeConnectedBgMask(ctx, src, bgR, bgG, bgB, fgMask, maskW, maskH)) {
+    // BuildEdgeConnectedBgMask can raise fz exceptions (fz_convert_color), so free
+    // fgMask on the throw path too instead of only on the boolean-failure path
+    bool built = false;
+    fz_var(built);
+    fz_try(ctx) {
+        built = BuildEdgeConnectedBgMask(ctx, src, bgR, bgG, bgB, fgMask, maskW, maskH);
+    }
+    fz_catch(ctx) {
+        free(fgMask);
+        fz_rethrow(ctx);
+    }
+    if (!built) {
         free(fgMask);
         return nullptr;
     }

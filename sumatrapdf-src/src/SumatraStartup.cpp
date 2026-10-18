@@ -2653,6 +2653,9 @@ ContinueOpenWindow:
         for (SessionData* data : *gInitialSessionData) {
             // create window hidden to avoid flashing the about page
             win = CreateAndShowMainWindow(data, false);
+            if (!win) {
+                continue;
+            }
             for (TabState* state : *data->tabStates) {
                 if (len(state->filePath) == 0) {
                     logf("WinMain: skipping RestoreTabOnStartup() because state->filePath is empty\n");
@@ -2709,15 +2712,18 @@ ContinueOpenWindow:
     }
 
     for (Str path : flags.fileNames) {
-        if (restoreSession) {
+        // win can still be null here: restoreSession with no session windows
+        // never ran the creation loop above
+        if (restoreSession && win) {
             auto* tab = FindTabByFile(path);
             if (tab) {
                 tabToSelect = tab;
-                if (flags.forwardSearchOrigin && flags.forwardSearchLine && win->AsFixed() && win->AsFixed()->pdfSync) {
+                DisplayModel* dmFix = win->AsFixed();
+                if (flags.forwardSearchOrigin && flags.forwardSearchLine && dmFix && dmFix->pdfSync) {
                     int page;
                     Vec<Rect> rects;
                     TempStr srcPath = path::NormalizeTemp(flags.forwardSearchOrigin);
-                    int ret = win->AsFixed()->pdfSync->SourceToDoc(srcPath, flags.forwardSearchLine, 0, &page, rects);
+                    int ret = dmFix->pdfSync->SourceToDoc(srcPath, flags.forwardSearchLine, 0, &page, rects);
                     ShowForwardSearchResult(win, srcPath, flags.forwardSearchLine, 0, ret, page, rects);
                 }
                 continue;

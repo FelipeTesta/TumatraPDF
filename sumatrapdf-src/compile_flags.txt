@@ -7,7 +7,7 @@
 -Iext/darkmodelib/include
 -Iext/a-zlib
 -Iext/synctex
--Ipackages/Microsoft.Web.WebView2.1.0.992.28/build/native/include
+-Ipackages/Microsoft.Web.WebView2.1.0.4022.49/build/native/include
 -DUNICODE
 -DWIN32
 -D_WIN32

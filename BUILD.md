@@ -109,10 +109,87 @@ New command ID: edit `cmd/gen-commands.ts`, run `bun cmd/gen-commands.ts`
 (regenerates `src/Commands.h`). New setting: edit `cmd/gen-settings.ts`, run
 `bun cmd/gen-settings.ts` (regenerates `src/Settings.h`). NEVER hand-edit `@gen` files.
 
+## Semantic navigation (clangd / Serena)
+
+clangd needs a compilation database to parse the tree with the real flags. MSBuild/premake
+cannot emit one, so `cmd/gen-compile-commands.ts` writes it from the shared flag list.
+
+```powershell
+cd sumatrapdf-src
+bun cmd/gen-compile-commands.ts          # -> compile_commands.json (gitignored, ~282 TUs)
+clangd --check=src/wingui/WebView.cpp    # parse ONE TU, print diagnostics + check results
+```
+
+- Flags live in `cmd/clang-flags.ts`, shared with `cmd/clang-tidy.ts` (same include dirs /
+  defines, so lint and navigation agree). The WebView2 include dir is resolved at runtime
+  from `packages/`; `-std=c++23` matches `<LanguageStandard>stdcpplatest</LanguageStandard>`.
+- Regenerate after adding/removing a `.cpp` under `src/`, or after a WebView2 NuGet bump.
+- The DB MUST sit in `sumatrapdf-src/`: clangd walks up from the file and the
+  `compile_flags.txt` in that directory shadows a DB placed at the repo root.
+  `compile_flags.txt` is only a stale-by-design fallback (hardcoded WebView2 version) —
+  run the generator instead. `.clangd`'s `-std` must match the projects: `CompileFlags.Add`
+  is applied AFTER the database flags, so an older standard there silently downgrades parsing.
+- Not covered on purpose: `src/mac/**` (Objective-C++), `src/testcode`, `src/tools`,
+  `src/regress`.
+- Serena MCP (clangd backend) is wired in `%APPDATA%\..\.config\opencode\opencode.json`
+  (`mcp.servers.serena`, `--project` = this `sumatrapdf-src` dir) — semantic
+  symbol/reference lookup from the agent, replacing syntactic greps for those questions.
+  Server logs: `C:\Users\Testa\.serena\logs\<date>\mcp_*.txt`.
+  Serena's bundled clangd 19 runs with `--background-index`: the FIRST symbol query starts a
+  full project index and can exceed Serena's 240 s tool timeout while it works (one-time;
+  shards persist in `%LOCALAPPDATA%\clangd\index`, so later queries are instant). Give it a
+  few minutes, then retry. Wait until the shard count in that folder stops growing.
+
+## Static analysis / CI workflows (CodeQL, MSVC /analyze, clang-tidy)
+
+GitHub runs ONLY the workflows at the repo root `.github/workflows/`. The files under
+`sumatrapdf-src/.github/workflows/` are upstream leftovers and NEVER execute (repo root
+is `TumatraPDF/`, build tree is `sumatrapdf-src/`). Live: `release.yml`, `codeql.yml`,
+`static-analysis.yml`.
+
+### CodeQL (`codeql.yml`)
+
+- c-cpp, `build-mode: manual` → `bun ./cmd/build-codeql.ts` (Release x64 through
+  `vs2022\TumatraPDF.sln`, regenerates `.work/embedded.dat` first).
+- Triggers: push/PR to `main` on `sumatrapdf-src/src|cmd|vs2022/**`, weekly cron,
+  `workflow_dispatch`. Advisory: SARIF filtered to `sumatrapdf-src/src/**` and uploaded;
+  CodeQL steps are `continue-on-error` (fork PRs get a read-only token).
+
+### MSVC /analyze (`cmd/analyze.ts` → `static-analysis.yml`)
+
+```powershell
+cd sumatrapdf-src
+bun cmd/analyze.ts                          # all fork TUs; deps must be prebuilt (Release x64)
+bun cmd/analyze.ts -files src\Toolbar.cpp   # touch + rebuild only the owning project
+bun cmd/analyze.ts -with-deps               # full solution cascade (slow, vendored noise)
+```
+
+- Builds the PROJECT (`vs2022\TumatraPDF.vcxproj`), never the solution: the solution
+  folder drags `PdfFilter` / `PdfPreview` / `test_util` along. `/t:Rebuild` is required
+  (Build alone finds every TU up to date and analyzes nothing);
+  `BuildProjectReferences=false` keeps the vendored projects out of the run, so a prior
+  normal Release build must exist.
+- Output: `out/analyze/msvc-analyze.log` + `out/analyze/warnings-summary.txt` (per-rule
+  counts, fork sources separated from vendored). Diagnostics are un-prefixed from the
+  MSBuild node id (`10>`) and de-duplicated (MSBuild repeats each one in its summary).
+  `VSLANG=1033` forces English diagnostics for parsing.
+- **TRAP**: `SelectedFiles` is a GLOBAL MSBuild property. Passing it on the command line
+  filters every other project's items as well — `ResourceCompile` goes empty and the RC
+  task dies with `MSB4044`. Worse, the filtered build then rewrote `base.lib` with a
+  single member (`BasePch.obj`), so the next link failed with **781 `LNK2001`/`LNK1120`
+  unresolved externals** for `src/base` symbols. Verify with
+  `dumpbin /archivemembers out/rel64/obj-s/base.lib` (a healthy lib lists ~49 objects) and
+  repair with `msbuild vs2022\base.vcxproj /t:Rebuild /p:Configuration=Release /p:Platform=x64`.
+  `cmd/analyze.ts` therefore TOUCHES the listed sources to defeat the incremental check
+  instead, and prints this hint when a link fails.
+- CI: weekly cron + `workflow_dispatch`; plain Release build first, then the sweep;
+  artifact `msvc-analyze` (log + summary, 30 days). Findings never fail the job; only a
+  real MSBuild failure does.
+
 ## Known issues
 
 - **LNK1201 (PDB lock)**: `libsumatrapdf.pdb` locked by VS Code/OneDrive. Rename PDB, rebuild.
-- **build-asan.ts / .vscode F5 broken**: reference old `SumatraPDF.sln`. Do not use.
+- **`.vscode` F5 broken**: `launch.json`/`tasks.json` still target `SumatraPDF-dll.exe` / `SumatraPDF.sln` — no F5 in VS Code. **ASan builds work again** (s36-r): `bun cmd/build-asan.ts [-rel] [-clean]` → `out/dbg64_asan|rel64_asan/TumatraPDF.exe`, and `bun cmd/run-unit-tests.ts -asan` runs the base unit tests under ASan.
 - **build_log.txt**: `Module not found` error = wrong cwd (repo root). Use `cd sumatrapdf-src`.
 - **MSB1009 (sln not found)**: `build.ts:37` with `..\vs2022` is a regression. Must read `vs2022\TumatraPDF.sln`. Revert on sight.
 

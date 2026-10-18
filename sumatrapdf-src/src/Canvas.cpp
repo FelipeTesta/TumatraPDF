@@ -2445,6 +2445,9 @@ static void OnMouseLeftButtonDown(MainWindow* win, int x, int y, WPARAM key) {
     HwndSetFocus(win->hwndFrame);
     DisplayModel* dm = win->AsFixed();
     ReportIf(!dm);
+    if (!dm) {
+        return;
+    }
     Point pt{x, y};
 
     // remember how this sequence started: WM_CONTEXTMENU, which a long press
@@ -2756,6 +2759,9 @@ static void OnMouseLeftButtonUp(MainWindow* win, int x, int y, WPARAM key) {
 
     DisplayModel* dm = win->AsFixed();
     ReportIf(!dm);
+    if (!dm) {
+        return;
+    }
 
     if (win->selection.lastInputWasTouch) {
         DWORD heldMs = (DWORD)GetMessageTime() - win->selection.touchDownTime;

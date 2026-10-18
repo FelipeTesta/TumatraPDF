@@ -1,0 +1,113 @@
+# CodeQL static analysis for TumatraPDF (C/C++).
+#
+# The upstream copy at sumatrapdf-src/.github/workflows/codeql.yml is INERT: GitHub
+# only runs workflows from the repo-root .github/workflows/ folder, and this fork's
+# repo root is TumatraPDF/, with the build tree under sumatrapdf-src/.
+#
+# Advisory by design: findings are uploaded for review, the job does not fail on them.
+# Results are filtered to sumatrapdf-src/src/** so vendored trees (ext/, mupdf/) do
+# not drown the report.
+name: "CodeQL"
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "sumatrapdf-src/src/**"
+      - "sumatrapdf-src/cmd/**"
+      - "sumatrapdf-src/vs2022/**"
+      - ".github/workflows/codeql.yml"
+  pull_request:
+    branches: [main]
+    # fork PRs run with a read-only GITHUB_TOKEN: the CodeQL steps are marked
+    # continue-on-error below so a missing security-events permission is a warning,
+    # not a red X on an external contribution.
+    paths:
+      - "sumatrapdf-src/src/**"
+      - "sumatrapdf-src/cmd/**"
+      - "sumatrapdf-src/vs2022/**"
+      - ".github/workflows/codeql.yml"
+  schedule:
+    - cron: "45 10 * * 1"
+  workflow_dispatch:
+
+permissions:
+  security-events: write
+  packages: read
+  actions: read
+  contents: read
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: windows-2022
+    timeout-minutes: 360
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: c-cpp
+            build-mode: manual
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      # NASM required by ext/libjpeg-turbo and ext/dav1d SIMD .asm custom build steps
+      - name: Setup NASM
+        uses: ilammy/setup-nasm@v1
+
+      # WebView2 SDK (nuget package referenced by vs2022/*.vcxproj, not tracked in git)
+      - name: Restore WebView2 nuget
+        working-directory: sumatrapdf-src
+        run: nuget install Microsoft.Web.WebView2 -Version 1.0.4022.49 -OutputDirectory packages -NonInteractive
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+
+      - name: Build (Release x64)
+        if: matrix.build-mode == 'manual'
+        working-directory: sumatrapdf-src
+        run: bun ./cmd/build-codeql.ts
+
+      - name: Perform CodeQL Analysis
+        continue-on-error: true
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: "/language:${{matrix.language}}"
+          output: sarif-results
+          upload: failure-only
+
+      - name: Filter SARIF to fork sources
+        continue-on-error: true
+        uses: advanced-security/filter-sarif@v1
+        with:
+          patterns: |
+            -**/*
+            sumatrapdf-src/src/**/*
+          input: sarif-results/cpp.sarif
+          output: sarif-results/cpp.sarif
+
+      - name: Upload SARIF
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: sarif-results/cpp.sarif
+
+      - name: Upload SARIF as a Build Artifact
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v6
+        with:
+          name: sarif-results
+          path: sarif-results
+          retention-days: 14
