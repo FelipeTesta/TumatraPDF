@@ -12,7 +12,7 @@
 
 ### Verified
 - Build 0/0 → Compiled. `ad-hoc-flashcard-cloze` PASS end-to-end WITH the pre-filter (add→toggle→study→reveal→rate→history/backup; `[fc] FlashcardLoadFromDocument - found 1 flashcards` ✓). `s36i-roundtrip` PASS with doc (25 buttons, marks=17,21 stable).
-- Serena MCP (clangd) find_symbol timed out 240s twice on this tree (huge C++ TU set) — compile_commands.json present; needs smaller scope or clangd warm-up before it's usable here; tree-sitter + grep remain the mapping tools.
+- **Serena MCP FIXED** (was: find_symbol 240s timeout ×2): root cause = unscoped search visits ALL 282 TUs (clangd parses each — huge header graphs). Fix per official docs (Unreal guide, same problem class): scoped `find_symbol(relative_path=…)` + `.serena/project.yml` tuned (`ls_workspace_folders: ["./src"]`, `ignored_paths` for mupdf/ext/out/.vs/packages/tests-tmp/.work). Verified: get_symbols_overview (31 syms on Flashcard.cpp), scoped find_symbol, cross-file find_referencing_symbols (Flashcard↔Commands_Flashcard), get_diagnostics (`{}` = clean). Recipe in AGENTS.md §6b.
 
 ## 2026-10-18 (s36-r) — roadmap B1/B2/B3 + C1: CodeQL + MSVC `/analyze` CI jobs + clang-tidy sweep
 
