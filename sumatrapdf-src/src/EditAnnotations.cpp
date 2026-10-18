@@ -184,7 +184,8 @@ static Annotation* FindAnnotationOnSamePage(WindowTab* tab, Annotation* annot) {
     }
     int pageNo = annot->pageNo;
     Vec<Annotation*> annots;
-    EngineGetAnnotations(engine, annots);
+    // single-page query: the full-document scan parses EVERY page (UI freeze)
+    EngineGetPageAnnotations(engine, pageNo, annots);
     for (Annotation* a : annots) {
         if (a != annot && a->pageNo == pageNo) {
             return a;

@@ -119,6 +119,25 @@ Vec<Flashcard> FlashcardLoadFromDocument(EngineMupdf* engine) {
 
     int pageCount = fz_count_pages(ctx, engine->_doc);
     for (int pageIdx = 0; pageIdx < pageCount; pageIdx++) {
+        // Fast /Annots pre-filter: most pages have no annotations, and
+        // fz_load_page (page struct + annot parse) is this scan's dominant
+        // cost on big books. Resolving just the page object (borrowed ref,
+        // O(1) after mupdf's one-time lazy page-tree pass) and checking its
+        // "Annots" entry skips annot-free pages without building an fz_page.
+        // The skip continues AFTER fz_catch — never jump out of fz_try (setjmp).
+        bool hasAnnots = false;
+        fz_try(ctx) {
+            pdf_obj* pageObj = pdf_lookup_page_obj(ctx, engine->pdfdoc, pageIdx);
+            pdf_obj* annots = pageObj ? pdf_dict_get(ctx, pageObj, PDF_NAME(Annots)) : nullptr;
+            hasAnnots = annots != nullptr && (pdf_is_array(ctx, annots) ? pdf_array_len(ctx, annots) > 0 : true);
+        }
+        fz_catch(ctx) {
+            fz_report_error(ctx);
+        }
+        if (!hasAnnots) {
+            continue;
+        }
+
         fz_page* page = fz_load_page(ctx, engine->_doc, pageIdx);
         if (!page) {
             continue;

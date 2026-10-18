@@ -4593,8 +4593,11 @@ static Annotation* FindMatchingAnnotation(WindowTab* tab, const SavedAnnotSel& k
     if (!engine) {
         return nullptr;
     }
+    // the key carries the page: one page's annots suffice (the loop below
+    // filters on a->pageNo == key.pageNo) — the full-document scan parses
+    // EVERY page and froze the UI on big books
     Vec<Annotation*> annots;
-    EngineMupdfGetAnnotations(engine, annots);
+    EngineGetPageAnnotations(engine, key.pageNo, annots);
     for (Annotation* a : annots) {
         if (a->pageNo == key.pageNo && a->type == key.type && a->bounds == key.bounds) {
             return a;

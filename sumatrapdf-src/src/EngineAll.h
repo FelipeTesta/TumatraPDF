@@ -64,6 +64,7 @@ Str LoadEmbeddedPDFFile(Str path);
 TempStr ParseEmbeddedStreamNumber(Str path, int* streamNoOut);
 Annotation* EngineMupdfCreateAnnotation(EngineBase*, int pageNo, PointF pos, AnnotCreateArgs* args);
 void EngineMupdfGetAnnotations(EngineBase*, Vec<Annotation*>&);
+void EngineMupdfGetPageAnnotations(EngineBase*, int pageNo, Vec<Annotation*>&);
 bool EngineMupdfHasUnsavedAnnotations(EngineBase*);
 bool EngineMupdfSupportsAnnotations(EngineBase*);
 bool EngineMupdfIsEncrypted(EngineBase* engine);
@@ -93,6 +94,7 @@ EngineBase* CreateEngineFromFile(Str filePath, PasswordUI* pwdUI, bool enableChm
 
 bool EngineSupportsAnnotations(EngineBase*);
 bool EngineGetAnnotations(EngineBase*, Vec<Annotation*>&);
+bool EngineGetPageAnnotations(EngineBase*, int pageNo, Vec<Annotation*>&);
 bool EngineHasUnsavedAnnotations(EngineBase*);
 Annotation* EngineGetAnnotationAtPos(EngineBase*, int pageNo, PointF pos, Annotation*);
 Annotation* EngineGetWidgetAtPos(EngineBase*, int pageNo, PointF pos);

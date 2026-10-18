@@ -6675,10 +6675,31 @@ void EngineMupdfGetAnnotations(EngineBase* engine, Vec<Annotation*>& annotsOut) 
     }
     ScopedRecursiveMutex scope(&e->pagesLock);
     for (int i = 1; i <= e->pageCount; i++) {
-        FzPageInfo* pi = e->GetFzPageInfo(i, false);
+        // loadQuick=true: annotations only — a loadQuick=false call would run
+        // the full stext extraction for every never-visited page and freeze
+        // the UI thread on big books (FC-H2)
+        FzPageInfo* pi = e->GetFzPageInfo(i, true);
         if (!pi) {
             continue;
         }
+        annotsOut.Append(pi->annotations);
+    }
+}
+
+// Annotations of a SINGLE page: ensures that page is loaded and its annots
+// scanned, WITHOUT the full-document parse. Callers that only need one page's
+// annotations must use this instead of EngineMupdfGetAnnotations (which
+// fz_load_page's every page and froze the UI on first ctrl+click / annot edit
+// on big books).
+void EngineMupdfGetPageAnnotations(EngineBase* engine, int pageNo, Vec<Annotation*>& annotsOut) {
+    annotsOut.Clear();
+    EngineMupdf* e = AsEngineMupdf(engine);
+    if (!e->pdfdoc || pageNo < 1 || pageNo > e->pageCount) {
+        return;
+    }
+    ScopedRecursiveMutex scope(&e->pagesLock);
+    FzPageInfo* pi = e->GetFzPageInfo(pageNo, true);
+    if (pi) {
         annotsOut.Append(pi->annotations);
     }
 }

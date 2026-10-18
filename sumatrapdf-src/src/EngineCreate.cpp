@@ -342,6 +342,14 @@ bool EngineGetAnnotations(EngineBase* engine, Vec<Annotation*>& annotsOut) {
     return true;
 }
 
+bool EngineGetPageAnnotations(EngineBase* engine, int pageNo, Vec<Annotation*>& annotsOut) {
+    if (!IsEngineMupdf(engine)) {
+        return false;
+    }
+    EngineMupdfGetPageAnnotations(engine, pageNo, annotsOut);
+    return true;
+}
+
 bool EngineHasUnsavedAnnotations(EngineBase* engine) {
     if (!IsEngineMupdf(engine)) {
         return false;

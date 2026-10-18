@@ -155,7 +155,10 @@ BitmapCacheEntry::~BitmapCacheEntry() {
 BitmapCacheEntry* RenderCache::Find(DisplayModel* dm, int pageNo, int rotation, float zoom, TilePosition* tile) {
     ScopedRecursiveMutex scope(&cacheAccess);
     rotation = NormalizeRotation(rotation);
-    for (int i = 0; i < cacheCount; i++) {
+    // newest-first: the hot hit (PaintTile) is almost always the most recently
+    // added entry (the render thread appends to cache[cacheCount]), so scan
+    // from the tail — O(1) for the common case instead of a linear walk
+    for (int i = cacheCount - 1; i >= 0; i--) {
         BitmapCacheEntry* e = cache[i];
         if ((dm == e->dm) && (pageNo == e->pageNo) && (rotation == e->rotation) &&
             (kInvalidZoom == zoom || zoom == e->zoom) && (!tile || e->tile == *tile) &&
@@ -846,7 +849,9 @@ int RenderCache::GetRenderDelay(DisplayModel* dm, int pageNo, TilePosition tile)
         }
     }
 
-    for (int i = 0; i < requestCount; i++) {
+    // newest-first: requests are appended and popped from the tail
+    // (GetNextRequest), so a request PaintTile just enqueued sits at the end
+    for (int i = requestCount - 1; i >= 0; i--) {
         if (requests[i].pageNo == pageNo && requests[i].dm == dm && requests[i].tile == tile) {
             return (int)(GetTickCount64() - requests[i].timestamp);
         }

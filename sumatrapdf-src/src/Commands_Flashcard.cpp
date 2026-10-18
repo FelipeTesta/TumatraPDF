@@ -229,6 +229,43 @@ static void BuildFilteredStudyOrder(MainWindow* win) {
          nDue);
 }
 
+// FC prefetch (user request: "fila pré-carregada dos próximos cards"): parse
+// the PAGES of the next study-queue cards so advancing never pays a
+// first-touch fz_load_page on the UI thread. loadQuick=true = page dict +
+// annotations only (no stext extraction, no render): sub-ms when the page is
+// already cached, a few ms for a first-touch parse. Also warms cross-page
+// cards' secondary pages (they scroll into view on reveal).
+static void FlashcardPrefetchUpcoming(MainWindow* win, int fromIdx, int count) {
+    auto& order = win->flashcard.studyOrder;
+    if (fromIdx < 0) {
+        return;
+    }
+    int end = fromIdx + count;
+    if (end > len(order)) {
+        end = len(order);
+    }
+    for (int i = fromIdx; i < end; i++) {
+        FlashcardQueueEntry& e = order[i];
+        if (!e.tab || e.cardIdx < 0 || e.cardIdx >= len(e.tab->flashcard.cards)) {
+            continue;
+        }
+        DisplayModel* dm = e.tab->AsFixed();
+        auto* engine = dm ? AsEngineMupdf(dm->GetEngine()) : nullptr;
+        if (!engine) {
+            continue;
+        }
+        Flashcard& card = e.tab->flashcard.cards[e.cardIdx];
+        u64 t0 = GetTickCount64();
+        engine->GetFzPageInfo(card.pageNo, true);
+        int nExtra = len(card.extraPages);
+        for (int k = 0; k < nExtra; k++) {
+            engine->GetFzPageInfo(card.extraPages[k].pageNo, true);
+        }
+        logf("[fc][perf] prefetch idx=%d card=%d page=%d extra=%d: %dms\n", i, e.cardIdx, card.pageNo, nExtra,
+             (int)(GetTickCount64() - t0));
+    }
+}
+
 // Called after study-order settings changed (Order dialog), after the page
 // filter changed (Filter dialog) or after the study scope toggled: rebuild
 // the queue and restart from its first card (centered) when a session is
@@ -240,6 +277,7 @@ void FlashcardApplyStudyOrder(MainWindow* win) {
         win->flashcard.revealMode = false;
         if (len(win->flashcard.studyOrder) > 0) {
             win->flashcard.currentCardIdx = 0;
+            FlashcardPrefetchUpcoming(win, 0, 5);
             FlashcardNavigateToEntry(win, win->flashcard.studyOrder[0], true);
         } else {
             win->flashcard.currentCardIdx = -1;
@@ -374,6 +412,9 @@ static void HandleFlashcardRate(MainWindow* win, int rating) {
     } else {
         logf("[fc] HandleFlashcardRate - advancing to card %d/%d\n", win->flashcard.currentCardIdx + 1,
              len(win->flashcard.studyOrder));
+        // prefetch the upcoming cards BEFORE navigating (page-parse only) so
+        // the jump itself is instant
+        FlashcardPrefetchUpcoming(win, win->flashcard.currentCardIdx, 4);
         FlashcardNavigateToEntry(win, win->flashcard.studyOrder[win->flashcard.currentCardIdx], true);
     }
     MainWindowRerender(win);
@@ -525,6 +566,7 @@ bool HandleCommandFlashcard(MainWindow* win, int cmd) {
                 // Navigate to first card: masked (front state), vertically centered
                 if (len(win->flashcard.studyOrder) > 0) {
                     win->flashcard.currentCardIdx = 0;
+                    FlashcardPrefetchUpcoming(win, 0, 5);
                     FlashcardNavigateToEntry(win, win->flashcard.studyOrder[0], true);
                 }
             } else {
