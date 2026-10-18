@@ -15,6 +15,7 @@ import { testit as adHocJpegDecode } from "./ad-hoc-jpeg-decode.ts";
 import { testit as adHocPasteImageAnnot } from "./ad-hoc-paste-image-annot.ts";
 import { testit as adHocUia } from "./ad-hoc-uia.ts";
 import { testit as adHocUpdate } from "./ad-hoc-update.ts";
+import { testit as adHocFlashcardCrossPage } from "./ad-hoc-flashcard-crosspage.ts";
 import { testit as latexTests } from "./latex.ts";
 import { testit as issueChmLzx } from "./issue-chm-lzx.ts";
 
@@ -27,6 +28,7 @@ const adHocTests: [string, () => void | Promise<void>][] = [
   ["ad-hoc-paste-image-annot", adHocPasteImageAnnot],
   ["ad-hoc-uia", adHocUia],
   ["ad-hoc-update", adHocUpdate],
+  ["ad-hoc-flashcard-crosspage", adHocFlashcardCrossPage],
   ["issue-chm-lzx", issueChmLzx],
 ];
 

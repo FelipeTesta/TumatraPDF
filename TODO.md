@@ -6,7 +6,7 @@
 ## Housekeeping (quick)
 
 - [ ] Old stray local branches (`master`, `feature/*`) vs git-flow conventions — prune after confirming nothing unmerged.
-- [ ] TODO BUG-3 verify: right-click image menu flagged "most functions broken" once (may be unimplemented upstream) — live-check whether Crop/Resize/Replace/Paint forward path works; BUG-3 + s32-B can be tested together.
+- [x] BUG-3/s32-B menu gating live-checked (s36-l, image-XObject fixture + vision): image items appear ONLY over an image — PASS. Remaining sub-items live under **BUG-3** (Save-as path + non-image items).
 
 ## Refactoring backlog (from 2026-09-21 tree-sitter audit — see LOG entries for completed R1/R2/R4, 16A-D, C2-C5/F6, SelectionState)
 
@@ -15,10 +15,10 @@
 - [x] **R-P1 `BlitPixmapRegion` HALFTONE** (DONE s34-c 2026-10-11): stretch mode now only set when actually stretching (isStretch flag); 1:1 BitBlt tiles skip SetStretchBltMode entirely. Verified: s34-crop-e2e PASS.
 - [x] **R-P1 arch-tools GDI+ churn (fork)** (DONE s34-c 2026-10-11): early-out (nothing to draw on page → skip Graphics + all ctors) + shared static Gdiplus Pen/Brush/Font objects (app never calls GdiplusShutdown → statics safe); dashed in-progress line preserved. Verified: s33-arch-repro ALL PASS.
 - [x] **R-P1 `DrawDocument` O(N) loop** (DONE s34-c 2026-10-11): binary-searched [firstPage,lastPage] window over monotonic pageOnScreen.y (continuous modes, nPages > 64) + row-mate walk-back + ±2 slack; in-loop visibleRatio/isShown guards unchanged; non-continuous/degenerate geometry = full loop (safe degradation). Verified: crop + arch E2E (page-1 render + pan to page 3).
-- [ ] **R-P2 `PaintTile` linear scans**: up to 4 scans per tile per paint (Find ×2 over cache[128], GetRenderDelay, RequestRendering→Exists→Find). Fix: hash keyed (dm,pageNo,rot,zoom,tile).
-- [ ] **R-P2 `RecalcVisibleParts` full-layout copy per scroll tick**: DocumentLayout::Reset(nPages) + per-page copy on every scroll/zoom/autoscroll tick. Fix: reuse member / incremental window.
-- [ ] **R-P2 hbmp blit DC churn**: CreateCompatibleDC+SelectObject+DeleteDC per tile (use SetDIBitsToDevice on DIB bmBits instead).
-- [ ] **R-P2 `HdcCreateSimpleFont` per paint** for rendering/failed pages (cache per DPI).
+- [x] **R-P2 `PaintTile` linear scans** (DONE s36-m 2026-10-18, 80/20): Find + GetRenderDelay now scan NEWEST-FIRST — the hot hit is almost always the most recently added entry (render thread appends to cache[cacheCount]; requests appended + popped from tail), so the common case is O(1) instead of a full walk. Full hash keyed (dm,pageNo,rot,zoom,tile) CONSIDERED + REJECTED: no STL in base (would need a hand-rolled map surviving DropCacheEntry compaction + darkModeEpoch invalidation) for ~0.5-1ms/frame worst-case scan cost — bad cost/benefit for a core cache.
+- [x] **R-P2 `RecalcVisibleParts` full-layout copy per scroll tick** — DONE s35 (TODO line 39: RecalcVisibleParts recomputes directly on pagesInfo; DocumentLayout::Reset has no per-tick caller anymore; verified by grep 2026-10-18).
+- [x] **R-P2 hbmp blit DC churn** — STALE (verified s36-m 2026-10-18): render tiles are MALLOC pixmaps (EngineMupdf.cpp:1642 `AllocPixmap` sets no hbmp) so BlitPixmapRegion takes the StretchDIBits path — no CreateCompatibleDC per tile. The hbmp DC path exists only for DIB-backed pixmaps (icons, thumbnails).
+- [x] **R-P2 `HdcCreateSimpleFont` per paint** — STALE (verified s36-m 2026-10-18): HdcCreateSimpleFont already caches via FindCreatedFont/RememberCreatedFont (base/Win.cpp:2155) — per-paint calls are a lookup, and no caller DeleteObjects the shared font.
 - [ ] **R-P3 annotations full-doc scan**: EngineMupdfGetAnnotations loads every page (first ctrl+click / fc toggle / reload) — `[perf]` logs in place; async/lazy list build once real-book numbers land.
 - Fine as-is: InvertPixmap (255-v) ≤ old ramp cost; debug-info Record/UpdateRenderInfo no-op when windows closed; FreeIfFull/FreeNotVisible bounded rare scans.
 
@@ -32,8 +32,8 @@
 
 ## Two Columns v2 — pending USER validations (code complete)
 
-- [ ] Visual: Back/Forward after v2 toggle; page edit `3R`; reopen doc saved with v2.
-- [ ] Visual: `TwoColumn2 + Trim` combo; `TwoColumn2 + R2L` (manga) — first virtual column must show the RIGHT column.
+- [x] Visual (s36-l): Back/Forward after v2 toggle PASS (1→2→1→2); page edit `3R` graceful no-op (out-of-range, no crash) PASS; reopen doc saved with v2 = MANUAL ONLY (`-for-testing` never saves settings; no `-settings` flag).
+- [x] Visual (s36-l): `TwoColumn2 + Trim` renders sane PASS; `TwoColumn2 + R2L` (manga) mirrors columns — leftmost = the RIGHT half PASS. Harness `tests/tmp/s36l-tc2.ts` + openrouter-VL vision review.
 - [x] Autoscroll + TC2 acceptance (continuous 1L→1R→2L→2R, no jump) — code-verified; user confirm on real book.
 - [x] **TC2 stall on mouse-hover (s35, 2026-10-12):** flaky stall with TC2+autoscroll+trim+contrast+invert — root: layout rebuild mid-scroll makes `IsAtDocumentEnd()` spike true (transient canvas geometry) → the tick KILLED the autoscroll timer permanently. Fix: skip the tick when GetCanvasSize() invalid (mid-rebuild). Probe `tests/tmp/s35-tc2-auto.ts` 3/3 SCROLLING after fix (was 1/2 stall before). User confirm on real book.
 - [x] **TC2 drag-slow (s35):** `RecalcVisibleParts` rebuilt a full DocumentLayout + copied per page on EVERY scroll tick (2× cost under TC2 virtual pages). Now recomputed directly on pagesInfo (allocation/copy round-trip gone). User confirm.
@@ -41,6 +41,7 @@
 
 ## Flashcards — open
 
+- [x] **FC-X1 cross-page cloze (s36-m, 2026-10-18)**: selection spanning a page break = ONE card now. Author group token `#%08X` (`FlashcardGroupToken`) on every page's annot → loader merges into one card (`extraPages`); mask paints all pages; Page column shows range. Trap: exact `Author() == "TumatraPDF-Flashcard"` comparisons (2 sites) → `StartsWith`. E2E `tests/ad-hoc-flashcard-crosspage.ts`. PENDING: user live test on a real book (2-page passage).
 - [ ] **FC-M1** tests: SM-2 (intervals/ease cap/relearn), study-JSON roundtrip, due filter — after Image Occlusion lands.
 - [ ] **FC-M5** rate keys 1-4 have no visual hint (no rate buttons/tooltips on toolbar).
 - [ ] **FC-H2** full-document annot scan under `docLock` on Toggle ON — UI freeze on huge PDFs; pre-check /Annots per page before `fz_load_page`.
@@ -52,7 +53,7 @@
 
 Boxes over images/diagrams as cards — same Highlight-annot + mask/reveal/rate pipeline as text clozes; only the DRAWING MODE at creation is new. 4 steps (IO-1 state `boxMode`+`pendingBoxes`; IO-2 canvas rubber-band before selection branches; IO-3 screen→page conversion like cloze rects; IO-4 `S` creates ONE Highlight with N quads, Esc/Box-off discards).
 
-- [ ] **IO-D1** grouping: boxes session → 1 grouped card (recommended, matches Alt+multi-select) vs 1 card/box (Anki default)?
+- [ ] **IO-D1** grouping: boxes session → 1 grouped card (recommended, matches Alt+multi-select) vs 1 card/box (Anki default)? — NOTE (s36-m 2026-10-18): the cross-page cloze already ships this exact mechanism for multi-page: `FlashcardGroupToken` (shared token written into the annot author) + `Flashcard::extraPages`. Reuse it for box groups (same card, several rect groups on one page) instead of inventing a second scheme.
 - [ ] **IO-D2** mode entry: toolbar "Box" button only? key `B`? both?
 - [ ] **IO-D3** scope: boxes cover image/diagram regions only (no text selection) — confirm.
 

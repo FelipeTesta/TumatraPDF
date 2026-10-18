@@ -2859,7 +2859,7 @@ static void OnMouseLeftButtonUp(MainWindow* win, int x, int y, WPARAM key) {
         // to the flashcard Lista panel instead of the annotation editor
         // (user spec, 2026-10-10)
         Annotation* annotUnderCursor = win->annotationUnderCursor;
-        if (str::Eq(Author(annotUnderCursor), StrL("TumatraPDF-Flashcard"))) {
+        if (str::StartsWith(Author(annotUnderCursor), StrL("TumatraPDF-Flashcard"))) {
             logf("[fc] ctrl+click on flashcard highlight - opening Lista panel\n");
             if (!win->flashcard.on) {
                 // the panel only exists in flashcard mode; turn it on first
@@ -3320,33 +3320,41 @@ static void PaintFlashcardMasks(MainWindow* win, DisplayModel* dm, HDC hdc) {
     }
     for (int i = 0; cards && i < len(*cards); i++) {
         const Flashcard& card = (*cards)[i];
-        if (card.pageNo < 1) {
-            continue;
-        }
+        bool opaque = (i == studyCardIdx && !win->flashcard.revealMode);
         Gdiplus::Graphics gs(hdc);
         // Paint each quad subrect separately so a multi-line cloze covers
         // exactly the highlighted text (not the union bbox). Under TC2 the
         // display uses virtual pages: map the physical rect to its column
         // (PhysicalToVirtualForRect) so the mask lands on the text.
-        for (int rIdx = 0; rIdx < len(card.rects); rIdx++) {
-            RectF vr;
-            int vPage = dm->PhysicalToVirtualForRect(card.pageNo, card.rects[rIdx], &vr);
-            if (!dm->ValidPageNo(vPage)) {
-                continue;
+        // A cross-page cloze masks EVERY page it covers (primary + extraPages).
+        auto paintPage = [&](int pageNo, const Vec<RectF>& rects) {
+            if (pageNo < 1) {
+                return;
             }
-            Rect rc = dm->CvtToScreen(vPage, vr);
-            if (i == studyCardIdx && !win->flashcard.revealMode) {
-                // Studying this card: opaque mask hides the cloze text ([_____])
-                Gdiplus::Color col(255, 100, 100, 100); // dark gray, fully opaque
-                Gdiplus::SolidBrush brush(col);
-                gs.FillRectangle(&brush, rc.x, rc.y, rc.dx, rc.dy);
-            } else {
-                // Reading / reveal / non-current card: subtle translucent marker
-                // (text stays visible; on reveal the current card shows its original text)
-                Gdiplus::Color col(30, 128, 128, 128); // light gray, very transparent
-                Gdiplus::SolidBrush brush(col);
-                gs.FillRectangle(&brush, rc.x, rc.y, rc.dx, rc.dy);
+            for (int rIdx = 0; rIdx < len(rects); rIdx++) {
+                RectF vr;
+                int vPage = dm->PhysicalToVirtualForRect(pageNo, rects[rIdx], &vr);
+                if (!dm->ValidPageNo(vPage)) {
+                    continue;
+                }
+                Rect rc = dm->CvtToScreen(vPage, vr);
+                if (opaque) {
+                    // Studying this card: opaque mask hides the cloze text ([_____])
+                    Gdiplus::Color col(255, 100, 100, 100); // dark gray, fully opaque
+                    Gdiplus::SolidBrush brush(col);
+                    gs.FillRectangle(&brush, rc.x, rc.y, rc.dx, rc.dy);
+                } else {
+                    // Reading / reveal / non-current card: subtle translucent marker
+                    // (text stays visible; on reveal the current card shows its original text)
+                    Gdiplus::Color col(30, 128, 128, 128); // light gray, very transparent
+                    Gdiplus::SolidBrush brush(col);
+                    gs.FillRectangle(&brush, rc.x, rc.y, rc.dx, rc.dy);
+                }
             }
+        };
+        paintPage(card.pageNo, card.rects);
+        for (int g = 0; g < len(card.extraPages); g++) {
+            paintPage(card.extraPages[g].pageNo, card.extraPages[g].rects);
         }
     }
 }

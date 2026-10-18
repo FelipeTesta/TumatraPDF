@@ -42,8 +42,59 @@ static u64 FlashcardKey(int pageNo, const RectF& b) {
     return h;
 }
 
+// Prefix every flashcard annotation's author starts with. A cross-page cloze
+// appends "#<8 hex>" (the group token) so its per-page annotations are
+// re-grouped into one card at load; a single-page card keeps the bare prefix.
+static Str FlashcardAuthorPrefix() {
+    return StrL("TumatraPDF-Flashcard");
+}
+
+// Deterministic group token for a cross-page cloze: hash of the FIRST page's
+// first mask rect. Never 0 (0 is reserved for "single-page card").
+u64 FlashcardGroupToken(int firstPageNo, Vec<RectF>& firstPageRects) {
+    RectF r;
+    if (len(firstPageRects) > 0) {
+        r = firstPageRects[0];
+    }
+    u64 t = FlashcardKey(firstPageNo, r);
+    return t ? t : 1;
+}
+
+// Parse the optional "#<hex>" group token that follows the author prefix.
+// Returns 0 for a bare prefix (single-page card) or a malformed suffix.
+static u32 FlashcardAuthorToken(Str author) {
+    int prefixLen = len(FlashcardAuthorPrefix());
+    if (len(author) <= prefixLen + 1 || author.s[prefixLen] != '#') {
+        return 0;
+    }
+    u32 v = 0;
+    bool any = false;
+    for (int i = prefixLen + 1; i < len(author) && i - prefixLen <= 8; i++) {
+        char ch = author.s[i];
+        int d = -1;
+        if (ch >= '0' && ch <= '9') {
+            d = ch - '0';
+        } else if (ch >= 'a' && ch <= 'f') {
+            d = ch - 'a' + 10;
+        } else if (ch >= 'A' && ch <= 'F') {
+            d = ch - 'A' + 10;
+        } else {
+            break;
+        }
+        v = v * 16 + (u32)d;
+        any = true;
+    }
+    if (!any) {
+        return 0;
+    }
+    return v ? v : 1;
+}
+
 // Iterate all annotations on all pages and extract flashcards.
-// Flashcards are Highlight annotations with author "TumatraPDF-Flashcard".
+// Flashcards are Highlight annotations whose author starts with
+// "TumatraPDF-Flashcard". A cross-page cloze is stored as one Highlight per
+// page sharing an author group token ("...-Flashcard#<hex>"): the pages are
+// merged here into ONE card (primary = lowest page, the rest in extraPages).
 // Cloze is positional: the highlight quad-points are the mask over existing
 // PDF text and the annotation content stays empty (no text duplication).
 Vec<Flashcard> FlashcardLoadFromDocument(EngineMupdf* engine) {
@@ -55,6 +106,16 @@ Vec<Flashcard> FlashcardLoadFromDocument(EngineMupdf* engine) {
 
     fz_context* ctx = engine->Ctx();
     ScopedRecursiveMutex cs(&engine->docLock);
+
+    // Raw per-annotation tags, collected page by page, then grouped by token.
+    struct TaggedAnnot {
+        u32 token = 0;
+        int annotId = -1;
+        int pageNo = -1;
+        RectF bounds;
+        Vec<RectF> rects;
+    };
+    Vec<TaggedAnnot> tagged;
 
     int pageCount = fz_count_pages(ctx, engine->_doc);
     for (int pageIdx = 0; pageIdx < pageCount; pageIdx++) {
@@ -76,22 +137,24 @@ Vec<Flashcard> FlashcardLoadFromDocument(EngineMupdf* engine) {
 
             // Only load annotations authored by our flashcard system
             const char* author = pdf_annot_author(ctx, annot);
-            if (!author || !str::StartsWith(Str(author), StrL("TumatraPDF-Flashcard"))) {
+            if (!author || !str::StartsWith(Str(author), FlashcardAuthorPrefix())) {
                 continue;
             }
+            u32 token = FlashcardAuthorToken(Str(author));
 
             // A single corrupt annotation must not abort the whole scan (an
             // uncaught fz_throw here crashes the app). pdf_annot_rect() must NOT
             // be used: markup annotations are excluded from rect_subtypes and
             // throw "Highlight annotations have no Rect property". pdf_bound_annot()
             // computes the bbox from quad-points and works for all types.
-            Flashcard card;
+            TaggedAnnot ta;
+            ta.token = token;
+            ta.pageNo = pageIdx + 1; // 1-based
             bool ok = false;
             fz_try(ctx) {
-                card.annotId = pdf_to_num(ctx, pdf_annot_obj(ctx, annot));
-                card.pageNo = pageIdx + 1; // 1-based
+                ta.annotId = pdf_to_num(ctx, pdf_annot_obj(ctx, annot));
                 fz_rect rect = pdf_bound_annot(ctx, annot);
-                card.bounds = RectF(PointF(rect.x0, rect.y0), PointF(rect.x1, rect.y1));
+                ta.bounds = RectF(PointF(rect.x0, rect.y0), PointF(rect.x1, rect.y1));
                 // Per-quad subrects so a multi-line cloze masks exactly the
                 // highlighted text (not the union bbox). pdf_annot_quad_point
                 // ALREADY applies the page transform (cropbox + rotation) —
@@ -104,10 +167,10 @@ Vec<Flashcard> FlashcardLoadFromDocument(EngineMupdf* engine) {
                 for (int i = 0; i < nQuads; i++) {
                     fz_quad q = pdf_annot_quad_point(ctx, annot, i);
                     fz_rect qr = fz_rect_from_quad(q);
-                    card.rects.Append(RectF(PointF(qr.x0, qr.y0), PointF(qr.x1, qr.y1)));
+                    ta.rects.Append(RectF(PointF(qr.x0, qr.y0), PointF(qr.x1, qr.y1)));
                 }
-                if (len(card.rects) == 0) {
-                    card.rects.Append(card.bounds);
+                if (len(ta.rects) == 0) {
+                    ta.rects.Append(ta.bounds);
                 }
                 ok = true;
             }
@@ -117,14 +180,70 @@ Vec<Flashcard> FlashcardLoadFromDocument(EngineMupdf* engine) {
             if (!ok) {
                 continue;
             }
-            // Cloze is positional: the highlight rect is the mask over existing PDF
-            // text, so no content is stored (no duplicated text in the document).
-            card.key = FlashcardKey(card.pageNo, card.bounds);
-
-            result.Append(card);
+            tagged.Append(ta);
         }
 
         fz_drop_page(ctx, page);
+    }
+
+    // Group by token: token 0 = standalone card; a non-zero token merges every
+    // page of the same cross-page cloze into one card (primary = lowest page).
+    Vec<u32> groupTokens; // parallel to result
+    for (int i = 0; i < len(tagged); i++) {
+        TaggedAnnot& ta = tagged[i];
+        // Cloze is positional: the highlight rect is the mask over existing PDF
+        // text, so no content is stored (no duplicated text in the document).
+        if (ta.token == 0) {
+            Flashcard card;
+            card.annotId = ta.annotId;
+            card.pageNo = ta.pageNo;
+            card.bounds = ta.bounds;
+            card.rects = ta.rects;
+            card.key = FlashcardKey(card.pageNo, card.bounds);
+            result.Append(card);
+            groupTokens.Append(0);
+            continue;
+        }
+
+        int idx = -1;
+        for (int k = 0; k < len(groupTokens); k++) {
+            if (groupTokens[k] == ta.token) {
+                idx = k;
+                break;
+            }
+        }
+        if (idx < 0) {
+            Flashcard card;
+            card.annotId = ta.annotId;
+            card.pageNo = ta.pageNo;
+            card.bounds = ta.bounds;
+            card.rects = ta.rects;
+            card.key = FlashcardKey(card.pageNo, card.bounds);
+            result.Append(card);
+            groupTokens.Append(ta.token);
+            continue;
+        }
+
+        Flashcard& card = result[idx];
+        FlashcardPageGroup g;
+        g.pageNo = ta.pageNo;
+        g.bounds = ta.bounds;
+        g.rects = ta.rects;
+        if (ta.pageNo < card.pageNo) {
+            // this page becomes the new primary; demote the old one
+            FlashcardPageGroup old;
+            old.pageNo = card.pageNo;
+            old.bounds = card.bounds;
+            old.rects = card.rects;
+            card.pageNo = ta.pageNo;
+            card.bounds = ta.bounds;
+            card.rects = ta.rects;
+            card.annotId = ta.annotId;
+            card.key = FlashcardKey(card.pageNo, card.bounds);
+            card.extraPages.Append(old);
+        } else {
+            card.extraPages.Append(g);
+        }
     }
 
     logf("[fc] FlashcardLoadFromDocument - found %d flashcards\n", len(result));
@@ -134,8 +253,10 @@ Vec<Flashcard> FlashcardLoadFromDocument(EngineMupdf* engine) {
 // Create a flashcard Highlight annotation covering the given PAGE-space rects:
 // cloze is positional (content stays empty), author TumatraPDF-Flashcard, gray
 // 0.5 color, 0.4 opacity — the exact recipe of CmdFlashcardAdd, extracted so
-// the import merge can create cards the same way.
-Annotation* FlashcardCreateHighlightAnnot(EngineBase* engine, int pageNo, Vec<RectF>& rects) {
+// the import merge can create cards the same way. groupToken != 0 tags the
+// annotation as one page of a cross-page cloze: the token is appended to the
+// author ("#<8 hex>") so the loader re-groups all its pages into one card.
+Annotation* FlashcardCreateHighlightAnnot(EngineBase* engine, int pageNo, Vec<RectF>& rects, u64 groupToken) {
     if (!engine || len(rects) == 0) {
         return nullptr;
     }
@@ -158,7 +279,12 @@ Annotation* FlashcardCreateHighlightAnnot(EngineBase* engine, int pageNo, Vec<Re
     fz_context* ctx = epdf->Ctx();
     ScopedRecursiveMutex cs(&epdf->docLock);
     fz_try(ctx) {
-        pdf_set_annot_author(ctx, annot->pdfannot, CStrTemp(StrL("TumatraPDF-Flashcard")));
+        if (groupToken) {
+            TempStr author = fmt("%s#%08X", FlashcardAuthorPrefix(), (int)(u32)groupToken);
+            pdf_set_annot_author(ctx, annot->pdfannot, CStrTemp(author));
+        } else {
+            pdf_set_annot_author(ctx, annot->pdfannot, CStrTemp(FlashcardAuthorPrefix()));
+        }
         float gray[3] = {0.5f, 0.5f, 0.5f};
         pdf_set_annot_color(ctx, annot->pdfannot, 3, gray);
         pdf_set_annot_opacity(ctx, annot->pdfannot, 0.4f);
@@ -219,12 +345,25 @@ int FlashcardImportFromPdf(EngineMupdf* dstEngine, Vec<Flashcard>& existing, con
             dupes++;
             continue;
         }
-        Annotation* annot = FlashcardCreateHighlightAnnot(dstEngine, tc.pageNo, tc.rects);
-        if (annot) {
-            imported++;
-        } else {
-            logf("[fc] Import - ERROR: failed to create card on page %d\n", tc.pageNo);
+        // A cross-page card creates one annotation per page, all sharing a
+        // group token (minted here from the primary page) so the exported
+        // document re-groups them into ONE card too.
+        u64 token = 0;
+        if (len(tc.extraPages) > 0) {
+            token = FlashcardGroupToken(tc.pageNo, tc.rects);
         }
+        Annotation* annot = FlashcardCreateHighlightAnnot(dstEngine, tc.pageNo, tc.rects, token);
+        if (!annot) {
+            logf("[fc] Import - ERROR: failed to create card on page %d\n", tc.pageNo);
+            continue;
+        }
+        for (int g = 0; g < len(tc.extraPages); g++) {
+            FlashcardPageGroup& pg = tc.extraPages[g];
+            if (!FlashcardCreateHighlightAnnot(dstEngine, pg.pageNo, pg.rects, token)) {
+                logf("[fc] Import - ERROR: failed to create card page %d\n", pg.pageNo);
+            }
+        }
+        imported++;
     }
     srcBase->Release();
     logf("[fc] Import - imported %d new card(s), skipped %d duplicate(s)\n", imported, dupes);
@@ -1098,7 +1237,8 @@ int FlashcardStudyListDocs(Vec<FlashcardStudyDocInfo>& out) {
         if (info.docPath && len(info.docPath) > 0) {
             info.syncStatus = file::Exists(Str(info.docPath)) ? 1 : 2;
         }
-        TempStr syncStr = info.syncStatus == 1 ? StrL("ok") : (info.syncStatus == 2 ? StrL("MISSING") : StrL("unknown"));
+        TempStr syncStr =
+            info.syncStatus == 1 ? StrL("ok") : (info.syncStatus == 2 ? StrL("MISSING") : StrL("unknown"));
         logf("[fc] StudyListDocs - %s: name='%s' cards=%d due=%d last=%lld sync=%s\n",
              Str(info.fileName ? info.fileName : "?"), Str(info.docName ? info.docName : "?"), info.totalCards,
              info.dueCount, info.lastReviewedAt, Str(syncStr));

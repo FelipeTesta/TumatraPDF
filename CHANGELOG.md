@@ -4,7 +4,16 @@ Per-version changelog for TumatraPDF — new functions + bug fixes, newest first
 Feature details live in [README.md](README.md); full per-session development
 history in [LOG.md](LOG.md).
 
-## v1.0.12 (pending)
+## v1.0.13 (pending)
+
+- **Flashcards span page breaks.** A cloze whose text selection continues onto
+  the next page is now ONE card, not two: every page the selection covers is
+  masked at once during study, and the review counter, queue and study history
+  treat it as a single card. The List panel shows the page range (e.g.
+  `12-13`) and the card label joins the masked text of all its pages. Existing
+  single-page cards are unchanged.
+
+## v1.0.12 (2026-10-17)
 
 - **Reading statistics ("Stats").** Time spent reading with auto-scroll
   active is now tracked per document and per day, and shown in a new stats

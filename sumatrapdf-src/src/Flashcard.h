@@ -11,17 +11,31 @@ struct Annotation;
 struct MainWindow;
 struct WindowTab;
 
+// FlashcardPageGroup — one page's part of a cross-page cloze. A cloze that
+// spans a page break is stored as one Highlight per page (a PDF annotation
+// can't live on two pages); the pages are re-grouped into ONE Flashcard at
+// load via a shared token in the annotation author (see Flashcard.h note).
+struct FlashcardPageGroup {
+    int pageNo = -1;  // 1-based PHYSICAL page number
+    RectF bounds;     // union bbox of this page's mask rects, PAGE coords
+    Vec<RectF> rects; // per quad-point subrects, PAGE coords
+};
+
 // Flashcard — represents a card saved as a PDF Highlight annotation.
 // Cards are occlusion masks over existing PDF text (cloze): the highlight rect
 // hides the text underneath in study mode. No content is duplicated in the PDF.
 struct Flashcard {
     u64 key = 0;      // stable id: hash(pageNo + bounds) — survives PDF save (annotId is not stable)
     int annotId = -1; // MuPDF annotation object number (unstable across save; display only)
-    int pageNo = -1;  // 1-based page number
+    int pageNo = -1;  // 1-based page number of the PRIMARY (lowest) page
     RectF bounds;     // selection rect in PAGE coordinates (PDF points) = the cloze mask
     // Per quad-point subrects (PAGE coords): a multi-line selection has one quad per
     // line, so the mask covers exactly the highlighted text, not the union bbox.
     Vec<RectF> rects;
+    // Additional pages of a cross-page cloze, in ascending page order (empty
+    // for the common single-page card). pageNo/bounds/rects above always
+    // describe the PRIMARY page; study masks every page here at once.
+    Vec<FlashcardPageGroup> extraPages;
 };
 
 // FlashcardStudyState — per-card study progress (stored in external JSON)
@@ -72,6 +86,7 @@ struct FlashcardTabState {
 struct FcListRow {
     int cardIdx = -1;
     int pageNo = -1;
+    int pageNoEnd = -1;   // last page for a cross-page card (== pageNo otherwise)
     int rating = 0;       // last rating 1-4 (0 = new)
     int interval = 0;     // SM-2 interval in days
     i64 nextReviewAt = 0; // timestamp (ms)
@@ -81,9 +96,15 @@ struct FcListRow {
 Vec<Flashcard> FlashcardLoadFromDocument(EngineMupdf* engine);
 
 // Create a flashcard Highlight annotation for the given PAGE-space rects
-// (author/color/opacity per the flashcard recipe). Used by CmdFlashcardAdd
-// and the import merge.
-Annotation* FlashcardCreateHighlightAnnot(EngineBase* engine, int pageNo, Vec<RectF>& rects);
+// (author/color/opacity per the flashcard recipe). groupToken != 0 tags the
+// annotation as part of a cross-page cloze (encoded in the author) so all of
+// its pages re-group into one card. Used by CmdFlashcardAdd and the import
+// merge.
+Annotation* FlashcardCreateHighlightAnnot(EngineBase* engine, int pageNo, Vec<RectF>& rects, u64 groupToken = 0);
+
+// Deterministic token shared by every annotation of a cross-page cloze: hash
+// of the FIRST page's first mask rect. Never returns 0 (0 means "single page").
+u64 FlashcardGroupToken(int firstPageNo, Vec<RectF>& firstPageRects);
 
 // Import the NEW flashcards (Highlight annots) from another copy of the SAME
 // document into ours, merging with existing cards (duplicate = same page +

@@ -225,7 +225,7 @@ The features below were developed on top of SumatraPDF and **do not exist in the
 
 **How it works:**
 
-- **Create:** select text → `S` (or `Shift+S`). `Alt+drag` accumulates disjoint selections → ONE grouped card (N masks).
+- **Create:** select text → `S` (or `Shift+S`). `Alt+drag` accumulates disjoint selections → ONE grouped card (N masks). Selection continuing onto the NEXT page also makes **ONE card**: every page it covers is masked at once in study (Page column shows the range, e.g. `12-13`) — the per-page highlights share a group token in their annotation author.
 - **Study:** toolbar Study button. Card arrives masked, vertically centered (TC2 column-aware). `Space`/`Enter` reveals → `1`–`4` rate (Again/Hard/Good/Easy, numpad too) → auto-advance. Again reinserts the card (relearn). Back = previous card, arrives revealed, keeps scroll. Next = skip without rating.
 - **SM-2 state:** per-book JSON in the study-history folder (default: portable app-data dir next to the exe, configurable via the Settings window), keyed by MD5(filePath) — per-book isolation; files carry the book's name for the Config list. All flashcard windows are theme-aware (dark mode included).
 - **Order dialog** (Order button): Sequential/Random (shuffle within new/due groups) + new-cards position — before due / after due / mixed (proportional interleave, default). Instant apply.

@@ -1306,7 +1306,7 @@ void UpdateAnnotationsList(EditAnnotationsWindow* ew) {
     // Filter out flashcard annotations (parallel separation)
     for (int i = len(ew->annotations) - 1; i >= 0; i--) {
         Str author = Author(ew->annotations[i]);
-        if (str::Eq(author, StrL("TumatraPDF-Flashcard"))) {
+        if (str::StartsWith(author, StrL("TumatraPDF-Flashcard"))) {
             ew->annotations.RemoveAt(i);
         }
     }

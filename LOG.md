@@ -1,5 +1,37 @@
 # TumatraPDF — Development Log
 
+## 2026-10-18 (s36-m) — Flashcard cross-page cloze: one card per multi-page selection (BUILD OK, app untouched logs; crosspage + cloze PASS)
+
+### Fixed
+
+- User: "highlight zone em duas páginas cobre só um lado". Root: `CmdFlashcardAdd` created ONE Highlight per page (upstream behavior) and the loader returned ONE Flashcard per annotation → a 2-page selection became 2 independent cards, each masked alone in study mode. Fix: cross-page selection now tags every page's annotation with a shared group token and the loader merges them into ONE card.
+  - `FlashcardGroupToken(firstPageNo, firstPageRects)` (Flashcard.cpp) = FNV-1a `FlashcardKey` of the first page's first mask rect; never 0.
+  - Author carries it: `TumatraPDF-Flashcard#%08X` (single-page = bare prefix). Persisted via `pdf_set_annot_author` (MuPDF `/T` — survives save; content stays EMPTY, so no tooltip/comment appears — `RebuildCommentsFromAnnotationsInner` skips empty content).
+  - `FlashcardLoadFromDocument` now collects tags then groups by token: primary = lowest page, others in new `Flashcard::extraPages` (`FlashcardPageGroup{pageNo,bounds,rects}`); `key` stays positional on the primary page. `FlashcardImportFromPdf` re-mints the token so the exported doc re-groups too.
+
+### Changed
+
+- Masks: `PaintFlashcardMasks` (Canvas.cpp) paints primary + every `extraPages` (opaque current-card mask covers ALL pages).
+- Page filter (`CollectTabCards`): a card passes when ANY of its pages is in the filter.
+- List panel: `FcListRow::pageNoEnd` → Page column shows the range (`12-13`); `FcListCardLabelTemp` joins the masked text of every page.
+- **TRAP**: `Author(annot) == "TumatraPDF-Flashcard"` exact equality appeared in 2 places (Canvas ctrl+click → List panel; EditAnnotations filter that hides flashcards from the annotation editor) — grouped cards stopped matching. Both switched to `str::StartsWith`.
+
+### Verified
+
+- `tests/ad-hoc-flashcard-crosspage.ts` (new, ad-hoc): keyboard visual-mode selection across the page break → log `group token 3B608E44 spans 2 page(s)` + `found 1 flashcards` + `1 cards pass (of 1)`; asserts fail if regrouping regresses. Screenshots: page 1 fully masked, page 2's selected lines masked (rest normal).
+- Regression: `tests/ad-hoc-flashcard-cloze.ts` PASS (single-page cloze unchanged).
+- Build 0 err/0 warn; deploy copy to `Compiled/` skipped (user's instance holds the exe — lock only, artifact `out/dbg64/TumatraPDF.exe` fine).
+
+## 2026-10-17 (s36-l) — quick validations closed + harness PDF-path trap found (BUILD unchanged; app untouched)
+
+### Verified (all via -for-testing + pipe + vision review)
+- **BUG-3/s32-B image context menu**: right-click over a real image XObject vs white margin (fixture `tests/tmp/s36l-mkpdf.ts` generates a Flate-RGB image PDF): image items ("Copy Image To Clipboard" + "Image" submenu) appear ONLY over the image — v1.0.10 gating works live.
+- **TC2 visual validations**: V1 Back/Forward after v2 toggle (1→2→1→2 via CmdNavigateBack/Forward) PASS; V2 page-box "3R" graceful (out-of-range on 2-page doc, no crash) PASS; V4 TC2+Trim renders sane PASS; V5 Manga R2L mirrors columns (leftmost = black half, content right) PASS. V3 (reopen-with-v2-saved) = MANUAL ONLY — `-for-testing` never saves settings and there is no `-settings` flag.
+- **Branch pruning**: all 5 local branches (`master`, `feature/16c-c5-checkpoint`, `feature/16c-extraction-checkpoint`, `feature/flashcard-system`, `feature/toolbar-design-system`) verified merged into main and deleted (flashcard needed upstream re-point + `-d`; CC safety net blocks `-D`). Remotes `origin/master` + `origin/feature/flashcard-system` still exist — need user decision.
+
+### Fixed (harness, not app)
+- **`join(EXE, "..", "..", "ext", ...)` TRAP**: EXE includes the FILENAME, so two `..` pop only the filename + `dbg64` → `out\ext\a-zlib\zlib.3.pdf` (nonexistent) → every s36k harness ran DOC-LESS ("Error loading zlib.3.pdf — The file does not exist" dialog in every screenshot; toolbar assertions passed anyway because the toolbar exists without a doc). Fixed to three `..` in `s36k-dragsim/roundtrip/s36l-tc2/s36k-shot`; gates re-run WITH doc: dragsim PASS (25 buttons now — `Edit` 518 appears when a doc is loaded; marks=17,21), roundtrip PASS, d5 PASS. Vision-model note: gemini-2.5-flash hallucinated page indicators "2/5" on doc-less shots (zlib has 2 pages) — openrouter VL (`nvidia/nemotron-3.5-super-vl:free`) is the trustworthy reviewer; gemini vision is flaky (2 of 4 calls returned "no vision").
+
 ## 2026-10-17 (s36-j) — Toolbar round-trip: timer trio inside Autoscroll + rewrap guard fix (BUILD OK; s36i PASS)
 
 ### Changed (s36-k round 3 — group-coherent wrap "por blocos")

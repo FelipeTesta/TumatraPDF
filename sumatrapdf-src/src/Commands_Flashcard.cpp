@@ -129,11 +129,19 @@ static void CollectTabCards(MainWindow* win, WindowTab* tab, i64 now, Vec<Flashc
         logf("[fc] CollectTabCards - '%s': filter '%s' -> %s\n", FlashcardTabLogName(tab), tab->flashcard.filterExpr,
              filtered ? StrL("active") : StrL("inactive (empty/invalid)"));
     }
+    // a cross-page card passes the page filter when ANY of its pages is in it
+    auto pageInFilter = [&](int pg) { return pg >= 1 && pg <= len(pages) && pages[pg - 1]; };
     int nBefore = len(newCards) + len(dueCards);
     for (int i = 0; i < len(tab->flashcard.cards); i++) {
         Flashcard& card = tab->flashcard.cards[i];
-        if (filtered && (card.pageNo < 1 || card.pageNo > len(pages) || !pages[card.pageNo - 1])) {
-            continue;
+        if (filtered) {
+            bool ok = pageInFilter(card.pageNo);
+            for (int k = 0; !ok && k < len(card.extraPages); k++) {
+                ok = pageInFilter(card.extraPages[k].pageNo);
+            }
+            if (!ok) {
+                continue;
+            }
         }
         // SRS: include only cards that are new (never rated) or due for review
         bool isNew = true;
@@ -460,16 +468,35 @@ bool HandleCommandFlashcard(MainWindow* win, int cmd) {
             }
 
             Annotation* annot = nullptr;
+            // Cross-page cloze: one highlight per page, but every page of the
+            // same selection shares a group token (hashed from the first page's
+            // first mask rect) so the loader re-groups them into ONE card that
+            // masks all pages at once. Single-page selection: token 0.
+            u64 groupToken = 0;
+            if (len(pageNos) > 1) {
+                int firstPage = pageNos[0];
+                for (auto pageNo : pageNos) {
+                    if (pageNo < firstPage) firstPage = pageNo;
+                }
+                Vec<RectF> firstRects;
+                for (auto& sel : *s) {
+                    if (sel.pageNo == firstPage) firstRects.Append(sel.rect);
+                }
+                groupToken = FlashcardGroupToken(firstPage, firstRects);
+            }
             for (auto pageNo : pageNos) {
                 Vec<RectF> rects;
                 for (auto& sel : *s) {
                     if (pageNo != sel.pageNo) continue;
                     rects.Append(sel.rect);
                 }
-                annot = FlashcardCreateHighlightAnnot(engine, pageNo, rects);
+                annot = FlashcardCreateHighlightAnnot(engine, pageNo, rects, groupToken);
             }
 
             if (annot) {
+                if (groupToken) {
+                    logf("[fc] cross-page cloze: group token %08X spans %d page(s)\n", (u32)groupToken, len(pageNos));
+                }
                 DeleteOldSelectionInfo(win, true);
                 // Reload cards so count/order reflect the new cloze immediately
                 tab->flashcard.cards = FlashcardLoadFromDocument(AsEngineMupdf(engine));

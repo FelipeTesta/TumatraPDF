@@ -128,11 +128,11 @@ static TempStr FcListDueTextTemp(const FcListRow& row, i64 now) {
 
 // ---- masked-text label extraction ----------------------------------------
 
-// true if the codepoint rect overlaps any mask rect of the card (inflated a
-// bit so adjacent lines whose bbox clips the mask still match)
-static bool FcRectHitsCard(const Rect& cpRect, const Flashcard& card) {
+// true if the codepoint rect overlaps any of the mask rects (inflated a bit so
+// adjacent lines whose bbox clips the mask still match)
+static bool FcRectHitsMask(const Rect& cpRect, const Vec<RectF>& rects) {
     float inf = 1.5f;
-    for (const RectF& r : card.rects) {
+    for (const RectF& r : rects) {
         float rx = r.x - inf, ry = r.y - inf;
         float rdx = r.dx + 2 * inf, rdy = r.dy + 2 * inf;
         bool overlap = (float)cpRect.x < rx + rdx && (float)(cpRect.x + cpRect.dx) > rx && (float)cpRect.y < ry + rdy &&
@@ -144,57 +144,82 @@ static bool FcRectHitsCard(const Rect& cpRect, const Flashcard& card) {
     return false;
 }
 
-// build the card label by walking the page's extracted text and keeping the
+// build the card label by walking each page's extracted text and keeping the
 // codepoints that sit under the card's mask rects. pageText is a cache owned
-// by the caller (re-extracted when pageNo changes). Falls back to "Card N"
-// when nothing matches.
+// by the caller (re-extracted when pageNo changes). A cross-page cloze appends
+// the masked text of EVERY page it covers. Falls back to "Card N" when nothing
+// matches.
 static TempWStr FcListCardLabelTemp(WindowTab* tab, const Flashcard& card, int cardNo, PageText& pt, int& ptPage) {
     TempStr fallback = fmt("Card %d", cardNo);
     EngineBase* engine = tab->GetEngine();
     if (!engine) {
         return str::DupTemp(ToWStrTemp(fallback));
     }
-    if (ptPage != card.pageNo || !pt.text || !pt.coords) {
-        FreePageText(&pt);
-        pt = engine->ExtractPageText(card.pageNo);
-        ptPage = card.pageNo;
-    }
-    if (!pt.text || !pt.coords || pt.nCodepoints <= 0) {
-        return str::DupTemp(ToWStrTemp(fallback));
-    }
 
     WCHAR buf[256];
     int n = 0;
-    int byteIdx = 0;
-    int cpIdx = 0;
-    bool lastWasSpace = false;
-    while (byteIdx < pt.len && cpIdx < pt.nCodepoints && n < 250) {
-        int nBytes = 0;
-        u32 cp = (u32)Utf8CodepointAtByte(pt.text, byteIdx, &nBytes);
-        if (nBytes <= 0) {
-            break;
+    bool truncated = false;
+    bool needsSep = false; // a space before every page after the first
+
+    auto appendPage = [&](int pageNo, const Vec<RectF>& rects) {
+        if (n >= 250) {
+            truncated = true;
+            return;
         }
-        if (FcRectHitsCard(pt.coords[cpIdx], card)) {
-            // collapse whitespace runs (multi-line masks read as one line)
-            if (cp == '\n' || cp == '\r' || cp == ' ' || cp == '\t') {
-                if (!lastWasSpace) {
-                    buf[n++] = ' ';
-                    lastWasSpace = true;
-                }
-            } else {
-                lastWasSpace = false;
-                if (cp > 0xffff && n < 248) {
-                    cp -= 0x10000;
-                    buf[n++] = (WCHAR)(0xd800 + (cp >> 10));
-                    buf[n++] = (WCHAR)(0xdc00 + (cp & 0x3ff));
-                } else if (cp <= 0xffff) {
-                    buf[n++] = (WCHAR)cp;
+        if (ptPage != pageNo || !pt.text || !pt.coords) {
+            FreePageText(&pt);
+            pt = engine->ExtractPageText(pageNo);
+            ptPage = pageNo;
+        }
+        if (!pt.text || !pt.coords || pt.nCodepoints <= 0) {
+            return;
+        }
+        if (needsSep && n < 250) {
+            buf[n++] = ' ';
+        }
+        int byteIdx = 0;
+        int cpIdx = 0;
+        bool lastWasSpace = true;
+        while (byteIdx < pt.len && cpIdx < pt.nCodepoints && n < 250) {
+            int nBytes = 0;
+            u32 cp = (u32)Utf8CodepointAtByte(pt.text, byteIdx, &nBytes);
+            if (nBytes <= 0) {
+                break;
+            }
+            if (FcRectHitsMask(pt.coords[cpIdx], rects)) {
+                // collapse whitespace runs (multi-line masks read as one line)
+                if (cp == '\n' || cp == '\r' || cp == ' ' || cp == '\t') {
+                    if (!lastWasSpace) {
+                        buf[n++] = ' ';
+                        lastWasSpace = true;
+                    }
+                } else {
+                    lastWasSpace = false;
+                    if (cp > 0xffff && n < 248) {
+                        cp -= 0x10000;
+                        buf[n++] = (WCHAR)(0xd800 + (cp >> 10));
+                        buf[n++] = (WCHAR)(0xdc00 + (cp & 0x3ff));
+                    } else if (cp <= 0xffff) {
+                        buf[n++] = (WCHAR)cp;
+                    }
                 }
             }
+            byteIdx += nBytes;
+            cpIdx++;
         }
-        byteIdx += nBytes;
-        cpIdx++;
+        if (byteIdx < pt.len || cpIdx < pt.nCodepoints) {
+            truncated = true; // stopped early on this page: label is cut
+        }
+        if (n > 0) {
+            needsSep = true;
+        }
+    };
+
+    appendPage(card.pageNo, card.rects);
+    for (int g = 0; g < len(card.extraPages); g++) {
+        appendPage(card.extraPages[g].pageNo, card.extraPages[g].rects);
     }
+
     while (n > 0 && buf[n - 1] == ' ') {
         n--; // trim trailing space
     }
@@ -202,7 +227,7 @@ static TempWStr FcListCardLabelTemp(WindowTab* tab, const Flashcard& card, int c
         return str::DupTemp(ToWStrTemp(fallback));
     }
     buf[n] = 0;
-    if (n >= 250 && cpIdx < pt.nCodepoints) {
+    if (truncated) {
         // truncated because the card is huge: hint with an ellipsis
         buf[n - 1] = 0x2026; // …
     }
@@ -264,7 +289,7 @@ static void FcListDrawItem(MainWindow* win, const DRAWITEMSTRUCT* dis) {
         DrawTextW(dis->hDC, buf, (int)n, &rc, DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS);
     }
 
-    TempStr pagTxt = fmt("%d", row.pageNo);
+    TempStr pagTxt = (row.pageNoEnd > row.pageNo) ? fmt("%d-%d", row.pageNo, row.pageNoEnd) : fmt("%d", row.pageNo);
     RECT rcPag{dis->rcItem.left + cols.xPagR - 60, dis->rcItem.top, dis->rcItem.left + cols.xPagR, dis->rcItem.bottom};
     WStr pagW = ToWStrTemp(pagTxt);
     DrawTextW(dis->hDC, pagW.s, len(pagW), &rcPag, DT_SINGLELINE | DT_VCENTER | DT_RIGHT);
@@ -643,6 +668,7 @@ void FlashcardSidebarPopulate(MainWindow* win) {
         FcListRow row;
         row.cardIdx = i;
         row.pageNo = card.pageNo;
+        row.pageNoEnd = len(card.extraPages) > 0 ? card.extraPages[len(card.extraPages) - 1].pageNo : card.pageNo;
         for (auto& st : tab->flashcard.studyDoc.states) {
             if (st.key == card.key) {
                 row.rating = st.state.rating;
