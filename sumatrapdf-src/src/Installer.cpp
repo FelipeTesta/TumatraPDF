@@ -2143,8 +2143,8 @@ static i64 EstimateInstallerWriteBytes(const lzma::SimpleArchive* archive) {
             }
         }
     }
-    need += largest;          // possible concurrent .tmp during robust write
-    need += 16 * 1024 * 1024; // filesystem / safety margin
+    need += largest;               // possible concurrent .tmp during robust write
+    need += (i64)16 * 1024 * 1024; // filesystem / safety margin
     return need;
 }
 
@@ -2188,7 +2188,7 @@ static bool EnsureEnoughDiskSpaceForInstall(Str installDir, const lzma::SimpleAr
         return true;
     }
     int freeMb = (int)(freeBytes / (1024ull * 1024ull));
-    int needMb = (int)((need + 1024 * 1024 - 1) / (1024 * 1024));
+    int needMb = (int)((need + (i64)1024 * 1024 - 1) / ((i64)1024 * 1024));
     NotifyFailed(fmt(_TRA("Not enough free disk space to install SumatraPDF.\n\n"
                           "Required: about %d MB free\nAvailable: %d MB\n\n"
                           "Free up space on this drive and try again.")

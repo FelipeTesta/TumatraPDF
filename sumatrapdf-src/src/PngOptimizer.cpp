@@ -163,14 +163,14 @@ static u8* PixmapToRgbaContiguous(const Pixmap* px) {
     }
     int w = px->width;
     int h = px->height;
-    int n = w * h * 4;
-    u8* rgba = (u8*)malloc((size_t)n);
+    size_t n = (size_t)w * h * 4;
+    u8* rgba = (u8*)malloc(n);
     if (!rgba) {
         return nullptr;
     }
     for (int y = 0; y < h; y++) {
-        const u8* src = px->data + y * px->stride;
-        u8* dst = rgba + y * w * 4;
+        const u8* src = px->data + (ptrdiff_t)y * px->stride;
+        u8* dst = rgba + (ptrdiff_t)y * w * 4;
         if (px->format == PixmapFormat::RGBA8) {
             memcpy(dst, src, (size_t)w * 4);
         } else if (px->format == PixmapFormat::BGRA8) {

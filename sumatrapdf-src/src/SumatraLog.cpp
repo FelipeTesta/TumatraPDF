@@ -44,7 +44,7 @@ Str gLogFilePath;
 constexpr int kMaxLogBuf = (1024 * 1024) - 128;
 
 // Max log file size before rotation (5 MB)
-constexpr int64_t kMaxLogFileSize = 5 * 1024 * 1024;
+constexpr int64_t kMaxLogFileSize = (int64_t)5 * 1024 * 1024;
 
 static LARGE_INTEGER lastPipeOpenTryTime = {};
 

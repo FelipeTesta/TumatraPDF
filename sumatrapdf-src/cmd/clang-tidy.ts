@@ -256,7 +256,13 @@ async function main() {
     "src/ifilter/*.cpp",
   ];
 
-  const files = fileArgs.length > 0 ? fileArgs : await globFiles(patterns);
+  const globbed = fileArgs.length > 0 ? fileArgs : await globFiles(patterns);
+  // On Windows the sweep compiles with the MSVC/Win32 include set, so platform-suffixed
+  // posix/mac/linux sources cannot resolve their headers and just produce errors
+  // (sys/mman.h, dirent.h, ...). They are built by the macOS/Linux pipelines; pass them
+  // explicitly with -files to analyze them.
+  const platformRx = /_(posix|mac|linux)\.cpp$/i;
+  const files = fileArgs.length > 0 ? globbed : globbed.filter((f) => !platformRx.test(f));
   const toProcess = files.filter((f) => !isWhitelisted(f));
 
   const failures: string[] = [];

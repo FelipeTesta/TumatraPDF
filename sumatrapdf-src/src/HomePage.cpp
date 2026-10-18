@@ -1418,11 +1418,11 @@ void HomeStatsWnd::Paint(VirtWndPaintCtx& ctx) {
     rcNext = {b.x + b.dx - pad - dpi(14), b.y, dpi(14), yearRowDy};
     Gdiplus::PointF p1[3] = {{(float)(rcPrev.x + 10), (float)rcPrev.y},
                              {(float)(rcPrev.x + 10), (float)(rcPrev.y + rcPrev.dy)},
-                             {(float)(rcPrev.x + 2), (float)(rcPrev.y + rcPrev.dy / 2)}};
+                             {(float)(rcPrev.x + 2), (float)(rcPrev.y + rcPrev.dy / 2.0f)}};
     HomeStatsDrawTriangle(g, p1, GpCol(ac.axis));
     Gdiplus::PointF p2[3] = {{(float)(rcNext.x + 4), (float)rcNext.y},
                              {(float)(rcNext.x + 4), (float)(rcNext.y + rcNext.dy)},
-                             {(float)(rcNext.x + 12), (float)(rcNext.y + rcNext.dy / 2)}};
+                             {(float)(rcNext.x + 12), (float)(rcNext.y + rcNext.dy / 2.0f)}};
     HomeStatsDrawTriangle(g, p2, GpCol(ac.axis));
     TempStr yearTxt = fmt("%d", year);
     Gdiplus::StringFormat sf(Gdiplus::StringFormatFlagsNoWrap);

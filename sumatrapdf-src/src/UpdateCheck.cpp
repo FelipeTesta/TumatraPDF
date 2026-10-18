@@ -470,7 +470,7 @@ static void DownloadUpdateAsync(DownloadUpdateAsyncData* data) {
     // TumatraPDF releases are unsigned portable exes: instead of a signature check,
     // require a plausible PE file (MZ header, >= 1 MiB)
     if (ok) {
-        constexpr i64 kMinExeSize = 1024 * 1024;
+        constexpr i64 kMinExeSize = 1024LL * 1024;
         Str hdr = file::ReadFile(installerPath);
         i64 size = len(hdr);
         ok = size >= kMinExeSize && hdr.s[0] == 'M' && hdr.s[1] == 'Z';
