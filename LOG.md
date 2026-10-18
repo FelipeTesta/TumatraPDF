@@ -1,5 +1,19 @@
 # TumatraPDF — Development Log
 
+## 2026-10-18 (s36-s) — FC-H2 closed: flashcard scan /Annots pre-filter + COMMIT of perf batch (BUILD OK; cloze e2e PASS)
+
+### Fixed
+- **FlashcardLoadFromDocument Toggle-ON scan** (last FC-H2 leg): raw `fz_load_page` per page under `docLock` = the remaining big-book cost. Added a fast **/Annots pre-filter**: `pdf_lookup_page_obj` (borrowed ref, O(1) after mupdf's one-time lazy page-tree pass) + `pdf_dict_get(PDF_NAME(Annots))` — annot-free pages (95%+ of a typical book) skip `fz_load_page` entirely (~us vs ~1-2ms/page; seconds → ms). `/Annots` as a single annot (non-array, legal) treated as hasAnnots. Skip `continue`s AFTER `fz_catch` — never jump out of `fz_try` (setjmp). Design (a) from the independent-consultant subagent; (b) GetFzPageInfo under docLock REJECTED (violates EngineMupdf.h lock hierarchy "never pagesLock under docLock" — deadlock), (c) background worker + (d) partial lists rejected (complexity vs residual win).
+
+### Committed (user order: "commitar para o outro agente fazer outros refactors")
+- `85c02e7` perf: annot scans skip text extraction + flashcard /Annots pre-filter + card prefetch (10 files: Flashcard.cpp, Commands_Flashcard.cpp s36-p prefetch, EngineAll.h/EngineCreate.cpp/EngineMupdf.cpp s36-o, EditAnnotations.cpp, SumatraPDF.cpp, RenderCache.cpp s36-n, LOG, TODO) — `prompt:` line per convention.
+- `83a1393` tidy: clang-tidy leftovers (float division promotion, int64 overflow casts — 8 files from the parallel sweep, left uncommitted by s36-r).
+- Tree CLEAN after commits. NOT pushed (no user order).
+
+### Verified
+- Build 0/0 → Compiled. `ad-hoc-flashcard-cloze` PASS end-to-end WITH the pre-filter (add→toggle→study→reveal→rate→history/backup; `[fc] FlashcardLoadFromDocument - found 1 flashcards` ✓). `s36i-roundtrip` PASS with doc (25 buttons, marks=17,21 stable).
+- Serena MCP (clangd) find_symbol timed out 240s twice on this tree (huge C++ TU set) — compile_commands.json present; needs smaller scope or clangd warm-up before it's usable here; tree-sitter + grep remain the mapping tools.
+
 ## 2026-10-18 (s36-r) — roadmap B1/B2/B3 + C1: CodeQL + MSVC `/analyze` CI jobs + clang-tidy sweep
 
 ### Added
