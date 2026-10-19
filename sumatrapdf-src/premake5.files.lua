@@ -729,6 +729,22 @@ function sumatrapdf_files()
     "VirtWnd.*",
     "WebpReader.*",
     "WindowTab.*",
+    -- TumatraPDF fork additions (kept together so upstream merges stay simple;
+    -- without these a `premake5 vs2022` regen silently strips them from the app
+    -- project and the link fails later with LNK1120 unresolved externals)
+    "Flashcard.*",
+    "FlashcardSidebar.*",
+    "FlashcardToolbar.*",
+    "Commands_Flashcard.*",
+    "Commands_AutoScroll.*",
+    "Commands_ArchTools.*",
+    "Commands_View.*",
+    "Commands_File.*",
+    "Commands_Edit.*",
+    "Commands_Image.*",
+    "ToolbarLayout.*",
+    "MainWindowCreate.*",
+    "ReadingStats.*",
   })
   filter { "configurations:Debug or DebugFull" }
   files_in_dir("src", {

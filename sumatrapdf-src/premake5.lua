@@ -1369,11 +1369,15 @@ workspace "TumatraPDF"
     -- resolve static imports (uxtheme.dll etc.) from System32 only, so that
     -- a DLL planted next to the exe can't be side-loaded (seen in crash reports
     -- with our signed exe re-distributed alongside a fake UxTheme.dll).
-    -- skip for x64_asan: ASan needs clang_rt.asan_dynamic-x86_64.dll beside the exe.
-    filter "not platforms:x64_asan"
-    linkoptions { "/DEPENDENTLOADFLAG:0x800" }
+    -- asan keeps the hardening but with APPLICATION_DIR added (0xA00): the ASan
+    -- dynamic runtime (clang_rt.asan_dynamic-x86_64.dll) lives beside the exe and
+    -- with plain 0x800 the loader can't find it - the exe exits 53 before main.
+    -- (premake5-beta8 ignores `filter "not platforms:x64_asan"`, so spell out the
+    -- positive platform lists instead of a negation)
     filter "platforms:x64_asan"
-    linkoptions { "/INFERASANLIBS" }
+    linkoptions { "/DEPENDENTLOADFLAG:0xA00" }
+    filter "platforms:x86 or x64 or arm64"
+    linkoptions { "/DEPENDENTLOADFLAG:0x800" }
     filter {}
     dependson { "test_util" }
     -- pack translations + marked/mermaid + manual into .work/embedded.dat
@@ -1478,8 +1482,17 @@ workspace "TumatraPDF"
     linkoptions { "/DELAYLOAD:uiautomationcore.dll" }
     -- resolve static imports (uxtheme.dll etc.) from System32 only, so that
     -- a DLL planted next to the exe can't be side-loaded. doesn't affect
-    -- delay-loaded libsumatrapdf.dll which LoadLibsumatrapdf() loads by full path
+    -- delay-loaded libsumatrapdf.dll which LoadLibsumatrapdf() loads by full path.
+    -- asan keeps the hardening but with APPLICATION_DIR added (0xA00): the ASan
+    -- dynamic runtime (clang_rt.asan_dynamic-x86_64.dll) lives beside the exe and
+    -- with plain 0x800 the loader can't find it - the exe exits 53 before main.
+    -- (premake5-beta8 ignores `filter "not platforms:x64_asan"`, so spell out the
+    -- positive platform lists instead of a negation)
+    filter "platforms:x64_asan"
+    linkoptions { "/DEPENDENTLOADFLAG:0xA00" }
+    filter "platforms:x86 or x64 or arm64"
     linkoptions { "/DEPENDENTLOADFLAG:0x800" }
+    filter {}
     dependson { "PdfFilter", "PdfPreview", "test_util", "sumatrapdf-tool" }
     -- pack translations + marked/mermaid + manual into .work/embedded.dat
     prebuildcommands {

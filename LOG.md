@@ -1,5 +1,19 @@
 # TumatraPDF — Development Log
 
+## 2026-10-19 (s36-w) — E2: premake regen made safe (fork sources + ASan hardening encoded)
+
+### Added
+- **`premake5.files.lua`**: the 13 fork app sources missing from `sumatrapdf_files()` added as one commented block (`Flashcard.*`, `FlashcardSidebar.*`, `FlashcardToolbar.*`, `Commands_Flashcard/AutoScroll/ArchTools/View/File/Edit/Image.*`, `ToolbarLayout.*`, `MainWindowCreate.*`, `ReadingStats.*`) — a `premake5 vs2022` regen used to silently strip them from `TumatraPDF.vcxproj` and `SumatraPDF-static.vcxproj`, and the release link then failed with LNK1120 (the AGENTS §6b "premake TRAP"). Found via a coverage check (vcxproj ClCompile entries vs lua patterns): BasePch/AppUnitTests were false positives (explicitly listed in `premake5.lua`).
+- **`premake5.lua`** (both exe projects): the `/DEPENDENTLOADFLAG` asan exception rewritten with POSITIVE platform filters — `platforms:x64_asan` → `0xA00` (SYSTEM32 + APPLICATION_DIR; the ASan dynamic runtime lives beside the exe; plain `0x800` = silent exit 53 before main, see s36-u), `platforms:x86 or x64 or arm64` → `0x800`. The old `filter "not platforms:x64_asan"` is IGNORED by the vendored premake 5.0.0-beta8 (regen applied 0x800 to ALL 16 configs and never emitted the `/INFERASANLIBS` line), which is exactly how the stale committed vcxproj got its broken 0x800 in the asan configs.
+
+### Verified
+- `bin/premake5.exe vs2022` regen: fork sources present in the regenerated `TumatraPDF.vcxproj` (Flashcard/Commands_Edit/ReadingStats/ToolbarLayout/MainWindowCreate all true), **4× `0xA00`** (asan configs) + **12× `0x800`** (non-asan), both exe projects. Regen diff vs committed = only the 2 exe vcxproj + their `.filters` (195/81).
+- Build green after regen (77.8 s). One-time `C1853` (stale PCH) after a regen: delete `out/<cfg>/obj/**/ *.pch` and rebuild — the regen invalidates the old PCH.
+
+### Notes
+- The AGENTS §6b premake-TRAP mitigation (`rtk git stash push -- vs2022/`) is obsolete: regen is now safe; keep it only if upstream premake5.lua/files.lua change again.
+- The `Compiled/TumatraPDF.exe` copy step can fail with EBUSY while the user is running the deployed exe — harmless, the fresh exe is in `out/dbg64/`.
+
 ## 2026-10-19 (s36-v) — E1: build-time measurement (per-TU cl /Bt+ tool); no optimization justified
 
 ### Added

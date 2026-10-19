@@ -203,7 +203,7 @@ TumatraPDF/                   # repo root
 - `.vscode/launch.json`/`tasks.json` target `SumatraPDF-dll.exe`/`SumatraPDF.sln` — no F5 debug in VS Code
 - `-dbg-control` lacks commands for custom feature state (crop rect, trim, autoscroll ETA, contrast/invert)
 
-**premake TRAP:** `bin/premake5.exe vs2022` regenerates `vs2022/*.vcxproj` from upstream `premake5.lua`, which does NOT know the 10 fork-added source files (Flashcard*.cpp, Commands_{Flashcard,AutoScroll,ArchTools,View,File}.cpp, ToolbarLayout.cpp, MainWindowCreate.cpp) — every run silently strips their ClCompile entries → app release link fails LATER with LNK1120 unresolved externals. `cmd/run-unit-tests.ts` no longer runs premake (fixed 2026-09-23). If premake must run: `rtk git stash push -- sumatrapdf-src/vs2022/` restores the tree afterwards (checkout/restore blocked by rtk safety net). Permanent fix: add fork sources to premake5.lua (MERGE conflict surface — defer).
+**premake TRAP (FIXED s36-w):** `bin/premake5.exe vs2022` regenerates `vs2022/*.vcxproj` — the fork sources are now listed in `premake5.files.lua` (`sumatrapdf_files()`) and the asan `/DEPENDENTLOADFLAG:0xA00` exception is encoded in `premake5.lua` (beta8 ignores `not` filters — use positive platform lists), so a regen no longer strips fork sources or breaks ASan startup. After a regen, delete stale PCHs (`out/<cfg>/obj/**/*.pch`) — they cause one-time `C1853` errors. If upstream premake5.lua/files.lua change in a MERGE, re-run the coverage check (vcxproj vs lua patterns) before regenerating.
 
 # 7. Windows Shell Safety
 

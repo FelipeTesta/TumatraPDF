@@ -101,7 +101,7 @@ The two sizes are the SAME code — Debug vs Release configuration:
 
 ## New files in src/
 
-Adding .cpp/.h → run `bun cmd/premake.ts` first (regenerates `vs2022/*.vcxproj`).
+Adding .cpp/.h → run `bun cmd/premake.ts` first (regenerates `vs2022/*.vcxproj`). Safe since s36-w: fork sources are listed in `premake5.files.lua` and the asan DEPENDENTLOADFLAG exception lives in `premake5.lua`. After a regen, delete stale PCHs (`out/<cfg>/obj/**/*.pch`) — they cause one-time `C1853` precompiled-header errors.
 
 ## Generated commands/settings
 

@@ -150,6 +150,27 @@
     <ClInclude Include="..\src\Commands.h">
       <Filter>src</Filter>
     </ClInclude>
+    <ClInclude Include="..\src\Commands_ArchTools.h">
+      <Filter>src</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\Commands_AutoScroll.h">
+      <Filter>src</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\Commands_Edit.h">
+      <Filter>src</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\Commands_File.h">
+      <Filter>src</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\Commands_Flashcard.h">
+      <Filter>src</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\Commands_Image.h">
+      <Filter>src</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\Commands_View.h">
+      <Filter>src</Filter>
+    </ClInclude>
     <ClInclude Include="..\src\CrashHandler.h">
       <Filter>src</Filter>
     </ClInclude>
@@ -216,6 +237,12 @@
     <ClInclude Include="..\src\Flags.h">
       <Filter>src</Filter>
     </ClInclude>
+    <ClInclude Include="..\src\Flashcard.h">
+      <Filter>src</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\FlashcardSidebar.h">
+      <Filter>src</Filter>
+    </ClInclude>
     <ClInclude Include="..\src\FormFields.h">
       <Filter>src</Filter>
     </ClInclude>
@@ -256,6 +283,9 @@
       <Filter>src</Filter>
     </ClInclude>
     <ClInclude Include="..\src\MainWindow.h">
+      <Filter>src</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\MainWindowCreate.h">
       <Filter>src</Filter>
     </ClInclude>
     <ClInclude Include="..\src\MarkdownModel.h">
@@ -316,6 +346,9 @@
       <Filter>src</Filter>
     </ClInclude>
     <ClInclude Include="..\src\ReadAloudPlaybackBar.h">
+      <Filter>src</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\ReadingStats.h">
       <Filter>src</Filter>
     </ClInclude>
     <ClInclude Include="..\src\RefHover.h">
@@ -427,6 +460,9 @@
       <Filter>src</Filter>
     </ClInclude>
     <ClInclude Include="..\src\Toolbar.h">
+      <Filter>src</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\ToolbarLayout.h">
       <Filter>src</Filter>
     </ClInclude>
     <ClInclude Include="..\src\Translations.h">
@@ -599,33 +635,6 @@
     <ClCompile Include="..\src\AutoScroll.cpp">
       <Filter>src</Filter>
     </ClCompile>
-    <ClCompile Include="..\src\Commands_AutoScroll.cpp">
-      <Filter>src</Filter>
-    </ClCompile>
-    <ClCompile Include="..\src\Commands_ArchTools.cpp">
-      <Filter>src</Filter>
-    </ClCompile>
-    <ClCompile Include="..\src\Commands_View.cpp">
-      <Filter>src</Filter>
-    </ClCompile>
-    <ClCompile Include="..\src\MainWindowCreate.cpp">
-      <Filter>src</Filter>
-    </ClCompile>
-    <ClCompile Include="..\src\Flashcard.cpp">
-      <Filter>src</Filter>
-    </ClCompile>
-    <ClCompile Include="..\src\Commands_Flashcard.cpp">
-      <Filter>src</Filter>
-    </ClCompile>
-    <ClCompile Include="..\src\FlashcardToolbar.cpp">
-      <Filter>src</Filter>
-    </ClCompile>
-    <ClCompile Include="..\src\FlashcardSidebar.cpp">
-      <Filter>src</Filter>
-    </ClCompile>
-    <ClCompile Include="..\src\Commands_File.cpp">
-      <Filter>src</Filter>
-    </ClCompile>
     <ClCompile Include="..\src\AvifReader.cpp">
       <Filter>src</Filter>
     </ClCompile>
@@ -669,6 +678,27 @@
       <Filter>src</Filter>
     </ClCompile>
     <ClCompile Include="..\src\Commands.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\Commands_ArchTools.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\Commands_AutoScroll.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\Commands_Edit.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\Commands_File.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\Commands_Flashcard.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\Commands_Image.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\Commands_View.cpp">
       <Filter>src</Filter>
     </ClCompile>
     <ClCompile Include="..\src\ContrastOverlay.cpp">
@@ -752,6 +782,15 @@
     <ClCompile Include="..\src\Flags.cpp">
       <Filter>src</Filter>
     </ClCompile>
+    <ClCompile Include="..\src\Flashcard.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\FlashcardSidebar.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\FlashcardToolbar.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
     <ClCompile Include="..\src\FormFields.cpp">
       <Filter>src</Filter>
     </ClCompile>
@@ -801,6 +840,9 @@
       <Filter>src</Filter>
     </ClCompile>
     <ClCompile Include="..\src\MainWindow.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\MainWindowCreate.cpp">
       <Filter>src</Filter>
     </ClCompile>
     <ClCompile Include="..\src\MarkdownModel.cpp">
@@ -888,6 +930,9 @@
       <Filter>src</Filter>
     </ClCompile>
     <ClCompile Include="..\src\ReadAloudPlaybackBar.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\ReadingStats.cpp">
       <Filter>src</Filter>
     </ClCompile>
     <ClCompile Include="..\src\RefHover.cpp">

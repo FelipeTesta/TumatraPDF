@@ -560,7 +560,7 @@
       <AdditionalLibraryDirectories>..\packages\Microsoft.Web.WebView2.1.0.4022.49\build\native\x64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <EntryPointSymbol>WinMainCRTStartup</EntryPointSymbol>
       <GenerateMapFile>false</GenerateMapFile>
-      <AdditionalOptions>/IMPLIB:"../out/dbg64_asan/obj-s/SumatraPDF-static.lib" /MAP:"../out/dbg64_asan/obj-s/SumatraPDF-static.map" /DELAYLOAD:gdiplus.dll /DELAYLOAD:msimg32.dll /DELAYLOAD:shlwapi.dll /DELAYLOAD:urlmon.dll /DELAYLOAD:wininet.dll /DELAYLOAD:uiautomationcore.dll /INFERASANLIBS %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>/IMPLIB:"../out/dbg64_asan/obj-s/SumatraPDF-static.lib" /MAP:"../out/dbg64_asan/obj-s/SumatraPDF-static.map" /DELAYLOAD:gdiplus.dll /DELAYLOAD:msimg32.dll /DELAYLOAD:shlwapi.dll /DELAYLOAD:urlmon.dll /DELAYLOAD:wininet.dll /DELAYLOAD:uiautomationcore.dll /DEPENDENTLOADFLAG:0xA00 %(AdditionalOptions)</AdditionalOptions>
     </Link>
     <ProjectReference>
     </ProjectReference>
@@ -736,7 +736,7 @@
       <AdditionalLibraryDirectories>..\packages\Microsoft.Web.WebView2.1.0.4022.49\build\native\x64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <EntryPointSymbol>WinMainCRTStartup</EntryPointSymbol>
       <GenerateMapFile>false</GenerateMapFile>
-      <AdditionalOptions>/IMPLIB:"../out/dbgfull64_asan/obj-s/SumatraPDF-static.lib" /MAP:"../out/dbgfull64_asan/obj-s/SumatraPDF-static.map" /DELAYLOAD:gdiplus.dll /DELAYLOAD:msimg32.dll /DELAYLOAD:shlwapi.dll /DELAYLOAD:urlmon.dll /DELAYLOAD:wininet.dll /DELAYLOAD:uiautomationcore.dll /INFERASANLIBS %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>/IMPLIB:"../out/dbgfull64_asan/obj-s/SumatraPDF-static.lib" /MAP:"../out/dbgfull64_asan/obj-s/SumatraPDF-static.map" /DELAYLOAD:gdiplus.dll /DELAYLOAD:msimg32.dll /DELAYLOAD:shlwapi.dll /DELAYLOAD:urlmon.dll /DELAYLOAD:wininet.dll /DELAYLOAD:uiautomationcore.dll /DEPENDENTLOADFLAG:0xA00 %(AdditionalOptions)</AdditionalOptions>
     </Link>
     <ProjectReference>
     </ProjectReference>
@@ -927,7 +927,7 @@
       <AdditionalLibraryDirectories>..\packages\Microsoft.Web.WebView2.1.0.4022.49\build\native\x64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <EntryPointSymbol>WinMainCRTStartup</EntryPointSymbol>
       <GenerateMapFile>false</GenerateMapFile>
-      <AdditionalOptions>/IMPLIB:"../out/rel64_asan/obj-s/SumatraPDF-static.lib" /MAP:"../out/rel64_asan/obj-s/SumatraPDF-static.map" /DELAYLOAD:gdiplus.dll /DELAYLOAD:msimg32.dll /DELAYLOAD:shlwapi.dll /DELAYLOAD:urlmon.dll /DELAYLOAD:wininet.dll /DELAYLOAD:uiautomationcore.dll /INFERASANLIBS %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>/IMPLIB:"../out/rel64_asan/obj-s/SumatraPDF-static.lib" /MAP:"../out/rel64_asan/obj-s/SumatraPDF-static.map" /DELAYLOAD:gdiplus.dll /DELAYLOAD:msimg32.dll /DELAYLOAD:shlwapi.dll /DELAYLOAD:urlmon.dll /DELAYLOAD:wininet.dll /DELAYLOAD:uiautomationcore.dll /DEPENDENTLOADFLAG:0xA00 %(AdditionalOptions)</AdditionalOptions>
     </Link>
     <ProjectReference>
     </ProjectReference>
@@ -1118,7 +1118,7 @@
       <AdditionalLibraryDirectories>..\packages\Microsoft.Web.WebView2.1.0.4022.49\build\native\x64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <EntryPointSymbol>WinMainCRTStartup</EntryPointSymbol>
       <GenerateMapFile>false</GenerateMapFile>
-      <AdditionalOptions>/IMPLIB:"../out/rel64_prefast_asan/obj-s/SumatraPDF-static.lib" /MAP:"../out/rel64_prefast_asan/obj-s/SumatraPDF-static.map" /DELAYLOAD:gdiplus.dll /DELAYLOAD:msimg32.dll /DELAYLOAD:shlwapi.dll /DELAYLOAD:urlmon.dll /DELAYLOAD:wininet.dll /DELAYLOAD:uiautomationcore.dll /INFERASANLIBS %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>/IMPLIB:"../out/rel64_prefast_asan/obj-s/SumatraPDF-static.lib" /MAP:"../out/rel64_prefast_asan/obj-s/SumatraPDF-static.map" /DELAYLOAD:gdiplus.dll /DELAYLOAD:msimg32.dll /DELAYLOAD:shlwapi.dll /DELAYLOAD:urlmon.dll /DELAYLOAD:wininet.dll /DELAYLOAD:uiautomationcore.dll /DEPENDENTLOADFLAG:0xA00 %(AdditionalOptions)</AdditionalOptions>
     </Link>
     <ProjectReference>
     </ProjectReference>
@@ -1167,6 +1167,13 @@
     <ClInclude Include="..\src\CommandAvailability.h" />
     <ClInclude Include="..\src\CommandPalette.h" />
     <ClInclude Include="..\src\Commands.h" />
+    <ClInclude Include="..\src\Commands_ArchTools.h" />
+    <ClInclude Include="..\src\Commands_AutoScroll.h" />
+    <ClInclude Include="..\src\Commands_Edit.h" />
+    <ClInclude Include="..\src\Commands_File.h" />
+    <ClInclude Include="..\src\Commands_Flashcard.h" />
+    <ClInclude Include="..\src\Commands_Image.h" />
+    <ClInclude Include="..\src\Commands_View.h" />
     <ClInclude Include="..\src\CrashHandler.h" />
     <ClInclude Include="..\src\DisplayMode.h" />
     <ClInclude Include="..\src\DisplayModel.h" />
@@ -1189,6 +1196,8 @@
     <ClInclude Include="..\src\FindBar.h" />
     <ClInclude Include="..\src\FindWindow.h" />
     <ClInclude Include="..\src\Flags.h" />
+    <ClInclude Include="..\src\Flashcard.h" />
+    <ClInclude Include="..\src\FlashcardSidebar.h" />
     <ClInclude Include="..\src\FormFields.h" />
     <ClInclude Include="..\src\GlobalPrefs.h" />
     <ClInclude Include="..\src\GumboHelpers.h" />
@@ -1203,6 +1212,7 @@
     <ClInclude Include="..\src\KeyboardHelp.h" />
     <ClInclude Include="..\src\LinkFollow.h" />
     <ClInclude Include="..\src\MainWindow.h" />
+    <ClInclude Include="..\src\MainWindowCreate.h" />
     <ClInclude Include="..\src\MarkdownModel.h" />
     <ClInclude Include="..\src\MarkdownToc.h" />
     <ClInclude Include="..\src\Menu.h" />
@@ -1223,6 +1233,7 @@
     <ClInclude Include="..\src\ProgressUpdateUI.h" />
     <ClInclude Include="..\src\ReadAloudHighlight.h" />
     <ClInclude Include="..\src\ReadAloudPlaybackBar.h" />
+    <ClInclude Include="..\src\ReadingStats.h" />
     <ClInclude Include="..\src\RefHover.h" />
     <ClInclude Include="..\src\RefHoverDetect.h" />
     <ClInclude Include="..\src\RefHoverInternal.h" />
@@ -1260,6 +1271,7 @@
     <ClInclude Include="..\src\Theme.h" />
     <ClInclude Include="..\src\TipText.h" />
     <ClInclude Include="..\src\Toolbar.h" />
+    <ClInclude Include="..\src\ToolbarLayout.h" />
     <ClInclude Include="..\src\Translations.h" />
     <ClInclude Include="..\src\TreeModel.h" />
     <ClInclude Include="..\src\TrimConfigDialog.h" />
@@ -1351,21 +1363,10 @@
     <ClCompile Include="..\src\ArchScaleDialog.cpp" />
     <ClCompile Include="..\src\ArchVector.cpp" />
     <ClCompile Include="..\src\AutoScroll.cpp" />
-    <ClCompile Include="..\src\Commands_AutoScroll.cpp" />
-    <ClCompile Include="..\src\Commands_ArchTools.cpp" />
-    <ClCompile Include="..\src\Commands_View.cpp" />
-    <ClCompile Include="..\src\MainWindowCreate.cpp" />
-    <ClCompile Include="..\src\Commands_File.cpp" />
     <ClCompile Include="..\src\AvifReader.cpp" />
     <ClCompile Include="..\src\BasePch.cpp">
       <PrecompiledHeader>Create</PrecompiledHeader>
     </ClCompile>
-    <ClCompile Include="..\src\Flashcard.cpp" />
-    <ClCompile Include="..\src\Commands_Flashcard.cpp" />
-    <ClCompile Include="..\src\Commands_Edit.cpp" />
-    <ClCompile Include="..\src\Commands_Image.cpp" />
-    <ClCompile Include="..\src\FlashcardToolbar.cpp" />
-    <ClCompile Include="..\src\FlashcardSidebar.cpp" />
     <ClCompile Include="..\src\Canvas.cpp" />
     <ClCompile Include="..\src\CanvasAboutUI.cpp" />
     <ClCompile Include="..\src\CaptionGlyphs.cpp" />
@@ -1379,6 +1380,13 @@
     <ClCompile Include="..\src\CommandPaletteDraw.cpp" />
     <ClCompile Include="..\src\CommandPaletteFilter.cpp" />
     <ClCompile Include="..\src\Commands.cpp" />
+    <ClCompile Include="..\src\Commands_ArchTools.cpp" />
+    <ClCompile Include="..\src\Commands_AutoScroll.cpp" />
+    <ClCompile Include="..\src\Commands_Edit.cpp" />
+    <ClCompile Include="..\src\Commands_File.cpp" />
+    <ClCompile Include="..\src\Commands_Flashcard.cpp" />
+    <ClCompile Include="..\src\Commands_Image.cpp" />
+    <ClCompile Include="..\src\Commands_View.cpp" />
     <ClCompile Include="..\src\ContrastOverlay.cpp" />
     <ClCompile Include="..\src\CrashHandler.cpp" />
     <ClCompile Include="..\src\DisplayMode.cpp" />
@@ -1406,6 +1414,9 @@
     <ClCompile Include="..\src\FindBar.cpp" />
     <ClCompile Include="..\src\FindWindow.cpp" />
     <ClCompile Include="..\src\Flags.cpp" />
+    <ClCompile Include="..\src\Flashcard.cpp" />
+    <ClCompile Include="..\src\FlashcardSidebar.cpp" />
+    <ClCompile Include="..\src\FlashcardToolbar.cpp" />
     <ClCompile Include="..\src\FormFields.cpp" />
     <ClCompile Include="..\src\GlobalPrefs.cpp" />
     <ClCompile Include="..\src\GumboHelpers.cpp" />
@@ -1423,6 +1434,7 @@
     <ClCompile Include="..\src\KeyboardHelp.cpp" />
     <ClCompile Include="..\src\LinkFollow.cpp" />
     <ClCompile Include="..\src\MainWindow.cpp" />
+    <ClCompile Include="..\src\MainWindowCreate.cpp" />
     <ClCompile Include="..\src\MarkdownModel.cpp" />
     <ClCompile Include="..\src\MarkdownToc.cpp" />
     <ClCompile Include="..\src\Menu.cpp" />
