@@ -1,5 +1,20 @@
 # TumatraPDF — Development Log
 
+## 2026-10-19 (s36-u) — D1 slice 1: app-level ASan fuzzing driver + ASan app exe startup fix
+
+### Added
+- **`cmd/fuzz.ts`**: app-level fuzz driver feeding byte-mutated inputs to `out/dbg64_asan/TumatraPDF.exe` through its HEADLESS entry points and recording crashes with the offending input. Modes: `render` (default; `-render <file> 1` = engine load + mupdf xref parse + page render + teardown), `extract` (`-extract-text <file> 1`), `exif` (`-dump-exif`). Mutator = xorshift-RNG byte flips / random / interesting bytes / truncate / chunk-splice, deterministic per `-seed-offset` so a crash is reproducible. Crash detection = non-zero/1 exit + `AddressSanitizer|SEGV|runtime error` in output; crashing inputs + stdout land in `tests/tmp/fuzz-crashes/`. Seeds auto-gathered recursively from `ext/` + `tests/` (D2 corpus: 23 engine seeds). Options `-n`, `-seconds`, `-mode`, `-seeds`, `-seed`, `-seed-offset`.
+- `-stress-test` is NOT usable as a fuzz entry: it runs inside the GUI (needs the main window) and hangs headless. `-engine-dump` also hangs (dialog/file output). The usable headless entries are `-render`, `-extract-text`, `-dump-exif` (all run in `SumatraStartup` before window creation and exit).
+
+### Fixed
+- **ASan app exe was broken at startup (exit 53, no output, no WER, no log) — root cause `/DEPENDENTLOADFLAG:0x800`**: all four `x64_asan` configs in `vs2022/TumatraPDF.vcxproj` (Debug/DebugFull/Release/ReleaseAnalyze) link with `/DEPENDENTLOADFLAG:0x800` (`LOAD_LIBRARY_SEARCH_SYSTEM32`), which blocks the loader from finding `clang_rt.asan_dynamic-x86_64.dll` in the app dir → controlled silent exit before main. Non-ASan builds were unaffected (no ASan DLL import). Fixed with `0xA00` (adds `LOAD_LIBRARY_SEARCH_APPLICATION_DIR`). Verified: `out/dbg64_asan/TumatraPDF.exe -dump-exif` now exits 0 with identical output to rel64; `test_util.exe` under ASan unaffected (its vcxproj has no DEPENDENTLOADFLAG). This survived the s36-r C1 verification because only `test_util.exe` was ever run under ASan.
+
+### Verified
+- ASan rebuild 141 s (build-asan.ts, after B5 wave 2); fuzz smoke 8 execs / 6 s / 0 crashes; first real campaign **`bun cmd/fuzz.ts -n 300 -seconds 600` → 300 execs / 262 s (1.1 exec/s) / 0 crashes** over the 23-seed corpus in `render` mode. Clean ASan baseline — consistent with the B5/B6 null-deref and overflow fixes.
+
+### Notes
+- `rel64` sanity probe (`-dump-exif` on a real JPEG, exit 0) is what isolated the ASan-only failure; `dumpbin /dependents` via the full MSVC path (dumpbin is NOT on PATH) confirmed the exe imports `clang_rt.asan_dynamic-x86_64.dll` + `libsumatrapdf.dll`.
+
 ## 2026-10-18 (s36-t) — B5: MSVC `/analyze` 120 → 17 (C28159 + C26495 + wave 2 tail)
 
 ### Fixed

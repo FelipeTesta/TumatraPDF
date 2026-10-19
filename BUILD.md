@@ -186,6 +186,23 @@ bun cmd/analyze.ts -with-deps               # full solution cascade (slow, vendo
   artifact `msvc-analyze` (log + summary, 30 days). Findings never fail the job; only a
   real MSBuild failure does.
 
+### App-level fuzzing (ASan) — `cmd/fuzz.ts`
+
+Feeds byte-mutated inputs to `out/dbg64_asan/TumatraPDF.exe` through its headless entries
+(`-render <file> 1`, `-extract-text <file> 1`, `-dump-exif <file>` — all run before window
+creation and exit) and records crashes with the offending input in `tests/tmp/fuzz-crashes/`.
+Requires the ASan exe (`bun cmd/build-asan.ts`). Deterministic: rerun with the same
+`-seed-offset` to reproduce. `-stress-test`/`-engine-dump` are NOT headless (GUI) — don't
+use them as fuzz entries.
+
+    bun cmd/fuzz.ts -n 300 -seconds 600          # render mode over ext/ + tests/ seeds
+    bun cmd/fuzz.ts -mode exif -n 200            # EXIF parser only
+
+Known trap: the four `x64_asan` configs link with `/DEPENDENTLOADFLAG` — it must be
+`0xA00` (SYSTEM32 + APPLICATION_DIR), not `0x800`: with `0x800` the loader cannot find
+`clang_rt.asan_dynamic-x86_64.dll` in the app dir and the exe exits 53 silently before
+main (fixed s36-u, LOG).
+
 ## Known issues
 
 - **LNK1201 (PDB lock)**: `libsumatrapdf.pdb` locked by VS Code/OneDrive. Rename PDB, rebuild.

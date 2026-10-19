@@ -563,7 +563,7 @@ cd ../out/dbgarm64 &amp; if not exist InstallerData.dat ..\..\bin\MakeLZSA.exe I
       <AdditionalLibraryDirectories>..\packages\Microsoft.Web.WebView2.1.0.4022.49\build\native\x64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <EntryPointSymbol>WinMainCRTStartup</EntryPointSymbol>
       <GenerateMapFile>false</GenerateMapFile>
-      <AdditionalOptions>/IMPLIB:"../out/dbg64_asan/obj/TumatraPDF.lib" /MAP:"../out/dbg64_asan/obj/TumatraPDF.map" /DELAYLOAD:libsumatrapdf.dll /DELAYLOAD:gdiplus.dll /DELAYLOAD:msimg32.dll /DELAYLOAD:shlwapi.dll /DELAYLOAD:urlmon.dll /DELAYLOAD:wininet.dll /DELAYLOAD:uiautomationcore.dll /DEPENDENTLOADFLAG:0x800 %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>/IMPLIB:"../out/dbg64_asan/obj/TumatraPDF.lib" /MAP:"../out/dbg64_asan/obj/TumatraPDF.map" /DELAYLOAD:libsumatrapdf.dll /DELAYLOAD:gdiplus.dll /DELAYLOAD:msimg32.dll /DELAYLOAD:shlwapi.dll /DELAYLOAD:urlmon.dll /DELAYLOAD:wininet.dll /DELAYLOAD:uiautomationcore.dll /DEPENDENTLOADFLAG:0xA00 %(AdditionalOptions)</AdditionalOptions>
     </Link>
     <ProjectReference>
     </ProjectReference>
@@ -746,7 +746,7 @@ cd ../out/dbgfullarm64 &amp; if not exist InstallerData.dat ..\..\bin\MakeLZSA.e
       <AdditionalLibraryDirectories>..\packages\Microsoft.Web.WebView2.1.0.4022.49\build\native\x64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <EntryPointSymbol>WinMainCRTStartup</EntryPointSymbol>
       <GenerateMapFile>false</GenerateMapFile>
-      <AdditionalOptions>/IMPLIB:"../out/dbgfull64_asan/obj/TumatraPDF.lib" /MAP:"../out/dbgfull64_asan/obj/TumatraPDF.map" /DELAYLOAD:libsumatrapdf.dll /DELAYLOAD:gdiplus.dll /DELAYLOAD:msimg32.dll /DELAYLOAD:shlwapi.dll /DELAYLOAD:urlmon.dll /DELAYLOAD:wininet.dll /DELAYLOAD:uiautomationcore.dll /DEPENDENTLOADFLAG:0x800 %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>/IMPLIB:"../out/dbgfull64_asan/obj/TumatraPDF.lib" /MAP:"../out/dbgfull64_asan/obj/TumatraPDF.map" /DELAYLOAD:libsumatrapdf.dll /DELAYLOAD:gdiplus.dll /DELAYLOAD:msimg32.dll /DELAYLOAD:shlwapi.dll /DELAYLOAD:urlmon.dll /DELAYLOAD:wininet.dll /DELAYLOAD:uiautomationcore.dll /DEPENDENTLOADFLAG:0xA00 %(AdditionalOptions)</AdditionalOptions>
     </Link>
     <ProjectReference>
     </ProjectReference>
@@ -944,7 +944,7 @@ cd ../out/arm64 &amp; if not exist InstallerData.dat ..\..\bin\MakeLZSA.exe Inst
       <AdditionalLibraryDirectories>..\packages\Microsoft.Web.WebView2.1.0.4022.49\build\native\x64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <EntryPointSymbol>WinMainCRTStartup</EntryPointSymbol>
       <GenerateMapFile>false</GenerateMapFile>
-      <AdditionalOptions>/IMPLIB:"../out/rel64_asan/obj/TumatraPDF.lib" /MAP:"../out/rel64_asan/obj/TumatraPDF.map" /DELAYLOAD:libsumatrapdf.dll /DELAYLOAD:gdiplus.dll /DELAYLOAD:msimg32.dll /DELAYLOAD:shlwapi.dll /DELAYLOAD:urlmon.dll /DELAYLOAD:wininet.dll /DELAYLOAD:uiautomationcore.dll /DEPENDENTLOADFLAG:0x800 %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>/IMPLIB:"../out/rel64_asan/obj/TumatraPDF.lib" /MAP:"../out/rel64_asan/obj/TumatraPDF.map" /DELAYLOAD:libsumatrapdf.dll /DELAYLOAD:gdiplus.dll /DELAYLOAD:msimg32.dll /DELAYLOAD:shlwapi.dll /DELAYLOAD:urlmon.dll /DELAYLOAD:wininet.dll /DELAYLOAD:uiautomationcore.dll /DEPENDENTLOADFLAG:0xA00 %(AdditionalOptions)</AdditionalOptions>
     </Link>
     <ProjectReference>
     </ProjectReference>
@@ -1142,7 +1142,7 @@ cd ../out/arm64_prefast &amp; if not exist InstallerData.dat ..\..\bin\MakeLZSA.
       <AdditionalLibraryDirectories>..\packages\Microsoft.Web.WebView2.1.0.4022.49\build\native\x64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <EntryPointSymbol>WinMainCRTStartup</EntryPointSymbol>
       <GenerateMapFile>false</GenerateMapFile>
-      <AdditionalOptions>/IMPLIB:"../out/rel64_prefast_asan/obj/TumatraPDF.lib" /MAP:"../out/rel64_prefast_asan/obj/TumatraPDF.map" /DELAYLOAD:libsumatrapdf.dll /DELAYLOAD:gdiplus.dll /DELAYLOAD:msimg32.dll /DELAYLOAD:shlwapi.dll /DELAYLOAD:urlmon.dll /DELAYLOAD:wininet.dll /DELAYLOAD:uiautomationcore.dll /DEPENDENTLOADFLAG:0x800 %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>/IMPLIB:"../out/rel64_prefast_asan/obj/TumatraPDF.lib" /MAP:"../out/rel64_prefast_asan/obj/TumatraPDF.map" /DELAYLOAD:libsumatrapdf.dll /DELAYLOAD:gdiplus.dll /DELAYLOAD:msimg32.dll /DELAYLOAD:shlwapi.dll /DELAYLOAD:urlmon.dll /DELAYLOAD:wininet.dll /DELAYLOAD:uiautomationcore.dll /DEPENDENTLOADFLAG:0xA00 %(AdditionalOptions)</AdditionalOptions>
     </Link>
     <ProjectReference>
     </ProjectReference>

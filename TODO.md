@@ -28,8 +28,8 @@ Status: `DONE` = shipped + verified, `WIP` = in progress, `TODO` = pending. Effo
 | C | C2 | Time Travel Debugging recipe (`tttracer.exe` present): record a hard repro, replay in WinDbgX, document in BUILD.md | M | TODO | Deterministic replay of timing/interaction bugs (toolbar drag-collapse class) instead of "cannot reproduce" |
 | C | C3 | Application Verifier over `TumatraPDF.exe` + unit tests (handles/heaps/locks), triage findings | M | TODO | Runtime detection of handle/heap/lock misuse, esp. Win32 GDI/HWND lifetimes in the new panels |
 | C | C4 | Install WinDbg (`winget install Microsoft.WinDbg`) | S | TODO | Symbolicated crash-dump analysis + TTD replay (C2 depends on it); no debugger CLI on PATH today |
-| D | D1 | libFuzzer/ASan harnesses on entry points we own: mupdf xref/object parsing, `-dump-exif`, cmark-gfm, image decoders through our wrappers (jxl/heic/dav1d) | L | TODO | Malformed PDF/EPUB/image crashes found by machine before users hit them — highest bug yield for a PDF reader (and the same class as most past CVEs) |
-| D | D2 | Seed corpus from `ext/*.pdf` + `tests/` regression files, bounded local runs first | S | TODO | Fuzzer reaches deep parser paths in minutes instead of days of blind mutation |
+| D | D1 | libFuzzer/ASan harnesses on entry points we own: mupdf xref/object parsing, `-dump-exif`, cmark-gfm, image decoders through our wrappers (jxl/heic/dav1d) | L | WIP s36-u | Malformed PDF/EPUB/image crashes found by machine before users hit them — highest bug yield for a PDF reader (and the same class as most past CVEs). s36-u slice 1: `cmd/fuzz.ts` app-level ASan fuzzer (headless `-render`/`-extract-text`/`-dump-exif` entries, byte mutator, 23 seeds, 300 execs / 0 crashes baseline) + fixed the ASan app exe startup (`DEPENDENTLOADFLAG` 0x800 to 0xA00, LOG s36-u); remaining: native libFuzzer harnesses, exif seeds, cmark-gfm/image-decoder modes |
+| D | D2 | Seed corpus from `ext/*.pdf` + `tests/` regression files, bounded local runs first | S | DONE s36-u | Fuzzer reaches deep parser paths in minutes instead of days of blind mutation (corpus auto-gathered recursively by `cmd/fuzz.ts` from `ext/` + `tests/`; bounded runs via `-n`/`-seconds`) |
 | D | D3 | Nightly time-boxed fuzz job (`daily.yml` / `linux-daily.yml`) + crash artifact upload | S | TODO | Continuous parser regression coverage; every crash lands with its repro input attached |
 | E | E1 | MSBuild binlog → top-20 slowest TUs → sccache/ccache + PCH scope review; measure build wall time before/after | M | TODO | Shorter edit→build→test loop; less idle waiting per iteration (measurable delta, not a guess) |
 | E | E2 | Permanent premake fix: fork-only sources missing from `premake5.lua` (AGENTS.md §6b "premake TRAP"); MERGE conflict surface — isolated commit | S | TODO | Removes the LNK1120 landmine: a `premake5 vs2022` run silently strips 10 fork sources and the link failure surfaces much later |
@@ -165,6 +165,14 @@ Quando Twocolumns=on, clicar e arrastar a página está lento/travando;
 Quando Twoxolumns=on, não consigo selecionar o texto OCR para anotações ou flashcards;
 
 [ ] melhorar o passo do zoom
+
+Quando 'Trim Config'=on, pausar o autoscroll
+
+precisamos ter um "MASTER" de tempo de leitura (backup) independente dos livros para caso o tempo de leitura não se perca quando algum livro seja renomeado, deletado ou movido; em um primeiro momento vai estar relacionado ao livro, mas depois continua armazenado mesmo sem o livro em disco. isso será importante especialmente quando a lista de documentos lidos ficar grande demais e tivermos que limitar.
+
+No home, o tempo de leitura deve ficar: Today 'Nm' | Total: 'Nh NNm'; está aparecendo '7d', nao sei o que seria isso; também melhorar o contraste das cores, os tempos estão muito escuros, ficam pouco legível.
+
+'Ctrl+shift+t' → reabrir sessão fechada com todos os livros (pode ser a ultima janela fechada com todos os livros)
 
 ### 2026-10-15
 [x] autoscroll:on & twocolumn:on → shift:hold → não consigo arrastar a página com o touchpad do notebook — FIXED s35-b (2026-10-15): causa = WM_MOUSEWHEEL (swipe vertical do touchpad) chega com MK_SHIFT (Shift é o modificador do quick view) e era remapeado como scroll HORIZONTAL (Canvas.cpp CanvasOnMouseWheel hScroll check) — sem espaço horizontal no quick view = nada rolava. Quick view ON agora força scroll vertical. E2E: tests/tmp/s35b-quickview.ts (wheel MK_SHIFT scrollY 3→23 OK + drag pan OK).
