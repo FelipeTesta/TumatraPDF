@@ -1,5 +1,17 @@
 # TumatraPDF — Development Log
 
+## 2026-10-19 (s36-v) — E1: build-time measurement (per-TU cl /Bt+ tool); no optimization justified
+
+### Added
+- **`cmd/build-times.ts`**: ranks the slowest translation units by cl front-end (c1/c1xx) + back-end (c2) time. Reads the per-TU command lines MSBuild logged in `out/<config>/obj/<proj>/<proj>.tlog/CL.command.1.tlog`, re-runs each compile with `/Bt+` (6 in parallel), parses `time(...)=Xs` from cl output, writes `out/build-times.txt`. INCLUDE for direct cl spawns is captured once from vcvars64.bat via a temp batch (Bun arg-quoting mangles a direct `cmd /c "vcvars && set"` chain).
+- Baseline artifact: `out/build-times.txt` (Debug x64, 238 TUs).
+
+### Verified
+- **Compile is NOT the bottleneck**: front-end total 32.1 s / back-end 3.8 s for 238 TUs (~0.15 s/TU); slowest TU only 2.14 s (`TextToSpeech.cpp`), then `BasePch.cpp` 1.64 s, `DmLibDpi.cpp` 1.54 s — no outliers; PCH is doing its job (most TUs 0.2-0.4 s).
+- **Edit-build-test loop: ~10 s** (1 touched TU + link via `cmd/build.ts`, and the same via direct MSBuild); no-op build ~10 s; app-only Rebuild 57-112 s; single-threaded full rebuild 193 s.
+- Conclusion for E1: **sccache/PCH changes are not justified** — the loop is 10 s and compile is a small slice of it; the roadmap item existed on a guess and the measurement killed it. Re-run `cmd/build-times.ts` if the loop ever feels slow again.
+- Tooling traps found on the way: MSBuild cl/Bt+ stderr interlaces with /m (attribution needs `/m:1` or direct re-runs); cl prints its errors AND the /Bt+ timings on STDOUT (capturing only stderr yields "silent" failures); the tlog flags line carries the source path unquoted and uppercased (strip it case-insensitively and re-quote, or paths with spaces split into phantom `D:\1` TUs).
+
 ## 2026-10-19 (s36-u) — D1 slice 1: app-level ASan fuzzing driver + ASan app exe startup fix
 
 ### Added
