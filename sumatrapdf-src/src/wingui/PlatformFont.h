@@ -25,6 +25,10 @@ inline PlatformFontStyle operator|(PlatformFontStyle a, PlatformFontStyle b) {
     return (PlatformFontStyle)((int)a | (int)b);
 }
 
+inline PlatformFontStyle operator&(PlatformFontStyle a, PlatformFontStyle b) {
+    return (PlatformFontStyle)((int)a & (int)b);
+}
+
 struct PlatformFont {
     // intrusive list of interned fonts, rooted at gPlatformFonts
     PlatformFont* next = nullptr;

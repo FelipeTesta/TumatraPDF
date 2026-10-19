@@ -63,6 +63,10 @@ static bool SaveHbitmapAsPng(HBITMAP hbmp, WStr destPath) {
         return false;
     }
     Gdiplus::ImageCodecInfo* codecs = (Gdiplus::ImageCodecInfo*)buf;
+    if (num == 0 || size < num * sizeof(Gdiplus::ImageCodecInfo)) {
+        free(buf);
+        return false;
+    }
     if (Gdiplus::GetImageEncoders(num, size, codecs) != Gdiplus::Ok) {
         free(buf);
         return false;

@@ -477,6 +477,7 @@ LRESULT TryReflectMessages(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
                 return wndFrom->OnNotifyReflect(wparam, lparam);
             }
         }
+            [[fallthrough]];
         // A set of messages to be reflected back to the control that generated them.
         case WM_CTLCOLORBTN:
         case WM_CTLCOLOREDIT:

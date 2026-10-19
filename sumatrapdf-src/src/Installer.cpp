@@ -301,7 +301,8 @@ static void StopServiceAndDependents(SC_HANDLE scm, Str serviceName, int depth =
     // Active dependents must be stopped before this service (MSDN EnumDependentServices).
     DWORD bytesNeeded = 0;
     DWORD nServices = 0;
-    EnumDependentServicesW(svc, SERVICE_ACTIVE, nullptr, 0, &bytesNeeded, &nServices);
+    // probe call: returns FALSE by design, the required size arrives via GetLastError()
+    (void)EnumDependentServicesW(svc, SERVICE_ACTIVE, nullptr, 0, &bytesNeeded, &nServices);
     DWORD enumErr = GetLastError();
     if (enumErr == ERROR_MORE_DATA && bytesNeeded > 0) {
         auto* deps = (ENUM_SERVICE_STATUSW*)malloc(bytesNeeded);
@@ -405,6 +406,10 @@ static TempStr ProcessesHoldingFileTemp(Str path) {
     }
 
     str::Builder sb;
+    // nInfo cannot exceed the nNeeded-sized buffer we allocated
+    if (nInfo > nNeeded) {
+        nInfo = nNeeded;
+    }
     for (UINT i = 0; i < nInfo; i++) {
         TempStr app = ToUtf8Temp(infos[i].strAppName);
         DWORD pid = infos[i].Process.dwProcessId;

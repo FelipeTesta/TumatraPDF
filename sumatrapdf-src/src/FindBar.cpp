@@ -576,7 +576,9 @@ void ToggleFloatingFindUI(MainWindow* win) {
     }
     HwndSetFocus(win->hwndFindEdit);
     // restore the caret/selection last, after Show/SetText reset it
-    Edit_SetSel(win->hwndFindEdit, LOWORD(sel), HIWORD(sel));
+    if (win->hwndFindEdit) {
+        Edit_SetSel(win->hwndFindEdit, LOWORD(sel), HIWORD(sel));
+    }
 }
 
 // reposition over the search toolbar icon (no-op if not visible)

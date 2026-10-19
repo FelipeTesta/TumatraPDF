@@ -715,6 +715,10 @@ static bool EditSaveArgbBitmapAsPng(Gdiplus::Bitmap* bmp, const WCHAR* path) {
         return false;
     }
     auto* codecs = (Gdiplus::ImageCodecInfo*)buf;
+    if (num == 0 || size < num * sizeof(Gdiplus::ImageCodecInfo)) {
+        free(buf);
+        return false;
+    }
     if (Gdiplus::GetImageEncoders(num, size, codecs) != Gdiplus::Ok) {
         free(buf);
         return false;

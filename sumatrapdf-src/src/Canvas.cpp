@@ -111,7 +111,9 @@ static HCURSOR CreateLaserPointerCursor(int size) {
     void* bits = nullptr;
     HBITMAP hbmpColor = CreateDIBSection(nullptr, &bmi, DIB_RGB_COLORS, &bits, nullptr, 0);
     if (!hbmpColor || !bits) {
-        DeleteObject(hbmpColor);
+        if (hbmpColor) {
+            DeleteObject(hbmpColor);
+        }
         return nullptr;
     }
 
@@ -550,7 +552,11 @@ void DisconnectLastDragDataObject() {
     if (!gLastDragDataObj) {
         return;
     }
-    CoDisconnectObject(gLastDragDataObj, 0);
+    // best-effort disconnect: a failure here is not actionable
+    HRESULT disconnectHr = CoDisconnectObject(gLastDragDataObj, 0);
+    if (FAILED(disconnectHr)) {
+        logf("DisconnectLastDragDataObject: CoDisconnectObject failed 0x%lx\n", (u32)disconnectHr);
+    }
     gLastDragDataObj->Release();
     gLastDragDataObj = nullptr;
 }
@@ -591,7 +597,9 @@ static HGLOBAL EncodeBitmapToPngGlobal(HBITMAP hbmp) {
     Gdiplus::Status status = gdipBmp.Save(stream, &pngClsid, nullptr);
     HGLOBAL hMem = nullptr;
     if (status == Gdiplus::Ok) {
-        GetHGlobalFromStream(stream, &hMem);
+        if (GetHGlobalFromStream(stream, &hMem) != S_OK) {
+            hMem = nullptr;
+        }
     }
     stream->Release();
     if (status != Gdiplus::Ok) {
@@ -839,6 +847,10 @@ static HBITMAP CreateProportionalDragThumbnail(HBITMAP src, int maxEdge) {
     Gdiplus::BitmapData bd{};
     Gdiplus::Rect lockRc(0, 0, dw, dh);
     if (scaled.LockBits(&lockRc, Gdiplus::ImageLockModeRead, PixelFormat32bppARGB, &bd) != Gdiplus::Ok) {
+        return nullptr;
+    }
+    if (!bd.Scan0) {
+        scaled.UnlockBits(&bd);
         return nullptr;
     }
 

@@ -2231,15 +2231,20 @@ static void LayoutHomePage(HomePageLayout& l) {
         int borderDy = searchEditDy + 2; // 1px border on each side
         l.rcSearchBorder = {borderX, borderY, borderDx, borderDy};
         // measure font height so we can vertically center the edit
-        HFONT editFont = (HFONT)SendMessage(win->hwndHomeSearch, WM_GETFONT, 0, 0);
-        TEXTMETRIC tm;
-        HFONT oldFont = (HFONT)SelectObject(hdc, editFont);
-        GetTextMetrics(hdc, &tm);
-        SelectObject(hdc, oldFont);
-        int fontDy = tm.tmHeight + tm.tmExternalLeading + 2; // +2 for caret padding
+        HFONT editFont = win->hwndHomeSearch ? (HFONT)SendMessage(win->hwndHomeSearch, WM_GETFONT, 0, 0) : nullptr;
+        int fontDy = DpiScale(hdc, 14); // fallback when the edit doesn't exist yet
+        if (editFont) {
+            TEXTMETRIC tm;
+            HFONT oldFont = (HFONT)SelectObject(hdc, editFont);
+            GetTextMetrics(hdc, &tm);
+            SelectObject(hdc, oldFont);
+            fontDy = tm.tmHeight + tm.tmExternalLeading + 2; // +2 for caret padding
+        }
         int editDy = std::min(fontDy, searchEditDy);
         int editY = borderY + 1 + ((searchEditDy - editDy) / 2);
-        MoveWindow(win->hwndHomeSearch, borderX + 1, editY, borderDx - 2, editDy, TRUE);
+        if (win->hwndHomeSearch) {
+            MoveWindow(win->hwndHomeSearch, borderX + 1, editY, borderDx - 2, editDy, TRUE);
+        }
     }
     // border is 1px top + 1px bottom = 2px
     int searchAreaDy = headerSearchGap + searchEditDy + 2 + searchThumbsGap;

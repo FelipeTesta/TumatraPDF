@@ -1762,7 +1762,7 @@ static LRESULT CALLBACK WndProcTocFilterEdit(HWND hwnd, UINT msg, WPARAM wp, LPA
             return 0;
         }
     }
-    if (msg == WM_CHAR && (wp == VK_RETURN || wp == '\r' || wp == '\n')) {
+    if (msg == WM_CHAR && (wp == VK_RETURN || wp == '\n')) {
         return 0;
     }
     return DefSubclassProc(hwnd, msg, wp, lp);

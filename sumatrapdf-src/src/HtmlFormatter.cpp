@@ -284,8 +284,12 @@ void HtmlFormatter::SetFontBasedOn(PlatformFont* font, PlatformFontStyle fs, flo
 }
 
 bool ValidStyleForChangeFontStyle(PlatformFontStyle fs) {
-    return (PlatformFontStyle::Bold == fs) || (PlatformFontStyle::Italic == fs) ||
-           (PlatformFontStyle::Underline == fs) || (PlatformFontStyle::Strikeout == fs);
+    // the style values are combinable flags (operator|), so test the bit, not
+    // the whole value: (Bold|Italic) is a valid change request
+    return (fs & PlatformFontStyle::Bold) != PlatformFontStyle::Regular ||
+           (fs & PlatformFontStyle::Italic) != PlatformFontStyle::Regular ||
+           (fs & PlatformFontStyle::Underline) != PlatformFontStyle::Regular ||
+           (fs & PlatformFontStyle::Strikeout) != PlatformFontStyle::Regular;
 }
 
 // change the current font by adding (if addStyle is true) or removing

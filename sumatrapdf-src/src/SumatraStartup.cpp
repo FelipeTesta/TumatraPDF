@@ -540,7 +540,11 @@ static const GUID kIidVirtualDesktopManager = {0xA5CD92FF,
 // COM is already initialized (ScopedOle in WinMain) by the time we call this.
 static ISumatraVirtualDesktopManager* CreateVirtualDesktopManager() {
     ISumatraVirtualDesktopManager* mgr = nullptr;
-    CoCreateInstance(kClsidVirtualDesktopManager, nullptr, CLSCTX_ALL, kIidVirtualDesktopManager, (void**)&mgr);
+    HRESULT hr =
+        CoCreateInstance(kClsidVirtualDesktopManager, nullptr, CLSCTX_ALL, kIidVirtualDesktopManager, (void**)&mgr);
+    if (FAILED(hr)) {
+        mgr = nullptr;
+    }
     return mgr;
 }
 
@@ -1735,7 +1739,9 @@ static void LogWineDpiInfo() {
         ReleaseDC(nullptr, screenDC);
     }
     uint monitorDpiX = 0, monitorDpiY = 0;
-    HMONITOR mon = MonitorFromWindow(nullptr, MONITOR_DEFAULTTOPRIMARY);
+    // point (0,0) is on the primary monitor; avoids passing a null hwnd to
+    // MonitorFromWindow (SAL flags it, though MONITOR_DEFAULTTOPRIMARY allows it)
+    HMONITOR mon = MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY);
     HRESULT hr = E_FAIL;
     if (mon && DynGetDpiForMonitor) {
         hr = DynGetDpiForMonitor(mon, 0, &monitorDpiX, &monitorDpiY);

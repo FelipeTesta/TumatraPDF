@@ -780,8 +780,9 @@ static int GetThemeByName(Str name) {
     return -1;
 }
 
-// this is the default aggressive yellow that we suppress
-constexpr COLORREF kMainWinBgColDefault = (RGB(0xff, 0xf2, 0) - 0x80000000);
+// this is the default aggressive yellow that we suppress (the original literal
+// was RGB(0xff, 0xf2, 0) - 0x80000000, whose unsigned wrap equals 0x80f2ffff)
+constexpr COLORREF kMainWinBgColDefault = 0x80f2ffff;
 
 static bool IsDefaultMainWinColor(ParsedColor* col) {
     return col->parsedOk && col->col == kMainWinBgColDefault;

@@ -1442,7 +1442,7 @@ void HtmlWindow::NavigateToDataUrl(Str url) {
 
 void HtmlWindow::NavigateToUrl(Str urlA) {
     TempWStr url = ToWStrTemp(urlA);
-    VARIANT urlVar;
+    VARIANT urlVar{}; // zero-init so Navigate2's _In_ contract is provably met
     VariantInitBstr(urlVar, url);
     str::Free(currentURL);
     currentURL = {};
