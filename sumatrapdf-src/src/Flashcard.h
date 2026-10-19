@@ -52,7 +52,7 @@ struct FlashcardStudyState {
 struct FlashcardStudyDoc {
     int version = 1;
     struct StateEntry {
-        u64 key; // matches Flashcard::key
+        u64 key = 0; // matches Flashcard::key
         FlashcardStudyState state;
     };
     Vec<StateEntry> states;

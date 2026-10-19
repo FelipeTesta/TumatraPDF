@@ -65,8 +65,8 @@ constexpr int kTextPaddingRight = 6;
 
 struct ToolbarButtonInfo {
     /* index in the toolbar bitmap (-1 for separators) */
-    TbIcon bmpIndex;
-    int cmdId;
+    TbIcon bmpIndex = TbIcon::None;
+    int cmdId = 0;
     Str toolTip;
     Str svgIcon;
 };

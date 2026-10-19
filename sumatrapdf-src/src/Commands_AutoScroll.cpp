@@ -36,7 +36,7 @@ void HandleCmdAutoScrollTimerToggle(MainWindow* win) {
     win->autoScroll.timerEnabled = on;
     if (win->autoScroll.active) {
         win->autoScroll.timerMinutes = on ? win->autoScroll.timerMinutesSetting : 0;
-        win->autoScroll.startTick = GetTickCount();
+        win->autoScroll.startTick = GetTickCount64();
     }
     gGlobalPrefs->autoScrollTimerEnabled = on;
 }
@@ -51,7 +51,7 @@ void HandleCmdAutoScrollTimerEdit(MainWindow* win) {
     win->autoScroll.timerMinutesSetting = (DWORD)m;
     if (win->autoScroll.active && win->autoScroll.timerEnabled) {
         win->autoScroll.timerMinutes = (DWORD)m;
-        win->autoScroll.startTick = GetTickCount();
+        win->autoScroll.startTick = GetTickCount64();
     }
     gGlobalPrefs->autoScrollTimerMinutes = m;
 }

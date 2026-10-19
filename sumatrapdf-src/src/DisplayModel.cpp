@@ -869,10 +869,10 @@ void DisplayModel::UpdateEstimatedMediaBox() {
 
     struct SizeCount {
         SizeF size;
-        int nVisible;
-        int nTotal;
+        int nVisible = 0;
+        int nTotal = 0;
     };
-    SizeCount sizes[kMaxSizes];
+    SizeCount sizes[kMaxSizes] = {};
     int nSizes = 0;
 
     for (int pageNo = 1; pageNo <= PageCount(); pageNo++) {

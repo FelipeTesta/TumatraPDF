@@ -551,7 +551,7 @@ struct MoveAsideDlgCtx {
     Str fileName;
     bool success = false;
     bool aborted = false;
-    DWORD lastTryTick = 0;
+    u64 lastTryTick = 0;
 };
 
 // ACCESS_DENIED with no process holders → permissions/AV/ACL, not "file in use".
@@ -670,11 +670,11 @@ static HRESULT CALLBACK MoveAsideBlockedDialogCallback(HWND hwnd, UINT msg, WPAR
     auto* ctx = (MoveAsideDlgCtx*)lpRefData;
     switch (msg) {
         case TDN_CREATED:
-            ctx->lastTryTick = GetTickCount();
+            ctx->lastTryTick = GetTickCount64();
             break;
         case TDN_TIMER: {
             // Auto-retry rename every 3 seconds while the dialog is open.
-            DWORD now = GetTickCount();
+            u64 now = GetTickCount64();
             if (now - ctx->lastTryTick >= 3000) {
                 ctx->lastTryTick = now;
                 logf("MoveAside dialog: retry rename '%s'\n", ctx->path);

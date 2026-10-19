@@ -675,9 +675,9 @@ HRESULT STDMETHODCALLTYPE SumatraUIAutomationTextRange::MoveEndpointByUnit(TextP
 
     class EndPointMover {
       protected:
-        SumatraUIAutomationTextRange* target;
-        int* target_page;
-        int* target_glyph;
+        SumatraUIAutomationTextRange* target = nullptr;
+        int* target_page = nullptr;
+        int* target_glyph = nullptr;
 
       public:
         // return false when cannot be moved

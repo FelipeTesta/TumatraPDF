@@ -68,7 +68,7 @@ struct PendingWebViewOp {
         Navigate,
     };
 
-    Kind kind;
+    Kind kind = Init;
     Str text;
     // for Init: the token AddInitScript() already handed back to the caller, so
     // the script keeps its identity across the queue

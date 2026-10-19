@@ -37,11 +37,11 @@ TempWStr RefHoverPageTextToWStrTemp(Str text) {
 // cached to avoid re-scanning the document on each hover.
 struct CitationCacheEntry {
     Str surname; // owned UTF-8
-    int year;
-    int srcPage;  // page where the lookup was issued (so cap at srcPage works per-page)
-    int destPage; // -1 if not found
-    float destX;
-    float destY;
+    int year = 0;
+    int srcPage = 0;   // page where the lookup was issued (so cap at srcPage works per-page)
+    int destPage = -1; // -1 if not found
+    float destX = 0;
+    float destY = 0;
 };
 
 struct RefLookupCache {

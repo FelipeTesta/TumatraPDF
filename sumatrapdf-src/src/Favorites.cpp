@@ -681,8 +681,8 @@ static void GoToFavoritePage(MainWindow* win, int pageNo, Str pageLabel) {
 }
 
 struct GoToFavoritePageData {
-    MainWindow* win;
-    int pageNo;
+    MainWindow* win = nullptr;
+    int pageNo = 0;
     Str pageLabel; // owned copy (str::Dup), freed by the task
 };
 

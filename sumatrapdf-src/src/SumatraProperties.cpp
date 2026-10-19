@@ -969,7 +969,7 @@ bool PropertiesWnd::Create(HWND parent) {
 }
 
 struct GetFontsResult {
-    HWND hwnd;
+    HWND hwnd = nullptr;
     str::Builder fontsText;
 };
 

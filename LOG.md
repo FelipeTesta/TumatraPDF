@@ -1,5 +1,20 @@
 # TumatraPDF — Development Log
 
+## 2026-10-18 (s36-t) — B5 wave 1: MSVC `/analyze` 114 → 36 (C28159 + C26495)
+
+### Fixed
+- **C28159 (21 → 0)**: every `GetTickCount()` call site → `GetTickCount64()` and every tick-holding `DWORD` field/var → `u64` (49-day rollover class). Call sites: `AutoScroll.cpp` (9), `Commands_AutoScroll.cpp` (2), `Installer.cpp` (2), `ReadingStats.cpp` (1), `SearchAndDDE.cpp` (3), `SelectionToolbar.cpp` (2), `wingui/WebView.cpp` (2). Storage widened to `u64`: `MainWindow.h` `autoScroll.startTick`/`lastScrollTick`, `Installer.cpp` `ctx->lastTryTick`, `ReadingStats.cpp` `gReadingStats.lastTick`, `SearchAndDDE.cpp` `d->lastProgressMs` + `lastSendMs`, `SelectionToolbar.cpp` `tb->lastPositionUpdateTick`, `WebView.cpp` `gEnvFailedAtMs`. All sites + all consumers in one sweep, so no DWORD/u64 tick mixing remains.
+- **C26495 (57 → 0)**: in-class member initializers on 22 aggregate structs across 18 files; values match what every constructor/init site already assigned (zero behavior change). Notables: `ArchMeasurement` (MainWindow.h, 10 members), `BgColorDlgData` (SumatraDialogs.cpp, 9; arrays `= {}`, `selectedCustomIdx = -1`), `lzma::FileInfo` (5, `FILETIME = {}`), `CitationCacheEntry` (5, `destPage = -1`), `EndPointMover` (uia/TextRange.cpp, 3 pointers `= nullptr`), `CaptureCtx` (AtomicInt `= 0`), `ToolbarButtonInfo` (`bmpIndex = TbIcon::None`), `PendingWebViewOp` (`kind = Init`), `TabsCtrl::SelectionChangedEvent`/`MigrationEvent` (`tabIdx = -1`), `SizeCount` (DisplayModel.cpp; array also `= {}` so `SizeF size` zero-init), `GoToFavoritePageData`, `OpenCopyDataAsync`/`OpenManyCopyDataAsync`, `Dialog_GetPassword_Data` (bool* `= nullptr`), `Dialog_Find_Data`, `GetFontsResult`, `DownloadAndOpenUrlData`, `MdTocParseCtx`, `Shortcut` (Settings.h), `FlashcardStudyDoc::StateEntry`, `AIChatSessionInfo`.
+- Mechanical batches applied via bun exact-string scripts with per-pattern count asserts (wave 1: `tests/tmp/fix-c28159.ts`, 29 replacements across 8 files) — the workflow for the remaining B5 classes.
+
+### Verified
+- `clang-format` on all touched files; `bun cmd/build.ts` 0/0 after each wave (68 s / 122 s).
+- `cmd/analyze.ts -files` after each wave: C28159 21 → 0, then C26495 57 → 0; fork totals **114 → 93 → 36 warnings, 0 errors, 15 distinct rules**; baseline regenerated (`out/analyze/warnings-summary.txt`).
+- Remaining 36 = the hard tail: C6387 5 (null-hwnd guards), C6001 5 (uninit reads), C6385 4, C6031 4, C6011 3, C6287 3, C6386 2, C26813 2, C6262 2, singles C26110/C28183/C28182/C26454/C33005/C26819.
+
+### Notes
+- `-files` replay caveat: un-recompiled TUs replay cached findings, so a rule only disappears when every reporting TU recompiles; header changes force that via include dependencies. B5 batches must re-run `-files` on the cpp files, never rely on header-only touches.
+
 ## 2026-10-18 (s36-s) — FC-H2 closed: flashcard scan /Annots pre-filter + COMMIT of perf batch (BUILD OK; cloze e2e PASS)
 
 ### Fixed

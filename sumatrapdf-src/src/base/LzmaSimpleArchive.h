@@ -5,12 +5,12 @@ namespace lzma {
 
 struct FileInfo {
     // public data
-    u32 compressedSize;
-    u32 uncompressedSize;
-    u32 uncompressedCrc32;
-    FILETIME ftModified;
+    u32 compressedSize = 0;
+    u32 uncompressedSize = 0;
+    u32 uncompressedCrc32 = 0;
+    FILETIME ftModified = {};
     Str name;
-    const u8* compressedData;
+    const u8* compressedData = nullptr;
 };
 
 // translations + marked + mermaid + in-app manual assets share one LzSA

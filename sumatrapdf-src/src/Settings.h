@@ -438,7 +438,7 @@ struct Shortcut {
     // ToolbarText are set, the icon is used
     Str toolbarSvgIcon;
     // command id
-    int cmdId;
+    int cmdId = 0;
 };
 
 // color themes

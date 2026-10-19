@@ -25,7 +25,7 @@ struct DailyEntry {
 
 static struct {
     Vec<DailyEntry> daily; // kept sorted by dateKey
-    DWORD lastTick = 0;    // wall-clock reference for the webview path
+    u64 lastTick = 0;      // wall-clock reference for the webview path
     float accumSec = 0.0f; // sub-second carry: ticks arrive ~64Hz with ~0.01s
     int dirtySec = 0;      // unsaved seconds (write threshold)
     bool loaded = false;   // sidecar parsed
@@ -122,7 +122,7 @@ void ReadingStatsAddSeconds(MainWindow* win, float sec) {
 }
 
 void ReadingStatsTickWebview(MainWindow* win) {
-    DWORD now = GetTickCount();
+    u64 now = GetTickCount64();
     if (gReadingStats.lastTick == 0) {
         gReadingStats.lastTick = now;
         return;

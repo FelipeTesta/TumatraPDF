@@ -169,10 +169,10 @@ static INT_PTR CreateDialogBox(int dlgId, HWND parent, DLGPROC DlgProc, LPARAM d
 
 /* For passing data to/from GetPassword dialog */
 struct Dialog_GetPassword_Data {
-    Str fileName;       /* name of the file for which we need the password */
-    Str pwdOut;         /* password entered by the user */
-    bool* remember;     /* remember the password (encrypted) or ask again? */
-    bool* showPassword; /* keep the "show password" state across retries */
+    Str fileName;                 /* name of the file for which we need the password */
+    Str pwdOut;                   /* password entered by the user */
+    bool* remember = nullptr;     /* remember the password (encrypted) or ask again? */
+    bool* showPassword = nullptr; /* keep the "show password" state across retries */
 };
 
 static INT_PTR CALLBACK Dialog_GetPassword_Proc(HWND hDlg, UINT msg, WPARAM wp, LPARAM lp) {
@@ -346,8 +346,8 @@ Str Dialog_GoToPage(HWND hwnd, Str currentPageLabel, int pageCount, bool onlyNum
 /* For passing data to/from Find dialog */
 struct Dialog_Find_Data {
     Str searchTerm;
-    bool matchCase;
-    WNDPROC editWndProc;
+    bool matchCase = false;
+    WNDPROC editWndProc = nullptr;
 };
 
 static LRESULT CALLBACK Dialog_Find_Edit_Proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
@@ -1230,17 +1230,17 @@ static INT_PTR CALLBACK Dialog_AddFav_Proc(HWND hDlg, UINT msg, WPARAM wp, LPARA
 static const int kMaxCustomColors = 13;
 
 struct BgColorDlgData {
-    COLORREF currentColor; // current selected color
-    bool isCheckered;      // true if "checkered" is selected
-    bool applyToAll;       // radio: all files like this
-    COLORREF customColors[kMaxCustomColors];
-    bool customColorSet[kMaxCustomColors]; // true if slot has a color
-    bool customColorsChanged;
-    int selectedCustomIdx; // -1 = no custom button selected
-    bool previewSelected;  // true if preview button is selected
-    Str title;             // dialog title (empty = default)
-    bool showRadioButtons; // show "this file" / "all files" radio buttons
-    Str allFilesLabel;     // label for "all files" radio button (empty = default)
+    COLORREF currentColor = 0; // current selected color
+    bool isCheckered = false;  // true if "checkered" is selected
+    bool applyToAll = false;   // radio: all files like this
+    COLORREF customColors[kMaxCustomColors] = {};
+    bool customColorSet[kMaxCustomColors] = {}; // true if slot has a color
+    bool customColorsChanged = false;
+    int selectedCustomIdx = -1;    // -1 = no custom button selected
+    bool previewSelected = false;  // true if preview button is selected
+    Str title;                     // dialog title (empty = default)
+    bool showRadioButtons = false; // show "this file" / "all files" radio buttons
+    Str allFilesLabel;             // label for "all files" radio button (empty = default)
 };
 
 // fixed preset colors: checkered, black, white

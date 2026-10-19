@@ -19,7 +19,7 @@ struct AIChatSessionInfo {
     Str sessionId;
     Str display;
     Str project;
-    i64 timestamp;
+    i64 timestamp = 0;
 };
 
 struct AIChatLogger {

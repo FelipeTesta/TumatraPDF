@@ -332,7 +332,7 @@ struct MdTocParseCtx {
     StrVec* files = nullptr;
     Vec<MarkdownFileToc>* tocs = nullptr;
     bool htmlMode = false;
-    AtomicInt nextIdx;
+    AtomicInt nextIdx = 0;
 };
 
 static void MdTocParseWorker(MdTocParseCtx* ctx) {

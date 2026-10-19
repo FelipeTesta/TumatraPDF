@@ -50,12 +50,12 @@ struct FindMatch {
 
 // Arch Tools measurement record
 struct ArchMeasurement {
-    int pageNo;               // page number this measurement belongs to
-    float p1x, p1y, p2x, p2y; // PAGE coords of the two points
-    float p3x = 0, p3y = 0;   // arc bulge point (kind 1 only)
-    float x, y, len;          // measured values in real units (or page units if no scale)
-    int unit;                 // 0=mm,1=cm,2=m,3=in,4=ft
-    bool scaled;              // true if values are in real units (scale applied)
+    int pageNo = 0;                           // page number this measurement belongs to
+    float p1x = 0, p1y = 0, p2x = 0, p2y = 0; // PAGE coords of the two points
+    float p3x = 0, p3y = 0;                   // arc bulge point (kind 1 only)
+    float x = 0, y = 0, len = 0;              // measured values in real units (or page units if no scale)
+    int unit = 0;                             // 0=mm,1=cm,2=m,3=in,4=ft
+    bool scaled = false;                      // true if values are in real units (scale applied)
     // 0 = measured segment (two points); 1 = radius arc (three points, len =
     // radius); 2 = reference guide line (two points, drawn across the page)
     int kind = 0;
@@ -341,15 +341,15 @@ struct MainWindow {
         bool active = false;
         float speed = 2.0f; // nominal pixels per tick (at 100Hz); see AutoScrollPxPerSec
         float speedMultiplier = 0.008f;
-        float accum = 0.0f;       // fractional pixels pending scroll
-        DWORD lastScrollTick = 0; // last tick timestamp (time-based scroll)
-        int etaMinutes = 0;       // ETA (minutes) = remaining px / declared speed
-        int etaLastShown = -1;    // last displayed minute (dedupe label updates)
+        float accum = 0.0f;     // fractional pixels pending scroll
+        u64 lastScrollTick = 0; // last tick timestamp (time-based scroll)
+        int etaMinutes = 0;     // ETA (minutes) = remaining px / declared speed
+        int etaLastShown = -1;  // last displayed minute (dedupe label updates)
         HWND hwndEtaLabel = nullptr;
         DWORD timerMinutes = 0;         // 0 = no timer (effective value used by tick)
         DWORD timerMinutesSetting = 30; // configured minutes from UI input (default 30)
         bool timerEnabled = false;      // timer checkbox state
-        DWORD startTick = 0;
+        u64 startTick = 0;
         HWND hwndTimerCheck = nullptr;
         HWND hwndTimerLabel = nullptr;
         HWND hwndTimerEdit = nullptr;

@@ -809,7 +809,7 @@ struct CountThreadData {
     ThreadHandle thread = nullptr;
     // worker-thread only: drive the "<found>... <page>" progress status
     int nFoundSoFar = 0;
-    DWORD lastProgressMs = 0;
+    u64 lastProgressMs = 0;
 
     CountThreadData(MainWindow* win, EngineBase* engine, Str text, bool matchCase, bool matchWholeWord,
                     bool wantMatchList, bool wantSnippets, int startPage, LONG epoch) {
@@ -955,7 +955,7 @@ static void CountProgress(CountThreadData* d, ProgressUpdateData* data) {
     if (data->current <= 0) {
         return;
     }
-    DWORD now = GetTickCount();
+    u64 now = GetTickCount64();
     if (d->lastProgressMs != 0 && now - d->lastProgressMs < kFindProgressMs) {
         return;
     }
@@ -1044,7 +1044,7 @@ static void CountThread(CountThreadData* d) {
     Vec<FindMatch>* matches = d->wantMatchList ? new Vec<FindMatch>() : nullptr;
     int nSent = 0;        // positions already reported via a partial batch
     int nSentMatches = 0; // matches already streamed to the results list
-    DWORD lastSendMs = 0;
+    u64 lastSendMs = 0;
     bool capped = false; // scan stopped at kMaxFindCount matches
     {
         TextSearch ts(engine);
@@ -1097,7 +1097,7 @@ static void CountThread(CountThreadData* d) {
                 if (nSent == 0) {
                     send = n >= kFindResultsFirstBatch;
                 } else {
-                    send = (n - nSent >= kFindResultsBatch) && (GetTickCount() - lastSendMs >= kFindResultsBatchMs);
+                    send = (n - nSent >= kFindResultsBatch) && (GetTickCount64() - lastSendMs >= kFindResultsBatchMs);
                 }
                 if (send) {
                     auto* pd = new CountPartialTaskData;
@@ -1109,7 +1109,7 @@ static void CountThread(CountThreadData* d) {
                     pd->matches = CloneMatchesRange(matches, nSentMatches, nMatches);
                     nSent = n;
                     nSentMatches = nMatches;
-                    lastSendMs = GetTickCount();
+                    lastSendMs = GetTickCount64();
                     uitask::Post(MkFunc0<CountPartialTaskData>(CountPartialTask, pd), "TaskFindCountPartial");
                 }
             }
@@ -2825,13 +2825,13 @@ LRESULT OnDDETerminate(HWND hwnd, WPARAM wp, LPARAM /*lp*/) {
 // Payload for async Open command carried in kCopyDataOpen WM_COPYDATA
 struct OpenCopyDataAsync {
     Str path; // heap-allocated, freed by OpenCopyDataAsyncRun
-    u32 newWindow;
+    u32 newWindow = 0;
 };
 
 struct OpenManyCopyDataAsync {
     StrVec paths;
-    HWND hwnd;
-    u32 newWindow;
+    HWND hwnd = nullptr;
+    u32 newWindow = 0;
 };
 
 static void OpenManyCopyDataAsyncRun(OpenManyCopyDataAsync* d) {

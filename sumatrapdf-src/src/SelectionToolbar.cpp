@@ -53,7 +53,7 @@ struct SelectionToolbar {
     Size size;
     Rect lastPlaced;    // last screen rect we moved the window to (avoids redundant SetWindowPos)
     Rect lastSelBounds; // last canvas-space selection bounds used for placement
-    DWORD lastPositionUpdateTick = 0;
+    u64 lastPositionUpdateTick = 0;
     SelectionToolbarButton buttons[10];
     int nButtons = 0;
 };
@@ -534,7 +534,7 @@ static void ShowSelectionToolbarNow(MainWindow* win) {
     tb->tab = win->CurrentTab();
     tb->hotIndex = -1;
     tb->pressedIndex = -1;
-    tb->lastPositionUpdateTick = GetTickCount();
+    tb->lastPositionUpdateTick = GetTickCount64();
     tb->lastSelBounds = sel;
     InitButtons(tb, win);
     if (tb->nButtons == 0) {
@@ -630,7 +630,7 @@ void UpdateSelectionToolbarPosition(MainWindow* win) {
     if (!SelectionBoundsChanged(sel, tb->lastSelBounds, slack)) {
         return;
     }
-    DWORD now = GetTickCount();
+    u64 now = GetTickCount64();
     if (tb->lastPositionUpdateTick != 0 && now - tb->lastPositionUpdateTick < kSelTbPositionUpdateMinMs) {
         return;
     }

@@ -514,9 +514,9 @@ struct CaptureItem {
 
 struct CaptureCtx {
     Vec<CaptureItem>* items = nullptr;
-    AtomicInt nextIdx;
-    AtomicInt captureMs; // aggregate PrintWindow/BitBlt time across items
-    AtomicInt thumbMs;   // aggregate thumbnail scaling time across items
+    AtomicInt nextIdx = 0;
+    AtomicInt captureMs = 0; // aggregate PrintWindow/BitBlt time across items
+    AtomicInt thumbMs = 0;   // aggregate thumbnail scaling time across items
 };
 
 static void CaptureOneItem(CaptureCtx* ctx, CaptureItem* item) {

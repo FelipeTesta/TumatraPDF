@@ -172,7 +172,7 @@ constexpr DWORD kEnvCreateRetryDelayMs = 300;
 constexpr DWORD kEnvFailedCooldownMs = 10 * 1000;
 
 int gEnvCreateAttempts = 0;
-DWORD gEnvFailedAtMs = 0;
+u64 gEnvFailedAtMs = 0;
 UINT_PTR gEnvRetryTimerId = 0;
 HWND gEnvRetryTimerHwnd = nullptr;
 
@@ -1829,7 +1829,7 @@ static bool StartSharedEnvironmentCreation();
 // webview in the process dead until restart.
 static void SharedEnvironmentGiveUp() {
     gSharedEnvState = SharedWebViewEnvState::Failed;
-    gEnvFailedAtMs = GetTickCount();
+    gEnvFailedAtMs = GetTickCount64();
     FailPendingWebviews();
 }
 
@@ -1961,7 +1961,7 @@ static bool EnvCreationAllowedAgain() {
     if (gSharedEnvState != SharedWebViewEnvState::Failed) {
         return false;
     }
-    DWORD elapsed = GetTickCount() - gEnvFailedAtMs;
+    u64 elapsed = GetTickCount64() - gEnvFailedAtMs;
     return elapsed >= kEnvFailedCooldownMs;
 }
 

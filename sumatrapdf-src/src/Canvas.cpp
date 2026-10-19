@@ -5891,7 +5891,7 @@ static TempStr FileNameFromUrlTemp(Str url) {
 
 struct DownloadAndOpenUrlData {
     Str url;
-    HWND hwndCanvas;
+    HWND hwndCanvas = nullptr;
 };
 
 static void OpenDownloadedPath(Str* path) {

@@ -801,7 +801,7 @@ struct TabsCtrl : Wnd {
 
     struct SelectionChangedEvent {
         TabsCtrl* tabs = nullptr;
-        int tabIdx;
+        int tabIdx = -1;
     };
 
     struct ClosedEvent {
@@ -811,7 +811,7 @@ struct TabsCtrl : Wnd {
 
     struct MigrationEvent {
         TabsCtrl* tabs = nullptr;
-        int tabIdx;
+        int tabIdx = -1;
         Point releasePoint;
     };
 

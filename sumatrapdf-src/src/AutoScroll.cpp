@@ -212,7 +212,7 @@ void AutoScrollToggle(MainWindow* win) {
     win->autoScroll.autoPausedByFocus = false;
     if (win->autoScroll.active) {
         win->autoScroll.accum = 0;
-        win->autoScroll.startTick = GetTickCount();
+        win->autoScroll.startTick = GetTickCount64();
         // time-based scroll: the first tick measures elapsed from "now"
         win->autoScroll.lastScrollTick = win->autoScroll.startTick;
         win->autoScroll.etaLastShown = -1;
@@ -276,7 +276,7 @@ void AutoScrollResumeFromFocus(MainWindow* win) {
     win->autoScroll.autoPausedByFocus = false;
     win->autoScroll.active = true;
     win->autoScroll.accum = 0;
-    win->autoScroll.startTick = GetTickCount();
+    win->autoScroll.startTick = GetTickCount64();
     // time-based scroll: measure elapsed from "now" so resuming doesn't jump
     win->autoScroll.lastScrollTick = win->autoScroll.startTick;
     RecalcAutoScrollEta(win);
@@ -311,7 +311,7 @@ void AutoScrollSpeedAdjust(MainWindow* win, int direction) {
     if (win->autoScroll.active) {
         // time-based scroll: restart the elapsed window at the new speed so
         // the next tick doesn't jump by the old-speed quantum
-        win->autoScroll.lastScrollTick = GetTickCount();
+        win->autoScroll.lastScrollTick = GetTickCount64();
         RecalcAutoScrollEta(win);
         if (win->AsMarkdown() && !(GetKeyState(VK_CONTROL) & 0x8000)) {
             win->autoScroll.webviewPxPerSec = AutoScrollPxPerSec(win);
@@ -344,8 +344,9 @@ static LRESULT CALLBACK TimerDoneOverlayProc(HWND hwnd, UINT msg, WPARAM wp, LPA
             GetClientRect(hwnd, &rc);
             SetBkMode(hdc, TRANSPARENT);
             SetTextColor(hdc, ThemeWindowTextColor());
-            HFONT hFont = CreateFontW(DpiScale(hwnd, 52), 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
-                                      CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
+            HFONT hFont = CreateFontW(DpiScale(hwnd, 52), 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+                                      OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+                                      DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
             HFONT hOld = (HFONT)SelectObject(hdc, hFont);
             DrawTextW(hdc, L"\u2234", -1, &rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
             SelectObject(hdc, hOld);
@@ -439,7 +440,7 @@ void AutoScrollContinuousTick(MainWindow* win, HWND hwnd) {
         // else-branch below (webviewCtrlDown state machine) — an early return
         // here would starve it and Ctrl would never pause the .md scroll.
         if (GetKeyState(VK_CONTROL) & 0x8000) {
-            win->autoScroll.lastScrollTick = GetTickCount();
+            win->autoScroll.lastScrollTick = GetTickCount64();
             ReadingStatsResetTick();
             return;
         }
@@ -447,7 +448,7 @@ void AutoScrollContinuousTick(MainWindow* win, HWND hwnd) {
         // user can freely drag/pan the full page; releasing Shift resumes it.
         if (dm->viewportCropV2QuickToggled) {
             win->autoScroll.accum = 0;
-            win->autoScroll.lastScrollTick = GetTickCount();
+            win->autoScroll.lastScrollTick = GetTickCount64();
             ReadingStatsResetTick();
             logf("[autoscroll-dbg] stall: viewportCropV2QuickToggled\n");
             return;
@@ -459,7 +460,7 @@ void AutoScrollContinuousTick(MainWindow* win, HWND hwnd) {
         // would kill the autoscroll for good just because the user moved the
         // mouse while scrolling. Skip the tick when the canvas isn't valid.
         if (dm->GetCanvasSize().dy <= 0) {
-            win->autoScroll.lastScrollTick = GetTickCount();
+            win->autoScroll.lastScrollTick = GetTickCount64();
             ReadingStatsResetTick();
             logf("[autoscroll-dbg] stall guard: layout mid-rebuild, tick skipped\n");
             return;
@@ -476,7 +477,7 @@ void AutoScrollContinuousTick(MainWindow* win, HWND hwnd) {
         }
         // Timer check
         if (win->autoScroll.timerMinutes > 0 && win->autoScroll.startTick > 0) {
-            DWORD elapsedMs = GetTickCount() - win->autoScroll.startTick;
+            u64 elapsedMs = GetTickCount64() - win->autoScroll.startTick;
             if (elapsedMs >= (DWORD)win->autoScroll.timerMinutes * 60 * 1000) {
                 win->autoScroll.active = false;
                 KillTimer(hwnd, kContinuousAutoScrollTimerID);
@@ -493,7 +494,7 @@ void AutoScrollContinuousTick(MainWindow* win, HWND hwnd) {
         // granularity (USER_TIMER_MINIMUM fires ~64Hz, not the 100Hz the old
         // per-tick quantum assumed — that mismatch was inflating the ETA
         // once the measured speed replaced the nominal one).
-        DWORD nowMs = GetTickCount();
+        u64 nowMs = GetTickCount64();
         float elapsedSec = (float)(nowMs - win->autoScroll.lastScrollTick) / 1000.0f;
         win->autoScroll.lastScrollTick = nowMs;
         if (elapsedSec < 0.0f || elapsedSec > 1.0f) {
@@ -546,7 +547,7 @@ void AutoScrollContinuousTick(MainWindow* win, HWND hwnd) {
         }
         // Timer check (same as fixed-page)
         if (win->autoScroll.timerMinutes > 0 && win->autoScroll.startTick > 0) {
-            DWORD elapsedMs = GetTickCount() - win->autoScroll.startTick;
+            u64 elapsedMs = GetTickCount64() - win->autoScroll.startTick;
             if (elapsedMs >= (DWORD)win->autoScroll.timerMinutes * 60 * 1000) {
                 win->autoScroll.active = false;
                 KillTimer(hwnd, kContinuousAutoScrollTimerID);
