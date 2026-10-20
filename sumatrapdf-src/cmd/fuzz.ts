@@ -3,10 +3,12 @@
 // -extract-text for load+text extraction, -dump-exif for the EXIF parser) and records
 // any crash together with the input that caused it.
 //
-// Why app-level instead of a native libFuzzer harness: it needs zero build-system
-// surgery (no new vcxproj, no premake touch) and exercises the exact code path a real
-// document takes. Each exec pays ~100-200 ms of process startup, so runs are bounded
-// by -n (iterations) and -seconds rather than relying on libFuzzer's own loop.
+// Two-tier fuzzing setup: base/ text parsers are fuzzed in-process by the native
+// libFuzzer harness (cmd/build-fuzz-harness.ts -> out/fuzz/fuzz-parsers.exe,
+// ~13k execs/s); this driver fuzzes the full ENGINE paths, which cannot run
+// in-process (mupdf has global state that cannot reset between loads). Each exec
+// pays ~100-200 ms of process startup, so runs are bounded by -n (iterations) and
+// -seconds rather than relying on libFuzzer's own loop.
 //
 // Requirements: build the ASan exe first (bun cmd/build-asan.ts); out/dbg64_asan/
 // TumatraPDF.exe must exist.

@@ -1,5 +1,16 @@
 # TumatraPDF — Development Log
 
+## 2026-10-19 (s36-x) — D1 slice 2: native libFuzzer harness for base parsers (13.6k execs/s)
+
+### Added
+- `tests/fuzz/BaseParsersFuzzer.cpp` + `cmd/build-fuzz-harness.ts` → `out/fuzz/fuzz-parsers.exe`: in-process libFuzzer harness (standalone LLVM clang-cl 23, `-fsanitize=address,fuzzer`) for `ParseSquareTree` + `json::Parse`, dispatched on the first input byte. Reuses `cmd/clang-flags.ts` include/define sets; copies `clang_rt.asan_dynamic-x86_64.dll` next to the exe. `cmd/fuzz.ts` header now documents the two-tier split (native harness for base parsers vs app-level driver for engine paths).
+
+### Verified
+- `out\fuzz\fuzz-parsers.exe -max_total_time=25 -max_len=4096 out\fuzz\corpus`: **353 493 runs / 26 s = 13 595 execs/s** (vs ~5/s process-per-input in `cmd/fuzz.ts` — ~2700×), 2820 new corpus units, 0 crashes, peak RSS 514 MB (ASan active).
+
+### Notes
+- clang-cl ASan recipe: `/clang:-std=c++23` (`/std:c++23latest` is silently ignored → falls back to C++14 → CTAD deduction-guide errors in `Scoped.h`); `/MDd` rejected by clang's ASan (debug CRT unsupported), and rel64 `base.lib` is `/MT` + `/GL` (lld-link cannot consume bitcode objects) → the harness compiles the needed base sources directly (Str, Strconv, StrUtf8, StrFormatParse, Arena + Arena_win, Base + Base_win) and stubs the app-level hooks (`_uploadDebugReport`, `log`) instead of linking base.lib. Template-deduction trap: `MkFunc1(fn, nullptr)` fails deduction on the `T1* d` parameter — pass `(void*)nullptr`.
+
 ## 2026-10-19 (s36-w) — E2: premake regen made safe (fork sources + ASan hardening encoded)
 
 ### Added
