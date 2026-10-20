@@ -1,5 +1,18 @@
 # TumatraPDF — Development Log
 
+## 2026-10-20 (s36-ac) — C3 App Verifier clean + D1 driver arg fix + headless -render finding
+
+### Fixed
+- **`cmd/fuzz.ts` app-level driver args were wrong**: `-render <file> 1` / `-extract-text <file> 1` made Flags.cpp eat the FILE PATH as the paramInt (page number), leaving `fileNames=['1']` → engine creation failed every exec → the D1 slice-1 "300 execs / 0 crashes" baseline exercised NO engine code (vacuous). Correct order: `<file> -render 1` / `<file> -extract-text 1` (`-dump-exif <file>` was already right). Driver now also passes `-for-testing`.
+
+### Verified
+- **C3 (App Verifier) clean**: under Heaps+Handles+Locks — `test_util.exe -for-ai`: **102 783 tests PASS, exit 0**; `TumatraPDF.exe -for-testing <file> -extract-text 1` and the render run: **exit 0, no verifier stops** (logs `TumatraPDF.exe.0/1.dat` in `%USERPROFILE%\AppVerifierLogs`, verifier disabled after). Elevation via one UAC per batch; batches in `%TEMP%\c3-appverif\`.
+- mupdf 1.28.5 engine confirmed functional headless: `-extract-text` prints the zlib manual text (hex-dumped).
+- Re-baselined fuzz render mode after the arg fix: 4 execs / 10 s (2.5 s/exec — real engine loads now).
+
+### Notes
+- **Headless `-render` is pre-existing broken** (not an F1 regression — the pre-F1 ASan exe fails identically): `EngineMupdf::RenderPage` → `GetFzPageInfo(pageNo, false)` returns null without GUI-side init; "failed to render page", exit 0. The mupdf-level render pipeline itself works (the native harness runs `fz_run_page` in-process at ~900 execs/s). Extract-text is the deep headless exercise path; render mode now only exercises the engine lifecycle. Flag-semantics lesson in Lemma (`m534b377a0b07`).
+
 ## 2026-10-20 (s36-aa) — F4/F5 dependency batch: libarchive 3.8.10, libjpeg-turbo 3.2.0, mujs 1.3.11, liblzma 5.8.4, darkmodelib e8ec95ba, decoders, zlib-ng removed (BUILD OK; gates PASS)
 
 ### Changed

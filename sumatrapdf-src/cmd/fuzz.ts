@@ -10,6 +10,12 @@
 // pays ~100-200 ms of process startup, so runs are bounded by -n (iterations) and
 // -seconds rather than relying on libFuzzer's own loop.
 //
+// Flag-semantics notes: -render/-extract-text take the PAGE NUMBER (-render 1)
+// and the document is a positional arg; -dump-exif takes the file as its param.
+// The render mode only exercises the engine lifecycle (EngineMupdf::RenderPage
+// returns null headless - GetFzPageInfo's full path needs GUI-side init), so
+// extract-text is the deep headless exercise path.
+//
 // Requirements: build the ASan exe first (bun cmd/build-asan.ts); out/dbg64_asan/
 // TumatraPDF.exe must exist.
 //
@@ -34,7 +40,7 @@ const modes: Record<string, FuzzMode> = {
   // engine load + page render + teardown, all before window creation; exercises
   // mupdf xref/object parsing, the engine wrappers and the render pipeline
   render: {
-    argsFor: (file) => ["-render", file, "1"],
+    argsFor: (file) => [file, "-render", "1"],
     seeds: () =>
       gatherSeeds(
         ["ext", "tests"],
@@ -43,7 +49,7 @@ const modes: Record<string, FuzzMode> = {
   },
   // engine load + text extraction + teardown (no rendering)
   extract: {
-    argsFor: (file) => ["-extract-text", file, "1"],
+    argsFor: (file) => [file, "-extract-text", "1"],
     seeds: () => gatherSeeds(["ext", "tests"], [".pdf", ".xps", ".epub", ".mobi", ".fb2", ".chm"]),
   },
   // EXIF/JPEG metadata parser only; fast, focused
@@ -178,7 +184,7 @@ async function main() {
     const data = mutate(raw, rng);
     await writeFile(inputPath, data);
 
-    const res = Bun.spawnSync([exe, ...mode.argsFor(inputPath)]);
+    const res = Bun.spawnSync([exe, "-for-testing", ...mode.argsFor(inputPath)]);
     execs++;
     const crashed = res.exitCode !== 0 && res.exitCode !== 1;
     const outText = `${res.stdout}\n${res.stderr}`;
