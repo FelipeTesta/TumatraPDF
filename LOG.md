@@ -1,5 +1,14 @@
 # TumatraPDF — Development Log
 
+## 2026-10-20 (s36-y) — D1 slice 3: mupdf libFuzzer harness + C4 WinDbg
+
+### Added
+- `tests/fuzz/MupdfFuzzer.cpp` + `cmd/build-fuzz-harness-mupdf.ts` (WIP, link step not yet verified): in-process libFuzzer harness that opens a fresh `fz_context` per input (the only clean reset — mupdf has global caches, same pattern as upstream's own fuzzers), parses bytes as PDF via `fz_open_document_with_stream(".pdf")`, loads page 0, renders it at 0.25 scale into an RGB pixmap (page box clamped to <20000). mupdf exception macros in THIS vendored version have no `fz_end_try` and `fz_catch`+`fz_always` cannot be chained (both expand to `else`) — use try/catch then drop outside.
+
+### Notes
+- The mupdf build is two-step: clang-cl compiles the instrumented object, then MSVC `link.exe` (only linker consuming rel64's `/GL` bitcode objects) links it with `mupdf.lib`; link runs inside a temp batch calling `vcvars64.bat` (SDK `LIB` needed) with a response file. LLVM 23 Windows ships ASan **dynamic-only**: `clang_rt.asan_dynamic-x86_64.lib` + `clang_rt.asan_dynamic_runtime_thunk-x86_64.lib` + the DLL copied next to the exe (no static `clang_rt.asan-x86_64.lib`).
+- **C4 DONE**: WinDbg 1.2610.1001.0 installed via `winget install -e --id Microsoft.WinDbg` (verified).
+
 ## 2026-10-19 (s36-x) — D1 slice 2: native libFuzzer harness for base parsers (13.6k execs/s)
 
 ### Added

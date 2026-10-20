@@ -27,12 +27,67 @@ Status: `DONE` = shipped + verified, `WIP` = in progress, `TODO` = pending. Effo
 | C | C1 | Repair `cmd/build-asan.ts` (was unrunnable: VS-2026 detection, premake trap, wrong solution/target; repaired s36-r) → working `/fsanitize=address` build + `cmd/run-unit-tests.ts -asan` (verified s36-r: `out/dbg64_asan/TumatraPDF.exe` + `clang_rt.asan_dynamic-x86_64.dll`, 0 errors, 277 s; `EnableASAN=true` on x64_asan; ASan unit tests exit 0) | M | DONE s36-r | Memory-safety defects (use-after-free, out-of-bounds) caught by unit tests; today zero ASan coverage on Windows |
 | C | C2 | Time Travel Debugging recipe (`tttracer.exe` present): record a hard repro, replay in WinDbgX, document in BUILD.md | M | TODO | Deterministic replay of timing/interaction bugs (toolbar drag-collapse class) instead of "cannot reproduce" |
 | C | C3 | Application Verifier over `TumatraPDF.exe` + unit tests (handles/heaps/locks), triage findings | M | TODO | Runtime detection of handle/heap/lock misuse, esp. Win32 GDI/HWND lifetimes in the new panels |
-| C | C4 | Install WinDbg (`winget install Microsoft.WinDbg`) | S | TODO | Symbolicated crash-dump analysis + TTD replay (C2 depends on it); no debugger CLI on PATH today |
+| C | C4 | Install WinDbg (`winget install Microsoft.WinDbg`) | S | DONE s36-y | Symbolicated crash-dump analysis + TTD replay (C2 depends on it); WinDbg 1.2610.1001.0 installed via winget (verified: "Instalado com êxito") |
 | D | D1 | libFuzzer/ASan harnesses on entry points we own: mupdf xref/object parsing, `-dump-exif`, cmark-gfm, image decoders through our wrappers (jxl/heic/dav1d) | L | WIP s36-u | Malformed PDF/EPUB/image crashes found by machine before users hit them — highest bug yield for a PDF reader (and the same class as most past CVEs). s36-u slice 1: `cmd/fuzz.ts` app-level ASan fuzzer (headless `-render`/`-extract-text`/`-dump-exif` entries, byte mutator, 23 seeds, 300 execs / 0 crashes baseline) + fixed the ASan app exe startup (`DEPENDENTLOADFLAG` 0x800 to 0xA00, LOG s36-u); s36-x slice 2: native libFuzzer harness for base parsers (`cmd/build-fuzz-harness.ts` -> `out/fuzz/fuzz-parsers.exe`, 13.6k execs/s, LOG s36-x); remaining: exif seeds, cmark-gfm/image-decoder harnesses (same recipe as s36-x) |
 | D | D2 | Seed corpus from `ext/*.pdf` + `tests/` regression files, bounded local runs first | S | DONE s36-u | Fuzzer reaches deep parser paths in minutes instead of days of blind mutation (corpus auto-gathered recursively by `cmd/fuzz.ts` from `ext/` + `tests/`; bounded runs via `-n`/`-seconds`) |
 | D | D3 | Nightly time-boxed fuzz job (`daily.yml` / `linux-daily.yml`) + crash artifact upload | S | TODO | Continuous parser regression coverage; every crash lands with its repro input attached |
 | E | E1 | MSBuild binlog → top-20 slowest TUs → sccache/ccache + PCH scope review; measure build wall time before/after | M | DONE s36-v | Shorter edit→build→test loop; less idle waiting per iteration (measurable delta, not a guess). s36-v DONE: measured, NOT needed - compile is 36 s / 238 TUs (slowest 2.14 s, PCH effective), edit-build-test loop ~10 s; sccache/PCH changes would not pay. Tool: `cmd/build-times.ts` (`out/build-times.txt`), see LOG s36-v |
 | E | E2 | Permanent premake fix: fork-only sources missing from `premake5.lua` (AGENTS.md §6b "premake TRAP"); MERGE conflict surface — isolated commit | S | DONE s36-w | Removes the LNK1120 landmine: a `premake5 vs2022` run silently strips 10 fork sources and the link failure surfaces much later. s36-w DONE: 13 sources added to `sumatrapdf_files()` + DEPENDENTLOADFLAG asan exception (0xA00) with positive filters in both exe projects (beta8 ignores `not` filters); regen verified incl. fork files + 0xA00, build green (LOG s36-w) |
+
+## Dependency updates — PROGRESSIVE PLAN (audit 2026-10-20)
+
+Baseline: fork ships **mupdf 1.28.0-rc2**; upstream SumatraPDF master runs **1.28.5** and records its local mupdf edits as **47 patch files in `ext/patches/`**. Execute top-to-bottom; each phase must end green (build 0 err/0 warn + listed gates) before starting the next. Effort labels: S = < 1 h, M = 1–3 h, L = > 3 h.
+
+### Measured diff (snapshot before any work)
+
+- **mupdf 1.28.0 → 1.28.5**: 182 commits, 152 files touched — `source/fitz` (46), `source/pdf` (26), `include/mupdf` (12), `source/html` (10), `docs/reference` (13), `source/tools` (8), rest platform/wrap. Content is overwhelmingly **security/crash hardening**: OOB read/write in TTF subsetting (709729/709735/709736/709737), stack overflow + OOB in pdf recolor (709742/709743), OOB write in `mutool audit` (709753), OOB in seps pixmap conversion (708749), SEGV on early metadata (709734), plus shade clipping / pattern rendering / js `Rect` fixes. Patch-level release ⇒ no API break.
+- **Patch carriage**: of upstream's 47 patches, **11 reverse-apply exactly** on our tree (0002, 0004, 0005, 0006, 0007, 0008, 0009, 0012, 0013, 0014, 0019), **22 apply cleanly forward = absent today**, **14 conflict = context drifted**. A wholesale tree replacement resyncs all 47 in one shot.
+- **Integration surface** (upstream commit `585ce546`, 161 files): `ext/mupdf/**` (158) + `ext/versions.txt` + `premake5.files.lua` (+`crypt-chacha20.c`, +`regexp.c`) + `vs2022/mupdf.vcxproj`/`.filters` (+`regexp.h`, +`fitz-imp.h`, +`crypt-chacha20.c`, +`regexp.c`) + `src/SumatraPDF.cpp` (hardcoded `FZ_VERSION` string) + `cmd/deps-build-defs.ts` (upstream-only build system — **N/A for the fork**, which uses premake). **Zero other `src/` changes ⇒ no API adaptation required.**
+- **Fork carries no local mupdf edits**: no commit touched `sumatrapdf-src/mupdf/` after the import commit `fd7e625`, and the working tree is clean ⇒ replacing the tree loses nothing.
+
+### F1 — mupdf 1.28.5 (P1, M)
+
+- [ ] Snapshot: `git tag pre-mupdf-1285` + branch `dep/mupdf-1.28.5`; record current build wall time (`bun cmd/build-times.ts`) and gate results as the baseline.
+- [ ] Fetch upstream's vendored tree (`ext/mupdf` @ `sumatrapdfreader/sumatrapdf` master) and **replace** `sumatrapdf-src/mupdf/` wholesale (it already contains 1.28.5 + all 47 patches applied).
+- [ ] Wire the new sources: `premake5.files.lua` → add `crypt-chacha20.c` and `regexp.c` to `mupdf_files()`; headers `regexp.h`, `fitz-imp.h` are include-only.
+- [ ] Regenerate `vs2022/mupdf.vcxproj` + `.filters` (premake) or hand-add the 4 entries; **delete stale PCHs** (`out/dbg64/obj/**/*.pch`) — otherwise one-time `C1853`.
+- [ ] Bump `ext/versions.txt` mupdf line to `1.28.5` (single source of truth) and note the new files.
+- [ ] Check `src/SumatraPDF.cpp` for a hardcoded `FZ_VERSION` string (upstream defines one before including mutool headers) — the fork currently has **no** such define; add/keep consistent if the build ever needs it.
+
+### F2 — Gates for F1 (S)
+
+- [ ] `bun cmd/build.ts` → 0 err / 0 warn → `Compiled/`.
+- [ ] `bun cmd/run-unit-tests.ts -dbg` (base parsers + engine basics).
+- [ ] `bun tests/all.ts` **once** (justified: vendored engine swap).
+- [ ] Targeted E2E: `tests/ad-hoc-flashcard-cloze.ts`, `tests/tmp/s36i-roundtrip.ts`, plus manual smoke (`-for-testing`): open a text PDF, an EPUB, a markdown file, an annot-heavy PDF (add + edit annotation), and a 2-page selection cloze.
+- [ ] If anything regresses: bisect by patch group (the 47 patches are the only local delta over pristine 1.28.5).
+
+### F3 — Adopt the `ext/patches/` discipline (S)
+
+- [ ] Copy upstream's `ext/patches/` (47 `.patch` + `README.md`) into `sumatrapdf-src/ext/patches/` so the next mupdf bump is mechanical (apply patches → resolve → record).
+- [ ] Document in `MERGE.md`: mupdf upgrade = new tree + `ext/patches/` replay, never hand-edits inside `ext/mupdf`.
+- [ ] Verify the patch set still reverse-applies on the freshly swapped tree (`git apply --check -R --ignore-whitespace -p1` per file) — a clean sweep proves tree == patches + upstream.
+
+### F4 — Small independent updates (P2, S each)
+
+- [ ] `libarchive 3.8.8 → 3.8.10` (security release; 7z Delta/RISCV/ARMThumb/IA64 filters).
+- [ ] kjk decoders → current HEADs: `chmdec` `19d91e5` (LZX read-before-window fix), `heicdec` `8846fe9`, `jxldec` `d71b246`, `djvudec` `cfd3251`; re-run the amalgamation scripts and refresh `dist/` only.
+- [ ] `mujs 1.3.9 → 1.3.11` via `bun cmd/a-mujs.ts` (upstream is on 1.3.10 — align or go to latest).
+- [ ] `darkmodelib` → `0.76.0` (upstream pin, 2026-08-23).
+- [ ] `liblzma 5.8.3 → 5.8.4`.
+
+### F5 — Medium/optional (M)
+
+- [ ] `libjpeg-turbo 3.1.4.1 → 3.2.0`: regenerate the hand-maintained `jconfig.h` / `jconfigint.h` / `jversion.h`, review the NASM `simd/` source list, update premake.
+- [ ] Remove dead `ext/zlib-ng` (2.0.6, **not linked** — `premake5.lua` has `-- links { "zlib-ng" }` and links `a-zlib`) from `premake5.files.lua` + delete the tree; do **not** upgrade it.
+- [ ] Bun `1.3.14 → 1.4.3` (build/test scripts only) after re-running the suite.
+
+### F6 — Explicitly deferred (documented)
+
+- [ ] **harfbuzz 13.0.1 → 14.6.0 and freetype 2.14.3 → 2.15.0**: both are pins of mupdf's thirdparty set, and mupdf **1.28.5 still pins exactly our versions** (harfbuzz `c28ba35`, freetype `0a0221a`). Upgrading independently diverges from the combination Artifex tests; revisit only when mupdf bumps its pins (then the delta is one tree swap).
+- [ ] **synctex 1.16 / lzma 9.22b**: frozen upstream projects, no action.
+- [ ] **UnRAR metadata drift**: `ext/versions.txt` says `7.1.6` while `ext/unrar/version.hpp` reports `RARVER 7.11.0` (2025-03-20) — verify against rarlab before any change.
+- [ ] **OCR**: upstream vendors `tesseract 5.5.2` (Artifex fork) for `mutool draw -F ocr.*`; that is the cheapest path for the "OCR image" TODO item — decide separately (binary size cost).
 
 ## Refactoring backlog (from 2026-09-21 tree-sitter audit — see LOG entries for completed R1/R2/R4, 16A-D, C2-C5/F6, SelectionState)
 
