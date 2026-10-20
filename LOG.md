@@ -1,6 +1,76 @@
 # TumatraPDF — Development Log
 
-## 2026-10-20 (s36-y) — D1 slice 3: mupdf libFuzzer harness + C4 WinDbg
+## 2026-10-20 (s36-aa) — F4/F5 dependency batch: libarchive 3.8.10, libjpeg-turbo 3.2.0, mujs 1.3.11, liblzma 5.8.4, darkmodelib e8ec95ba, decoders, zlib-ng removed (BUILD OK; gates PASS)
+
+### Changed
+- **libarchive 3.8.8 → 3.8.10** (security release; 7z Delta/RISCV/ARMThumb/IA64 filters). Curated flat tree re-synced: 116 files updated, `archive_crc32.c` / `archive_umask.c` / `archive_umask_private.h` / `archive_xml_private.h` added, `archive_crc32.h` removed. `premake5.files.lua` list updated; `config_windows.h` needed `#define ARCHIVE_CRYPTO_WIN 1` (3.8.10 guards the WinCNG digest path with it — without it `win_crypto_init/Update/Final` are undeclared, C4013); `archive_read_support_format_cab.c` needed `(size_t)1 << w_bits` (C4334).
+- **libjpeg-turbo 3.1.4.1 → 3.2.0**: 145 files re-synced. 3.2.0 moves the SIMD dispatcher to one shared `simd/jsimd.c` + `jsimd{const,dct,int}.h` (arch picked at compile time by `SIMD_ARCHITECTURE`, now defined in the hand-maintained `jconfigint.h`), so the per-arch `jsimd.c` copies are gone; asm lists must mirror `SIMD_SOURCES` in `simd/CMakeLists.txt` (the `*-ext.asm` files are `%include`-only fragments — assembling them standalone fails). `jversion.h` now exposes only `JCOPYRIGHT` (`jerror.h` uses it). Multi-precision is mandatory (`jcinit.c`/`jdmaster.c` reference `j12init_*`/`j16init_*` unconditionally) ⇒ build `src/wrapper/*.c`, minus `template.c` and the `rdpng-*`/`wrpng-*` PNG wrappers (they need the external `spng`).
+- **mujs 1.3.9 → 1.3.11** via `cmd/a-mujs.ts` (regenerates `ext/a-mujs`); new `defaultRev`, `versions.txt` updated.
+- **liblzma 5.8.3 → 5.8.4**: 18 files synced; the 5 local-only `common/tuklib_*.h` stay (upstream moved them to its own `src/common/`).
+- **kjk decoders → current HEADs**: `chmdec` `19d91e5` (LZX read-before-window fix), `jxldec` `d71b246`; `heicdec`/`djvudec` were already byte-identical to HEAD ⇒ metadata bump only.
+- **Removed dead `ext/zlib-ng`** (104 files, never linked): dropped its `premake5.files.lua` block, the stale commented link line in `premake5.lua`, and the `versions.txt` entry.
+- **darkmodelib trunk → `e8ec95ba63`** (2026-10-10; repo renamed `ozone10/win32-darkmodelib`, no tags). Vendored tree re-synced: `DarkModeSubclass.{h,cpp}` → `Darkmodelib.h` + `src/Darkmodelib.cpp`, new `MemoryHelper*` + `DmlibIni.cpp`. **Namespace `DarkMode` → `dmlib`** — first build failed with `C2653 'DarkMode'` everywhere because the rename was missed in the API audit (function names unchanged); fixed by rewriting 94 call sites in 23 `src/**` files. premake list + `cmd/build-lib-defs.ts` updated; `UseDarkModeLib()` stays (fork's own helper, not the lib's).
+
+### Fixed
+- `cmd/util.ts` `detectVisualStudio2026()` falls back to VS 2022 (the fork builds with VS 2022; `a-mujs.ts` hard-failed without it). `cl.exe` still needs `VsDevCmd.bat`.
+- `tests/issue-2199.ts` asserted on a fixed middle row band (`h/2 ± 10`) for the "Couldn't render page N" caption; with a fit-page layout at 125% DPI the caption sits at y≈451, so the test read 0 px and looked like a rendering regression (the app log proved the fork's guard still fires: `EngineCbx::LoadMedibox: empty media box` → `no image data for page 2, failing the render`). Now counts the whole canvas; thresholds unchanged (still catches black = 0 px and blank white = full canvas).
+- `tests/issue-906.ts` spawned the exe through `cmd.exe /c`, which breaks on this repo's space-containing path (`'D:\1' is not recognized`); spawns the argv array directly now.
+
+### Verified
+- `bun cmd/build.ts` 0 err / 0 warn after every step (final: 29.9 s) → `Compiled/TumatraPDF.exe`.
+- `bun cmd/run-unit-tests.ts -dbg` PASS; `issue-1678` (archive formats) PASS; `issue-2199` (broken cbz page) PASS; `issue-3731` (JPEG render, 309 distinct colours) PASS; `issue-5681` (mujs REPL) PASS; `ad-hoc-flashcard-cloze` PASS; `s36i-roundtrip` PASS.
+- No mupdf/mujs regressions: `libarchive` was the only suspect in the `issue-2199` investigation, and the app log showed the guard still working.
+- Release x64 (`out/rel64`, MSBuild `Configuration=Release Platform=x64`) rebuilt clean with the new dependency set: `mupdf.lib` (60,447,440 B), `libjpeg-turbo.lib` (11,996,588 B), `libarchive.lib` (21,385,694 B) ⇒ consistent for the fuzz harness.
+- ASan gate `tests/issue-chm-lzx.ts` PASS under `out/dbg64_asan/TumatraPDF.exe` (`paths=6 retrieve_ok=5 retrieve_fail=1`, malformed CHM rejected) — ASan app builds with all upgraded deps (233 s, 0 err / 0 warn).
+- Render smoke (`tests/tmp/rel-smoke.ts`, canvas pixel capture): rel64 PDF 255 colours / lumVar 5487, rel64 JPEG `testorig.jpg` **35 507 distinct colours** (full mupdf → libjpeg-turbo 3.2.0 SIMD path), dbg64 PDF 255 colours / lumVar 5610, **EPUB 523 colours / lumVar 8011** (mupdf HTML/EPUB layout intact) and markdown **1530 colours** ⇒ both configs paint real pages for every engine family.
+- `tests/lint-mingw-sources.ts` PASS (147 patterns) and `tests/lint-command-ids.ts` PASS; cross-platform defs validated (`check-libdefs.ts`: 42 groups / 735 patterns, only glob patterns "missing").
+- Full suite re-run: identical stop at the documented pre-existing `issue-5734` exit 5; the post-`issue-5734` runner reproduced the **same 17 pre-existing failures** and no new ones.
+
+### Notes
+- **darkmodelib** upgraded (see Changed). Verification: toolbar round-trip PASS; dark/light/flashcard-sidebar screenshots **pixel-equivalent to the pre-upgrade Release baseline** (chrome/page means within ±1/255 via GDI+ sampling; `4-light-back.png` hash-identical to `1-light.png`). Pre-existing oddity to investigate separately: dark-mode chrome paints a saturated yellow (≈ rgb 245,237,19) on this machine in **both** builds (old lib + new lib, PrintWindow and BitBlt agree) — not a regression; likely accent/theme-preset driven.
+- Partial revert of individual libarchive `.c` files is impossible (private structs changed in 3.8.10 ⇒ C2039); bisect only in whole-tree steps. `git checkout -- <path>` is blocked by the CC Safety Net — use `git stash push -- <paths>`.
+- PowerShell `| Select-Object -First N` kills the upstream process once N lines arrive, so a mutating script appears to "print but do nothing" — redirect with `| Out-Null` instead.
+- `ext/patches/` procedure documented in `MERGE.md` § Dependency upgrades.
+
+## 2026-10-20 (s36-z) — F1: mupdf 1.28.0-rc2 → 1.28.5 (security; BUILD OK; unit tests PASS)
+
+### Changed
+- **mupdf 1.28.5** swapped in wholesale from upstream SumatraPDF integration commit `585ce546` ("Update mupdf to 1.28.5 (fixes #6182)", 2026-10-02). Tree sync byte-safe (bun, CRLF normalization for text, NUL-detect for binaries): 1410 files copied, **7 added**, **4 removed**. Zero fork-side mupdf edits existed before (`git log -- sumatrapdf-src/mupdf` = import commit only), so nothing lost.
+- Content = security/crash hardening across 182 upstream commits: OOB read/write in TTF subsetting, stack overflow + OOB in pdf recolor, OOB write in `mutool audit`, OOB in seps pixmap conversion, SEGV on early metadata, shade clipping, pattern rendering, js `Rect`.
+- **`pkcs7-windows` left mupdf** upstream (moved to their own `src/mupdf/`). Ported `pkcs7-windows.c/.h` + `README.md` into `sumatrapdf-src/src/mupdf/`; includes in `ArchVector.cpp` / `EngineMupdf.cpp` now `<mupdf/pkcs7-windows.h>` (resolved via `-I src`). New header is a superset (adds `inspect`, PFX, store APIs).
+- `premake5.files.lua` `mupdf_files()`: `+crypt-chacha20.c`, `+load-webp.c`, `+regexp.c`; `mupdf/source/helpers/pkcs7/pkcs7-windows.c` → `src/mupdf/pkcs7-windows.c`. `premake5.lua` mupdf project: `+src/mupdf` include dir (mupdf's `murun.c` / `pdfsign.c` include the header bare).
+- `ext/versions.txt`: mupdf 1.28.0-rc2 → 1.28.5 (2026-09-24).
+
+### Added
+- **`sumatrapdf-src/ext/patches/`** (F3): the 27 upstream patch files + README copied from the same commit — permanent record of every change made to the vendored mupdf tree, so future bumps diff patches instead of re-deriving a 1400-file diff. Base revision documented as 1.28.5 (`8ad45e92f`). Of those 27, 22 are already applied in the tree; 5 (0001 tools usage, 0010/0011 ToUnicode, 0025 webp-images, 0032 unrendered annots) remain unapplied upstream at that commit — **none is a regression vs the fork's previous tree, which carried only 11**.
+
+### Fixed
+- **Pre-existing fork-wide test bug**: 23 test files wrote `SumatraPDF-settings.txt` into `-appdata`, but the fork reads `TumatraPDF-settings.txt` (AppSettings.cpp:202) — every settings-driven test silently ran on defaults (`issue-1106` failed deterministically on `WindowState=2`). Renamed in all test writes; `issue-1106` now PASS.
+- **Pre-existing lint failure** (`lint-mingw-sources`): 17 fork sources present in premake but missing from `cmd/build-with-mingw.ts` (AutoScroll, ArchScaleDialog, Commands_{AutoScroll,ArchTools,Edit,File,Flashcard,Image,View}, ContrastOverlay, Flashcard{Sidebar,Toolbar}, MainWindowCreate, ReadingStats, ToolbarLayout, TrimConfigDialog) — added; lint PASS (147 patterns covered).
+
+### Verified
+- `bun cmd/build.ts`: **0 warnings / 0 errors**, 87.8 s (full mupdf recompile), exe deployed to `../Compiled`.
+- `bun cmd/run-unit-tests.ts -dbg`: PASS.
+- premake regen (`bin/premake5.exe vs2022`): only `mupdf.vcxproj`/`.filters` changed; fork sources intact (Flashcard/Commands_*/ToolbarLayout/MainWindowCreate verified present).
+
+### Notes
+- Vendored tree now carries 11 patch behaviors the fork did not have (webp-iccp, svg-css-class, css-background-image, md-nul-scan, movie-poster, ocg-usage-event, backwards-range bookmarks, merge exit-code, svg-unsized-image, signatures-windows-pkcs7, css-user-stylesheet).
+- freetype 2.14.3 / harfbuzz 13.0.1 pins are **identical** in 1.28.5 → F6 divergence decision unchanged (no extra work).
+
+## 2026-10-20 (s36-ab) - D1 slice 3 verified: mupdf harness linked + campaign (975 execs/s)
+
+### Added
+- `.github/workflows/fuzz.yml` (D3): nightly (`40 4 * * *` + dispatch) windows-2022 job - Release x64 msbuild (supplies the /MT mupdf.lib), both native harnesses built, 10 min base-parser + 15 min mupdf campaigns, crash/leak/oom artifacts uploaded (14 days). Advisory: crash steps `continue-on-error`, job never red. Runner notes: `choco install llvm` satisfies the scripts' hardcoded `C:\Program Files\LLVM` (clang-cl + clang_rt.* libs); `cmd/build.ts` has no Release x64 mode, so the workflow drives msbuild directly.
+
+### Verified
+- `tests/fuzz/MupdfFuzzer.cpp` + `cmd/build-fuzz-harness-mupdf.ts` -> `out/fuzz/fuzz-mupdf.exe` LINKED. The LNK2019 chain, solved: the vendored mupdf headers have no `extern "C"` guards -> a C++ TU must wrap the includes (the app does the same in Annotation.cpp); mupdf.lib's own deps must be linked too (freetype, harfbuzz, a-jbig2dec, lcms2, libjpeg-turbo, libwebp, a-openjpeg, a-zlib, a-mujs, brotli, a-extract, a-gumbo, libarchive + ole32/windowscodecs for the fork's WIC JXR patch); lld-link cannot consume the /GL bitcode libs, so the link step runs MSVC `link.exe` via a vcvars64.bat temp batch + response file.
+- Campaign vs mupdf 1.28.0-rc2: **36 869 runs / 41 s = 899 execs/s, 0 crashes**. RE-VERIFIED after the s36-z mupdf 1.28.5 swap: clean build, **30 252 runs / 31 s = 975 execs/s, 0 crashes** (corpus = 5 ext PDFs).
+- Recipe + traps saved to Lemma (`mf2427ca162cc`): `/clang:-std=c++23`, LLVM 23 ASan is dynamic-only (fuzzer + asan_dynamic + asan_dynamic_runtime_thunk + DLL next to exe), no `fz_end_try` in this mupdf version (fz_catch/fz_always both expand to `else`).
+
+### Notes
+- Coverage caveat: MSVC-built mupdf.lib carries no sanitizer-coverage instrumentation, so libFuzzer's cov counts only harness branches (cov:3) - the campaign is ASan-checked random fuzzing at ~1000 execs/s (~4600x the app-level driver), not coverage-guided. Coverage-guided mupdf fuzzing needs a clang-built mupdf.lib (future work).
+
+## 2026-10-20 (s36-y) - D1 slice 3: mupdf libFuzzer harness + C4 WinDbg
 
 ### Added
 - `tests/fuzz/MupdfFuzzer.cpp` + `cmd/build-fuzz-harness-mupdf.ts` (WIP, link step not yet verified): in-process libFuzzer harness that opens a fresh `fz_context` per input (the only clean reset — mupdf has global caches, same pattern as upstream's own fuzzers), parses bytes as PDF via `fz_open_document_with_stream(".pdf")`, loads page 0, renders it at 0.25 scale into an RGB pixmap (page box clamped to <20000). mupdf exception macros in THIS vendored version have no `fz_end_try` and `fz_catch`+`fz_always` cannot be chained (both expand to `else`) — use try/catch then drop outside.

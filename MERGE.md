@@ -30,6 +30,31 @@ TumatraPDF is a direct fork of SumatraPDF (upstream baseline ~912ecf2, August 20
 8. Update docs: `README.md`, `LOG.md`, `FLOW/tumatrapdf.dot` (English + caveman, AGENTS.md §13)
 9. Commit and merge to master
 
+## Dependency upgrades — vendored tree rules
+
+mupdf is the one dependency whose delta is a patch stack, so it has a fixed
+procedure (used in s36-z for 1.28.0-rc2 → 1.28.5):
+
+1. Fetch the upstream SumatraPDF commit that bumps mupdf (`git fetch --depth 1
+   <full-SHA>` in a sparse clone of `ext/mupdf`) — its tree IS the target state.
+2. Replace `sumatrapdf-src/mupdf/` wholesale (CRLF-normalized; repo stores it
+   with CRLF under `.gitattributes` `* -text`). Never hand-edit that tree.
+3. Whole-file additions upstream keeps OUTSIDE the vendored tree (e.g.
+   `pkcs7-windows.c`) live in `sumatrapdf-src/src/mupdf/` and are wired into
+   `premake5.files.lua` + `includedirs`.
+4. Patches ride along in `sumatrapdf-src/ext/patches/` (copy of upstream
+   `ext/patches/`); verify with
+   `git apply --check -R --ignore-whitespace -p1 <patch>` (repo CRLF vs patch LF
+   ⇒ `--ignore-whitespace` is mandatory, otherwise every patch falsely conflicts).
+5. `bin/premake5.exe vs2022` (fork sources are protected by
+   `premake5.files.lua`), delete stale `out/<cfg>/obj/**/*.pch`, then
+   `bun cmd/build.ts`.
+
+Other vendored deps (libarchive, libjpeg-turbo, mujs, decoders) are curated flat
+trees: sync only the files present on both sides, keep the hand-maintained build
+config (`config_windows.h`, `jconfig*.h`, ...), then update `ext/versions.txt`.
+
+
 ## Useful Commands
 
 ```powershell

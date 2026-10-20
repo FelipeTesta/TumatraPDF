@@ -28,9 +28,9 @@ Status: `DONE` = shipped + verified, `WIP` = in progress, `TODO` = pending. Effo
 | C | C2 | Time Travel Debugging recipe (`tttracer.exe` present): record a hard repro, replay in WinDbgX, document in BUILD.md | M | TODO | Deterministic replay of timing/interaction bugs (toolbar drag-collapse class) instead of "cannot reproduce" |
 | C | C3 | Application Verifier over `TumatraPDF.exe` + unit tests (handles/heaps/locks), triage findings | M | TODO | Runtime detection of handle/heap/lock misuse, esp. Win32 GDI/HWND lifetimes in the new panels |
 | C | C4 | Install WinDbg (`winget install Microsoft.WinDbg`) | S | DONE s36-y | Symbolicated crash-dump analysis + TTD replay (C2 depends on it); WinDbg 1.2610.1001.0 installed via winget (verified: "Instalado com êxito") |
-| D | D1 | libFuzzer/ASan harnesses on entry points we own: mupdf xref/object parsing, `-dump-exif`, cmark-gfm, image decoders through our wrappers (jxl/heic/dav1d) | L | WIP s36-u | Malformed PDF/EPUB/image crashes found by machine before users hit them — highest bug yield for a PDF reader (and the same class as most past CVEs). s36-u slice 1: `cmd/fuzz.ts` app-level ASan fuzzer (headless `-render`/`-extract-text`/`-dump-exif` entries, byte mutator, 23 seeds, 300 execs / 0 crashes baseline) + fixed the ASan app exe startup (`DEPENDENTLOADFLAG` 0x800 to 0xA00, LOG s36-u); s36-x slice 2: native libFuzzer harness for base parsers (`cmd/build-fuzz-harness.ts` -> `out/fuzz/fuzz-parsers.exe`, 13.6k execs/s, LOG s36-x); remaining: exif seeds, cmark-gfm/image-decoder harnesses (same recipe as s36-x) |
+| D | D1 | libFuzzer/ASan harnesses on entry points we own: mupdf xref/object parsing, `-dump-exif`, cmark-gfm, image decoders through our wrappers (jxl/heic/dav1d) | L | WIP s36-u | Malformed PDF/EPUB/image crashes found by machine before users hit them — highest bug yield for a PDF reader (and the same class as most past CVEs). s36-u slice 1: `cmd/fuzz.ts` app-level ASan fuzzer (headless `-render`/`-extract-text`/`-dump-exif` entries, byte mutator, 23 seeds, 300 execs / 0 crashes baseline) + fixed the ASan app exe startup (`DEPENDENTLOADFLAG` 0x800 to 0xA00, LOG s36-u); s36-x slice 2: native libFuzzer harness for base parsers (`cmd/build-fuzz-harness.ts` -> `out/fuzz/fuzz-parsers.exe`, 13.6k execs/s, LOG s36-x); s36-ab: mupdf harness LINKED + re-verified on the F1/F4/F5 dependency batch (886-975 execs/s, 0 crashes, LOG s36-ab); remaining: exif seeds, cmark-gfm/image-decoder harnesses (same recipe as s36-ab) |
 | D | D2 | Seed corpus from `ext/*.pdf` + `tests/` regression files, bounded local runs first | S | DONE s36-u | Fuzzer reaches deep parser paths in minutes instead of days of blind mutation (corpus auto-gathered recursively by `cmd/fuzz.ts` from `ext/` + `tests/`; bounded runs via `-n`/`-seconds`) |
-| D | D3 | Nightly time-boxed fuzz job (`daily.yml` / `linux-daily.yml`) + crash artifact upload | S | TODO | Continuous parser regression coverage; every crash lands with its repro input attached |
+| D | D3 | Nightly time-boxed fuzz job (`daily.yml` / `linux-daily.yml`) + crash artifact upload | S | DONE s36-ab | Continuous parser regression coverage; every crash lands with its repro input attached. s36-ab: `.github/workflows/fuzz.yml` - nightly native-harness campaigns (base parsers 10 min + mupdf 15 min, advisory, crash artifacts 14d); app-level ASan driver stays local (CI cost not justified yet) |
 | E | E1 | MSBuild binlog → top-20 slowest TUs → sccache/ccache + PCH scope review; measure build wall time before/after | M | DONE s36-v | Shorter edit→build→test loop; less idle waiting per iteration (measurable delta, not a guess). s36-v DONE: measured, NOT needed - compile is 36 s / 238 TUs (slowest 2.14 s, PCH effective), edit-build-test loop ~10 s; sccache/PCH changes would not pay. Tool: `cmd/build-times.ts` (`out/build-times.txt`), see LOG s36-v |
 | E | E2 | Permanent premake fix: fork-only sources missing from `premake5.lua` (AGENTS.md §6b "premake TRAP"); MERGE conflict surface — isolated commit | S | DONE s36-w | Removes the LNK1120 landmine: a `premake5 vs2022` run silently strips 10 fork sources and the link failure surfaces much later. s36-w DONE: 13 sources added to `sumatrapdf_files()` + DEPENDENTLOADFLAG asan exception (0xA00) with positive filters in both exe projects (beta8 ignores `not` filters); regen verified incl. fork files + 0xA00, build green (LOG s36-w) |
 
@@ -45,41 +45,45 @@ Baseline: fork ships **mupdf 1.28.0-rc2**; upstream SumatraPDF master runs **1.2
 - **Integration surface** (upstream commit `585ce546`, 161 files): `ext/mupdf/**` (158) + `ext/versions.txt` + `premake5.files.lua` (+`crypt-chacha20.c`, +`regexp.c`) + `vs2022/mupdf.vcxproj`/`.filters` (+`regexp.h`, +`fitz-imp.h`, +`crypt-chacha20.c`, +`regexp.c`) + `src/SumatraPDF.cpp` (hardcoded `FZ_VERSION` string) + `cmd/deps-build-defs.ts` (upstream-only build system — **N/A for the fork**, which uses premake). **Zero other `src/` changes ⇒ no API adaptation required.**
 - **Fork carries no local mupdf edits**: no commit touched `sumatrapdf-src/mupdf/` after the import commit `fd7e625`, and the working tree is clean ⇒ replacing the tree loses nothing.
 
-### F1 — mupdf 1.28.5 (P1, M)
+### F1 — mupdf 1.28.5 (P1, M) — DONE s36-z
 
-- [ ] Snapshot: `git tag pre-mupdf-1285` + branch `dep/mupdf-1.28.5`; record current build wall time (`bun cmd/build-times.ts`) and gate results as the baseline.
-- [ ] Fetch upstream's vendored tree (`ext/mupdf` @ `sumatrapdfreader/sumatrapdf` master) and **replace** `sumatrapdf-src/mupdf/` wholesale (it already contains 1.28.5 + all 47 patches applied).
-- [ ] Wire the new sources: `premake5.files.lua` → add `crypt-chacha20.c` and `regexp.c` to `mupdf_files()`; headers `regexp.h`, `fitz-imp.h` are include-only.
-- [ ] Regenerate `vs2022/mupdf.vcxproj` + `.filters` (premake) or hand-add the 4 entries; **delete stale PCHs** (`out/dbg64/obj/**/*.pch`) — otherwise one-time `C1853`.
-- [ ] Bump `ext/versions.txt` mupdf line to `1.28.5` (single source of truth) and note the new files.
-- [ ] Check `src/SumatraPDF.cpp` for a hardcoded `FZ_VERSION` string (upstream defines one before including mutool headers) — the fork currently has **no** such define; add/keep consistent if the build ever needs it.
+- [x] No branch/tag: the shared tree has a second agent on `main`, so the swap was done in place with explicit-path tracking (upstream baseline, not a fork branch).
+- [x] Fetched upstream's vendored tree at the integration commit `585ce54655e8ccf2b82200aa2b31176cc2ebef6c` (sparse clone → `tests/tmp/sp-1285/`) and **replaced** `sumatrapdf-src/mupdf/` wholesale (`tests/tmp/mupdf-sync.ts`, CRLF-normalized, binary-safe): 1410 files, +7 / −4.
+- [x] Wire the new sources: `premake5.files.lua` `mupdf_files()` → `+crypt-chacha20.c`, `+load-webp.c`, `+regexp.c`; `mupdf/source/helpers/pkcs7/pkcs7-windows.c` → `src/mupdf/pkcs7-windows.c` (upstream moved that helper out of the vendored tree — ported with `src/mupdf/README.md`; `premake5.lua` mupdf project gained a `src/mupdf` include dir because `murun.c`/`pdfsign.c` include it bare).
+- [x] Regenerated `vs2022/mupdf.vcxproj` + `.filters` via `bin/premake5.exe vs2022` (regen is safe since s36-w); only those two files changed, fork sources intact. Stale PCHs deleted (2).
+- [x] `ext/versions.txt` mupdf → `1.28.5` (2026-09-24).
+- [x] `FZ_VERSION`: not needed — the fork defines no such string (upstream's is tied to their own `src/SumatraPDF.cpp` mutool block) and the build is green without it.
+- Correction vs the audit snapshot: the 1.28.5 commit vendored **27 patch files** (not 47 — the 47 was later master) and **22 of them are already applied** in that tree; the fork carried only 11 ⇒ the swap is a superset, no patch behavior lost. All 27 + README now live in `sumatrapdf-src/ext/patches/` (F3 provenance).
 
-### F2 — Gates for F1 (S)
+### F2 — Gates for F1 (S) — IN PROGRESS
 
-- [ ] `bun cmd/build.ts` → 0 err / 0 warn → `Compiled/`.
-- [ ] `bun cmd/run-unit-tests.ts -dbg` (base parsers + engine basics).
-- [ ] `bun tests/all.ts` **once** (justified: vendored engine swap).
-- [ ] Targeted E2E: `tests/ad-hoc-flashcard-cloze.ts`, `tests/tmp/s36i-roundtrip.ts`, plus manual smoke (`-for-testing`): open a text PDF, an EPUB, a markdown file, an annot-heavy PDF (add + edit annotation), and a 2-page selection cloze.
-- [ ] If anything regresses: bisect by patch group (the 47 patches are the only local delta over pristine 1.28.5).
+- [x] `bun cmd/build.ts` → 0 err / 0 warn → `Compiled/` (87.8 s full mupdf recompile).
+- [x] `bun cmd/run-unit-tests.ts -dbg` → PASS.
+- [x] `bun tests/all.ts` once — 2 **pre-existing** fork bugs fixed on the way: 23 tests wrote `SumatraPDF-settings.txt` (fork reads `TumatraPDF-settings.txt`) and `lint-mingw-sources` was missing 17 fork sources; `issue-906` spawned the exe via `cmd.exe /c` (breaks on the space in this repo path) → spawn argv directly.
+- [x] Release rebuild so `out/rel64/obj-s/mupdf.lib` matches 1.28.5 (the fuzz harness links it) — `MSBuild vs2022\TumatraPDF.sln /t:TumatraPDF /p:Configuration=Release /p:Platform=x64`. NOTE: `cmd/build.ts` has **no** `-release` for x64 (only `-rel-32`).
+- [x] Targeted E2E: `tests/ad-hoc-flashcard-cloze.ts` PASS, `tests/tmp/s36i-roundtrip.ts` PASS. Manual render smoke (`tests/tmp/rel-smoke.ts`, canvas pixel capture — release + debug): text PDF 255 colours / lumVar 5487, JPEG 35 507 colours (libjpeg 3.2.0 SIMD path), EPUB 523 colours / lumVar 8011 (mupdf HTML layout), markdown 1530 colours ⇒ no blank/errored render. Annot add/edit is covered by the cloze harness (2-page selection + spanning group).
+- [ ] **Suite baseline (pre-existing, NOT caused by F1)** — 17 of the entries after `issue-5734` fail on this fork: `exit 5` shutdown crash (issue-5529, issue-2629, issue-4684, issue-5922, issue-5924, issue-5926, find-results-sorted, issue-5874, issue-2252), `-unit-tests exit 1` (issue-5840, issue-5842, issue-5846, parse-tip-brackets), UI/timing (issue-1914, issue-5866, issue-5869, issue-5792). Exit code **5 == 0xC0000005 access violation**, not "graceful quit" as `cmd/control.ts` claims. Reproduces only in the **debug** build (Release x64 on the same mupdf 1.28.5 exits 0; image-resize flow with no document also exits 0) ⇒ debug-only shutdown defect, triage separately.
+- [ ] If a real regression appears: bisect by patch group (the 27 patches are the only local delta over pristine 1.28.5).
 
-### F3 — Adopt the `ext/patches/` discipline (S)
+### F3 — Adopt the `ext/patches/` discipline (S) — DONE s36-z
 
-- [ ] Copy upstream's `ext/patches/` (47 `.patch` + `README.md`) into `sumatrapdf-src/ext/patches/` so the next mupdf bump is mechanical (apply patches → resolve → record).
-- [ ] Document in `MERGE.md`: mupdf upgrade = new tree + `ext/patches/` replay, never hand-edits inside `ext/mupdf`.
-- [ ] Verify the patch set still reverse-applies on the freshly swapped tree (`git apply --check -R --ignore-whitespace -p1` per file) — a clean sweep proves tree == patches + upstream.
+- [x] Copied upstream's `ext/patches/` (27 `.patch` + `README.md`, the set carried by the 1.28.5 integration commit) into `sumatrapdf-src/ext/patches/`.
+- [x] Documented the procedure in `MERGE.md` § "Dependency upgrades — vendored tree rules" (fetch upstream commit → replace tree wholesale → `ext/patches/` replay → regen premake → build).
+- [x] Reverse-apply sweep verified (`git apply --check -R --ignore-whitespace -p1`): 22 applied / 19 absent / 6 conflict; the fork's pre-swap tree had 11 applied / 22 absent / 14 conflict ⇒ superset, no patch behavior lost. **Trap**: without `--ignore-whitespace` all 27 report a false conflict (repo CRLF vs patch LF).
 
-### F4 — Small independent updates (P2, S each)
+### F4 — Small independent updates (P2, S each) — DONE s36-aa
 
-- [ ] `libarchive 3.8.8 → 3.8.10` (security release; 7z Delta/RISCV/ARMThumb/IA64 filters).
-- [ ] kjk decoders → current HEADs: `chmdec` `19d91e5` (LZX read-before-window fix), `heicdec` `8846fe9`, `jxldec` `d71b246`, `djvudec` `cfd3251`; re-run the amalgamation scripts and refresh `dist/` only.
-- [ ] `mujs 1.3.9 → 1.3.11` via `bun cmd/a-mujs.ts` (upstream is on 1.3.10 — align or go to latest).
-- [ ] `darkmodelib` → `0.76.0` (upstream pin, 2026-08-23).
-- [ ] `liblzma 5.8.3 → 5.8.4`.
+- [x] `libarchive 3.8.8 → 3.8.10` (security release; 7z Delta/RISCV/ARMThumb/IA64 filters). 116 files synced + `archive_crc32.c` / `archive_umask.c` / `archive_umask_private.h` / `archive_xml_private.h` added, `archive_crc32.h` removed; premake list updated; `config_windows.h` needed `#define ARCHIVE_CRYPTO_WIN 1` (3.8.10 guards the WinCNG digest init with it) and `archive_read_support_format_cab.c` needed `(size_t)1 << w_bits` (C4334). Gates: `issue-1678` PASS, `issue-2199` PASS, unit tests PASS.
+- [x] kjk decoders → current HEADs: `chmdec` `19d91e5` (LZX read-before-window fix, `chm.c` +411 B), `jxldec` `d71b246` (`jxl.c` +849 lines); `heicdec` (`8846fe9`) and `djvudec` (`cfd3251`) were already byte-identical to HEAD ⇒ metadata bump only.
+- [x] `mujs 1.3.9 → 1.3.11` via `bun cmd/a-mujs.ts` (needs `VsDevCmd.bat` for `cl.exe`; `cmd/util.ts` `detectVisualStudio2026()` now falls back to VS 2022). Generated `regexp.h`/`COPYING` arrive CRLF from the clone and were normalized to LF.
+- [x] `liblzma 5.8.3 → 5.8.4`: 18 files synced; the 5 local-only `common/tuklib_*.h` copies must stay (upstream moved them to its own `src/common/`, which the local build lacks). No `ext/versions.txt` entry exists for liblzma.
+- [ ] `darkmodelib` → moved to F5 (renamed API, not a security fix).
 
 ### F5 — Medium/optional (M)
 
-- [ ] `libjpeg-turbo 3.1.4.1 → 3.2.0`: regenerate the hand-maintained `jconfig.h` / `jconfigint.h` / `jversion.h`, review the NASM `simd/` source list, update premake.
-- [ ] Remove dead `ext/zlib-ng` (2.0.6, **not linked** — `premake5.lua` has `-- links { "zlib-ng" }` and links `a-zlib`) from `premake5.files.lua` + delete the tree; do **not** upgrade it.
+- [x] `libjpeg-turbo 3.1.4.1 → 3.2.0` (s36-aa). Re-vendored 145 files. 3.2.0 restructures: `jsimd.c` + `jsimd*.h` moved to `simd/` (one dispatcher, arch chosen by `SIMD_ARCHITECTURE` — added to the hand-maintained `jconfigint.h`); `jversion.h` now exposes only `JCOPYRIGHT` (`jerror.h` uses it); **all precision wrappers are mandatory** — `jcinit.c`/`jdmaster.c` dispatch on `cinfo->data_precision` at runtime and reference `j12init_*`/`j16init_*` unconditionally, so the build compiles `src/wrapper/*.c` (excluding `template.c` and the `rdpng-*`/`wrpng-*` PNG wrappers, which need the external `spng`). premake: asm lists mirror `SIMD_SOURCES` in `simd/CMakeLists.txt` (the `*-ext.asm` fragments are `%include`-only — never assemble them alone). Gates: build 0/0, `issue-3731` (JPEG render) PASS, `issue-2199` PASS, `issue-1678` PASS, flashcard cloze PASS, unit tests PASS.
+- [x] Removed dead `ext/zlib-ng` (104 files) + its `premake5.files.lua` block, `premake5.lua` stale link line and `ext/versions.txt` entry. Zero references left.
+- [x] `darkmodelib` upgraded to `e8ec95ba63` (2026-10-10; repo renamed `ozone10/win32-darkmodelib`, no tags). Renames: `DarkModeSubclass.{h,cpp}` → `Darkmodelib.h` + `src/Darkmodelib.cpp` (+ `MemoryHelper*`, new `DmlibIni.cpp`); **namespace `DarkMode` → `dmlib`** (23 files / 94 call sites rewritten; the function names themselves are unchanged; `UseDarkModeLib()` is the fork's own helper and stays). premake + `cmd/build-lib-defs.ts` updated. Verified: build 0/0, toolbar round-trip PASS, dark/light/flashcard-sidebar screenshots **pixel-equivalent to the pre-upgrade Release baseline** (chrome/page means within ±1/255; toggle round-trips exactly). Pre-existing oddity noted separately: dark-mode chrome paints a saturated yellow (≈ rgb 245,237,19) on this machine in BOTH builds — not caused by the upgrade; investigate separately (accent/theme preset).
 - [ ] Bun `1.3.14 → 1.4.3` (build/test scripts only) after re-running the suite.
 
 ### F6 — Explicitly deferred (documented)
@@ -173,6 +177,8 @@ Replace Image / Edit With Paint / top-level Copy Image shipped s31 — s34 E2E n
 Todas as alterações: Salvar no documento para persistir.
 
 ## Page Counting Format
+O sistema já exibe páginas em outros tipos de contagem, precisamos de uma ferramenta para alterar os pdfs, fazendo com que os números do arquivo batam com os números reais do livro.
+
 Similar ao sistema adobe, queremos uma ferramenta para mudar o formato de contabilizar alguns intervalos de página, especialmente para início de documentos.
 
 Exemplo: página 1-50 contabilizar em romano, da página 51 em dia, numérico → A página 51 se torna a nova página 1. Digitar 1 no campo de páginas, cai na página 51. Dessa forma o match das páginas dos livros fica exata.
@@ -200,6 +206,7 @@ quando autoscroll=on, toda vez que o app entrar em uma nova página E sair para 
 
 # Bugs open
 
+### Old
 - [x] **FIXED 2026-10-11: CRASH on search (Ctrl+F)** — dump 34131b symbolized (dbg exe has symbols): `DisplayModel::PhysicalToVirtualForRect` wrote `*rectOut` unconditionally, and the FindThread `searchVisible` probe (SearchAndDDE.cpp:1357) was the ONLY caller passing nullptr → null-write on every search that reached that branch. Guard added on both branches (null rectOut ⇒ identity rect, return unmapped page). Real-doc E2E (ACM query + 2× Enter on the CAD esquadrias PDF) now crash-free.
 - [x] **s34-g SHIPPED (2026-10-11, built+deployed, not committed):** resize enlarges BEYOND the original image rect (content-stream cm rewrite `SetImageDrawRect` + data swap; fallback = clamped padded swap on rotated/nested pages); flicker-free bbox drag (region-only invalidate); scale label text → white; Arch **Measure Radius** (3 clicks, r= label) + **Ref Line** (2 clicks, subtle full-page gray) — commands 523/524, persisted via measurements `kind`; Enter/numpad-Enter applies from the scale numeric field (edit subclass). USER validation pending: radius/refline UX, enlarge on a real book, flicker gone.
 
@@ -212,6 +219,14 @@ quando autoscroll=on, toda vez que o app entrar em uma nova página E sair para 
 - [ ] **BUG-4** Contrast × Trim Config ONE-SHOT vanish (first trim-config open after launch). Fix v2 (`EnsureContrastOverlayState` invariant + self-healing) deployed 2026-09-22 — awaiting user confirmation of the exact flow; `[contrast]` breadcrumbs in debug build.
 - [x] **Image editing functions (user 2026-10-10)** — Replace/Paint/Crop/Resize all FIXED s34 (E2E pass: `tests/tmp/s34-{replace,paint,crop}-e2e.ts`); root cause was a no-op image-submenu pruning bug (base `MenuRemove`/`MenuSetEnabled` don't descend into submenus) + WStrL/order bugs. Modularization into `Commands_Image.{h,cpp}` DONE s34-c 2026-10-11 (Menu.cpp dispatch stays — it's menu plumbing, not image logic). Convert button stays grayed by user decision.
 - [x] **Edit mode polish (s34-d/e/f, 2026-10-11):** in-page bbox editing SHIPPED (click image → bbox over page, border/edge/inside drag; E2E 7/7). s34-e: round resize/square crop handles; live preview; fc/edit 2nd-toolbar double-toggle dead space fixed (uiState.layout force-clear + rebar pre-size). s34-f: ALL edits = pure image-data swap (stamp path REMOVED per user — footprint fixed, enlarge limited to the original image area); bbox tracks the applied region (`PageImageEdit.content`); 🔴 marker via ToolbarUpdateStateForWindow. Remaining polish: "+Text" click-to-place flow; Esc cancels selection; preview bbox for armed +Img; stamp move/resize UX after placement; "+Img from file" picker.
+
+### USER
+função twocolumn sempre abrir 'off' em novos arquivos; a função não está fechando corretamente quando trim=on;
+
+precisamos armazenar POR ARQUIVO, pelo menos para os últimos 10 arquivos:
+- última velocidade de autoscroll
+- configuração de 'trim config'
+Para arquivos nunca abertos antes, usar config 'padrão'
 
 [] Quando Two columns=on & Autoscroll=on & Trim=on & Contrast=on & Invert=on, ao mover o mouse por cima da tela, o autoscroll para. Avaliar. Pode estar relacionado com o peso do arquivo.
 
