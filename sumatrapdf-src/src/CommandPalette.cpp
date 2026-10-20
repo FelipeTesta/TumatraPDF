@@ -25,7 +25,7 @@
 #include "Favorites.h"
 #include "FileHistory.h"
 #include "Menu.h"
-#include "DarkModeSubclass.h"
+#include "Darkmodelib.h"
 #include "Translations.h"
 #include "CommandPalette.h"
 #include "CommandPaletteInternal.h"
@@ -553,7 +553,7 @@ bool CommandPaletteWnd::Create(MainWindow* win, Str prefix, int smartTabAdvance)
         c->SetModel(m);
         listBox = c;
         if (UseDarkModeLib()) {
-            DarkMode::setDarkScrollBar(listBox->hwnd);
+            dmlib::setDarkScrollBar(listBox->hwnd);
         }
         vbox->AddChild(c, 1);
     }
@@ -602,7 +602,7 @@ bool CommandPaletteWnd::Create(MainWindow* win, Str prefix, int smartTabAdvance)
         c->SetColors(colTxt, colBg);
         if (UseDarkModeLib() && !IsCurrentThemeDefault()) {
             // otherwise the box glyph stays a light Windows checkbox
-            DarkMode::setDarkThemeExperimental(c->hwnd);
+            dmlib::setDarkThemeExperimental(c->hwnd);
         }
         c->onStateChanged = MkMethod0<CommandPaletteWnd, &CommandPaletteWnd::OnPre36CheckboxChanged>(this);
         checkboxPre36 = c;

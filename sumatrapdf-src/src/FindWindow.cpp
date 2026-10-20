@@ -32,12 +32,12 @@
 #include "FilterHighlightDraw.h"
 #include "Translations.h"
 #include "Theme.h"
-#include "DarkModeSubclass.h"
+#include "Darkmodelib.h"
 
 // match the frame's title bar to the current theme (dark caption in dark mode)
 static void ApplyTitleBarTheme(HWND hwnd) {
     if (UseDarkModeLib()) {
-        DarkMode::setDarkTitleBarEx(hwnd, true);
+        dmlib::setDarkTitleBarEx(hwnd, true);
     }
 }
 

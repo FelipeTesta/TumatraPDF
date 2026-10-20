@@ -18,7 +18,7 @@
 #include "SumatraConfig.h"
 #include "SumatraPDF.h"
 #include "Translations.h"
-#include "DarkModeSubclass.h"
+#include "Darkmodelib.h"
 #include "PdfDarkMode.h"
 #include "ChangeThemeDialog.h"
 
@@ -155,7 +155,7 @@ void ChangeThemeWnd::UpdateTheme() {
         btnChange->SetColors(colTxt, colBg);
     }
     if (UseDarkModeLib()) {
-        DarkMode::setDarkWndSafe(hwnd);
+        dmlib::setDarkWndSafe(hwnd);
     }
     RedrawWindow(hwnd, nullptr, nullptr, RDW_ERASE | RDW_INVALIDATE | RDW_ALLCHILDREN);
 }

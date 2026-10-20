@@ -1158,7 +1158,7 @@ cd ../out/rel64_prefast_asan &amp; if not exist InstallerData.dat ..\..\bin\Make
     </CustomBuild>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClInclude Include="..\ext\darkmodelib\include\DarkModeSubclass.h" />
+    <ClInclude Include="..\ext\darkmodelib\include\Darkmodelib.h" />
     <ClInclude Include="..\ext\darkmodelib\src\DmlibColor.h" />
     <ClInclude Include="..\ext\darkmodelib\src\DmlibDpi.h" />
     <ClInclude Include="..\ext\darkmodelib\src\DmlibGlyph.h" />
@@ -1170,6 +1170,8 @@ cd ../out/rel64_prefast_asan &amp; if not exist InstallerData.dat ..\..\bin\Make
     <ClInclude Include="..\ext\darkmodelib\src\DmlibSubclassWindow.h" />
     <ClInclude Include="..\ext\darkmodelib\src\DmlibWinApi.h" />
     <ClInclude Include="..\ext\darkmodelib\src\IatHook.h" />
+    <ClInclude Include="..\ext\darkmodelib\src\MemoryHelper.h" />
+    <ClInclude Include="..\ext\darkmodelib\src\MemoryHelperDef.h" />
     <ClInclude Include="..\ext\darkmodelib\src\ModuleHelper.h" />
     <ClInclude Include="..\ext\darkmodelib\src\StdAfx.h" />
     <ClInclude Include="..\ext\darkmodelib\src\UAHMenuBar.h" />
@@ -1332,7 +1334,7 @@ cd ../out/rel64_prefast_asan &amp; if not exist InstallerData.dat ..\..\bin\Make
     <ClInclude Include="..\src\wingui\WinGui.h" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="..\ext\darkmodelib\src\DarkModeSubclass.cpp">
+    <ClCompile Include="..\ext\darkmodelib\src\Darkmodelib.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="..\ext\darkmodelib\src\DmlibColor.cpp">
@@ -1342,6 +1344,9 @@ cd ../out/rel64_prefast_asan &amp; if not exist InstallerData.dat ..\..\bin\Make
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="..\ext\darkmodelib\src\DmlibHook.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\ext\darkmodelib\src\DmlibIni.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="..\ext\darkmodelib\src\DmlibPaintHelper.cpp">

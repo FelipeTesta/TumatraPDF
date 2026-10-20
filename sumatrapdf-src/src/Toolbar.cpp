@@ -43,7 +43,7 @@ extern "C" {
 #include "Translations.h"
 #include "SvgIcons.h"
 #include "Theme.h"
-#include "DarkModeSubclass.h"
+#include "Darkmodelib.h"
 #include "wingui/Layout.h"
 #include "wingui/WinGui.h"
 #include "TextToSpeech.h"
@@ -2600,7 +2600,7 @@ void CreateToolbar(MainWindow* win) {
     SetWindowTheme(hwndToolbar, L"", L"");
 
     if (UseDarkModeLib()) {
-        DarkMode::setWindowNotifyCustomDrawSubclass(win->hwndReBar);
+        dmlib::setWindowNotifyCustomDrawSubclass(win->hwndReBar);
     }
 
     PopulateCustomToolbarButtons();
@@ -2753,7 +2753,7 @@ void CreateToolbar2(MainWindow* win) {
     SetWindowTheme(hwndToolbar2, L"", L"");
 
     if (UseDarkModeLib()) {
-        DarkMode::setWindowNotifyCustomDrawSubclass(win->archTools.hwndReBar2);
+        dmlib::setWindowNotifyCustomDrawSubclass(win->archTools.hwndReBar2);
     }
 
     // Add 5 buttons: Scale, Measure, Clean lines, Reset Scale, Clean All
@@ -2834,7 +2834,7 @@ void ToolbarApplyThemeToRebar(HWND hwndRebar, HWND hwndToolbar) {
     SetWindowSubclass(hwndRebar, ReBarWndProc, 0, 0);
     SetWindowTheme(hwndToolbar, L"", L"");
     if (UseDarkModeLib()) {
-        DarkMode::setWindowNotifyCustomDrawSubclass(hwndRebar);
+        dmlib::setWindowNotifyCustomDrawSubclass(hwndRebar);
     }
     SetWindowLongPtr(hwndToolbar, GWLP_WNDPROC, (LONG_PTR)WndProcToolbar);
     if (!IsCurrentThemeDefault()) {
@@ -3155,7 +3155,7 @@ void CreateMenuBarRebar(MainWindow* win) {
     SetWindowSubclass(win->hwndMenuToolbar, MenuBarToolbarWndProc, 0, 0);
     TbSetButtonStructSize(win->hwndMenuToolbar, sizeofi(TBBUTTON));
 
-    if (!UseDarkModeLib() || !DarkMode::isEnabled()) {
+    if (!UseDarkModeLib() || !dmlib::isEnabled()) {
         if (!IsCurrentThemeDefault()) {
             SetWindowTheme(win->hwndMenuToolbar, L"", L"");
         }
@@ -3189,8 +3189,8 @@ void CreateMenuBarRebar(MainWindow* win) {
     SendMessageW(win->hwndMenuReBar, RB_INSERTBAND, (WPARAM)-1, (LPARAM)&rbBand);
 
     if (UseDarkModeLib()) {
-        DarkMode::setWindowNotifyCustomDrawSubclass(win->hwndMenuReBar);
-        DarkMode::setChildCtrlsSubclassAndTheme(win->hwndMenuReBar);
+        dmlib::setWindowNotifyCustomDrawSubclass(win->hwndMenuReBar);
+        dmlib::setChildCtrlsSubclassAndTheme(win->hwndMenuReBar);
     }
 }
 

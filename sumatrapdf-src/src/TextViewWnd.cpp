@@ -11,7 +11,7 @@
 #include "wingui/WinGui.h"
 
 #include "Theme.h"
-#include "DarkModeSubclass.h"
+#include "Darkmodelib.h"
 #include "SumatraConfig.h"
 
 struct TextViewWnd : Wnd {
@@ -62,8 +62,8 @@ void TextViewWnd::UpdateTheme() {
         edit->SetColors(colTxt, colBg);
     }
     if (UseDarkModeLib()) {
-        DarkMode::setDarkWndSafe(hwnd);
-        DarkMode::setWindowEraseBgSubclass(hwnd);
+        dmlib::setDarkWndSafe(hwnd);
+        dmlib::setWindowEraseBgSubclass(hwnd);
     }
     // Re-apply monospaced font after darkmode child theming (may reset font).
     if (edit && monoFont) {

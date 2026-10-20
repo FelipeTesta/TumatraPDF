@@ -28,7 +28,7 @@
 #include "SumatraProperties.h"
 #include "Canvas.h"
 #include "AIChatPanel.h"
-#include "DarkModeSubclass.h"
+#include "Darkmodelib.h"
 #include "Theme.h"
 #include "SumatraLog.h"
 
@@ -212,13 +212,13 @@ void UpdateAfterThemeChange() {
         UpdateFindWindowTheme(win);
         UpdateAIChatTheme(win);
         if (UseDarkModeLib()) {
-            DarkMode::setDarkTitleBarEx(win->hwndFrame, true);
-            DarkMode::setChildCtrlsTheme(win->hwndFrame);
+            dmlib::setDarkTitleBarEx(win->hwndFrame, true);
+            dmlib::setChildCtrlsTheme(win->hwndFrame);
             if (win->tabsCtrl) {
-                DarkMode::removeTabCtrlSubclass(win->tabsCtrl->hwnd);
+                dmlib::removeTabCtrlSubclass(win->tabsCtrl->hwnd);
             }
-            DarkMode::setDarkScrollBar(win->hwndCanvas);
-            DarkMode::setWindowMenuBarSubclass(win->hwndFrame);
+            dmlib::setDarkScrollBar(win->hwndCanvas);
+            dmlib::setWindowMenuBarSubclass(win->hwndFrame);
             ApplyDarkModeToInfotip(win);
         }
         UpdateWindowFrameBorderColor(win);

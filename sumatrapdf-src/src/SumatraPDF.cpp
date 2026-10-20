@@ -133,7 +133,7 @@ extern "C" {
 #include "RegistryPreview.h"
 #include "RegistrySearchFilter.h"
 #include "Theme.h"
-#include "DarkModeSubclass.h"
+#include "Darkmodelib.h"
 #include "TextToSpeech.h"
 #include "ReadAloudHighlight.h"
 #include "ReadAloudPlaybackBar.h"
@@ -2786,7 +2786,7 @@ void ApplyDarkModeToInfotip(MainWindow* win) {
     if (!win || !win->infotip || !win->infotip->hwnd) {
         return;
     }
-    DarkMode::setDarkTooltips(win->infotip->hwnd, (int)DarkMode::ToolTipsType::tooltip);
+    dmlib::setDarkTooltips(win->infotip->hwnd, (int)dmlib::ToolTipsType::tooltip);
     HFONT font = GetAppFont(win->hwndCanvas);
     win->infotip->SetFont(font);
     HwndSetFont(win->infotip->hwnd, font);
@@ -2939,11 +2939,11 @@ MainWindow* CreateMainWindow() {
     // layout re-calculations from MainWindow and creation of windows
     win->UpdateCanvasSize();
     if (UseDarkModeLib() && !IsCurrentThemeDefault()) {
-        DarkMode::setDarkTitleBarEx(win->hwndFrame, true);
-        DarkMode::setChildCtrlsSubclassAndTheme(win->hwndFrame);
-        DarkMode::removeTabCtrlSubclass(win->tabsCtrl->hwnd);
-        DarkMode::setDarkScrollBar(win->hwndCanvas);
-        DarkMode::setWindowMenuBarSubclass(win->hwndFrame);
+        dmlib::setDarkTitleBarEx(win->hwndFrame, true);
+        dmlib::setChildCtrlsSubclassAndTheme(win->hwndFrame);
+        dmlib::removeTabCtrlSubclass(win->tabsCtrl->hwnd);
+        dmlib::setDarkScrollBar(win->hwndCanvas);
+        dmlib::setWindowMenuBarSubclass(win->hwndFrame);
         ApplyDarkModeToInfotip(win);
     }
 
@@ -12757,10 +12757,10 @@ static LRESULT CustomCaptionFrameProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp,
 
         case WM_INITMENUPOPUP:
             // apply dark mode to popup menu window
-            if (UseDarkModeLib() && DarkMode::isEnabled()) {
+            if (UseDarkModeLib() && dmlib::isEnabled()) {
                 HWND hMenu = FindWindow(UNDOCUMENTED_MENU_CLASS_NAME, nullptr);
                 if (hMenu) {
-                    DarkMode::setDarkTitleBarEx(hMenu, false);
+                    dmlib::setDarkTitleBarEx(hMenu, false);
                 }
             }
             if (gMenuAccelPressed) {
@@ -13841,10 +13841,10 @@ LRESULT CALLBACK WndProcSumatraFrame(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) 
 
         case WM_INITMENUPOPUP:
             // apply dark mode to popup menu window
-            if (UseDarkModeLib() && DarkMode::isEnabled()) {
+            if (UseDarkModeLib() && dmlib::isEnabled()) {
                 HWND hMenuWnd = FindWindow(UNDOCUMENTED_MENU_CLASS_NAME, nullptr);
                 if (hMenuWnd) {
-                    DarkMode::setDarkTitleBarEx(hMenuWnd, false);
+                    dmlib::setDarkTitleBarEx(hMenuWnd, false);
                 }
             }
             // TODO: should I just build the menu from scratch every time?

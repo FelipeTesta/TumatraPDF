@@ -16,7 +16,7 @@
 #include "SumatraDialogs.h"
 #include "Translations.h"
 #include "Theme.h"
-#include "DarkModeSubclass.h"
+#include "Darkmodelib.h"
 
 // http://msdn.microsoft.com/en-us/library/ms645398(v=VS.85).aspx
 #pragma pack(push, 1)
@@ -184,7 +184,7 @@ static INT_PTR CALLBACK Dialog_GetPassword_Proc(HWND hDlg, UINT msg, WPARAM wp, 
         HwndSetText(hDlg, _TRA("Enter password"));
         SetWindowLongPtr(hDlg, GWLP_USERDATA, (LONG_PTR)data);
         if (UseDarkModeLib()) {
-            DarkMode::setDarkWndSafe(hDlg);
+            dmlib::setDarkWndSafe(hDlg);
         }
         HwndSetVisible(GetDlgItem(hDlg, IDC_REMEMBER_PASSWORD), data->remember != nullptr);
 
@@ -286,7 +286,7 @@ static INT_PTR CALLBACK Dialog_GoToPage_Proc(HWND hDlg, UINT msg, WPARAM wp, LPA
         data = (Dialog_GoToPage_Data*)lp;
         SetWindowLongPtr(hDlg, GWLP_USERDATA, (LONG_PTR)data);
         if (UseDarkModeLib()) {
-            DarkMode::setDarkWndSafe(hDlg);
+            dmlib::setDarkWndSafe(hDlg);
         }
         HwndSetText(hDlg, _TRA("Go to page"));
 
@@ -366,7 +366,7 @@ static INT_PTR CALLBACK Dialog_Find_Proc(HWND hDlg, UINT msg, WPARAM wp, LPARAM 
             data = (Dialog_Find_Data*)lp;
             SetWindowLongPtr(hDlg, GWLP_USERDATA, (LONG_PTR)data);
             if (UseDarkModeLib()) {
-                DarkMode::setDarkWndSafe(hDlg);
+                dmlib::setDarkWndSafe(hDlg);
             }
             HwndSetText(hDlg, _TRA("Find"));
             HwndSetDlgItemText(hDlg, IDC_STATIC, _TRA("&Find what:"));
@@ -479,7 +479,7 @@ static INT_PTR CALLBACK Dialog_ChangeLanguage_Proc(HWND hDlg, UINT msg, WPARAM w
         data = (Dialog_ChangeLanguage_Data*)lp;
         SetWindowLongPtr(hDlg, GWLP_USERDATA, (LONG_PTR)data);
         if (UseDarkModeLib()) {
-            DarkMode::setDarkWndSafe(hDlg);
+            dmlib::setDarkWndSafe(hDlg);
         }
         // for non-latin languages this depends on the correct fonts being installed,
         // otherwise all the user will see are squares
@@ -711,7 +711,7 @@ static INT_PTR CALLBACK Dialog_CustomZoom_Proc(HWND hDlg, UINT msg, WPARAM wp, L
             data = (Dialog_CustomZoom_Data*)lp;
             SetWindowLongPtr(hDlg, GWLP_USERDATA, (LONG_PTR)data);
             if (UseDarkModeLib()) {
-                DarkMode::setDarkWndSafe(hDlg);
+                dmlib::setDarkWndSafe(hDlg);
             }
             SetupZoomComboBox(hDlg, IDC_DEFAULT_ZOOM, data->forChm, data->zoomArg);
 
@@ -759,7 +759,7 @@ static INT_PTR CALLBACK Dialog_ChangeScrollbar_Proc(HWND hDlg, UINT msg, WPARAM 
     switch (msg) {
         case WM_INITDIALOG: {
             if (UseDarkModeLib()) {
-                DarkMode::setDarkWndSafe(hDlg);
+                dmlib::setDarkWndSafe(hDlg);
             }
             Str s = gGlobalPrefs->scrollbars;
             int checkId = IDC_SCROLLBAR_WINDOWS;
@@ -871,7 +871,7 @@ static INT_PTR CALLBACK Dialog_Settings_Proc(HWND hDlg, UINT msg, WPARAM wp, LPA
             prefs = (GlobalPrefs*)lp;
             SetWindowLongPtr(hDlg, GWLP_USERDATA, (LONG_PTR)prefs);
             if (UseDarkModeLib()) {
-                DarkMode::setDarkWndSafe(hDlg);
+                dmlib::setDarkWndSafe(hDlg);
             }
             {
                 HWND hwndCb = GetDlgItem(hDlg, IDC_DEFAULT_LAYOUT);
@@ -980,7 +980,7 @@ static INT_PTR CALLBACK Dialog_SetInverseSearch_Proc(HWND hDlg, UINT msg, WPARAM
             prefs = (GlobalPrefs*)lp;
             SetWindowLongPtr(hDlg, GWLP_USERDATA, (LONG_PTR)prefs);
             if (UseDarkModeLib()) {
-                DarkMode::setDarkWndSafe(hDlg);
+                dmlib::setDarkWndSafe(hDlg);
             }
             HwndSetText(hDlg, _TRA("Set inverse search command line"));
             HwndSetDlgItemText(hDlg, IDC_SECTION_INVERSESEARCH, _TRA("Set inverse search command line"));
@@ -1036,7 +1036,7 @@ static INT_PTR CALLBACK Sheet_Print_Advanced_Proc(HWND hDlg, UINT msg, WPARAM wp
             data = (Print_Advanced_Data*)((PROPSHEETPAGE*)lp)->lParam;
             SetWindowLongPtr(hDlg, GWLP_USERDATA, (LONG_PTR)data);
             if (UseDarkModeLib()) {
-                DarkMode::setDarkWndSafe(hDlg);
+                dmlib::setDarkWndSafe(hDlg);
             }
             HwndSetDlgItemText(hDlg, IDC_SECTION_PRINT_RANGE, _TRA("Print range"));
             HwndSetDlgItemText(hDlg, IDC_PRINT_RANGE_ALL, _TRA("&All selected pages"));
@@ -1181,7 +1181,7 @@ static INT_PTR CALLBACK Dialog_AddFav_Proc(HWND hDlg, UINT msg, WPARAM wp, LPARA
         Dialog_AddFav_Data* data = (Dialog_AddFav_Data*)lp;
         SetWindowLongPtr(hDlg, GWLP_USERDATA, (LONG_PTR)data);
         if (UseDarkModeLib()) {
-            DarkMode::setDarkWndSafe(hDlg);
+            dmlib::setDarkWndSafe(hDlg);
         }
         HwndSetText(hDlg, _TRA("Add Favorite"));
         TempStr s = fmt(_TRA("Add page %s to favorites with (optional) name:").s, data->pageNo);
@@ -1489,7 +1489,7 @@ static INT_PTR CALLBACK Dialog_ChangeBgColor_Proc(HWND hDlg, UINT msg, WPARAM wp
     switch (msg) {
         case WM_INITDIALOG: {
             if (UseDarkModeLib()) {
-                DarkMode::setDarkWndSafe(hDlg);
+                dmlib::setDarkWndSafe(hDlg);
             }
             HwndSetText(hDlg, data->title ? data->title : _TRA("Change Background Color"));
             HwndSetDlgItemText(hDlg, IDOK, _TRA("OK"));

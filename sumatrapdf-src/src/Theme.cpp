@@ -13,7 +13,7 @@ License: GPLv3 */
 #include "Theme.h"
 #include "GlobalPrefs.h"
 #include "Translations.h"
-#include "DarkModeSubclass.h"
+#include "Darkmodelib.h"
 #include "PdfDarkMode.h"
 
 // allow only x64 and arm64 for compatibility for older OS
@@ -46,12 +46,12 @@ void ApplyDarkModeToPopupWindow(HWND hwnd) {
     if (!UseDarkModeLib()) {
         return;
     }
-    DarkMode::setDarkTitleBarEx(hwnd, true);
+    dmlib::setDarkTitleBarEx(hwnd, true);
     if (IsCurrentThemeDefault()) {
         return;
     }
-    DarkMode::setChildCtrlsSubclassAndTheme(hwnd);
-    DarkMode::setWindowNotifyCustomDrawSubclass(hwnd);
+    dmlib::setChildCtrlsSubclassAndTheme(hwnd);
+    dmlib::setWindowNotifyCustomDrawSubclass(hwnd);
 }
 
 // wingui calls this from Button's WM_DRAWITEM; see the declaration in WinGui.h.
@@ -83,7 +83,7 @@ bool ButtonGetColors(ButtonColors* out) {
 // an app that doesn't theme anything can implement it as a no-op.
 void ListBoxMaybeApplyTheme(HWND hwnd) {
     if (UseDarkModeLib()) {
-        DarkMode::setDarkScrollBar(hwnd);
+        dmlib::setDarkScrollBar(hwnd);
     }
 }
 
@@ -667,35 +667,35 @@ static void ApplyThemeColorsToDarkMode() {
     // TODO: we should apply themes to every theme other than 0
     // but in Solarized Light in Find dialog's input field text is invisible i.e. black
     // UINT mode = themeIdx == 0 ? kModeClassic : kModeDark;
-    const bool isDarkCol = DarkMode::isColorDark(ThemeWindowControlBackgroundColor());
-    DarkMode::DarkModeType modeType = DarkMode::DarkModeType::light;
+    const bool isDarkCol = dmlib::isColorDark(ThemeWindowControlBackgroundColor());
+    dmlib::DarkModeType modeType = dmlib::DarkModeType::light;
     if (isDarkCol) {
-        modeType = DarkMode::DarkModeType::dark;
+        modeType = dmlib::DarkModeType::dark;
     } else if (IsCurrentThemeDefault()) {
-        modeType = DarkMode::DarkModeType::classic;
+        modeType = dmlib::DarkModeType::classic;
     }
     const UINT mode = static_cast<UINT>(modeType);
-    DarkMode::setDarkModeConfigEx(mode);
-    DarkMode::setDefaultColors(false);
+    dmlib::setDarkModeConfigEx(mode);
+    dmlib::setDefaultColors(false);
 
-    DarkMode::setBackgroundColor(ThemeWindowBackgroundColor());
-    DarkMode::setCtrlBackgroundColor(ThemeWindowControlBackgroundColor());
+    dmlib::setBackgroundColor(ThemeWindowBackgroundColor());
+    dmlib::setCtrlBackgroundColor(ThemeWindowControlBackgroundColor());
     COLORREF ctrlBg = ThemeWindowControlBackgroundColor();
-    DarkMode::setHotBackgroundColor(ThemeHotBackgroundColor());
-    DarkMode::setTextColor(ThemeWindowTextColor());
-    DarkMode::setDarkerTextColor(ThemeWindowDarkerTextColor());
-    DarkMode::setDisabledTextColor(ThemeWindowTextDisabledColor());
-    DarkMode::setDlgBackgroundColor(ctrlBg);
-    DarkMode::setLinkTextColor(ThemeWindowLinkColor());
-    DarkMode::setEdgeColor(ThemeEdgeColor());
-    DarkMode::setHotEdgeColor(ThemeHotEdgeColor());
-    DarkMode::setDisabledEdgeColor(ThemeDisabledEdgeColor());
-    DarkMode::setErrorBackgroundColor(ThemeErrorBackgroundColor());
-    DarkMode::updateThemeBrushesAndPens();
+    dmlib::setHotBackgroundColor(ThemeHotBackgroundColor());
+    dmlib::setTextColor(ThemeWindowTextColor());
+    dmlib::setDarkerTextColor(ThemeWindowDarkerTextColor());
+    dmlib::setDisabledTextColor(ThemeWindowTextDisabledColor());
+    dmlib::setDlgBackgroundColor(ctrlBg);
+    dmlib::setLinkTextColor(ThemeWindowLinkColor());
+    dmlib::setEdgeColor(ThemeEdgeColor());
+    dmlib::setHotEdgeColor(ThemeHotEdgeColor());
+    dmlib::setDisabledEdgeColor(ThemeDisabledEdgeColor());
+    dmlib::setErrorBackgroundColor(ThemeErrorBackgroundColor());
+    dmlib::updateThemeBrushesAndPens();
 
-    DarkMode::setViewTextColor(ThemeWindowTextColor());
-    DarkMode::setViewBackgroundColor(ThemeWindowControlBackgroundColor());
-    DarkMode::calculateTreeViewStyle();
+    dmlib::setViewTextColor(ThemeWindowTextColor());
+    dmlib::setViewBackgroundColor(ThemeWindowControlBackgroundColor());
+    dmlib::calculateTreeViewStyle();
 }
 
 void SetThemeByIndex(int themeIdx) {
@@ -716,7 +716,7 @@ void SetThemeByIndex(int themeIdx) {
         UpdateAfterThemeChange();
     }
     if (UseDarkModeLib()) {
-        DarkMode::setPrevTreeViewStyle();
+        dmlib::setPrevTreeViewStyle();
     }
 };
 
@@ -873,7 +873,7 @@ void UpdateThemeAfterHighContrastChange() {
     ApplyThemeColorsToDarkMode();
     UpdateAfterThemeChange();
     if (UseDarkModeLib()) {
-        DarkMode::setPrevTreeViewStyle();
+        dmlib::setPrevTreeViewStyle();
     }
 }
 

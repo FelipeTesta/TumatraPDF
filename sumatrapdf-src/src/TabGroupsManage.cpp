@@ -21,7 +21,7 @@
 #include "Translations.h"
 #include "SumatraConfig.h"
 #include "Theme.h"
-#include "DarkModeSubclass.h"
+#include "Darkmodelib.h"
 
 constexpr int kPadding = 8;
 
@@ -306,8 +306,8 @@ void TabGroupsWnd::UpdateTheme() {
     setColors(btnDelete);
     setColors(btnCancel);
     if (UseDarkModeLib()) {
-        DarkMode::setDarkWndSafe(hwnd);
-        DarkMode::setWindowEraseBgSubclass(hwnd);
+        dmlib::setDarkWndSafe(hwnd);
+        dmlib::setWindowEraseBgSubclass(hwnd);
     }
     RedrawWindow(hwnd, nullptr, nullptr, RDW_ERASE | RDW_INVALIDATE | RDW_ALLCHILDREN);
 }

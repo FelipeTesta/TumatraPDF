@@ -35,7 +35,7 @@
 #include "MainWindow.h"
 #include "WindowTab.h"
 #include "Theme.h"
-#include "DarkModeSubclass.h"
+#include "Darkmodelib.h"
 #include "Translations.h"
 #include "ImageSaveCropResize.h"
 
@@ -118,8 +118,8 @@ static void ApplyDarkMode(HWND hwnd) {
     if (!UseDarkModeLib()) {
         return;
     }
-    DarkMode::setDarkWndSafe(hwnd);
-    DarkMode::setWindowEraseBgSubclass(hwnd);
+    dmlib::setDarkWndSafe(hwnd);
+    dmlib::setWindowEraseBgSubclass(hwnd);
 }
 
 static HWND GetOwnerHwnd() {

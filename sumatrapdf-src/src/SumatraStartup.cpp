@@ -68,7 +68,7 @@
 #include "RegistryPreview.h"
 #include "ExternalViewers.h"
 #include "Theme.h"
-#include "DarkModeSubclass.h"
+#include "Darkmodelib.h"
 #include "CommandPalette.h"
 #include "SelectTextKeyboard.h"
 #include "SumatraControl.h"
@@ -2471,8 +2471,8 @@ int APIENTRY WinMain(_In_ HINSTANCE /*hInstance*/, _In_opt_ HINSTANCE /*hPrevIns
 
     // TODO: for reasons I don't understand, this must be called before LoadSettings()
     if (UseDarkModeLib()) {
-        DarkMode::initDarkMode();
-        DarkMode::setColorizeTitleBarConfig(true);
+        dmlib::initDarkMode();
+        dmlib::setColorizeTitleBarConfig(true);
     }
 
     LoadSettings();

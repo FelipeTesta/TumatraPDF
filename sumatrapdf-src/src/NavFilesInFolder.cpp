@@ -26,7 +26,7 @@
 #include "SumatraPDF.h"
 #include "Theme.h"
 #include "Translations.h"
-#include "DarkModeSubclass.h"
+#include "Darkmodelib.h"
 #include "NavFilesInFolder.h"
 
 // A modeless directory browser listing sub-directories and files SumatraPDF
@@ -794,7 +794,7 @@ bool NavFilesInFolderWnd::Create(MainWindow* mainWin) {
     }
     // top-level (no owner) so Alt-Tab switches between this and the main window
     if (UseDarkModeLib()) {
-        DarkMode::setDarkTitleBarEx(hwnd, true);
+        dmlib::setDarkTitleBarEx(hwnd, true);
     }
 
     auto colBg = ThemeWindowControlBackgroundColor();
@@ -832,7 +832,7 @@ bool NavFilesInFolderWnd::Create(MainWindow* mainWin) {
         c->SetColors(colTxt, colBg);
         listBox = c;
         if (UseDarkModeLib()) {
-            DarkMode::setDarkScrollBar(listBox->hwnd);
+            dmlib::setDarkScrollBar(listBox->hwnd);
         }
         vbox->AddChild(c, 1);
     }

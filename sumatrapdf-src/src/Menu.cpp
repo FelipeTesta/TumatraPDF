@@ -2559,7 +2559,7 @@ void MarkMenuOwnerDraw(HMENU /*hmenu*/, bool /*isMenuBar*/) {
 void MarkMenuOwnerDraw(HMENU hmenu, bool isMenuBar) {
     // darkmodelib handles the menu bar via setWindowMenuBarSubclass
     // but doesn't handle popup/context menus, so we owner-draw those
-    if (isMenuBar && UseDarkModeLib() && DarkMode::isEnabled()) {
+    if (isMenuBar && UseDarkModeLib() && dmlib::isEnabled()) {
         return;
     }
     if (!ThemeColorizeControls()) {

@@ -28,7 +28,7 @@
 #include "SumatraPDF.h"
 #include "Translations.h"
 #include "Theme.h"
-#include "DarkModeSubclass.h"
+#include "Darkmodelib.h"
 #include "EmbeddedResources.h"
 
 #include "AIChatCommon.h"
@@ -1216,7 +1216,7 @@ void UpdateAIChatTheme(MainWindow* win) {
     // the panel is created after the frame-wide dark mode pass, so its
     // controls (e.g. the checkbox) need their own subclass + theme pass
     if (UseDarkModeLib() && !IsCurrentThemeDefault()) {
-        DarkMode::setChildCtrlsSubclassAndTheme(win->hwndAiChatBox);
+        dmlib::setChildCtrlsSubclassAndTheme(win->hwndAiChatBox);
     }
     if (win->aiChatWebView) {
         DeleteAIChatWebView(win);

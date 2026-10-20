@@ -32,7 +32,7 @@ extern "C" {
 #include "EditAnnotations.h"
 #include "FormFields.h"
 #include "SumatraPDF.h"
-#include "DarkModeSubclass.h"
+#include "Darkmodelib.h"
 
 #include "Theme.h"
 
@@ -1889,7 +1889,7 @@ void ShowEditAnnotationsWindow(WindowTab* tab, Annotation* annot, EditAnnotFocus
     args.icon = LoadIconW(h, MAKEINTRESOURCEW(GetAppIconID()));
     // mainWindow->isDialog = true;
     if (UseDarkModeLib()) {
-        args.bgColor = DarkMode::isEnabled() ? ThemeWindowControlBackgroundColor() : MkGray(0xee);
+        args.bgColor = dmlib::isEnabled() ? ThemeWindowControlBackgroundColor() : MkGray(0xee);
     } else {
         args.bgColor = MkGray(0xee);
     }
@@ -1955,8 +1955,8 @@ void ShowEditAnnotationsWindow(WindowTab* tab, Annotation* annot, EditAnnotFocus
         SetSelectedAnnotation(tab, annot, isNew, focus);
     }
     if (UseDarkModeLib()) {
-        DarkMode::setDarkWndNotifySafe(ew->hwnd);
-        DarkMode::setWindowEraseBgSubclass(ew->hwnd);
+        dmlib::setDarkWndNotifySafe(ew->hwnd);
+        dmlib::setWindowEraseBgSubclass(ew->hwnd);
     }
 
     // important to call this after hooking up onSize to ensure

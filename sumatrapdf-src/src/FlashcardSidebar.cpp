@@ -27,7 +27,7 @@
 #include "Theme.h"
 #include "Translations.h"
 #include "resource.h"
-#include "DarkModeSubclass.h"
+#include "Darkmodelib.h"
 #include "Flashcard.h"
 #include "FlashcardSidebar.h"
 
@@ -559,7 +559,7 @@ void FlashcardSidebarCreate(MainWindow* win) {
     }
 
     if (UseDarkModeLib() && !IsCurrentThemeDefault()) {
-        DarkMode::setChildCtrlsSubclassAndTheme(box);
+        dmlib::setChildCtrlsSubclassAndTheme(box);
     }
 
     LayoutListaContainer(win);

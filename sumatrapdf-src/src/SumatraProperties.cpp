@@ -28,7 +28,7 @@
 #include "SumatraConfig.h"
 #include "Print.h"
 #include "Theme.h"
-#include "DarkModeSubclass.h"
+#include "Darkmodelib.h"
 
 void ShowProperties(HWND parent, DocController* ctrl);
 
@@ -827,8 +827,8 @@ void PropertiesWnd::UpdateTheme() {
         btnCopyToClipboard->SetColors(colTxt, colBg);
     }
     if (UseDarkModeLib()) {
-        DarkMode::setDarkWndSafe(hwnd);
-        DarkMode::setWindowEraseBgSubclass(hwnd);
+        dmlib::setDarkWndSafe(hwnd);
+        dmlib::setWindowEraseBgSubclass(hwnd);
     }
     // Re-apply monospaced font after darkmode child theming (may reset font).
     if (editProps && propsFont) {

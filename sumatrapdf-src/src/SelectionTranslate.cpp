@@ -26,7 +26,7 @@
 #include "AIChatPanel.h"
 #include "Translations.h"
 #include "Theme.h"
-#include "DarkModeSubclass.h"
+#include "Darkmodelib.h"
 #include "SelectionTranslate.h"
 
 static const Str kSrcLangAuto = StrL("Auto");
@@ -938,8 +938,8 @@ void SelectionTranslateWnd::UpdateTheme() {
     setColors(staticResultLabel);
     setColors(editResult);
     if (UseDarkModeLib()) {
-        DarkMode::setDarkWndSafe(hwnd);
-        DarkMode::setWindowEraseBgSubclass(hwnd);
+        dmlib::setDarkWndSafe(hwnd);
+        dmlib::setWindowEraseBgSubclass(hwnd);
     }
     RedrawWindow(hwnd, nullptr, nullptr, RDW_ERASE | RDW_INVALIDATE | RDW_ALLCHILDREN);
 }
