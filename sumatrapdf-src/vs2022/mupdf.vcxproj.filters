@@ -55,9 +55,6 @@
     <Filter Include="mupdf\source\helpers\mu-threads">
       <UniqueIdentifier>{AC47B4FB-182B-C33B-212E-F1778D90898C}</UniqueIdentifier>
     </Filter>
-    <Filter Include="mupdf\source\helpers\pkcs7">
-      <UniqueIdentifier>{FA9236BF-E6A2-E28F-4F5C-47AE3B8BD128}</UniqueIdentifier>
-    </Filter>
     <Filter Include="mupdf\source\html">
       <UniqueIdentifier>{C5338492-314A-8228-7AC1-0D4AE61653B0}</UniqueIdentifier>
     </Filter>
@@ -75,6 +72,12 @@
     </Filter>
     <Filter Include="mupdf\source\xps">
       <UniqueIdentifier>{CBEFAEFC-B7E8-CD4E-E01A-B3D3CC72AD5A}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src">
+      <UniqueIdentifier>{2DAB880B-99B4-887C-2230-9F7C8E38947C}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\mupdf">
+      <UniqueIdentifier>{788FB2B5-E4F9-662C-2D38-18D299E14481}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>
@@ -195,6 +198,9 @@
     <ClInclude Include="..\mupdf\include\mupdf\fitz\pool.h">
       <Filter>mupdf\include\mupdf\fitz</Filter>
     </ClInclude>
+    <ClInclude Include="..\mupdf\include\mupdf\fitz\regexp.h">
+      <Filter>mupdf\include\mupdf\fitz</Filter>
+    </ClInclude>
     <ClInclude Include="..\mupdf\include\mupdf\fitz\separation.h">
       <Filter>mupdf\include\mupdf\fitz</Filter>
     </ClInclude>
@@ -259,9 +265,6 @@
       <Filter>mupdf\include\mupdf\helpers</Filter>
     </ClInclude>
     <ClInclude Include="..\mupdf\include\mupdf\helpers\pkcs7-openssl.h">
-      <Filter>mupdf\include\mupdf\helpers</Filter>
-    </ClInclude>
-    <ClInclude Include="..\mupdf\include\mupdf\helpers\pkcs7-windows.h">
       <Filter>mupdf\include\mupdf\helpers</Filter>
     </ClInclude>
     <ClInclude Include="..\mupdf\include\mupdf\html.h">
@@ -355,6 +358,9 @@
       <Filter>mupdf\source\fitz</Filter>
     </ClInclude>
     <ClInclude Include="..\mupdf\source\fitz\encodings.h">
+      <Filter>mupdf\source\fitz</Filter>
+    </ClInclude>
+    <ClInclude Include="..\mupdf\source\fitz\fitz-imp.h">
       <Filter>mupdf\source\fitz</Filter>
     </ClInclude>
     <ClInclude Include="..\mupdf\source\fitz\font-table.h">
@@ -483,6 +489,9 @@
       <Filter>mupdf\source\fitz</Filter>
     </ClCompile>
     <ClCompile Include="..\mupdf\source\fitz\crypt-arc4.c">
+      <Filter>mupdf\source\fitz</Filter>
+    </ClCompile>
+    <ClCompile Include="..\mupdf\source\fitz\crypt-chacha20.c">
       <Filter>mupdf\source\fitz</Filter>
     </ClCompile>
     <ClCompile Include="..\mupdf\source\fitz\crypt-md5.c">
@@ -674,6 +683,9 @@
     <ClCompile Include="..\mupdf\source\fitz\load-tiff.c">
       <Filter>mupdf\source\fitz</Filter>
     </ClCompile>
+    <ClCompile Include="..\mupdf\source\fitz\load-webp.c">
+      <Filter>mupdf\source\fitz</Filter>
+    </ClCompile>
     <ClCompile Include="..\mupdf\source\fitz\log.c">
       <Filter>mupdf\source\fitz</Filter>
     </ClCompile>
@@ -750,6 +762,9 @@
       <Filter>mupdf\source\fitz</Filter>
     </ClCompile>
     <ClCompile Include="..\mupdf\source\fitz\random.c">
+      <Filter>mupdf\source\fitz</Filter>
+    </ClCompile>
+    <ClCompile Include="..\mupdf\source\fitz\regexp.c">
       <Filter>mupdf\source\fitz</Filter>
     </ClCompile>
     <ClCompile Include="..\mupdf\source\fitz\separation.c">
@@ -874,9 +889,6 @@
     </ClCompile>
     <ClCompile Include="..\mupdf\source\helpers\mu-threads\mu-threads.c">
       <Filter>mupdf\source\helpers\mu-threads</Filter>
-    </ClCompile>
-    <ClCompile Include="..\mupdf\source\helpers\pkcs7\pkcs7-windows.c">
-      <Filter>mupdf\source\helpers\pkcs7</Filter>
     </ClCompile>
     <ClCompile Include="..\mupdf\source\html\css-apply.c">
       <Filter>mupdf\source\html</Filter>
@@ -1195,6 +1207,9 @@
     </ClCompile>
     <ClCompile Include="..\mupdf\source\xps\xps-zip.c">
       <Filter>mupdf\source\xps</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\mupdf\pkcs7-windows.c">
+      <Filter>src\mupdf</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>

@@ -1,4 +1,4 @@
-// Copyright (C) 2025 Artifex Software, Inc.
+// Copyright (C) 2026 Artifex Software, Inc.
 //
 // This file is part of MuPDF.
 //
@@ -237,6 +237,8 @@ static void fz_parse_options_querystring(fz_context *ctx, fz_options *options, c
 		{
 			v = vv = s;
 		}
+		if (*s == '&')
+			++s;
 		add_option(ctx, options, k, kk, v, vv, unescape_url);
 	}
 }
@@ -386,6 +388,7 @@ static void fz_parse_options_json(fz_context *ctx, fz_options *options, const ch
 		// optional comma
 		if (*s != ',' && *s != '}')
 			fz_throw(ctx, FZ_ERROR_ARGUMENT, "invalid option syntax (expected ',' or '}')");
+		++s;
 
 		add_option(ctx, options, k, kk, v, vv, unescape_json);
 	}

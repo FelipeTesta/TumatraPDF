@@ -29,7 +29,7 @@
 /* default page size */
 #define DEF_WIDTH 612
 #define DEF_HEIGHT 792
-#define DEF_FONTSIZE 12
+#define DEF_FONTSIZE 16
 
 #define MAX_USE_DEPTH 100
 
@@ -241,7 +241,7 @@ svg_run_circle(fz_context *ctx, fz_device *dev, svg_document *doc, fz_xml *node,
 
 		if (cx_att) cx = svg_parse_length(cx_att, local_state.viewbox_w, local_state.fontsize);
 		if (cy_att) cy = svg_parse_length(cy_att, local_state.viewbox_h, local_state.fontsize);
-		if (r_att) r = svg_parse_length(r_att, local_state.viewbox_size, 12);
+		if (r_att) r = svg_parse_length(r_att, local_state.viewbox_size, local_state.fontsize);
 
 		if (r > 0)
 		{
@@ -1041,17 +1041,75 @@ svg_parse_viewbox(fz_context *ctx, svg_document *doc, fz_xml *node, svg_state *s
 static const char *linecap_table[] = { "butt", "round", "square" };
 static const char *linejoin_table[] = { "miter", "round", "bevel" };
 
+/* SumatraPDF: minimal CSS class support (#2155) */
+static int
+svg_has_class(const char *class_att, const char *name)
+{
+	size_t n = strlen(name);
+	const char *p = class_att;
+
+	while (*p)
+	{
+		while (*p && svg_is_whitespace(*p))
+			++p;
+		if (!strncmp(p, name, n) && (!p[n] || svg_is_whitespace(p[n])))
+			return 1;
+		while (*p && !svg_is_whitespace(*p))
+			++p;
+	}
+
+	return 0;
+}
+
+/* Splice the declarations of the element's classes onto its style attribute.
+ * The svg_parse_*_from_style() lookups take the first match, so the inline
+ * style comes first and the class rules follow in cascade order.
+ * Returns NULL (use style_att as is) when no class rule applies. */
+static char *
+svg_style_with_classes(fz_context *ctx, svg_document *doc, fz_xml *node, const char *style_att)
+{
+	const char *class_att = fz_xml_att(node, "class");
+	svg_class *cls;
+	size_t n = 1;
+	char *s, *p;
+
+	if (!class_att || !doc->classes)
+		return NULL;
+
+	for (cls = doc->classes; cls; cls = cls->next)
+		if (svg_has_class(class_att, cls->name))
+			n += strlen(cls->decl) + 1;
+	if (n == 1)
+		return NULL;
+	if (style_att)
+		n += strlen(style_att) + 1;
+
+	p = s = fz_malloc(ctx, n);
+	if (style_att)
+	{
+		p += fz_strlcpy(p, style_att, n);
+		*p++ = ';';
+	}
+	for (cls = doc->classes; cls; cls = cls->next)
+		if (svg_has_class(class_att, cls->name))
+		{
+			p += fz_strlcpy(p, cls->decl, n - (p - s));
+			*p++ = ';';
+		}
+	*p = 0;
+
+	return s;
+}
+
 /* parse transform and presentation attributes */
 static void
-svg_parse_common(fz_context *ctx, svg_document *doc, fz_xml *node, svg_state *state)
+svg_parse_common_imp(fz_context *ctx, svg_document *doc, fz_xml *node, svg_state *state, char *style_att)
 {
 	fz_stroke_state *stroke = state->stroke = fz_unshare_stroke_state(ctx, state->stroke);
 
 	char *transform_att = fz_xml_att(node, "transform");
 
 	char *font_size_att = fz_xml_att(node, "font-size");
-
-	char *style_att = fz_xml_att(node, "style");
 
 	// TODO: clip, clip-path, clip-rule
 
@@ -1200,9 +1258,22 @@ svg_parse_common(fz_context *ctx, svg_document *doc, fz_xml *node, svg_state *st
 }
 
 static void
-svg_parse_font_attributes(fz_context *ctx, svg_document *doc, fz_xml *node, svg_state *state, char *buf, int buf_size)
+svg_parse_common(fz_context *ctx, svg_document *doc, fz_xml *node, svg_state *state)
 {
 	char *style_att = fz_xml_att(node, "style");
+	char *expanded = svg_style_with_classes(ctx, doc, node, style_att);
+
+	fz_try(ctx)
+		svg_parse_common_imp(ctx, doc, node, state, expanded ? expanded : style_att);
+	fz_always(ctx)
+		fz_free(ctx, expanded);
+	fz_catch(ctx)
+		fz_rethrow(ctx);
+}
+
+static void
+svg_parse_font_attributes_imp(fz_context *ctx, svg_document *doc, fz_xml *node, svg_state *state, char *buf, int buf_size, char *style_att)
+{
 	char *font_family_att = fz_xml_att(node, "font-family");
 	char *font_weight_att = fz_xml_att(node, "font-weight");
 	char *font_style_att = fz_xml_att(node, "font-style");
@@ -1261,6 +1332,20 @@ svg_parse_font_attributes(fz_context *ctx, svg_document *doc, fz_xml *node, svg_
 }
 
 static void
+svg_parse_font_attributes(fz_context *ctx, svg_document *doc, fz_xml *node, svg_state *state, char *buf, int buf_size)
+{
+	char *style_att = fz_xml_att(node, "style");
+	char *expanded = svg_style_with_classes(ctx, doc, node, style_att);
+
+	fz_try(ctx)
+		svg_parse_font_attributes_imp(ctx, doc, node, state, buf, buf_size, expanded ? expanded : style_att);
+	fz_always(ctx)
+		fz_free(ctx, expanded);
+	fz_catch(ctx)
+		fz_rethrow(ctx);
+}
+
+static void
 svg_run_svg(fz_context *ctx, fz_device *dev, svg_document *doc, fz_xml *root, const svg_state *inherit_state)
 {
 	svg_state local_state;
@@ -1300,14 +1385,12 @@ svg_run_g(fz_context *ctx, fz_device *dev, svg_document *doc, fz_xml *root, cons
 {
 	svg_state local_state;
 	fz_xml *node;
-	/* SumatraPDF */
 	char font_family[100];
 
 	svg_begin_state(ctx, &local_state, inherit_state);
 	fz_try(ctx)
 	{
 		svg_parse_common(ctx, doc, root, &local_state);
-		/* SumatraPDF */
 		svg_parse_font_attributes(ctx, doc, root, &local_state, font_family, sizeof font_family);
 
 		for (node = fz_xml_down(root); node; node = fz_xml_next(node))
@@ -1410,15 +1493,117 @@ svg_run_use(fz_context *ctx, fz_device *dev, svg_document *doc, fz_xml *root, co
 		fz_rethrow(ctx);
 }
 
+/* SumatraPDF: load the raster an <image> points at. NULL if it cannot be read. */
+static fz_image *
+svg_load_image_href(fz_context *ctx, svg_document *doc, const char *href)
+{
+	static const char *jpeg_uri = "data:image/jpeg;base64,";
+	static const char *png_uri = "data:image/png;base64,";
+	const char *data = NULL;
+	fz_buffer *buf = NULL;
+	fz_image *img = NULL;
+
+	if (!strncmp(href, jpeg_uri, strlen(jpeg_uri)))
+		data = href + strlen(jpeg_uri);
+	else if (!strncmp(href, png_uri, strlen(png_uri)))
+		data = href + strlen(png_uri);
+
+	fz_var(buf);
+	fz_var(img);
+	fz_try(ctx)
+	{
+		if (data)
+			buf = fz_new_buffer_from_base64(ctx, data, 0);
+		else if (doc->zip)
+		{
+			char path[2048];
+			fz_strlcpy(path, doc->base_uri, sizeof path);
+			fz_strlcat(path, "/", sizeof path);
+			fz_strlcat(path, href, sizeof path);
+			fz_urldecode(path);
+			buf = fz_read_archive_entry(ctx, doc->zip, path);
+		}
+		if (buf)
+			img = fz_new_image_from_buffer(ctx, buf);
+	}
+	fz_always(ctx)
+		fz_drop_buffer(ctx, buf);
+	fz_catch(ctx)
+	{
+		fz_rethrow_if(ctx, FZ_ERROR_SYSTEM);
+		fz_report_error(ctx);
+		img = NULL;
+	}
+	return img;
+}
+
+/* Fill in a missing width or height from the raster. Both missing -> pixel size. */
+static void
+svg_image_intrinsic_size(fz_image *img, float *w, float *h)
+{
+	float iw = img->w;
+	float ih = img->h;
+
+	if (iw <= 0 || ih <= 0)
+		return;
+	if (*w <= 0 && *h <= 0)
+	{
+		*w = iw;
+		*h = ih;
+	}
+	else if (*w <= 0)
+		*w = iw * (*h) / ih;
+	else if (*h <= 0)
+		*h = ih * (*w) / iw;
+}
+
+static int
+svg_length_is_auto(const char *att)
+{
+	return att == NULL || strchr(att, '%') != NULL;
+}
+
+/* First <image> with no width and no height. Nested <svg> is its own viewport. */
+static int
+svg_unsized_image_box(fz_context *ctx, svg_document *doc, fz_xml *node, float *w, float *h)
+{
+	fz_xml *child;
+
+	for (child = fz_xml_down(node); child; child = fz_xml_next(child))
+	{
+		if (fz_xml_is_tag(child, "image"))
+		{
+			char *wa = fz_xml_att(child, "width");
+			char *ha = fz_xml_att(child, "height");
+			char *href = fz_xml_att_alt(child, "xlink:href", "href");
+			fz_image *img;
+
+			if (wa || ha || !href)
+				continue;
+			img = svg_load_image_href(ctx, doc, href);
+			if (!img)
+				continue;
+			*w = img->w;
+			*h = img->h;
+			fz_drop_image(ctx, img);
+			if (*w > 0 && *h > 0)
+				return 1;
+		}
+		else if (!fz_xml_is_tag(child, "svg"))
+		{
+			if (svg_unsized_image_box(ctx, doc, child, w, h))
+				return 1;
+		}
+	}
+	return 0;
+}
+
 static void
 svg_run_image(fz_context *ctx, fz_device *dev, svg_document *doc, fz_xml *root, const svg_state *inherit_state)
 {
 	svg_state local_state;
 	float x=0, y=0, w=0, h=0;
-	const char *data;
-
-	static const char *jpeg_uri = "data:image/jpeg;base64,";
-	static const char *png_uri = "data:image/png;base64,";
+	fz_image *img = NULL;
 
 	char *href_att = fz_xml_att_alt(root, "xlink:href", "href");
 	char *x_att = fz_xml_att(root, "x");
@@ -1427,6 +1612,7 @@ svg_run_image(fz_context *ctx, fz_device *dev, svg_document *doc, fz_xml *root, 
 	char *h_att = fz_xml_att(root, "height");
 
 	svg_begin_state(ctx, &local_state, inherit_state);
+	fz_var(img);
 	fz_try(ctx)
 	{
 		svg_parse_common(ctx, doc, root, &local_state);
@@ -1435,92 +1621,32 @@ svg_run_image(fz_context *ctx, fz_device *dev, svg_document *doc, fz_xml *root, 
 		if (w_att) w = svg_parse_length(w_att, local_state.viewbox_w, local_state.fontsize);
 		if (h_att) h = svg_parse_length(h_att, local_state.viewbox_h, local_state.fontsize);
 
-		if (w <= 0 || h <= 0)
+		if (!href_att)
 			break; // out of try-catch
 
-		if (!href_att)
+		img = svg_load_image_href(ctx, doc, href_att);
+		if (!img)
+		{
+			fz_warn(ctx, "svg: ignoring image '%s'", href_att);
+			break; // out of try-catch
+		}
+
+		/* SumatraPDF: omitted width/height is the raster's pixel size (#6266) */
+		if (w <= 0 || h <= 0)
+			svg_image_intrinsic_size(img, &w, &h);
+		if (w <= 0 || h <= 0)
 			break; // out of try-catch
 
 		local_state.transform = fz_concat(fz_translate(x, y), local_state.transform);
 		local_state.transform = fz_concat(fz_scale(w, h), local_state.transform);
-
-		if (!strncmp(href_att, jpeg_uri, strlen(jpeg_uri)))
-			data = href_att + strlen(jpeg_uri);
-		else if (!strncmp(href_att, png_uri, strlen(png_uri)))
-			data = href_att + strlen(png_uri);
-		else
-			data = NULL;
-		if (data)
-		{
-			fz_image *img = NULL;
-			fz_buffer *buf;
-
-			fz_var(img);
-
-			buf = fz_new_buffer_from_base64(ctx, data, 0);
-			fz_try(ctx)
-			{
-				fz_matrix orient;
-				img = fz_new_image_from_buffer(ctx, buf);
-				orient = fz_image_orientation_matrix(ctx, img);
-				local_state.transform = fz_concat(orient, local_state.transform);
-				fz_fill_image(ctx, dev, img, local_state.transform, 1, fz_default_color_params);
-			}
-			fz_always(ctx)
-			{
-				fz_drop_buffer(ctx, buf);
-				fz_drop_image(ctx, img);
-			}
-			fz_catch(ctx)
-			{
-				fz_rethrow_if(ctx, FZ_ERROR_SYSTEM);
-				fz_report_error(ctx);
-				fz_warn(ctx, "svg: ignoring embedded image '%s'", href_att);
-			}
-		}
-		else if (doc->zip)
-		{
-			char path[2048];
-			fz_buffer *buf = NULL;
-			fz_image *img = NULL;
-
-			fz_var(buf);
-			fz_var(img);
-
-			fz_strlcpy(path, doc->base_uri, sizeof path);
-			fz_strlcat(path, "/", sizeof path);
-			fz_strlcat(path, href_att, sizeof path);
-			fz_urldecode(path);
-
-			fz_try(ctx)
-			{
-				fz_matrix orient;
-				buf = fz_read_archive_entry(ctx, doc->zip, path);
-				img = fz_new_image_from_buffer(ctx, buf);
-				orient = fz_image_orientation_matrix(ctx, img);
-				local_state.transform = fz_concat(orient, local_state.transform);
-				fz_fill_image(ctx, dev, img, local_state.transform, 1, fz_default_color_params);
-			}
-			fz_always(ctx)
-			{
-				fz_drop_buffer(ctx, buf);
-				fz_drop_image(ctx, img);
-			}
-			fz_catch(ctx)
-			{
-				fz_rethrow_if(ctx, FZ_ERROR_SYSTEM);
-				fz_report_error(ctx);
-				fz_warn(ctx, "svg: ignoring external image '%s'", href_att);
-			}
-		}
-		else
-		{
-			fz_warn(ctx, "svg: ignoring external image '%s'", href_att);
-		}
-
+		local_state.transform = fz_concat(fz_image_orientation_matrix(ctx, img), local_state.transform);
+		fz_fill_image(ctx, dev, img, local_state.transform, 1, fz_default_color_params);
 	}
 	fz_always(ctx)
+	{
+		fz_drop_image(ctx, img);
 		svg_end_state(ctx, &local_state);
+	}
 	fz_catch(ctx)
 		fz_rethrow(ctx);
 }
@@ -1792,6 +1918,18 @@ svg_parse_document_bounds(fz_context *ctx, svg_document *doc, fz_xml *root)
 		if (h_att)
 			doc->height = svg_parse_length(h_att, doc->height, DEF_FONTSIZE);
 	}
+
+	/* SumatraPDF: no viewBox and a percentage size. An unsized <image>
+	 * was skipped, leaving a blank letter page. Use its pixel size (#6266). */
+	if (!viewbox_att && svg_length_is_auto(w_att) && svg_length_is_auto(h_att))
+	{
+		float iw = 0, ih = 0;
+		if (svg_unsized_image_box(ctx, doc, root, &iw, &ih))
+		{
+			doc->width = iw;
+			doc->height = ih;
+		}
+	}
 }
 
 void
@@ -1813,7 +1951,7 @@ svg_run_document(fz_context *ctx, svg_document *doc, fz_xml *root, fz_device *de
 	state.viewbox_h = DEF_HEIGHT;
 	state.viewbox_size = sqrtf(DEF_WIDTH*DEF_WIDTH + DEF_HEIGHT*DEF_HEIGHT) / sqrtf(2);
 
-	state.fontsize = 12;
+	state.fontsize = DEF_FONTSIZE;
 
 	state.opacity = 1;
 

@@ -17,7 +17,7 @@
 extern "C" {
 #include <mupdf/pdf.h>
 #if defined(_WIN32)
-#include <mupdf/helpers/pkcs7-windows.h>
+#include <mupdf/pkcs7-windows.h>
 #endif
 #include <mupdf/fitz/device.h>
 #include <mupdf/fitz/path.h>

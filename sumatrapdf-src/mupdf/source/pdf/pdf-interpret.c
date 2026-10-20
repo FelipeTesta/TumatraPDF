@@ -1595,6 +1595,7 @@ pdf_process_stream(fz_context *ctx, pdf_processor *proc, pdf_csi *csi, fz_stream
 									csi->stack[0] = pdf_to_real(ctx, o);
 									pdf_array_delete(ctx, csi->obj, n-1);
 									pdf_process_keyword(ctx, proc, csi, stm, buf->scratch);
+									break; /* keep parsing the rest of the array */
 								}
 							}
 						}
@@ -2011,7 +2012,10 @@ void
 pdf_tos_accumulate_clip(fz_context *ctx, pdf_text_object_state *tos)
 {
 	if (tos->clip_text == NULL)
+	{
 		tos->clip_text = fz_new_text(ctx);
+		tos->clip_text_bbox = fz_empty_rect;
+	}
 }
 
 int
@@ -2059,6 +2063,8 @@ void
 pdf_tos_move_after_char(fz_context *ctx, pdf_text_object_state *tos)
 {
 	tos->text_bbox = fz_union_rect(tos->text_bbox, tos->char_bbox);
+	if (tos->clip_text)
+		tos->clip_text_bbox = fz_union_rect(tos->clip_text_bbox, tos->char_bbox);
 	tos->tm = fz_pre_translate(tos->tm, tos->char_tx, tos->char_ty);
 }
 

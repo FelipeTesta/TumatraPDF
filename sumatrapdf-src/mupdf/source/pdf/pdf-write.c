@@ -22,6 +22,7 @@
 
 #include "mupdf/fitz.h"
 #include "pdf-annot-imp.h"
+#include "pdf-imp.h"
 
 #include <zlib.h>
 
@@ -59,12 +60,14 @@ typedef struct
 	int do_preserve_metadata;
 	int do_use_objstms;
 	int compression_effort;
+	int reproducible;
 
 	int list_len;
 	int *use_list;
 	int64_t *ofs_list;
 	int *gen_list;
 	int *renumber_map;
+	uint32_t *obj_crc;
 
 	pdf_object_labels *labels;
 	int num_labels;
@@ -241,6 +244,7 @@ static int removeduplicateobjs(fz_context *ctx, pdf_document *doc, pdf_write_sta
 	int changed = 0;
 
 	expand_lists(ctx, opts, xref_len);
+	opts->obj_crc = fz_realloc_array(ctx, opts->obj_crc, xref_len, uint32_t);
 	for (num = 1; num < xref_len; num++)
 	{
 		pdf_obj *a;
@@ -248,7 +252,11 @@ static int removeduplicateobjs(fz_context *ctx, pdf_document *doc, pdf_write_sta
 		if (num >= opts->list_len || !opts->use_list[num])
 			continue;
 
-		a = pdf_get_xref_entry_no_null(ctx, doc, num)->obj;
+		a = pdf_hash_obj(ctx, doc, num, (opts->do_garbage >= 4), &opts->obj_crc[num]);
+
+		/* Never common up pages! */
+		if (pdf_name_eq(ctx, pdf_dict_get(ctx, a, PDF_NAME(Type)), PDF_NAME(Page)))
+			continue;
 
 		/* Only compare an object to objects preceding it */
 		for (other = 1; other < num; other++)
@@ -260,6 +268,8 @@ static int removeduplicateobjs(fz_context *ctx, pdf_document *doc, pdf_write_sta
 				continue;
 
 			/* TODO: resolve indirect references to see if we can omit them */
+			if (opts->obj_crc[num] != opts->obj_crc[other])
+				continue;
 
 			b = pdf_get_xref_entry_no_null(ctx, doc, other)->obj;
 			if (opts->do_garbage >= 4)
@@ -272,10 +282,6 @@ static int removeduplicateobjs(fz_context *ctx, pdf_document *doc, pdf_write_sta
 				if (pdf_objcmp(ctx, a, b))
 					continue;
 			}
-
-			/* Never common up pages! */
-			if (pdf_name_eq(ctx, pdf_dict_get(ctx, a, PDF_NAME(Type)), PDF_NAME(Page)))
-				continue;
 
 			/* Keep the lowest numbered object */
 			newnum = fz_mini(num, other);
@@ -1659,10 +1665,13 @@ writeobjects(fz_context *ctx, pdf_document *doc, pdf_write_state *opts)
 		fz_write_string(ctx, opts->out, "%\xC2\xB5\xC2\xB6\n");
 	}
 
+	if (opts->reproducible)
+		fz_write_string(ctx, opts->out, "% Written by MuPDF\n\n");
+	else
 #ifdef CLUSTER
-	fz_write_string(ctx, opts->out, "% Written by MuPDF CLUSTER\n\n");
+		fz_write_string(ctx, opts->out, "% Written by MuPDF CLUSTER\n\n");
 #else
-	fz_write_string(ctx, opts->out, "% Written by MuPDF " FZ_VERSION "\n\n");
+		fz_write_string(ctx, opts->out, "% Written by MuPDF " FZ_VERSION "\n\n");
 #endif
 
 	for (num = 0; num < xref_len; num++)
@@ -1910,6 +1919,7 @@ static void initialise_write_state(fz_context *ctx, pdf_document *doc, const pdf
 	opts->dont_regenerate_id = in_opts->dont_regenerate_id;
 	opts->do_preserve_metadata = in_opts->do_preserve_metadata;
 	opts->do_use_objstms = in_opts->do_use_objstms;
+	opts->reproducible = in_opts->reproducible;
 
 	opts->permissions = in_opts->permissions;
 	memcpy(opts->opwd_utf8, in_opts->opwd_utf8, nelem(opts->opwd_utf8));
@@ -1934,6 +1944,7 @@ static void finalise_write_state(fz_context *ctx, pdf_write_state *opts)
 	fz_free(ctx, opts->ofs_list);
 	fz_free(ctx, opts->gen_list);
 	fz_free(ctx, opts->renumber_map);
+	fz_free(ctx, opts->obj_crc);
 	pdf_drop_object_labels(ctx, opts->labels);
 }
 
@@ -2005,6 +2016,7 @@ const char *fz_pdf_write_options_usage =
 	"\tuser-password=PASSWORD: password required to read document\n"
 	"\towner-password=PASSWORD: password required to edit document\n"
 	"\tregenerate-id: (default yes) regenerate document id\n"
+	"\treproducible: (default no) attempt to make document writes reproducible\n"
 	"\n";
 
 void
@@ -2067,6 +2079,7 @@ pdf_apply_write_options(fz_context *ctx, pdf_write_options *opts, fz_options *ar
 	fz_lookup_option_boolean(ctx, args, "sanitize", &opts->do_sanitize);
 	fz_lookup_option_boolean(ctx, args, "incremental", &opts->do_incremental);
 	fz_lookup_option_boolean(ctx, args, "objstms", &opts->do_use_objstms);
+	fz_lookup_option_boolean(ctx, args, "reproducible", &opts->reproducible);
 
 	fz_lookup_option_integer(ctx, args, "compression-effort", &opts->compression_effort);
 
@@ -2854,6 +2867,9 @@ do_pdf_save_document(fz_context *ctx, pdf_document *doc, pdf_write_state *opts, 
 		}
 
 		pdf_sync_open_pages(ctx, doc);
+
+		// mark incremental sections as having been saved
+		doc->num_incremental_sections = 0;
 
 		pdf_end_operation(ctx, doc);
 	}

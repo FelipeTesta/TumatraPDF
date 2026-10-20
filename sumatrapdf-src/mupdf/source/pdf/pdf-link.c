@@ -138,7 +138,6 @@ populate_destination(fz_context *ctx, pdf_document *doc, pdf_obj *dest, int is_r
 		p = fz_transform_point_xy(arg1v, arg2v, ctm);
 		destination->x = arg1 ? p.x : NAN;
 		destination->y = arg2 ? p.y : NAN;
-		/* SumatraPDF */
 		destination->zoom = arg3 ? (arg3v > 0 ? (arg3v * 100) : NAN) : NAN;
 		break;
 	case FZ_LINK_DEST_FIT_R:
@@ -266,17 +265,17 @@ get_file_stream_and_name(fz_context *ctx, pdf_obj *fs, pdf_obj **namep)
 	 * spec, but we'd rather find the embedded file than
 	 * not. */
 	if (any_name && !file)
-{
+	{
 		name = any_name;
 		file = pdf_dict_get(ctx, ef, PDF_NAME(UF));
 		if (file == NULL)
-		file = pdf_dict_get(ctx, ef, PDF_NAME(F));
+			file = pdf_dict_get(ctx, ef, PDF_NAME(F));
 		if (file == NULL)
-		file = pdf_dict_get(ctx, ef, PDF_NAME(Unix));
+			file = pdf_dict_get(ctx, ef, PDF_NAME(Unix));
 		if (file == NULL)
-		file = pdf_dict_get(ctx, ef, PDF_NAME(DOS));
+			file = pdf_dict_get(ctx, ef, PDF_NAME(DOS));
 		if (file == NULL)
-		file = pdf_dict_get(ctx, ef, PDF_NAME(Mac));
+			file = pdf_dict_get(ctx, ef, PDF_NAME(Mac));
 	}
 
 	if (namep)
@@ -704,6 +703,8 @@ pdf_load_link_annots(fz_context *ctx, pdf_document *doc, pdf_page *page, pdf_obj
 	fz_link *head, *tail;
 	pdf_obj *obj;
 	int i, n;
+
+	fz_var(head);
 
 	head = tail = NULL;
 

@@ -552,13 +552,13 @@ static void doc_resetForm(js_State *J)
 		fz_try(ctx)
 		{
 			n = pdf_array_len(ctx, form);
-		for (i = 0; i < n; i++)
+			for (i = 0; i < n; i++)
 				pdf_field_reset(ctx, js->doc, pdf_array_get(ctx, form, i));
 		}
-			fz_catch(ctx)
-				rethrow(js);
-		}
+		fz_catch(ctx)
+			rethrow(js);
 	}
+}
 
 static void doc_print(js_State *J)
 {
@@ -807,8 +807,7 @@ static void util_printf(js_State *J)
 					w = w * 10 + (c - '0');
 					c = *fmt++;
 				}
-				if (w < 0)
-					w = 0;
+				/* w is unsigned, so never < 0 */
 				if (!c)
 					break;
 

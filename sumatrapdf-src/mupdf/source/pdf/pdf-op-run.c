@@ -871,6 +871,9 @@ pdf_show_image_imp(fz_context *ctx, pdf_run_processor *pr, fz_image *image, fz_m
 	pdf_gstate *gstate = pr->gstate + pr->gtop;
 	fz_color_params cp = gstate->fill.color_params;
 
+	if (!fz_is_valid_rect(bbox))
+		return;
+
 	if (image->has_intent)
 		cp.ri = image->intent;
 
@@ -987,6 +990,8 @@ pdf_show_path(fz_context *ctx, pdf_run_processor *pr, int doclose, int dofill, i
 			fz_closepath(ctx, path);
 
 		bbox = fz_bound_path(ctx, path, (dostroke ? gstate->stroke_state : NULL), gstate->ctm);
+		if (!fz_is_valid_rect(bbox))
+			dofill = dostroke = 0;
 
 		if (pr->super.hidden)
 			dostroke = dofill = 0;
@@ -1029,9 +1034,9 @@ pdf_show_path(fz_context *ctx, pdf_run_processor *pr, int doclose, int dofill, i
 					break;
 				if (gstate->fill.alpha != 1)
 					fz_begin_group(ctx, pr->dev, bbox, NULL, 0, 0, FZ_BLEND_NORMAL, gstate->fill.alpha);
-					fz_clip_path(ctx, pr->dev, path, even_odd, gstate->ctm, bbox);
-					gstate = pdf_show_pattern(ctx, pr, gstate->fill.pattern, gstate->fill.gstate_num, bbox, PDF_FILL);
-					fz_pop_clip(ctx, pr->dev);
+				fz_clip_path(ctx, pr->dev, path, even_odd, gstate->ctm, bbox);
+				gstate = pdf_show_pattern(ctx, pr, gstate->fill.pattern, gstate->fill.gstate_num, bbox, PDF_FILL);
+				fz_pop_clip(ctx, pr->dev);
 				if (gstate->fill.alpha != 1)
 					fz_end_group(ctx, pr->dev);
 				break;
@@ -1064,9 +1069,9 @@ pdf_show_path(fz_context *ctx, pdf_run_processor *pr, int doclose, int dofill, i
 					break;
 				if (gstate->stroke.alpha != 1)
 					fz_begin_group(ctx, pr->dev, bbox, NULL, 0, 0, FZ_BLEND_NORMAL, gstate->stroke.alpha);
-					fz_clip_stroke_path(ctx, pr->dev, path, gstate->stroke_state, gstate->ctm, bbox);
-					gstate = pdf_show_pattern(ctx, pr, gstate->stroke.pattern, gstate->stroke.gstate_num, bbox, PDF_STROKE);
-					fz_pop_clip(ctx, pr->dev);
+				fz_clip_stroke_path(ctx, pr->dev, path, gstate->stroke_state, gstate->ctm, bbox);
+				gstate = pdf_show_pattern(ctx, pr, gstate->stroke.pattern, gstate->stroke.gstate_num, bbox, PDF_STROKE);
+				fz_pop_clip(ctx, pr->dev);
 				if (gstate->stroke.alpha != 1)
 					fz_end_group(ctx, pr->dev);
 				break;
@@ -1123,6 +1128,7 @@ pdf_flush_text_imp(fz_context *ctx, pdf_run_processor *pr, int flush_clip)
 	int doinvisible;
 	softmask_save softmask = { NULL };
 	int knockout_group = 0;
+	fz_rect tb;
 
 	if (flush_clip)
 		text = pdf_tos_get_clip_text(ctx, &pr->tos);
@@ -1131,37 +1137,39 @@ pdf_flush_text_imp(fz_context *ctx, pdf_run_processor *pr, int flush_clip)
 	if (!text)
 		return gstate;
 
-	pop_any_pending_mcid_changes(ctx, pr);
-
-	/* If we are going to output text, we need to have flushed any begin layers first. */
-	flush_begin_layer(ctx, pr);
-
-	dofill = dostroke = doclip = doinvisible = 0;
-	switch (pr->tos.text_mode)
-	{
-	case 0: dofill = 1; break;
-	case 1: dostroke = 1; break;
-	case 2: dofill = dostroke = 1; break;
-	case 3: doinvisible = 1; break;
-	case 4: dofill = doclip = 1; break;
-	case 5: dostroke = doclip = 1; break;
-	case 6: dofill = dostroke = doclip = 1; break;
-	case 7: doclip = 1; break;
-	}
-
-	if (flush_clip)
-		dostroke = dofill = 0;
-	else
-		doclip = 0;
-
-	if (pr->super.hidden)
-		dostroke = dofill = 0;
-
 	fz_try(ctx)
 	{
-		fz_rect tb = fz_transform_rect(pr->tos.text_bbox, gstate->ctm);
+		pop_any_pending_mcid_changes(ctx, pr);
+
+		/* If we are going to output text, we need to have flushed any begin layers first. */
+		flush_begin_layer(ctx, pr);
+
+		dofill = dostroke = doclip = doinvisible = 0;
+		switch (pr->tos.text_mode)
+		{
+		case 0: dofill = 1; break;
+		case 1: dostroke = 1; break;
+		case 2: dofill = dostroke = 1; break;
+		case 3: doinvisible = 1; break;
+		case 4: dofill = doclip = 1; break;
+		case 5: dostroke = doclip = 1; break;
+		case 6: dofill = dostroke = doclip = 1; break;
+		case 7: doclip = 1; break;
+		}
+
+		if (flush_clip)
+			dostroke = dofill = 0;
+		else
+			doclip = 0;
+
+		if (pr->super.hidden)
+			dostroke = dofill = 0;
+
+		tb = fz_transform_rect(pr->tos.text_bbox, gstate->ctm);
 		if (dostroke)
 			tb = fz_adjust_rect_for_stroke(ctx, tb, gstate->stroke_state, gstate->ctm);
+		if (!fz_is_valid_rect(tb))
+			dofill = dostroke = 0;
 
 		/* Don't bother sending a text group with nothing in it */
 		if (!text->head)
@@ -1258,9 +1266,10 @@ pdf_flush_text_imp(fz_context *ctx, pdf_run_processor *pr, int flush_clip)
 
 		if (doclip)
 		{
+			fz_rect ctb = fz_transform_rect(pr->tos.clip_text_bbox, gstate->ctm);
 			push_nest_clip(ctx, pr);
 			gstate->clip_depth++;
-			fz_clip_text(ctx, pr->dev, text, gstate->ctm, tb);
+			fz_clip_text(ctx, pr->dev, text, gstate->ctm, ctb);
 		}
 	}
 	fz_always(ctx)
@@ -1480,8 +1489,17 @@ int_in_singleton_or_array(fz_context *ctx, pdf_obj *k, int id)
 		for (i = 0; i < n; i++)
 		{
 			pdf_obj *o = pdf_array_get(ctx, k, i);
-			if (pdf_is_int(ctx, o) && pdf_to_int(ctx, o) == id)
-				return 1;
+			if (pdf_is_int(ctx, o))
+			{
+				if (pdf_to_int(ctx, o) == id)
+					return 1;
+			}
+			else
+			{
+				pdf_obj *mcid = pdf_dict_get(ctx, o, PDF_NAME(MCID));
+				if (pdf_is_int(ctx, mcid) && pdf_to_int(ctx, mcid) == id)
+					return 1;
+			}
 		}
 	}
 
@@ -1630,8 +1648,8 @@ pdf_show_text(fz_context *ctx, pdf_run_processor *pr, pdf_obj *text)
 				/* Bug 708615: pdf_show_char inside show_string can realloc gstate. */
 				gstate = pr->gstate + pr->gtop;
 				pdf_show_space(ctx, pr, - pdf_to_real(ctx, item) * gstate->text.size * 0.001f);
+			}
 		}
-	}
 	}
 	else if (pdf_is_string(ctx, text))
 	{
@@ -2013,7 +2031,7 @@ get_lineage(fz_context *ctx, pdf_obj *a, int *lenp)
 		{
 			/* Put a into lineage. */
 			if (max == len)
-{
+			{
 				max *= 2;
 				if (max == 0)
 					max = 32;
@@ -2026,8 +2044,8 @@ get_lineage(fz_context *ctx, pdf_obj *a, int *lenp)
 				break;
 
 			if (a == line[len>>1])
-			fz_throw(ctx, FZ_ERROR_FORMAT, "cycle in structure tree");
-	}
+				fz_throw(ctx, FZ_ERROR_FORMAT, "cycle in structure tree");
+		}
 	}
 	fz_catch(ctx)
 	{
@@ -2071,9 +2089,9 @@ repaired:
 			if (!doc->struct_tree_repaired)
 			{
 				fz_free(ctx, line_a);
-				line_a = NULL; /* SumatraPDF: prevent double free in fz_always if the retry throws */
+				line_a = NULL;
 				fz_free(ctx, line_b);
-				line_b = NULL; /* SumatraPDF */
+				line_b = NULL;
 				(void)pdf_check_structure_tree(ctx, doc);
 				goto repaired;
 			}
@@ -2245,13 +2263,13 @@ push_marked_content(fz_context *ctx, pdf_run_processor *proc, const char *tagstr
 		/* No point in layer processing unnecessarily */
 		if (proc->process_layers)
 		{
-		/* Start any optional content layers. */
-		if (pdf_name_eq(ctx, tag, PDF_NAME(OC)))
-			begin_oc(ctx, proc, val, NULL);
+			/* Start any optional content layers. */
+			if (pdf_name_eq(ctx, tag, PDF_NAME(OC)))
+				begin_oc(ctx, proc, val, NULL);
 
-		/* Special handling for common non-spec extension. */
-		if (pdf_name_eq(ctx, tag, PDF_NAME(Layer)))
-			begin_layer(ctx, proc, val);
+			/* Special handling for common non-spec extension. */
+			if (pdf_name_eq(ctx, tag, PDF_NAME(Layer)))
+				begin_layer(ctx, proc, val);
 		}
 
 		/* Structure */
@@ -3308,7 +3326,7 @@ pdf_close_run_processor(fz_context *ctx, pdf_processor *proc)
 	pop_nest_until_empty(ctx, pr);
 
 	if (pr->process_structure)
-	pop_structure_to(ctx, pr, NULL);
+		pop_structure_to(ctx, pr, NULL);
 
 	clear_marked_content(ctx, pr);
 }
