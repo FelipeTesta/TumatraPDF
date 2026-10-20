@@ -17,7 +17,7 @@ type Args = {
 };
 
 const defaultRepo = "https://github.com/ArtifexSoftware/mujs";
-const defaultRev = "e892c9fdbbddba94e52f656ccb378ed4885e30cc";
+const defaultRev = "01a75ff4324ae8a54cae91a26edd38029424edaa";
 const homepage = "https://mujs.com/";
 
 const depsDir = "deps";

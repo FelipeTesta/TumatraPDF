@@ -924,7 +924,6 @@
     <ClInclude Include="..\ext\libarchive\libarchive\archive_blake2.h" />
     <ClInclude Include="..\ext\libarchive\libarchive\archive_blake2_impl.h" />
     <ClInclude Include="..\ext\libarchive\libarchive\archive_cmdline_private.h" />
-    <ClInclude Include="..\ext\libarchive\libarchive\archive_crc32.h" />
     <ClInclude Include="..\ext\libarchive\libarchive\archive_cryptor_private.h" />
     <ClInclude Include="..\ext\libarchive\libarchive\archive_digest_private.h" />
     <ClInclude Include="..\ext\libarchive\libarchive\archive_endian.h" />
@@ -953,10 +952,12 @@
     <ClInclude Include="..\ext\libarchive\libarchive\archive_string.h" />
     <ClInclude Include="..\ext\libarchive\libarchive\archive_string_composition.h" />
     <ClInclude Include="..\ext\libarchive\libarchive\archive_time_private.h" />
+    <ClInclude Include="..\ext\libarchive\libarchive\archive_umask_private.h" />
     <ClInclude Include="..\ext\libarchive\libarchive\archive_windows.h" />
     <ClInclude Include="..\ext\libarchive\libarchive\archive_write_disk_private.h" />
     <ClInclude Include="..\ext\libarchive\libarchive\archive_write_private.h" />
     <ClInclude Include="..\ext\libarchive\libarchive\archive_write_set_format_private.h" />
+    <ClInclude Include="..\ext\libarchive\libarchive\archive_xml_private.h" />
     <ClInclude Include="..\ext\libarchive\libarchive\archive_xxhash.h" />
     <ClInclude Include="..\ext\libarchive\libarchive\config_freebsd.h" />
     <ClInclude Include="..\ext\libarchive\libarchive\config_macos.h" />
@@ -970,6 +971,7 @@
     <ClCompile Include="..\ext\libarchive\libarchive\archive_blake2sp_ref.c" />
     <ClCompile Include="..\ext\libarchive\libarchive\archive_check_magic.c" />
     <ClCompile Include="..\ext\libarchive\libarchive\archive_cmdline.c" />
+    <ClCompile Include="..\ext\libarchive\libarchive\archive_crc32.c" />
     <ClCompile Include="..\ext\libarchive\libarchive\archive_cryptor.c" />
     <ClCompile Include="..\ext\libarchive\libarchive\archive_digest.c" />
     <ClCompile Include="..\ext\libarchive\libarchive\archive_entry.c" />
@@ -1039,6 +1041,7 @@
     <ClCompile Include="..\ext\libarchive\libarchive\archive_string.c" />
     <ClCompile Include="..\ext\libarchive\libarchive\archive_string_sprintf.c" />
     <ClCompile Include="..\ext\libarchive\libarchive\archive_time.c" />
+    <ClCompile Include="..\ext\libarchive\libarchive\archive_umask.c" />
     <ClCompile Include="..\ext\libarchive\libarchive\archive_util.c" />
     <ClCompile Include="..\ext\libarchive\libarchive\archive_version_details.c" />
     <ClCompile Include="..\ext\libarchive\libarchive\archive_virtual.c" />

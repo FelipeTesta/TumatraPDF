@@ -144,6 +144,7 @@ export const libarchive: LibDef = {
         "archive_acl.c",
         "archive_check_magic.c",
         "archive_cmdline.c",
+        "archive_crc32.c",
         "archive_cryptor.c",
         "archive_digest.c",
         "archive_entry.c",
@@ -166,6 +167,7 @@ export const libarchive: LibDef = {
         "archive_string.c",
         "archive_string_sprintf.c",
         "archive_time.c",
+        "archive_umask.c",
         "archive_util.c",
         "archive_version_details.c",
         "archive_virtual.c",
@@ -317,12 +319,7 @@ export const libwebp: LibDef = {
 export const dav1d: LibDef = {
   name: "dav1d",
   alwaysOptimize: true,
-  defines: [
-    "_CRT_SECURE_NO_WARNINGS",
-    "ARCH_X86_32=0",
-    "ARCH_X86_64=1",
-    "HAVE_ASM=0",
-  ],
+  defines: ["_CRT_SECURE_NO_WARNINGS", "ARCH_X86_32=0", "ARCH_X86_64=1", "HAVE_ASM=0"],
   // NOTE: do NOT include ext/dav1d/include/compat/msvc — it shadows GCC's
   // native <stdatomic.h> with an MSVC-only version
   includes: ["ext/dav1d", "ext/dav1d/include"],
@@ -387,18 +384,8 @@ export const heicdec: LibDef = {
   name: "heicdec",
   alwaysOptimize: true,
   extraCflags: ["-msse4.1"],
-  defines: [
-    "_CRT_SECURE_NO_WARNINGS",
-    "HEIC_HAVE_DAV1D",
-    "HEIC_HAVE_ZLIB",
-    "HEIC_HAVE_BROTLI",
-  ],
-  includes: [
-    "ext/heicdec",
-    "ext/dav1d/include",
-    "ext/a-zlib",
-    "ext/brotli/c/include",
-  ],
+  defines: ["_CRT_SECURE_NO_WARNINGS", "HEIC_HAVE_DAV1D", "HEIC_HAVE_ZLIB", "HEIC_HAVE_BROTLI"],
+  includes: ["ext/heicdec", "ext/dav1d/include", "ext/a-zlib", "ext/brotli/c/include"],
   files: [
     {
       dir: "ext/heicdec",
@@ -492,38 +479,93 @@ const mupdfThirdPartySources: LibDef = {
         "jpeg_nbits.c",
       ],
     },
-    // ── libjpeg-turbo 3.x: 8-bit precision wrappers only (no 12/16-bit) ──
+    // ── libjpeg-turbo 3.x: multi-precision wrappers (3.2.0 dispatches on
+    //    cinfo->data_precision at runtime, so 12/16-bit objects are required);
+    //    template.c is the generator and the PNG wrappers need external spng ──
     {
       dir: "ext/libjpeg-turbo/src/wrapper",
       patterns: [
+        "jcapistd-12.c",
+        "jcapistd-16.c",
         "jcapistd-8.c",
+        "jccoefct-12.c",
         "jccoefct-8.c",
+        "jccolor-12.c",
+        "jccolor-16.c",
         "jccolor-8.c",
+        "jcdctmgr-12.c",
         "jcdctmgr-8.c",
+        "jcdiffct-12.c",
+        "jcdiffct-16.c",
         "jcdiffct-8.c",
+        "jclossls-12.c",
+        "jclossls-16.c",
         "jclossls-8.c",
+        "jcmainct-12.c",
+        "jcmainct-16.c",
         "jcmainct-8.c",
+        "jcprepct-12.c",
+        "jcprepct-16.c",
         "jcprepct-8.c",
+        "jcsample-12.c",
+        "jcsample-16.c",
         "jcsample-8.c",
+        "jdapistd-12.c",
+        "jdapistd-16.c",
         "jdapistd-8.c",
+        "jdcoefct-12.c",
         "jdcoefct-8.c",
+        "jdcolor-12.c",
+        "jdcolor-16.c",
         "jdcolor-8.c",
+        "jddctmgr-12.c",
         "jddctmgr-8.c",
+        "jddiffct-12.c",
+        "jddiffct-16.c",
         "jddiffct-8.c",
+        "jdlossls-12.c",
+        "jdlossls-16.c",
         "jdlossls-8.c",
+        "jdmainct-12.c",
+        "jdmainct-16.c",
         "jdmainct-8.c",
+        "jdmerge-12.c",
         "jdmerge-8.c",
+        "jdpostct-12.c",
+        "jdpostct-16.c",
         "jdpostct-8.c",
+        "jdsample-12.c",
+        "jdsample-16.c",
         "jdsample-8.c",
+        "jfdctfst-12.c",
         "jfdctfst-8.c",
+        "jfdctint-12.c",
         "jfdctint-8.c",
+        "jidctflt-12.c",
         "jidctflt-8.c",
+        "jidctfst-12.c",
         "jidctfst-8.c",
+        "jidctint-12.c",
         "jidctint-8.c",
+        "jidctred-12.c",
         "jidctred-8.c",
+        "jquant1-12.c",
         "jquant1-8.c",
+        "jquant2-12.c",
         "jquant2-8.c",
+        "jutils-12.c",
+        "jutils-16.c",
         "jutils-8.c",
+        "rdcolmap-12.c",
+        "rdcolmap-8.c",
+        "rdppm-12.c",
+        "rdppm-16.c",
+        "rdppm-8.c",
+        "wrgif-12.c",
+        "wrgif-8.c",
+        "wrppm-12.c",
+        "wrppm-16.c",
+        "wrppm-8.c",
       ],
     },
     // ── freetype ──
@@ -649,9 +691,7 @@ const mupdfThirdPartySources: LibDef = {
 };
 
 function sourceFiles(...indexes: number[]): FileGroup[] {
-  return indexes.map((index) =>
-    structuredClone(mupdfThirdPartySources.files[index]),
-  );
+  return indexes.map((index) => structuredClone(mupdfThirdPartySources.files[index]));
 }
 
 function thirdPartyLib(args: {
@@ -696,16 +736,8 @@ export const openjpeg = thirdPartyLib({
 
 export const freetype = thirdPartyLib({
   name: "freetype",
-  defines: [
-    "FT2_BUILD_LIBRARY",
-    'FT_CONFIG_MODULES_H="slimftmodules.h"',
-    'FT_CONFIG_OPTIONS_H="slimftoptions.h"',
-  ],
-  includes: [
-    "mupdf/scripts/freetype",
-    "ext/freetype/include",
-    "ext/brotli/c/include",
-  ],
+  defines: ["FT2_BUILD_LIBRARY", 'FT_CONFIG_MODULES_H="slimftmodules.h"', 'FT_CONFIG_OPTIONS_H="slimftoptions.h"'],
+  includes: ["mupdf/scripts/freetype", "ext/freetype/include", "ext/brotli/c/include"],
   files: sourceFiles(2, 3),
 });
 
@@ -724,18 +756,8 @@ const harfbuzzAllocDefines = [
 
 export const harfbuzz = thirdPartyLib({
   name: "harfbuzz",
-  defines: [
-    "_CRT_SECURE_NO_WARNINGS",
-    "HAVE_FALLBACK=1",
-    "HAVE_OT",
-    "HAVE_UCDN",
-    "HAVE_FREETYPE",
-  ],
-  includes: [
-    "ext/harfbuzz/src/hb-ucdn",
-    "mupdf/scripts/freetype",
-    "ext/freetype/include",
-  ],
+  defines: ["_CRT_SECURE_NO_WARNINGS", "HAVE_FALLBACK=1", "HAVE_OT", "HAVE_UCDN", "HAVE_FREETYPE"],
+  includes: ["ext/harfbuzz/src/hb-ucdn", "mupdf/scripts/freetype", "ext/freetype/include"],
   files: sourceFiles(5),
   debugExtraDefines: ["HAVE_ATEXIT", ...harfbuzzAllocDefines],
   releaseExtraDefines: harfbuzzAllocDefines,
@@ -765,11 +787,7 @@ export const brotli = thirdPartyLib({
 export const cmarkGfm = thirdPartyLib({
   name: "cmark-gfm",
   defines: ["CMARK_GFM_STATIC_DEFINE", "_CRT_SECURE_NO_WARNINGS"],
-  includes: [
-    "ext/cmark-gfm/src",
-    "ext/cmark-gfm/extensions",
-    "mupdf/scripts/cmark-gfm",
-  ],
+  includes: ["ext/cmark-gfm/src", "ext/cmark-gfm/extensions", "mupdf/scripts/cmark-gfm"],
   files: [
     {
       dir: "ext/cmark-gfm/src",
@@ -837,6 +855,7 @@ export const mupdf: LibDef = {
   ],
   includes: [
     "mupdf/include",
+    "src/mupdf",
     "ext/cmark-gfm/src",
     "ext/cmark-gfm/extensions",
     "mupdf/scripts/cmark-gfm",
@@ -1134,7 +1153,7 @@ export const mupdf: LibDef = {
         "pdftrim.c",
       ],
     },
-    { dir: "mupdf/source/helpers/pkcs7", patterns: ["pkcs7-windows.c"] },
+    { dir: "src/mupdf", patterns: ["pkcs7-windows.c"] },
     { dir: "mupdf/source/helpers/mu-threads", patterns: ["mu-threads.c"] },
   ],
 };

@@ -370,7 +370,7 @@
       <DisableSpecificWarnings>4127;4189;4324;4458;4522;4611;4702;4800;6319;4013;4018;4100;4244;4245;4819;%(DisableSpecificWarnings)</DisableSpecificWarnings>
       <PreprocessorDefinitions>IS_TRACY=0;WIN32;_WIN32;WINVER=0x0601;_WIN32_WINNT=0x0601;NTDDI_VERSION=0x06010000;_HAS_ITERATOR_DEBUGGING=0;NDEBUG;_CRT_SECURE_NO_WARNINGS;_HAS_EXCEPTIONS=0;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <UndefinePreprocessorDefinitions>DEBUG;%(UndefinePreprocessorDefinitions)</UndefinePreprocessorDefinitions>
-      <AdditionalIncludeDirectories>..\ext\libjpeg-turbo\src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\ext\libjpeg-turbo\src;..\ext\libjpeg-turbo\simd;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
       <Optimization>MinSpace</Optimization>
       <FunctionLevelLinking>true</FunctionLevelLinking>
@@ -404,7 +404,7 @@
       <DisableSpecificWarnings>4127;4189;4324;4458;4522;4611;4702;4800;6319;4013;4018;4100;4244;4245;4819;%(DisableSpecificWarnings)</DisableSpecificWarnings>
       <PreprocessorDefinitions>IS_TRACY=0;WIN32;_WIN32;WINVER=0x0601;_WIN32_WINNT=0x0601;NTDDI_VERSION=0x06010000;_HAS_ITERATOR_DEBUGGING=0;NDEBUG;_CRT_SECURE_NO_WARNINGS;_HAS_EXCEPTIONS=0;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <UndefinePreprocessorDefinitions>DEBUG;%(UndefinePreprocessorDefinitions)</UndefinePreprocessorDefinitions>
-      <AdditionalIncludeDirectories>..\ext\libjpeg-turbo\src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\ext\libjpeg-turbo\src;..\ext\libjpeg-turbo\simd;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
       <Optimization>MinSpace</Optimization>
       <FunctionLevelLinking>true</FunctionLevelLinking>
@@ -438,7 +438,7 @@
       <DisableSpecificWarnings>4127;4189;4324;4458;4522;4611;4702;4800;6319;4013;4018;4100;4244;4245;4819;%(DisableSpecificWarnings)</DisableSpecificWarnings>
       <PreprocessorDefinitions>IS_TRACY=0;WIN32;_WIN32;WINVER=0x0601;_WIN32_WINNT=0x0601;NTDDI_VERSION=0x06010000;_HAS_ITERATOR_DEBUGGING=0;NDEBUG;_CRT_SECURE_NO_WARNINGS;_HAS_EXCEPTIONS=0;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <UndefinePreprocessorDefinitions>DEBUG;%(UndefinePreprocessorDefinitions)</UndefinePreprocessorDefinitions>
-      <AdditionalIncludeDirectories>..\ext\libjpeg-turbo\src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\ext\libjpeg-turbo\src;..\ext\libjpeg-turbo\simd;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
       <Optimization>MinSpace</Optimization>
       <FunctionLevelLinking>true</FunctionLevelLinking>
@@ -472,7 +472,7 @@
       <DisableSpecificWarnings>4127;4189;4324;4458;4522;4611;4702;4800;6319;4013;4018;4100;4244;4245;4819;%(DisableSpecificWarnings)</DisableSpecificWarnings>
       <PreprocessorDefinitions>ASAN_BUILD=1;IS_TRACY=0;WIN32;_WIN32;WINVER=0x0601;_WIN32_WINNT=0x0601;NTDDI_VERSION=0x06010000;_HAS_ITERATOR_DEBUGGING=0;NDEBUG;_CRT_SECURE_NO_WARNINGS;_HAS_EXCEPTIONS=0;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <UndefinePreprocessorDefinitions>DEBUG;%(UndefinePreprocessorDefinitions)</UndefinePreprocessorDefinitions>
-      <AdditionalIncludeDirectories>..\ext\libjpeg-turbo\src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\ext\libjpeg-turbo\src;..\ext\libjpeg-turbo\simd;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
       <Optimization>MinSpace</Optimization>
       <FunctionLevelLinking>true</FunctionLevelLinking>
@@ -505,7 +505,7 @@
       <WarningLevel>Level4</WarningLevel>
       <DisableSpecificWarnings>4127;4189;4324;4458;4522;4611;4702;4800;6319;4013;4018;4100;4244;4245;4819;%(DisableSpecificWarnings)</DisableSpecificWarnings>
       <PreprocessorDefinitions>IS_TRACY=0;WIN32;_WIN32;WINVER=0x0601;_WIN32_WINNT=0x0601;NTDDI_VERSION=0x06010000;_HAS_ITERATOR_DEBUGGING=0;DEBUG;_CRT_SECURE_NO_WARNINGS;_HAS_EXCEPTIONS=0;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>..\ext\libjpeg-turbo\src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\ext\libjpeg-turbo\src;..\ext\libjpeg-turbo\simd;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
       <Optimization>MinSpace</Optimization>
       <FunctionLevelLinking>true</FunctionLevelLinking>
@@ -538,7 +538,7 @@
       <WarningLevel>Level4</WarningLevel>
       <DisableSpecificWarnings>4127;4189;4324;4458;4522;4611;4702;4800;6319;4013;4018;4100;4244;4245;4819;%(DisableSpecificWarnings)</DisableSpecificWarnings>
       <PreprocessorDefinitions>IS_TRACY=0;WIN32;_WIN32;WINVER=0x0601;_WIN32_WINNT=0x0601;NTDDI_VERSION=0x06010000;_HAS_ITERATOR_DEBUGGING=0;DEBUG;_CRT_SECURE_NO_WARNINGS;_HAS_EXCEPTIONS=0;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>..\ext\libjpeg-turbo\src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\ext\libjpeg-turbo\src;..\ext\libjpeg-turbo\simd;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
       <Optimization>MinSpace</Optimization>
       <FunctionLevelLinking>true</FunctionLevelLinking>
@@ -571,7 +571,7 @@
       <WarningLevel>Level4</WarningLevel>
       <DisableSpecificWarnings>4127;4189;4324;4458;4522;4611;4702;4800;6319;4013;4018;4100;4244;4245;4819;%(DisableSpecificWarnings)</DisableSpecificWarnings>
       <PreprocessorDefinitions>IS_TRACY=0;WIN32;_WIN32;WINVER=0x0601;_WIN32_WINNT=0x0601;NTDDI_VERSION=0x06010000;_HAS_ITERATOR_DEBUGGING=0;DEBUG;_CRT_SECURE_NO_WARNINGS;_HAS_EXCEPTIONS=0;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>..\ext\libjpeg-turbo\src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\ext\libjpeg-turbo\src;..\ext\libjpeg-turbo\simd;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
       <Optimization>MinSpace</Optimization>
       <FunctionLevelLinking>true</FunctionLevelLinking>
@@ -604,7 +604,7 @@
       <WarningLevel>Level4</WarningLevel>
       <DisableSpecificWarnings>4127;4189;4324;4458;4522;4611;4702;4800;6319;4013;4018;4100;4244;4245;4819;%(DisableSpecificWarnings)</DisableSpecificWarnings>
       <PreprocessorDefinitions>ASAN_BUILD=1;IS_TRACY=0;WIN32;_WIN32;WINVER=0x0601;_WIN32_WINNT=0x0601;NTDDI_VERSION=0x06010000;_HAS_ITERATOR_DEBUGGING=0;DEBUG;_CRT_SECURE_NO_WARNINGS;_HAS_EXCEPTIONS=0;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>..\ext\libjpeg-turbo\src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\ext\libjpeg-turbo\src;..\ext\libjpeg-turbo\simd;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
       <Optimization>MinSpace</Optimization>
       <FunctionLevelLinking>true</FunctionLevelLinking>
@@ -638,7 +638,7 @@
       <DisableSpecificWarnings>4127;4189;4324;4458;4522;4611;4702;4800;6319;4013;4018;4100;4244;4245;4819;%(DisableSpecificWarnings)</DisableSpecificWarnings>
       <PreprocessorDefinitions>IS_TRACY=0;WIN32;_WIN32;WINVER=0x0601;_WIN32_WINNT=0x0601;NTDDI_VERSION=0x06010000;_HAS_ITERATOR_DEBUGGING=0;NDEBUG;_CRT_SECURE_NO_WARNINGS;_HAS_EXCEPTIONS=0;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <UndefinePreprocessorDefinitions>DEBUG;%(UndefinePreprocessorDefinitions)</UndefinePreprocessorDefinitions>
-      <AdditionalIncludeDirectories>..\ext\libjpeg-turbo\src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\ext\libjpeg-turbo\src;..\ext\libjpeg-turbo\simd;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
       <Optimization>MinSpace</Optimization>
       <FunctionLevelLinking>true</FunctionLevelLinking>
@@ -672,7 +672,7 @@
       <DisableSpecificWarnings>4127;4189;4324;4458;4522;4611;4702;4800;6319;4013;4018;4100;4244;4245;4819;%(DisableSpecificWarnings)</DisableSpecificWarnings>
       <PreprocessorDefinitions>IS_TRACY=0;WIN32;_WIN32;WINVER=0x0601;_WIN32_WINNT=0x0601;NTDDI_VERSION=0x06010000;_HAS_ITERATOR_DEBUGGING=0;NDEBUG;_CRT_SECURE_NO_WARNINGS;_HAS_EXCEPTIONS=0;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <UndefinePreprocessorDefinitions>DEBUG;%(UndefinePreprocessorDefinitions)</UndefinePreprocessorDefinitions>
-      <AdditionalIncludeDirectories>..\ext\libjpeg-turbo\src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\ext\libjpeg-turbo\src;..\ext\libjpeg-turbo\simd;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
       <Optimization>MinSpace</Optimization>
       <FunctionLevelLinking>true</FunctionLevelLinking>
@@ -706,7 +706,7 @@
       <DisableSpecificWarnings>4127;4189;4324;4458;4522;4611;4702;4800;6319;4013;4018;4100;4244;4245;4819;%(DisableSpecificWarnings)</DisableSpecificWarnings>
       <PreprocessorDefinitions>IS_TRACY=0;WIN32;_WIN32;WINVER=0x0601;_WIN32_WINNT=0x0601;NTDDI_VERSION=0x06010000;_HAS_ITERATOR_DEBUGGING=0;NDEBUG;_CRT_SECURE_NO_WARNINGS;_HAS_EXCEPTIONS=0;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <UndefinePreprocessorDefinitions>DEBUG;%(UndefinePreprocessorDefinitions)</UndefinePreprocessorDefinitions>
-      <AdditionalIncludeDirectories>..\ext\libjpeg-turbo\src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\ext\libjpeg-turbo\src;..\ext\libjpeg-turbo\simd;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
       <Optimization>MinSpace</Optimization>
       <FunctionLevelLinking>true</FunctionLevelLinking>
@@ -740,7 +740,7 @@
       <DisableSpecificWarnings>4127;4189;4324;4458;4522;4611;4702;4800;6319;4013;4018;4100;4244;4245;4819;%(DisableSpecificWarnings)</DisableSpecificWarnings>
       <PreprocessorDefinitions>ASAN_BUILD=1;IS_TRACY=0;WIN32;_WIN32;WINVER=0x0601;_WIN32_WINNT=0x0601;NTDDI_VERSION=0x06010000;_HAS_ITERATOR_DEBUGGING=0;NDEBUG;_CRT_SECURE_NO_WARNINGS;_HAS_EXCEPTIONS=0;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <UndefinePreprocessorDefinitions>DEBUG;%(UndefinePreprocessorDefinitions)</UndefinePreprocessorDefinitions>
-      <AdditionalIncludeDirectories>..\ext\libjpeg-turbo\src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\ext\libjpeg-turbo\src;..\ext\libjpeg-turbo\simd;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
       <Optimization>MinSpace</Optimization>
       <FunctionLevelLinking>true</FunctionLevelLinking>
@@ -773,7 +773,7 @@
       <DisableSpecificWarnings>4127;4189;4324;4458;4522;4611;4702;4800;6319;4013;4018;4100;4244;4245;4819;%(DisableSpecificWarnings)</DisableSpecificWarnings>
       <PreprocessorDefinitions>IS_TRACY=0;WIN32;_WIN32;WINVER=0x0601;_WIN32_WINNT=0x0601;NTDDI_VERSION=0x06010000;_HAS_ITERATOR_DEBUGGING=0;NDEBUG;_CRT_SECURE_NO_WARNINGS;_HAS_EXCEPTIONS=0;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <UndefinePreprocessorDefinitions>DEBUG;%(UndefinePreprocessorDefinitions)</UndefinePreprocessorDefinitions>
-      <AdditionalIncludeDirectories>..\ext\libjpeg-turbo\src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\ext\libjpeg-turbo\src;..\ext\libjpeg-turbo\simd;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
       <Optimization>MinSpace</Optimization>
       <FunctionLevelLinking>true</FunctionLevelLinking>
@@ -808,7 +808,7 @@
       <DisableSpecificWarnings>4127;4189;4324;4458;4522;4611;4702;4800;6319;4013;4018;4100;4244;4245;4819;%(DisableSpecificWarnings)</DisableSpecificWarnings>
       <PreprocessorDefinitions>IS_TRACY=0;WIN32;_WIN32;WINVER=0x0601;_WIN32_WINNT=0x0601;NTDDI_VERSION=0x06010000;_HAS_ITERATOR_DEBUGGING=0;NDEBUG;_CRT_SECURE_NO_WARNINGS;_HAS_EXCEPTIONS=0;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <UndefinePreprocessorDefinitions>DEBUG;%(UndefinePreprocessorDefinitions)</UndefinePreprocessorDefinitions>
-      <AdditionalIncludeDirectories>..\ext\libjpeg-turbo\src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\ext\libjpeg-turbo\src;..\ext\libjpeg-turbo\simd;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
       <Optimization>MinSpace</Optimization>
       <FunctionLevelLinking>true</FunctionLevelLinking>
@@ -843,7 +843,7 @@
       <DisableSpecificWarnings>4127;4189;4324;4458;4522;4611;4702;4800;6319;4013;4018;4100;4244;4245;4819;%(DisableSpecificWarnings)</DisableSpecificWarnings>
       <PreprocessorDefinitions>IS_TRACY=0;WIN32;_WIN32;WINVER=0x0601;_WIN32_WINNT=0x0601;NTDDI_VERSION=0x06010000;_HAS_ITERATOR_DEBUGGING=0;NDEBUG;_CRT_SECURE_NO_WARNINGS;_HAS_EXCEPTIONS=0;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <UndefinePreprocessorDefinitions>DEBUG;%(UndefinePreprocessorDefinitions)</UndefinePreprocessorDefinitions>
-      <AdditionalIncludeDirectories>..\ext\libjpeg-turbo\src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\ext\libjpeg-turbo\src;..\ext\libjpeg-turbo\simd;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
       <Optimization>MinSpace</Optimization>
       <FunctionLevelLinking>true</FunctionLevelLinking>
@@ -878,7 +878,7 @@
       <DisableSpecificWarnings>4127;4189;4324;4458;4522;4611;4702;4800;6319;4013;4018;4100;4244;4245;4819;%(DisableSpecificWarnings)</DisableSpecificWarnings>
       <PreprocessorDefinitions>ASAN_BUILD=1;IS_TRACY=0;WIN32;_WIN32;WINVER=0x0601;_WIN32_WINNT=0x0601;NTDDI_VERSION=0x06010000;_HAS_ITERATOR_DEBUGGING=0;NDEBUG;_CRT_SECURE_NO_WARNINGS;_HAS_EXCEPTIONS=0;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <UndefinePreprocessorDefinitions>DEBUG;%(UndefinePreprocessorDefinitions)</UndefinePreprocessorDefinitions>
-      <AdditionalIncludeDirectories>..\ext\libjpeg-turbo\src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\ext\libjpeg-turbo\src;..\ext\libjpeg-turbo\simd;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
       <Optimization>MinSpace</Optimization>
       <FunctionLevelLinking>true</FunctionLevelLinking>
@@ -906,28 +906,10 @@
     </CustomBuild>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="..\ext\libjpeg-turbo\simd\i386\jsimd.c">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
+    <ClCompile Include="..\ext\libjpeg-turbo\simd\jsimd.c">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug x64_asan|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='DebugFull|x64'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='DebugFull|ARM64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='DebugFull x64_asan|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release x64_asan|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='ReleaseAnalyze|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='ReleaseAnalyze|ARM64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='ReleaseAnalyze x64_asan|x64'">true</ExcludedFromBuild>
-    </ClCompile>
-    <ClCompile Include="..\ext\libjpeg-turbo\simd\x86_64\jsimd.c">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='DebugFull|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='DebugFull|ARM64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='ReleaseAnalyze|Win32'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='ReleaseAnalyze|ARM64'">true</ExcludedFromBuild>
     </ClCompile>
     <ClCompile Include="..\ext\libjpeg-turbo\src\jaricom.c" />
@@ -960,34 +942,87 @@
     <ClCompile Include="..\ext\libjpeg-turbo\src\jmemmgr.c" />
     <ClCompile Include="..\ext\libjpeg-turbo\src\jmemnobs.c" />
     <ClCompile Include="..\ext\libjpeg-turbo\src\jpeg_nbits.c" />
+    <ClCompile Include="..\ext\libjpeg-turbo\src\wrapper\jcapistd-12.c" />
+    <ClCompile Include="..\ext\libjpeg-turbo\src\wrapper\jcapistd-16.c" />
     <ClCompile Include="..\ext\libjpeg-turbo\src\wrapper\jcapistd-8.c" />
+    <ClCompile Include="..\ext\libjpeg-turbo\src\wrapper\jccoefct-12.c" />
     <ClCompile Include="..\ext\libjpeg-turbo\src\wrapper\jccoefct-8.c" />
+    <ClCompile Include="..\ext\libjpeg-turbo\src\wrapper\jccolor-12.c" />
+    <ClCompile Include="..\ext\libjpeg-turbo\src\wrapper\jccolor-16.c" />
     <ClCompile Include="..\ext\libjpeg-turbo\src\wrapper\jccolor-8.c" />
+    <ClCompile Include="..\ext\libjpeg-turbo\src\wrapper\jcdctmgr-12.c" />
     <ClCompile Include="..\ext\libjpeg-turbo\src\wrapper\jcdctmgr-8.c" />
+    <ClCompile Include="..\ext\libjpeg-turbo\src\wrapper\jcdiffct-12.c" />
+    <ClCompile Include="..\ext\libjpeg-turbo\src\wrapper\jcdiffct-16.c" />
     <ClCompile Include="..\ext\libjpeg-turbo\src\wrapper\jcdiffct-8.c" />
+    <ClCompile Include="..\ext\libjpeg-turbo\src\wrapper\jclossls-12.c" />
+    <ClCompile Include="..\ext\libjpeg-turbo\src\wrapper\jclossls-16.c" />
     <ClCompile Include="..\ext\libjpeg-turbo\src\wrapper\jclossls-8.c" />
+    <ClCompile Include="..\ext\libjpeg-turbo\src\wrapper\jcmainct-12.c" />
+    <ClCompile Include="..\ext\libjpeg-turbo\src\wrapper\jcmainct-16.c" />
     <ClCompile Include="..\ext\libjpeg-turbo\src\wrapper\jcmainct-8.c" />
+    <ClCompile Include="..\ext\libjpeg-turbo\src\wrapper\jcprepct-12.c" />
+    <ClCompile Include="..\ext\libjpeg-turbo\src\wrapper\jcprepct-16.c" />
     <ClCompile Include="..\ext\libjpeg-turbo\src\wrapper\jcprepct-8.c" />
+    <ClCompile Include="..\ext\libjpeg-turbo\src\wrapper\jcsample-12.c" />
+    <ClCompile Include="..\ext\libjpeg-turbo\src\wrapper\jcsample-16.c" />
     <ClCompile Include="..\ext\libjpeg-turbo\src\wrapper\jcsample-8.c" />
+    <ClCompile Include="..\ext\libjpeg-turbo\src\wrapper\jdapistd-12.c" />
+    <ClCompile Include="..\ext\libjpeg-turbo\src\wrapper\jdapistd-16.c" />
     <ClCompile Include="..\ext\libjpeg-turbo\src\wrapper\jdapistd-8.c" />
+    <ClCompile Include="..\ext\libjpeg-turbo\src\wrapper\jdcoefct-12.c" />
     <ClCompile Include="..\ext\libjpeg-turbo\src\wrapper\jdcoefct-8.c" />
+    <ClCompile Include="..\ext\libjpeg-turbo\src\wrapper\jdcolor-12.c" />
+    <ClCompile Include="..\ext\libjpeg-turbo\src\wrapper\jdcolor-16.c" />
     <ClCompile Include="..\ext\libjpeg-turbo\src\wrapper\jdcolor-8.c" />
+    <ClCompile Include="..\ext\libjpeg-turbo\src\wrapper\jddctmgr-12.c" />
     <ClCompile Include="..\ext\libjpeg-turbo\src\wrapper\jddctmgr-8.c" />
+    <ClCompile Include="..\ext\libjpeg-turbo\src\wrapper\jddiffct-12.c" />
+    <ClCompile Include="..\ext\libjpeg-turbo\src\wrapper\jddiffct-16.c" />
     <ClCompile Include="..\ext\libjpeg-turbo\src\wrapper\jddiffct-8.c" />
+    <ClCompile Include="..\ext\libjpeg-turbo\src\wrapper\jdlossls-12.c" />
+    <ClCompile Include="..\ext\libjpeg-turbo\src\wrapper\jdlossls-16.c" />
     <ClCompile Include="..\ext\libjpeg-turbo\src\wrapper\jdlossls-8.c" />
+    <ClCompile Include="..\ext\libjpeg-turbo\src\wrapper\jdmainct-12.c" />
+    <ClCompile Include="..\ext\libjpeg-turbo\src\wrapper\jdmainct-16.c" />
     <ClCompile Include="..\ext\libjpeg-turbo\src\wrapper\jdmainct-8.c" />
+    <ClCompile Include="..\ext\libjpeg-turbo\src\wrapper\jdmerge-12.c" />
     <ClCompile Include="..\ext\libjpeg-turbo\src\wrapper\jdmerge-8.c" />
+    <ClCompile Include="..\ext\libjpeg-turbo\src\wrapper\jdpostct-12.c" />
+    <ClCompile Include="..\ext\libjpeg-turbo\src\wrapper\jdpostct-16.c" />
     <ClCompile Include="..\ext\libjpeg-turbo\src\wrapper\jdpostct-8.c" />
+    <ClCompile Include="..\ext\libjpeg-turbo\src\wrapper\jdsample-12.c" />
+    <ClCompile Include="..\ext\libjpeg-turbo\src\wrapper\jdsample-16.c" />
     <ClCompile Include="..\ext\libjpeg-turbo\src\wrapper\jdsample-8.c" />
+    <ClCompile Include="..\ext\libjpeg-turbo\src\wrapper\jfdctfst-12.c" />
     <ClCompile Include="..\ext\libjpeg-turbo\src\wrapper\jfdctfst-8.c" />
+    <ClCompile Include="..\ext\libjpeg-turbo\src\wrapper\jfdctint-12.c" />
     <ClCompile Include="..\ext\libjpeg-turbo\src\wrapper\jfdctint-8.c" />
+    <ClCompile Include="..\ext\libjpeg-turbo\src\wrapper\jidctflt-12.c" />
     <ClCompile Include="..\ext\libjpeg-turbo\src\wrapper\jidctflt-8.c" />
+    <ClCompile Include="..\ext\libjpeg-turbo\src\wrapper\jidctfst-12.c" />
     <ClCompile Include="..\ext\libjpeg-turbo\src\wrapper\jidctfst-8.c" />
+    <ClCompile Include="..\ext\libjpeg-turbo\src\wrapper\jidctint-12.c" />
     <ClCompile Include="..\ext\libjpeg-turbo\src\wrapper\jidctint-8.c" />
+    <ClCompile Include="..\ext\libjpeg-turbo\src\wrapper\jidctred-12.c" />
     <ClCompile Include="..\ext\libjpeg-turbo\src\wrapper\jidctred-8.c" />
+    <ClCompile Include="..\ext\libjpeg-turbo\src\wrapper\jquant1-12.c" />
     <ClCompile Include="..\ext\libjpeg-turbo\src\wrapper\jquant1-8.c" />
+    <ClCompile Include="..\ext\libjpeg-turbo\src\wrapper\jquant2-12.c" />
     <ClCompile Include="..\ext\libjpeg-turbo\src\wrapper\jquant2-8.c" />
+    <ClCompile Include="..\ext\libjpeg-turbo\src\wrapper\jutils-12.c" />
+    <ClCompile Include="..\ext\libjpeg-turbo\src\wrapper\jutils-16.c" />
     <ClCompile Include="..\ext\libjpeg-turbo\src\wrapper\jutils-8.c" />
+    <ClCompile Include="..\ext\libjpeg-turbo\src\wrapper\rdcolmap-12.c" />
+    <ClCompile Include="..\ext\libjpeg-turbo\src\wrapper\rdcolmap-8.c" />
+    <ClCompile Include="..\ext\libjpeg-turbo\src\wrapper\rdppm-12.c" />
+    <ClCompile Include="..\ext\libjpeg-turbo\src\wrapper\rdppm-16.c" />
+    <ClCompile Include="..\ext\libjpeg-turbo\src\wrapper\rdppm-8.c" />
+    <ClCompile Include="..\ext\libjpeg-turbo\src\wrapper\wrgif-12.c" />
+    <ClCompile Include="..\ext\libjpeg-turbo\src\wrapper\wrgif-8.c" />
+    <ClCompile Include="..\ext\libjpeg-turbo\src\wrapper\wrppm-12.c" />
+    <ClCompile Include="..\ext\libjpeg-turbo\src\wrapper\wrppm-16.c" />
+    <ClCompile Include="..\ext\libjpeg-turbo\src\wrapper\wrppm-8.c" />
   </ItemGroup>
   <ItemGroup>
     <CustomBuild Include="..\ext\libjpeg-turbo\simd\i386\jccolor-avx2.asm">
@@ -1545,46 +1580,31 @@
       <Message Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">%(Identity)</Message>
       <Message Condition="'$(Configuration)|$(Platform)'=='ReleaseAnalyze|Win32'">%(Identity)</Message>
     </CustomBuild>
-    <CustomBuild Include="..\ext\libjpeg-turbo\simd\i386\jquant-3dn.asm">
+    <CustomBuild Include="..\ext\libjpeg-turbo\simd\i386\jquantf-3dn.asm">
       <FileType>Document</FileType>
       <Command Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">..\bin\nasm.exe -f win32 -DWIN32 -I ../ext/libjpeg-turbo/simd/nasm/ -I ../ext/libjpeg-turbo/simd/i386/ -o "$(IntDir)/%(Filename).obj" "%(Identity)"</Command>
       <Command Condition="'$(Configuration)|$(Platform)'=='DebugFull|Win32'">..\bin\nasm.exe -f win32 -DWIN32 -I ../ext/libjpeg-turbo/simd/nasm/ -I ../ext/libjpeg-turbo/simd/i386/ -o "$(IntDir)/%(Filename).obj" "%(Identity)"</Command>
       <Command Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">..\bin\nasm.exe -f win32 -DWIN32 -I ../ext/libjpeg-turbo/simd/nasm/ -I ../ext/libjpeg-turbo/simd/i386/ -o "$(IntDir)/%(Filename).obj" "%(Identity)"</Command>
       <Command Condition="'$(Configuration)|$(Platform)'=='ReleaseAnalyze|Win32'">..\bin\nasm.exe -f win32 -DWIN32 -I ../ext/libjpeg-turbo/simd/nasm/ -I ../ext/libjpeg-turbo/simd/i386/ -o "$(IntDir)/%(Filename).obj" "%(Identity)"</Command>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">../out/dbg32/obj-s/libjpeg-turbo/jquant-3dn.obj</Outputs>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='DebugFull|Win32'">../out/dbgfull32/obj-s/libjpeg-turbo/jquant-3dn.obj</Outputs>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">../out/rel32/obj-s/libjpeg-turbo/jquant-3dn.obj</Outputs>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='ReleaseAnalyze|Win32'">../out/rel32_prefast/obj-s/libjpeg-turbo/jquant-3dn.obj</Outputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">../out/dbg32/obj-s/libjpeg-turbo/jquantf-3dn.obj</Outputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='DebugFull|Win32'">../out/dbgfull32/obj-s/libjpeg-turbo/jquantf-3dn.obj</Outputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">../out/rel32/obj-s/libjpeg-turbo/jquantf-3dn.obj</Outputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='ReleaseAnalyze|Win32'">../out/rel32_prefast/obj-s/libjpeg-turbo/jquantf-3dn.obj</Outputs>
       <Message Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">%(Identity)</Message>
       <Message Condition="'$(Configuration)|$(Platform)'=='DebugFull|Win32'">%(Identity)</Message>
       <Message Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">%(Identity)</Message>
       <Message Condition="'$(Configuration)|$(Platform)'=='ReleaseAnalyze|Win32'">%(Identity)</Message>
     </CustomBuild>
-    <CustomBuild Include="..\ext\libjpeg-turbo\simd\i386\jquant-mmx.asm">
+    <CustomBuild Include="..\ext\libjpeg-turbo\simd\i386\jquantf-sse.asm">
       <FileType>Document</FileType>
       <Command Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">..\bin\nasm.exe -f win32 -DWIN32 -I ../ext/libjpeg-turbo/simd/nasm/ -I ../ext/libjpeg-turbo/simd/i386/ -o "$(IntDir)/%(Filename).obj" "%(Identity)"</Command>
       <Command Condition="'$(Configuration)|$(Platform)'=='DebugFull|Win32'">..\bin\nasm.exe -f win32 -DWIN32 -I ../ext/libjpeg-turbo/simd/nasm/ -I ../ext/libjpeg-turbo/simd/i386/ -o "$(IntDir)/%(Filename).obj" "%(Identity)"</Command>
       <Command Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">..\bin\nasm.exe -f win32 -DWIN32 -I ../ext/libjpeg-turbo/simd/nasm/ -I ../ext/libjpeg-turbo/simd/i386/ -o "$(IntDir)/%(Filename).obj" "%(Identity)"</Command>
       <Command Condition="'$(Configuration)|$(Platform)'=='ReleaseAnalyze|Win32'">..\bin\nasm.exe -f win32 -DWIN32 -I ../ext/libjpeg-turbo/simd/nasm/ -I ../ext/libjpeg-turbo/simd/i386/ -o "$(IntDir)/%(Filename).obj" "%(Identity)"</Command>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">../out/dbg32/obj-s/libjpeg-turbo/jquant-mmx.obj</Outputs>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='DebugFull|Win32'">../out/dbgfull32/obj-s/libjpeg-turbo/jquant-mmx.obj</Outputs>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">../out/rel32/obj-s/libjpeg-turbo/jquant-mmx.obj</Outputs>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='ReleaseAnalyze|Win32'">../out/rel32_prefast/obj-s/libjpeg-turbo/jquant-mmx.obj</Outputs>
-      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">%(Identity)</Message>
-      <Message Condition="'$(Configuration)|$(Platform)'=='DebugFull|Win32'">%(Identity)</Message>
-      <Message Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">%(Identity)</Message>
-      <Message Condition="'$(Configuration)|$(Platform)'=='ReleaseAnalyze|Win32'">%(Identity)</Message>
-    </CustomBuild>
-    <CustomBuild Include="..\ext\libjpeg-turbo\simd\i386\jquant-sse.asm">
-      <FileType>Document</FileType>
-      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">..\bin\nasm.exe -f win32 -DWIN32 -I ../ext/libjpeg-turbo/simd/nasm/ -I ../ext/libjpeg-turbo/simd/i386/ -o "$(IntDir)/%(Filename).obj" "%(Identity)"</Command>
-      <Command Condition="'$(Configuration)|$(Platform)'=='DebugFull|Win32'">..\bin\nasm.exe -f win32 -DWIN32 -I ../ext/libjpeg-turbo/simd/nasm/ -I ../ext/libjpeg-turbo/simd/i386/ -o "$(IntDir)/%(Filename).obj" "%(Identity)"</Command>
-      <Command Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">..\bin\nasm.exe -f win32 -DWIN32 -I ../ext/libjpeg-turbo/simd/nasm/ -I ../ext/libjpeg-turbo/simd/i386/ -o "$(IntDir)/%(Filename).obj" "%(Identity)"</Command>
-      <Command Condition="'$(Configuration)|$(Platform)'=='ReleaseAnalyze|Win32'">..\bin\nasm.exe -f win32 -DWIN32 -I ../ext/libjpeg-turbo/simd/nasm/ -I ../ext/libjpeg-turbo/simd/i386/ -o "$(IntDir)/%(Filename).obj" "%(Identity)"</Command>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">../out/dbg32/obj-s/libjpeg-turbo/jquant-sse.obj</Outputs>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='DebugFull|Win32'">../out/dbgfull32/obj-s/libjpeg-turbo/jquant-sse.obj</Outputs>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">../out/rel32/obj-s/libjpeg-turbo/jquant-sse.obj</Outputs>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='ReleaseAnalyze|Win32'">../out/rel32_prefast/obj-s/libjpeg-turbo/jquant-sse.obj</Outputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">../out/dbg32/obj-s/libjpeg-turbo/jquantf-sse.obj</Outputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='DebugFull|Win32'">../out/dbgfull32/obj-s/libjpeg-turbo/jquantf-sse.obj</Outputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">../out/rel32/obj-s/libjpeg-turbo/jquantf-sse.obj</Outputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='ReleaseAnalyze|Win32'">../out/rel32_prefast/obj-s/libjpeg-turbo/jquantf-sse.obj</Outputs>
       <Message Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">%(Identity)</Message>
       <Message Condition="'$(Configuration)|$(Platform)'=='DebugFull|Win32'">%(Identity)</Message>
       <Message Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">%(Identity)</Message>
@@ -1615,6 +1635,21 @@
       <Outputs Condition="'$(Configuration)|$(Platform)'=='DebugFull|Win32'">../out/dbgfull32/obj-s/libjpeg-turbo/jquanti-avx2.obj</Outputs>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">../out/rel32/obj-s/libjpeg-turbo/jquanti-avx2.obj</Outputs>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='ReleaseAnalyze|Win32'">../out/rel32_prefast/obj-s/libjpeg-turbo/jquanti-avx2.obj</Outputs>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">%(Identity)</Message>
+      <Message Condition="'$(Configuration)|$(Platform)'=='DebugFull|Win32'">%(Identity)</Message>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">%(Identity)</Message>
+      <Message Condition="'$(Configuration)|$(Platform)'=='ReleaseAnalyze|Win32'">%(Identity)</Message>
+    </CustomBuild>
+    <CustomBuild Include="..\ext\libjpeg-turbo\simd\i386\jquanti-mmx.asm">
+      <FileType>Document</FileType>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">..\bin\nasm.exe -f win32 -DWIN32 -I ../ext/libjpeg-turbo/simd/nasm/ -I ../ext/libjpeg-turbo/simd/i386/ -o "$(IntDir)/%(Filename).obj" "%(Identity)"</Command>
+      <Command Condition="'$(Configuration)|$(Platform)'=='DebugFull|Win32'">..\bin\nasm.exe -f win32 -DWIN32 -I ../ext/libjpeg-turbo/simd/nasm/ -I ../ext/libjpeg-turbo/simd/i386/ -o "$(IntDir)/%(Filename).obj" "%(Identity)"</Command>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">..\bin\nasm.exe -f win32 -DWIN32 -I ../ext/libjpeg-turbo/simd/nasm/ -I ../ext/libjpeg-turbo/simd/i386/ -o "$(IntDir)/%(Filename).obj" "%(Identity)"</Command>
+      <Command Condition="'$(Configuration)|$(Platform)'=='ReleaseAnalyze|Win32'">..\bin\nasm.exe -f win32 -DWIN32 -I ../ext/libjpeg-turbo/simd/nasm/ -I ../ext/libjpeg-turbo/simd/i386/ -o "$(IntDir)/%(Filename).obj" "%(Identity)"</Command>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">../out/dbg32/obj-s/libjpeg-turbo/jquanti-mmx.obj</Outputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='DebugFull|Win32'">../out/dbgfull32/obj-s/libjpeg-turbo/jquanti-mmx.obj</Outputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">../out/rel32/obj-s/libjpeg-turbo/jquanti-mmx.obj</Outputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='ReleaseAnalyze|Win32'">../out/rel32_prefast/obj-s/libjpeg-turbo/jquanti-mmx.obj</Outputs>
       <Message Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">%(Identity)</Message>
       <Message Condition="'$(Configuration)|$(Platform)'=='DebugFull|Win32'">%(Identity)</Message>
       <Message Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">%(Identity)</Message>

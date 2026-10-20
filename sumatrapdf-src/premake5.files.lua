@@ -84,38 +84,6 @@ function zlib_files()
   })
 end
 
-function zlib_ng_files()
-  files_in_dir("ext/zlib-ng", {
-    "adler32.c",
-    "chunkset.c",
-    "compare258.c",
-    "compress.c",
-    "crc32.c",
-    "crc32_comb.c",
-    "deflate.c",
-    "deflate_fast.c",
-    "deflate_medium.c",
-    "deflate_quick.c",
-    "deflate_slow.c",
-    "functable.c",
-    "gzlib.c",
-    "gzread.c",
-    "gzwrite.c",
-    "infback.c",
-    "inffast.c",
-    "inflate.c",
-    "inftrees.c",
-    "insert_string.c",
-    "trees.c",
-    "uncompr.c",
-    "zutil.c",
-  })
-
-  files_in_dir("ext/zlib-ng/arch/x86", {
-    "*.c",
-  })
-end
-
 function unrar_files()
   files_in_dir("ext/unrar", {
     "archive.*",
@@ -182,6 +150,7 @@ function libarchive_files()
     "archive_acl.c",
     "archive_check_magic.c",
     "archive_cmdline.c",
+    "archive_crc32.c",
     "archive_cryptor.c",
     "archive_digest.c",
     "archive_entry.c",
@@ -204,6 +173,7 @@ function libarchive_files()
     "archive_string.c",
     "archive_string_sprintf.c",
     "archive_time.c",
+    "archive_umask.c",
     "archive_util.c",
     "archive_version_details.c",
     "archive_virtual.c",
@@ -395,50 +365,35 @@ function libjpeg_turbo_files()
     "jerror.c", "jfdctflt.c", "jmemmgr.c", "jmemnobs.c", "jpeg_nbits.c",
   })
 
-  -- libjpeg-turbo 3.x: 8-bit precision wrappers only. Each #includes the
-  -- matching ../<name>.c with BITS_IN_JSAMPLE=8. 12/16-bit wrappers are
-  -- omitted (MuPDF only uses the 8-bit API); jcinit/jdmaster/jdtrans reject
-  -- higher data_precision with JERR_BAD_PRECISION.
-  files_in_dir("ext/libjpeg-turbo/src/wrapper", {
-    "jcapistd-8.c",
-    "jccoefct-8.c",
-    "jccolor-8.c",
-    "jcdctmgr-8.c",
-    "jcdiffct-8.c",
-    "jclossls-8.c",
-    "jcmainct-8.c",
-    "jcprepct-8.c",
-    "jcsample-8.c",
-    "jdapistd-8.c",
-    "jdcoefct-8.c",
-    "jdcolor-8.c",
-    "jddctmgr-8.c",
-    "jddiffct-8.c",
-    "jdlossls-8.c",
-    "jdmainct-8.c",
-    "jdmerge-8.c",
-    "jdpostct-8.c",
-    "jdsample-8.c",
-    "jfdctfst-8.c",
-    "jfdctint-8.c",
-    "jidctflt-8.c",
-    "jidctfst-8.c",
-    "jidctint-8.c",
-    "jidctred-8.c",
-    "jquant1-8.c",
-    "jquant2-8.c",
-    "jutils-8.c",
-  })
+  -- libjpeg-turbo 3.2.0: every precision wrapper is required. jcinit.c and
+  -- jdmaster.c now dispatch on cinfo->data_precision at runtime and reference
+  -- the j12init_*/j16init_* symbols unconditionally (3.1.4.1 picked the
+  -- precision through BITS_IN_JSAMPLE at compile time, so only -8 existed).
+  -- Each wrapper #includes the matching ../<name>.c with its own
+  -- BITS_IN_JSAMPLE; the 8-bit API stays the default for callers.
+  files { "ext/libjpeg-turbo/src/wrapper/*.c" }
+  -- template.c is the generator template; rdpng/wrpng add PNG codec support
+  -- that needs the external spng library, which this fork does not vendor.
+  removefiles {
+    "ext/libjpeg-turbo/src/wrapper/template.c",
+    "ext/libjpeg-turbo/src/wrapper/rdpng-*.c",
+    "ext/libjpeg-turbo/src/wrapper/wrpng-*.c",
+  }
 
   -- arm64: no SIMD (WITH_SIMD is left undefined in jconfig.h/jconfigint.h).
 
+  -- libjpeg-turbo 3.2.0 moved jsimd.c and the jsimd*.h interface headers to
+  -- simd/ (one shared dispatcher; the arch is selected by SIMD_ARCHITECTURE in
+  -- jconfigint.h). The lists below mirror SIMD_SOURCES in simd/CMakeLists.txt —
+  -- the *-ext.asm / *colext.asm files are %include-only fragments pulled in by
+  -- their parent asm file and must NOT be assembled on their own.
   filter { 'platforms:x86' }
   files_in_dir("ext/libjpeg-turbo/simd/i386", {
-    "jsimdcpu.asm", "jfdctflt-3dn.asm", "jidctflt-3dn.asm", "jquant-3dn.asm",
+    "jsimdcpu.asm", "jfdctflt-3dn.asm", "jidctflt-3dn.asm", "jquantf-3dn.asm",
     "jccolor-mmx.asm", "jcgray-mmx.asm", "jcsample-mmx.asm", "jdcolor-mmx.asm",
     "jdmerge-mmx.asm", "jdsample-mmx.asm", "jfdctfst-mmx.asm", "jfdctint-mmx.asm",
-    "jidctfst-mmx.asm", "jidctint-mmx.asm", "jidctred-mmx.asm", "jquant-mmx.asm",
-    "jfdctflt-sse.asm", "jidctflt-sse.asm", "jquant-sse.asm",
+    "jidctfst-mmx.asm", "jidctint-mmx.asm", "jidctred-mmx.asm", "jquanti-mmx.asm",
+    "jfdctflt-sse.asm", "jidctflt-sse.asm", "jquantf-sse.asm",
     "jccolor-sse2.asm", "jcgray-sse2.asm", "jchuff-sse2.asm", "jcphuff-sse2.asm",
     "jcsample-sse2.asm", "jdcolor-sse2.asm", "jdmerge-sse2.asm", "jdsample-sse2.asm",
     "jfdctfst-sse2.asm", "jfdctint-sse2.asm", "jidctflt-sse2.asm", "jidctfst-sse2.asm",
@@ -447,7 +402,7 @@ function libjpeg_turbo_files()
     "jdmerge-avx2.asm", "jdsample-avx2.asm", "jfdctint-avx2.asm", "jidctint-avx2.asm",
     "jquanti-avx2.asm",
   })
-  files { "ext/libjpeg-turbo/simd/i386/jsimd.c" }
+  files { "ext/libjpeg-turbo/simd/jsimd.c" }
 
   filter { 'platforms:x64 or x64_asan' }
   files_in_dir("ext/libjpeg-turbo/simd/x86_64", {
@@ -460,7 +415,7 @@ function libjpeg_turbo_files()
     "jdmerge-avx2.asm", "jdsample-avx2.asm", "jfdctint-avx2.asm", "jidctint-avx2.asm",
     "jquanti-avx2.asm",
   })
-  files { "ext/libjpeg-turbo/simd/x86_64/jsimd.c" }
+  files { "ext/libjpeg-turbo/simd/jsimd.c" }
 
   filter {}
 end
@@ -783,10 +738,11 @@ end
 function darkmodelib_files()
   files_in_dir("ext/darkmodelib/src", {
     "*.h",
-    "DarkModeSubclass.cpp",
+    "Darkmodelib.cpp",
     "DmlibColor.cpp",
     "DmlibDpi.cpp",
     "DmlibHook.cpp",
+    "DmlibIni.cpp",
     "DmlibPaintHelper.cpp",
     "DmlibSubclass.cpp",
     "DmlibSubclassControl.cpp",
@@ -794,7 +750,7 @@ function darkmodelib_files()
     "DmlibWinApi.cpp",
   })
   files_in_dir("ext/darkmodelib/include", {
-    "DarkModeSubclass.h",
+    "Darkmodelib.h",
   })
 end
 
@@ -961,6 +917,7 @@ function mupdf_files()
     "context.c",
     "crypt-aes.c",
     "crypt-arc4.c",
+    "crypt-chacha20.c",
     "crypt-md5.c",
     "crypt-sha2.c",
     "cull-device.c",
@@ -1025,6 +982,7 @@ function mupdf_files()
     "load-pnm.c",
     "load-psd.c",
     "load-tiff.c",
+    "load-webp.c",
     "log.c",
     "memento.c",
     "memory.c",
@@ -1051,6 +1009,7 @@ function mupdf_files()
     "pool.c",
     "printf.c",
     "random.c",
+    "regexp.c",
     "separation.c",
     "shade.c",
     "skew.c",
@@ -1225,7 +1184,7 @@ function mupdf_files()
   }
   files {
     "mupdf/source/helpers/mu-threads/mu-threads.c",
-    "mupdf/source/helpers/pkcs7/pkcs7-windows.c",
+    "src/mupdf/pkcs7-windows.c",
   }
 end
 

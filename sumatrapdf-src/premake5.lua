@@ -222,7 +222,6 @@ end
 
 -- add to a project that links zlib
 function links_zlib()
-  -- links { "zlib-ng" }
   links { "a-zlib" }
 end
 
@@ -667,7 +666,9 @@ workspace "TumatraPDF"
     optimized_conf()
     defines { "_CRT_SECURE_NO_WARNINGS" }
     disablewarnings { "4013", "4018", "4100", "4244", "4245", "4819" }
-    includedirs { "ext/libjpeg-turbo/src" }
+    -- simd/ holds jsimd.c + the jsimd*.h interface headers in 3.2.0 (they used
+    -- to live in src/ and in each per-arch dir).
+    includedirs { "ext/libjpeg-turbo/src", "ext/libjpeg-turbo/simd" }
     filter { 'files:**.asm', 'platforms:x86' }
       buildmessage '%{file.relpath}'
       buildoutputs { '%{cfg.objdir}/%{file.basename}.obj' }
@@ -939,6 +940,7 @@ workspace "TumatraPDF"
     includedirs {
       "mupdf/include",
       "mupdf/generated",
+      "src/mupdf",
       "ext/a-jbig2dec",
       "ext/libjpeg-turbo/src",
       "ext/a-openjpeg",

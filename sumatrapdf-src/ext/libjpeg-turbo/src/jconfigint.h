@@ -34,7 +34,7 @@
 #define PACKAGE_NAME  "libjpeg-turbo"
 
 /* Version number of package */
-#define VERSION  "3.1.4.1"
+#define VERSION  "3.2.0"
 
 /* The size of `size_t', as computed by sizeof. */
 #ifdef _WIN64
@@ -105,4 +105,18 @@
 #define WITH_SIMD 1
 #endif
 
+#endif
+
+/* Architecture selector for the shared simd/jsimd.c dispatcher (libjpeg-turbo
+ * 3.2.0 moved jsimd.c there; CMake normally generates this line from
+ * SIMD_ARCHITECTURE). Values live in simd/jsimdconst.h: NONE -1, X86_64 0,
+ * I386 1. */
+#if !defined(WITH_SIMD)
+#define SIMD_ARCHITECTURE  NONE
+#elif defined(_M_X64) || defined(__x86_64__)
+#define SIMD_ARCHITECTURE  X86_64
+#elif defined(_M_IX86) || defined(__i386__)
+#define SIMD_ARCHITECTURE  I386
+#else
+#define SIMD_ARCHITECTURE  NONE
 #endif

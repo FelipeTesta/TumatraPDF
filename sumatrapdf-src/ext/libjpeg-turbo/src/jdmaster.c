@@ -24,6 +24,9 @@
 #include "jpeglib.h"
 #include "jpegapicomp.h"
 #include "jdmaster.h"
+#ifdef WITH_PROFILE
+#include "tjutil.h"
+#endif
 
 
 /*
@@ -515,6 +518,17 @@ master_selection(j_decompress_ptr cinfo)
   long samplesperrow;
   JDIMENSION jd_samplesperrow;
 
+  /* When decompressing an 8-bit-per-sample lossy JPEG image, we allow the
+   * caller to request 12-bit-per-sample output in order to facilitate shadow
+   * recovery in underexposed images.  However, in all other cases, setting the
+   * output data precision to a different value than the JPEG data precision
+   * will produce unexpected results, such as a bogus output image.
+   */
+  if (cinfo->master->jpeg_data_precision &&
+      cinfo->data_precision != cinfo->master->jpeg_data_precision &&
+      (cinfo->master->lossless || cinfo->data_precision != 12))
+    ERREXIT1(cinfo, JERR_BAD_PRECISION, cinfo->data_precision);
+
   /* Disable IDCT scaling and raw (downsampled) data output in lossless mode.
    * IDCT scaling is not useful in lossless mode, and it must be disabled in
    * order to properly calculate the output dimensions.  Raw data output isn't
@@ -572,9 +586,10 @@ master_selection(j_decompress_ptr cinfo)
 
     if (cinfo->enable_1pass_quant) {
 #ifdef QUANT_1PASS_SUPPORTED
-      /* SumatraPDF: 8-bit only (no 12/16-bit precision wrappers linked). */
       if (cinfo->data_precision == 8)
         jinit_1pass_quantizer(cinfo);
+      else if (cinfo->data_precision == 12)
+        j12init_1pass_quantizer(cinfo);
       else
         ERREXIT1(cinfo, JERR_BAD_PRECISION, cinfo->data_precision);
       master->quantizer_1pass = cinfo->cquantize;
@@ -588,6 +603,8 @@ master_selection(j_decompress_ptr cinfo)
 #ifdef QUANT_2PASS_SUPPORTED
       if (cinfo->data_precision == 8)
         jinit_2pass_quantizer(cinfo);
+      else if (cinfo->data_precision == 12)
+        j12init_2pass_quantizer(cinfo);
       else
         ERREXIT1(cinfo, JERR_BAD_PRECISION, cinfo->data_precision);
       master->quantizer_2pass = cinfo->cquantize;
@@ -606,6 +623,8 @@ master_selection(j_decompress_ptr cinfo)
 #ifdef UPSAMPLE_MERGING_SUPPORTED
       if (cinfo->data_precision == 8)
         jinit_merged_upsampler(cinfo); /* does color conversion too */
+      else if (cinfo->data_precision == 12)
+        j12init_merged_upsampler(cinfo); /* does color conversion too */
       else
         ERREXIT1(cinfo, JERR_BAD_PRECISION, cinfo->data_precision);
 #else
@@ -615,14 +634,28 @@ master_selection(j_decompress_ptr cinfo)
       if (cinfo->data_precision <= 8) {
         jinit_color_deconverter(cinfo);
         jinit_upsampler(cinfo);
+      } else if (cinfo->data_precision <= 12) {
+        j12init_color_deconverter(cinfo);
+        j12init_upsampler(cinfo);
       } else {
+#ifdef D_LOSSLESS_SUPPORTED
+        j16init_color_deconverter(cinfo);
+        j16init_upsampler(cinfo);
+#else
         ERREXIT1(cinfo, JERR_BAD_PRECISION, cinfo->data_precision);
+#endif
       }
     }
     if (cinfo->data_precision <= 8)
       jinit_d_post_controller(cinfo, cinfo->enable_2pass_quant);
+    else if (cinfo->data_precision <= 12)
+      j12init_d_post_controller(cinfo, cinfo->enable_2pass_quant);
     else
+#ifdef D_LOSSLESS_SUPPORTED
+      j16init_d_post_controller(cinfo, cinfo->enable_2pass_quant);
+#else
       ERREXIT1(cinfo, JERR_BAD_PRECISION, cinfo->data_precision);
+#endif
   }
 
   if (cinfo->master->lossless) {
@@ -632,8 +665,10 @@ master_selection(j_decompress_ptr cinfo)
      */
     if (cinfo->data_precision <= 8)
       jinit_lossless_decompressor(cinfo);
+    else if (cinfo->data_precision <= 12)
+      j12init_lossless_decompressor(cinfo);
     else
-      ERREXIT1(cinfo, JERR_BAD_PRECISION, cinfo->data_precision);
+      j16init_lossless_decompressor(cinfo);
     /* Entropy decoding: either Huffman or arithmetic coding. */
     if (cinfo->arith_code) {
       ERREXIT(cinfo, JERR_ARITH_NOTIMPL);
@@ -646,8 +681,10 @@ master_selection(j_decompress_ptr cinfo)
                    cinfo->buffered_image;
     if (cinfo->data_precision <= 8)
       jinit_d_diff_controller(cinfo, use_c_buffer);
+    else if (cinfo->data_precision <= 12)
+      j12init_d_diff_controller(cinfo, use_c_buffer);
     else
-      ERREXIT1(cinfo, JERR_BAD_PRECISION, cinfo->data_precision);
+      j16init_d_diff_controller(cinfo, use_c_buffer);
 #else
     ERREXIT(cinfo, JERR_NOT_COMPILED);
 #endif
@@ -657,6 +694,8 @@ master_selection(j_decompress_ptr cinfo)
     /* Inverse DCT */
     if (cinfo->data_precision == 8)
       jinit_inverse_dct(cinfo);
+    else if (cinfo->data_precision == 12)
+      j12init_inverse_dct(cinfo);
     else
       ERREXIT1(cinfo, JERR_BAD_PRECISION, cinfo->data_precision);
     /* Entropy decoding: either Huffman or arithmetic coding. */
@@ -680,7 +719,10 @@ master_selection(j_decompress_ptr cinfo)
     /* Initialize principal buffer controllers. */
     use_c_buffer = cinfo->inputctl->has_multiple_scans ||
                    cinfo->buffered_image;
-    jinit_d_coef_controller(cinfo, use_c_buffer);
+    if (cinfo->data_precision == 12)
+      j12init_d_coef_controller(cinfo, use_c_buffer);
+    else
+      jinit_d_coef_controller(cinfo, use_c_buffer);
 #else
     ERREXIT(cinfo, JERR_NOT_COMPILED);
 #endif
@@ -689,8 +731,16 @@ master_selection(j_decompress_ptr cinfo)
   if (!cinfo->raw_data_out) {
     if (cinfo->data_precision <= 8)
       jinit_d_main_controller(cinfo, FALSE /* never need full buffer here */);
+    else if (cinfo->data_precision <= 12)
+      j12init_d_main_controller(cinfo,
+                                FALSE /* never need full buffer here */);
     else
+#ifdef D_LOSSLESS_SUPPORTED
+      j16init_d_main_controller(cinfo,
+                                FALSE /* never need full buffer here */);
+#else
       ERREXIT1(cinfo, JERR_BAD_PRECISION, cinfo->data_precision);
+#endif
   }
 
   /* We can now tell the memory manager to allocate virtual arrays. */
@@ -851,6 +901,10 @@ GLOBAL(void)
 jinit_master_decompress(j_decompress_ptr cinfo)
 {
   my_master_ptr master = (my_master_ptr)cinfo->master;
+
+#ifdef WITH_PROFILE
+  master->pub.total_start = getTime();
+#endif
 
   master->pub.prepare_for_output_pass = prepare_for_output_pass;
   master->pub.finish_output_pass = finish_output_pass;

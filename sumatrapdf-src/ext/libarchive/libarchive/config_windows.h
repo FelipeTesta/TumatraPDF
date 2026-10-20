@@ -116,6 +116,7 @@ typedef unsigned short mode_t;
 
 /* BCrypt/CNG digest support (libarchive 3.8.8 dropped legacy WinCrypt) */
 #define HAVE_BCRYPT_H 1
+#define ARCHIVE_CRYPTO_WIN 1
 #define ARCHIVE_CRYPTO_MD5_WIN 1
 #define ARCHIVE_CRYPTO_SHA1_WIN 1
 #define ARCHIVE_CRYPTO_SHA256_WIN 1
