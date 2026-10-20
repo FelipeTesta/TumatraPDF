@@ -100,14 +100,31 @@ async function main() {
     findClangRtLib("clang_rt.asan_dynamic-x86_64.lib"),
     findClangRtLib("clang_rt.asan_dynamic_runtime_thunk-x86_64.lib"),
     mupdfLib,
+    // mupdf's own dependency archives (freetype, harfbuzz, ...); unreferenced
+    // members are skipped by the linker, so listing them all is harmless
+    join("out", "rel64", "obj-s", "freetype.lib"),
+    join("out", "rel64", "obj-s", "harfbuzz.lib"),
+    join("out", "rel64", "obj-s", "a-jbig2dec.lib"),
+    join("out", "rel64", "obj-s", "lcms2.lib"),
+    join("out", "rel64", "obj-s", "libjpeg-turbo.lib"),
+    join("out", "rel64", "obj-s", "libwebp.lib"),
+    join("out", "rel64", "obj-s", "a-openjpeg.lib"),
+    join("out", "rel64", "obj-s", "a-zlib.lib"),
+    join("out", "rel64", "obj-s", "a-mujs.lib"),
+    join("out", "rel64", "obj-s", "brotli.lib"),
+    join("out", "rel64", "obj-s", "a-extract.lib"),
+    join("out", "rel64", "obj-s", "a-gumbo.lib"),
+    join("out", "rel64", "obj-s", "libarchive.lib"),
     "user32.lib",
     "gdi32.lib",
     "advapi32.lib",
     "shell32.lib",
     "uuid.lib",
+    "ole32.lib",
+    "windowscodecs.lib",
   ];
-  await writeFile(rsp, args.map((a) => (a.includes(" ") ? `"${a}"` : a)).join(" ") + "\n");
-  await writeFile(batch, `@echo off\r\ncall "${vcvars}" >nul\r\nlink.exe "@${rsp}"\r\n`);
+  writeFileSync(rsp, args.map((a) => (a.includes(" ") ? `"${a}"` : a)).join(" ") + "\n");
+  writeFileSync(batch, `@echo off\r\ncall "${vcvars}" >nul\r\nlink.exe "@${rsp}"\r\n`);
   await runLogged("cmd.exe", ["/c", batch]);
   copyAsanRuntime();
   console.log(`exe: ${exe}`);

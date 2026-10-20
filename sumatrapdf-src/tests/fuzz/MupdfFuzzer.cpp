@@ -7,9 +7,13 @@
 #include <cstdint>
 #include <cstring>
 
+// the vendored mupdf headers have no extern "C" guards; the app wraps them
+// the same way (see Annotation.cpp)
+extern "C" {
 #include "mupdf/fitz/context.h"
 #include "mupdf/fitz/document.h"
 #include "mupdf/fitz/pixmap.h"
+}
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     if (size == 0 || size > (4u << 20)) {

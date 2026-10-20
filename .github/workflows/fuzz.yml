@@ -1,0 +1,71 @@
+# Nightly fuzzing: the two native libFuzzer harnesses (base text parsers + the
+# mupdf document pipeline), built with clang-cl + ASan and run for a fixed time
+# budget. Advisory only: a crash fails its step (so the run is visible in the
+# UI) but never fails the job; every crash lands in the uploaded artifact
+# together with its repro input.
+#
+# Requirements note: the harness scripts hardcode `C:\Program Files\LLVM` (both
+# clang-cl and the clang_rt.* libs), so LLVM is installed via chocolatey; the
+# Release x64 build supplies the /MT mupdf.lib the mupdf harness links (clang's
+# ASan cannot link the debug CRT).
+
+name: fuzz
+
+on:
+  schedule:
+    - cron: "40 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    runs-on: windows-2022
+    timeout-minutes: 120
+    defaults:
+      run:
+        working-directory: sumatrapdf-src
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - uses: microsoft/setup-msbuild@v2
+      - uses: ilammy/setup-nasm@v1
+      - name: Install LLVM (clang-cl + sanitizer runtimes)
+        run: choco install llvm -y --no-progress
+      - name: Nuget WebView2
+        run: nuget install Microsoft.Web.WebView2 -Version 1.0.4022.49 -OutputDirectory packages -NonInteractive
+
+      - name: Build Release x64 (mupdf.lib + deps for the harness link)
+        run: msbuild vs2022\TumatraPDF.sln /t:TumatraPDF /p:Configuration=Release /p:Platform=x64 /m
+
+      - name: Build harnesses
+        run: |
+          bun ./cmd/build-fuzz-harness.ts
+          bun ./cmd/build-fuzz-harness-mupdf.ts
+
+      - name: Fuzz base text parsers (10 min)
+        continue-on-error: true
+        run: |
+          New-Item -ItemType Directory -Force out\fuzz\corpus | Out-Null
+          out\fuzz\fuzz-parsers.exe -max_total_time=600 -print_final_stats=1 -max_len=65536 out\fuzz\corpus
+
+      - name: Fuzz mupdf document pipeline (15 min)
+        continue-on-error: true
+        run: |
+          New-Item -ItemType Directory -Force out\fuzz\corpus-mupdf | Out-Null
+          Get-ChildItem ext -Recurse -Filter *.pdf | Select-Object -First 20 | Copy-Item -Destination out\fuzz\corpus-mupdf
+          out\fuzz\fuzz-mupdf.exe -max_total_time=900 -print_final_stats=1 -max_len=1048576 out\fuzz\corpus-mupdf
+
+      - name: Upload crash artifacts
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: fuzz-crashes
+          path: |
+            sumatrapdf-src/crash-*
+            sumatrapdf-src/leak-*
+            sumatrapdf-src/oom-*
+            sumatrapdf-src/out/fuzz/corpus*/
+          if-no-files-found: ignore
+          retention-days: 14

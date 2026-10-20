@@ -140,6 +140,16 @@ clangd --check=src/wingui/WebView.cpp    # parse ONE TU, print diagnostics + che
   shards persist in `%LOCALAPPDATA%\clangd\index`, so later queries are instant). Give it a
   few minutes, then retry. Wait until the shard count in that folder stops growing.
 
+## Time Travel Debugging (TTD) (s36-ab)
+
+Deterministic replay of timing/interaction bugs (the toolbar drag-collapse class): record once, replay and inspect forwards AND backwards.
+
+- Tooling: `winget install Microsoft.WinDbg` (1.2610.x). It provides `WinDbgX.exe`, `cdbX64.exe` (execution aliases in `%LOCALAPPDATA%\Microsoft\WindowsApps`) and the recorder at `<pkg>\amd64\ttd\TTD.exe` (`Get-AppxPackage Microsoft.WinDbg` for the path). The System32 `tttracer.exe` is a limited diagnostic variant - not usable for automation.
+- The package dir is execution-protected (Win32 error 5): **copy `amd64\ttd\` to a writable dir** (e.g. `%TEMP%\ttd-bin`) and run `TTD.exe` from there.
+- Recording needs **elevation** (UAC) and a one-time **EULA** accept; both handled by a batch: `echo Y| "%TEMP%\ttd-bin\TTD.exe" -launch "<exe>" <args>`. TTD blocks until the app exits; to record a bounded session, schedule the kill first: `start /b cmd /c "timeout /t 18 /nobreak >nul & taskkill /f /im TumatraPDF.exe"`. Always launch the app with `-for-testing` so no user settings are touched.
+- Output: `<AppName>NN.run` + `.out` in the recorder's cwd. GUI activity is heavy: ~20 MB/s, 190-340 MB for a ~18 s launch+close.
+- Replay headless (verified): `cdbX64.exe -z <trace.run> -c "!tt 0:100; k; q"` - `!tt <pos>` travels in time, `dx @$cursession.TTD.*` exposes the trace model (memory-access queries, `TTD.Commands`, etc.). GUI: `WinDbgX.exe` > File > Open time travel file. Symbols: `_NT_SYMBOL_PATH=srv*<cache>*https://msdl.microsoft.com/download/symbols` (local PDBs resolve from the exe's dir automatically).
+
 ## Static analysis / CI workflows (CodeQL, MSVC /analyze, clang-tidy)
 
 GitHub runs ONLY the workflows at the repo root `.github/workflows/`. The files under
