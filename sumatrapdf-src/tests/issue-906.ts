@@ -33,10 +33,12 @@ export async function testit(): Promise<void> {
   const encryptedPdf = join(tmpdir(), "sumatra-issue-906-encrypted.pdf");
   rmSync(encryptedPdf, { force: true });
 
-  // Command-line tools must run through cmd.exe when invoked from PowerShell
-  // with redirected output; see SumatraStartup.cpp's PowerShell pipe guard.
+  // Spawn the exe directly: Bun's spawn passes an argv array straight to
+  // CreateProcess, so paths with spaces (the repo lives under
+  // "D:\1 Principal\...") need no quoting. Going through `cmd.exe /c` with one
+  // raw command string truncates them at the first space.
   const enc = Bun.spawnSync({
-    cmd: ["cmd.exe", "/c", EXE, "clean", "-E", "aes-256", "-U", PASSWORD, "-O", PASSWORD, SRC_PDF, encryptedPdf],
+    cmd: [EXE, "clean", "-E", "aes-256", "-U", PASSWORD, "-O", PASSWORD, SRC_PDF, encryptedPdf],
     stdout: "pipe",
     stderr: "pipe",
   });

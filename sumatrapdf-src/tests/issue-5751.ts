@@ -72,7 +72,7 @@ async function captureCanvas(
 ): Promise<Buffer> {
   const appdata = join(dir, `appdata-${tag}`);
   mkdirSync(appdata, { recursive: true });
-  writeFileSync(join(appdata, "SumatraPDF-settings.txt"), SETTINGS);
+  writeFileSync(join(appdata, "TumatraPDF-settings.txt"), SETTINGS);
 
   const proc = launchSumatra(["-appdata", appdata, pdf]);
   try {

@@ -25,7 +25,7 @@ export async function testit(): Promise<void> {
     mkdirSync(dir, { recursive: true });
     const doc = join(dir, "paper.pdf");
     copyFileSync(src, doc);
-    writeFileSync(join(dir, "SumatraPDF-settings.txt"), SETTINGS);
+    writeFileSync(join(dir, "TumatraPDF-settings.txt"), SETTINGS);
 
     const proc = Bun.spawn([EXE, "-appdata", dir, doc], { stdout: "pipe", stderr: "ignore" });
     let out = "";

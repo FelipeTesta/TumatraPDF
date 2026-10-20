@@ -113,17 +113,20 @@ function makeZip(entries: { name: string; data: Buffer }[]): Buffer {
   return Buffer.concat([localBuf, centralBuf, end]);
 }
 
-// how many pixels in the middle rows of the canvas differ from the (black)
-// comic book background -- i.e. how much of the page area has something on it
-function paintedPixelsInMiddle(canvas: number): number {
+// how many pixels of the canvas differ from the (black) comic book background --
+// i.e. how much of the page area has something on it. Counted over the whole
+// canvas, not just the middle rows: the "Couldn't render page N" message sits at
+// the page centre, and where that lands on screen depends on the fallback media
+// box of the broken page, the fit zoom and the display DPI scaling (125% here),
+// so a fixed band of rows made the check fail whenever the layout moved.
+function paintedPixels(canvas: number): number {
   const cap = captureWindowPixels(canvas);
   if (!cap) {
     throw new Error("could not capture the canvas");
   }
   const { w, h, data } = cap;
   let n = 0;
-  for (let dy = -10; dy <= 10; dy++) {
-    const y = Math.floor(h / 2) + dy;
+  for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
       const i = (y * w + x) * 4;
       if (data[i]! + data[i + 1]! + data[i + 2]! > 120) {
@@ -165,14 +168,14 @@ export async function testit(): Promise<void> {
     }
     await sleep(1800);
 
-    const painted1 = paintedPixelsInMiddle(canvas);
+    const painted1 = paintedPixels(canvas);
     if (painted1 < 50) {
       throw new Error(`page 1 (a normal image) painted almost nothing: ${painted1} px`);
     }
 
     sendMessage(frame, WM_COMMAND, BigInt(cmdId("CmdGoToNextPage")), 0n);
     await sleep(1800);
-    const painted2 = paintedPixelsInMiddle(canvas);
+    const painted2 = paintedPixels(canvas);
     // the broken page is black; only the "Couldn't render page 2" message is on
     // it, so expect a modest but clearly non-zero number of painted pixels
     if (painted2 < 20) {
@@ -187,11 +190,11 @@ export async function testit(): Promise<void> {
 
     sendMessage(frame, WM_COMMAND, BigInt(cmdId("CmdGoToNextPage")), 0n);
     await sleep(1800);
-    const painted3 = paintedPixelsInMiddle(canvas);
+    const painted3 = paintedPixels(canvas);
     if (painted3 < 50) {
       throw new Error(`page 3 stopped rendering after the broken page: ${painted3} px`);
     }
-    console.log(`  broken cbz page reports itself (${painted2} px painted, normal pages ${painted1}/${painted3}) ✓`);
+    console.log(`  broken cbz page reports itself (${painted2} px painted, normal pages ${painted1}/${painted3}) âœ“`);
   } finally {
     proc.kill();
     await sleep(300);

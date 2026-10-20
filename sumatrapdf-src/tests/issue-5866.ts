@@ -73,7 +73,7 @@ export async function testit(): Promise<void> {
   const appDataDir = tmpPath("issue-5866-appdata");
   rmSync(appDataDir, { recursive: true, force: true });
   mkdirSync(appDataDir, { recursive: true });
-  writeFileSync(join(appDataDir, "SumatraPDF-settings.txt"), SETTINGS);
+  writeFileSync(join(appDataDir, "TumatraPDF-settings.txt"), SETTINGS);
 
   const hadAutoHide = getTaskbarAutoHide();
   let proc: Bun.Subprocess | undefined;

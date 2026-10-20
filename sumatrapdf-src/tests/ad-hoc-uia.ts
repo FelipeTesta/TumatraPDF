@@ -134,7 +134,7 @@ export async function testit(): Promise<void> {
   const appdata = tmpPath("ad-hoc-uia-appdata");
   rmSync(appdata, { recursive: true, force: true });
   mkdirSync(appdata, { recursive: true });
-  writeFileSync(join(appdata, "SumatraPDF-settings.txt"), SETTINGS);
+  writeFileSync(join(appdata, "TumatraPDF-settings.txt"), SETTINGS);
 
   Bun.spawnSync(["taskkill", "/F", "/IM", "SumatraPDF.exe"]);
   await sleep(300);

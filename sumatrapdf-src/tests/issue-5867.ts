@@ -47,7 +47,7 @@ async function runWithIcon(name: string, svg: string): Promise<void> {
     const dir = tmpPath(`issue-5867-${name}`);
     rmSync(dir, { recursive: true, force: true });
     mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, "SumatraPDF-settings.txt"), settings(svg));
+    writeFileSync(join(dir, "TumatraPDF-settings.txt"), settings(svg));
 
     const proc = Bun.spawn([EXE, "-for-testing", "-appdata", dir, pdf], { stdout: "ignore", stderr: "ignore" });
     try {
