@@ -288,8 +288,8 @@ static void PaintScrollbar(OverlayScrollbar* sb) {
             if (IsVert(sb)) {
                 float sz = (float)arrowTop.dx / 3.0f;
                 // up triangle
-                float cx = (float)(arrowTop.x + (arrowTop.dx / 2.0f));
-                float cy = (float)(arrowTop.y + (arrowTop.dy / 2.0f));
+                float cx = (float)arrowTop.x + (float)arrowTop.dx / 2.0f;
+                float cy = (float)arrowTop.y + (float)arrowTop.dy / 2.0f;
                 Gdiplus::PointF upPts[3] = {
                     {cx, cy - (sz * 0.7f)},
                     {cx - sz, cy + (sz * 0.7f)},
@@ -297,8 +297,8 @@ static void PaintScrollbar(OverlayScrollbar* sb) {
                 };
                 gfx.FillPolygon(&br, upPts, 3);
                 // down triangle
-                cx = (float)(arrowBot.x + (arrowBot.dx / 2.0f));
-                cy = (float)(arrowBot.y + (arrowBot.dy / 2.0f));
+                cx = (float)arrowBot.x + (float)arrowBot.dx / 2.0f;
+                cy = (float)arrowBot.y + (float)arrowBot.dy / 2.0f;
                 Gdiplus::PointF downPts[3] = {
                     {cx - sz, cy - (sz * 0.7f)},
                     {cx + sz, cy - (sz * 0.7f)},
@@ -308,8 +308,8 @@ static void PaintScrollbar(OverlayScrollbar* sb) {
             } else {
                 float sz = (float)arrowTop.dy / 3.0f;
                 // left triangle
-                float cx = (float)(arrowTop.x + (arrowTop.dx / 2.0f));
-                float cy = (float)(arrowTop.y + (arrowTop.dy / 2.0f));
+                float cx = (float)arrowTop.x + (float)arrowTop.dx / 2.0f;
+                float cy = (float)arrowTop.y + (float)arrowTop.dy / 2.0f;
                 Gdiplus::PointF leftPts[3] = {
                     {cx - (sz * 0.7f), cy},
                     {cx + (sz * 0.7f), cy - sz},
@@ -317,8 +317,8 @@ static void PaintScrollbar(OverlayScrollbar* sb) {
                 };
                 gfx.FillPolygon(&br, leftPts, 3);
                 // right triangle
-                cx = (float)(arrowBot.x + (arrowBot.dx / 2.0f));
-                cy = (float)(arrowBot.y + (arrowBot.dy / 2.0f));
+                cx = (float)arrowBot.x + (float)arrowBot.dx / 2.0f;
+                cy = (float)arrowBot.y + (float)arrowBot.dy / 2.0f;
                 Gdiplus::PointF rightPts[3] = {
                     {cx - (sz * 0.7f), cy - sz},
                     {cx - (sz * 0.7f), cy + sz},
@@ -336,8 +336,8 @@ static void PaintScrollbar(OverlayScrollbar* sb) {
 
             if (IsVert(sb)) {
                 int sz = arrowTop.dx / 5;
-                float cx = (float)(arrowTop.x + (arrowTop.dx / 2.0f));
-                float cy = (float)(arrowTop.y + (arrowTop.dy / 2.0f)) + ((float)inset / 2);
+                float cx = (float)arrowTop.x + (float)arrowTop.dx / 2.0f;
+                float cy = (float)arrowTop.y + (float)arrowTop.dy / 2.0f + ((float)inset / 2);
                 Gdiplus::PointF upPts[3] = {
                     {cx - (float)sz, cy + ((float)sz / 2.0f)},
                     {cx, cy - ((float)sz / 2.0f)},
@@ -345,8 +345,8 @@ static void PaintScrollbar(OverlayScrollbar* sb) {
                 };
                 gfx.DrawLines(&pen, upPts, 3);
 
-                cx = (float)(arrowBot.x + (arrowBot.dx / 2.0f));
-                cy = (float)(arrowBot.y + (arrowBot.dy / 2.0f)) - ((float)inset / 2);
+                cx = (float)arrowBot.x + (float)arrowBot.dx / 2.0f;
+                cy = (float)arrowBot.y + (float)arrowBot.dy / 2.0f - ((float)inset / 2);
                 Gdiplus::PointF downPts[3] = {
                     {cx - (float)sz, cy - ((float)sz / 2.0f)},
                     {cx, cy + ((float)sz / 2.0f)},
@@ -355,8 +355,8 @@ static void PaintScrollbar(OverlayScrollbar* sb) {
                 gfx.DrawLines(&pen, downPts, 3);
             } else {
                 int sz = arrowTop.dy / 5;
-                float cx = (float)(arrowTop.x + (arrowTop.dx / 2.0f)) + ((float)inset / 2);
-                float cy = (float)(arrowTop.y + (arrowTop.dy / 2.0f));
+                float cx = (float)arrowTop.x + (float)arrowTop.dx / 2.0f + ((float)inset / 2);
+                float cy = (float)arrowTop.y + (float)arrowTop.dy / 2.0f;
                 Gdiplus::PointF leftPts[3] = {
                     {cx + ((float)sz / 2.0f), cy - (float)sz},
                     {cx - ((float)sz / 2.0f), cy},
@@ -364,8 +364,8 @@ static void PaintScrollbar(OverlayScrollbar* sb) {
                 };
                 gfx.DrawLines(&pen, leftPts, 3);
 
-                cx = (float)(arrowBot.x + (arrowBot.dx / 2.0f)) - ((float)inset / 2);
-                cy = (float)(arrowBot.y + (arrowBot.dy / 2.0f));
+                cx = (float)arrowBot.x + (float)arrowBot.dx / 2.0f - ((float)inset / 2);
+                cy = (float)arrowBot.y + (float)arrowBot.dy / 2.0f;
                 Gdiplus::PointF rightPts[3] = {
                     {cx - ((float)sz / 2.0f), cy - (float)sz},
                     {cx + ((float)sz / 2.0f), cy},

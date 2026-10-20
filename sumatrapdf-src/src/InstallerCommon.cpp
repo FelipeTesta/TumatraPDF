@@ -979,7 +979,7 @@ static void DrawFrame2(Graphics& g, Rect r, bool skipMessage) {
         return;
     }
 
-    float msgY = (float)(r.dy / 2.0f);
+    float msgY = (float)r.dy / 2.0f;
     if (gMsg) {
         msgY += DrawMessage(g, gMsg, msgY, (float)r.dx, gMsgColor) + 5;
     }

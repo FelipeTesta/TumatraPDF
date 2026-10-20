@@ -426,7 +426,7 @@ int EditToolsImageHoverTest(MainWindow* win, int x, int y) {
     if (nearB) {
         return 4;
     }
-    if (x >= sr.x && x <= sr.x + sr.dx && y >= sr.y && y <= sr.y + sr.dy) {
+    if ((float)x >= sr.x && (float)x <= sr.x + sr.dx && (float)y >= sr.y && (float)y <= sr.y + sr.dy) {
         return 0; // inside: move
     }
     return -1;

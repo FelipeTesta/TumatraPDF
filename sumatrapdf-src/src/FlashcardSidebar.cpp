@@ -265,7 +265,7 @@ static void FcListDrawItem(MainWindow* win, const DRAWITEMSTRUCT* dis) {
     if ((int)dis->itemID >= len(win->flashcard.listaRows)) {
         return;
     }
-    const FcListRow& row = win->flashcard.listaRows[dis->itemID];
+    const FcListRow& row = win->flashcard.listaRows[(int)dis->itemID];
 
     i64 now = (i64)time(nullptr) * 1000;
     COLORREF txtCol = selected ? (isDark ? RGB(240, 240, 240) : RGB(20, 20, 20)) : ThemeWindowTextColor();

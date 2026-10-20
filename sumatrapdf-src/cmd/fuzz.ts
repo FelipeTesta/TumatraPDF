@@ -41,21 +41,31 @@ const modes: Record<string, FuzzMode> = {
   // mupdf xref/object parsing, the engine wrappers and the render pipeline
   render: {
     argsFor: (file) => [file, "-render", "1"],
-    seeds: () =>
-      gatherSeeds(
-        ["ext", "tests"],
-        [".pdf", ".xps", ".epub", ".mobi", ".fb2", ".cbz", ".cbr", ".jpg", ".png", ".jxl", ".heic", ".tga"],
-      ),
+    seeds: (dir) =>
+      gatherSeeds(dir ? [dir] : ["ext", "tests"], [
+        ".pdf",
+        ".xps",
+        ".epub",
+        ".mobi",
+        ".fb2",
+        ".cbz",
+        ".cbr",
+        ".jpg",
+        ".png",
+        ".jxl",
+        ".heic",
+        ".tga",
+      ]),
   },
   // engine load + text extraction + teardown (no rendering)
   extract: {
     argsFor: (file) => [file, "-extract-text", "1"],
-    seeds: () => gatherSeeds(["ext", "tests"], [".pdf", ".xps", ".epub", ".mobi", ".fb2", ".chm"]),
+    seeds: (dir) => gatherSeeds(dir ? [dir] : ["ext", "tests"], [".pdf", ".xps", ".epub", ".mobi", ".fb2", ".chm"]),
   },
   // EXIF/JPEG metadata parser only; fast, focused
   exif: {
     argsFor: (file) => ["-dump-exif", file],
-    seeds: () => gatherSeeds(["ext", "tests"], [".jpg", ".jpeg", ".tif", ".tiff"]),
+    seeds: (dir) => gatherSeeds(dir ? [dir] : ["ext", "tests"], [".jpg", ".jpeg", ".tif", ".tiff"]),
   },
 };
 
@@ -135,7 +145,7 @@ function argVal(name: string): string | undefined {
 }
 const modeName = argVal("-mode") ?? "render";
 const exeRel = argVal("-exe") ?? join("out", "dbg64_asan", "TumatraPDF.exe");
-const seedsDir = argVal("-seeds") ?? "ext";
+const seedsDir = argVal("-seeds");
 const seedFile = argVal("-seed");
 const iterations = Number.parseInt(argVal("-n") ?? "100", 10) || 100;
 const secondsBudget = Number.parseInt(argVal("-seconds") ?? "600", 10) || 600;

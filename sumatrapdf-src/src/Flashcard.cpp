@@ -1293,20 +1293,20 @@ void FlashcardSm2Update(FlashcardStudyState& state, int rating) {
         state.interval = 0;
         state.easeFactor = std::max(1.3f, state.easeFactor - 0.2f);
     } else if (rating == 2) { // Hard
-        state.interval = std::max(1, (int)(state.interval * 1.2f));
+        state.interval = std::max(1, (int)((float)state.interval * 1.2f));
         state.easeFactor = std::max(1.3f, state.easeFactor - 0.15f);
     } else if (rating == 3) { // Good
         if (state.interval == 0) {
             state.interval = 1;
         } else {
-            state.interval = std::max(1, (int)(state.interval * state.easeFactor));
+            state.interval = std::max(1, (int)((float)state.interval * state.easeFactor));
         }
         // easeFactor unchanged
     } else if (rating == 4) { // Easy
         if (state.interval == 0) {
             state.interval = 1;
         } else {
-            state.interval = std::max(1, (int)(state.interval * state.easeFactor * 1.3f));
+            state.interval = std::max(1, (int)((float)state.interval * state.easeFactor * 1.3f));
         }
         state.easeFactor += 0.15f;
     }

@@ -504,7 +504,7 @@ void AutoScrollContinuousTick(MainWindow* win, HWND hwnd) {
         win->autoScroll.accum += AutoScrollPxPerSec(win) * elapsedSec;
         int dy = (int)win->autoScroll.accum;
         if (dy != 0) {
-            win->autoScroll.accum -= dy;
+            win->autoScroll.accum -= (float)dy;
             win->MoveDocBy(0, dy);
         }
         // TEMP s35: once per second, log scroll state so we can see where a

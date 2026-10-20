@@ -1683,8 +1683,8 @@ static void TrimComputeLineInfoForPage(MainWindow* win, DisplayModel* dm, int pa
     out->mbDx = mb.dx;
     out->mbDy = mb.dy;
     out->tRef = tRef;
-    out->topLineY = tl.y + (int)((win->trimConfigTop - tRef) * zoom);
-    out->bottomLineY = tl.y + (int)((mb.dy - win->trimConfigBottom - tRef) * zoom);
+    out->topLineY = tl.y + (int)(((float)win->trimConfigTop - (float)tRef) * zoom);
+    out->bottomLineY = tl.y + (int)((mb.dy - (float)win->trimConfigBottom - (float)tRef) * zoom);
 }
 
 // Collect the trim lines that are visible in the viewport, for the current
@@ -1746,16 +1746,16 @@ static void OnMouseMove(MainWindow* win, int x, int y, WPARAM key) {
             TrimLineInfo ti;
             TrimComputeLineInfoForPage(win, dm, dragPage, &ti);
             if (win->trimConfigDragLine == 1) {
-                int minY = ti.tl.y - (int)(ti.tRef * ti.zoom);
+                int minY = ti.tl.y - (int)((float)ti.tRef * ti.zoom);
                 int lineY = y < minY ? minY : (y > ti.bottomLineY ? ti.bottomLineY : y);
-                win->trimConfigTop = (int)((lineY - ti.tl.y) / ti.zoom + ti.tRef);
+                win->trimConfigTop = (int)((float)(lineY - ti.tl.y) / ti.zoom + (float)ti.tRef);
                 if (win->trimConfigTop < 0) {
                     win->trimConfigTop = 0;
                 }
             } else if (win->trimConfigDragLine == 2) {
-                int maxY = ti.tl.y + (int)((ti.mbDy - ti.tRef) * ti.zoom);
+                int maxY = ti.tl.y + (int)((ti.mbDy - (float)ti.tRef) * ti.zoom);
                 int lineY = y < ti.topLineY ? ti.topLineY : (y > maxY ? maxY : y);
-                win->trimConfigBottom = (int)((ti.mbDy - ti.tRef) - (lineY - ti.tl.y) / ti.zoom);
+                win->trimConfigBottom = (int)((ti.mbDy - (float)ti.tRef) - (float)(lineY - ti.tl.y) / ti.zoom);
                 if (win->trimConfigBottom < 0) {
                     win->trimConfigBottom = 0;
                 }
@@ -3897,6 +3897,8 @@ static void PaintArchReferenceLine(DisplayModel* dm, int pageNo, PointF a, Point
     }
     Point sa = dm->CvtToScreen(pageNo, a);
     Point sb = dm->CvtToScreen(pageNo, b);
+    float sax = (float)sa.x;
+    float say = (float)sa.y;
     float dx = (float)(sb.x - sa.x);
     float dy = (float)(sb.y - sa.y);
     if (fabsf(dx) < 1e-4f && fabsf(dy) < 1e-4f) {
@@ -3913,26 +3915,25 @@ static void PaintArchReferenceLine(DisplayModel* dm, int pageNo, PointF a, Point
     float tLo = -1e18f;
     float tHi = 1e18f;
     if (fabsf(dx) > 1e-6f) {
-        float ta = (x0 - sa.x) / dx;
-        float tb = (x1 - sa.x) / dx;
+        float ta = (x0 - sax) / dx;
+        float tb = (x1 - sax) / dx;
         tLo = std::max(tLo, std::min(ta, tb));
         tHi = std::min(tHi, std::max(ta, tb));
-    } else if (sa.x < x0 || sa.x > x1) {
+    } else if (sax < x0 || sax > x1) {
         return;
     }
     if (fabsf(dy) > 1e-6f) {
-        float ta = (y0 - sa.y) / dy;
-        float tb = (y1 - sa.y) / dy;
+        float ta = (y0 - say) / dy;
+        float tb = (y1 - say) / dy;
         tLo = std::max(tLo, std::min(ta, tb));
         tHi = std::min(tHi, std::max(ta, tb));
-    } else if (sa.y < y0 || sa.y > y1) {
+    } else if (say < y0 || say > y1) {
         return;
     }
     if (tLo > tHi) {
         return;
     }
-    gs->DrawLine(&refPen, (int)(sa.x + tLo * dx), (int)(sa.y + tLo * dy), (int)(sa.x + tHi * dx),
-                 (int)(sa.y + tHi * dy));
+    gs->DrawLine(&refPen, (int)(sax + tLo * dx), (int)(say + tLo * dy), (int)(sax + tHi * dx), (int)(say + tHi * dy));
 }
 
 // saved radius measurement: dashed chord + teal arc + "r=" label at the bulge

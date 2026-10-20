@@ -671,7 +671,7 @@ static void SetupZoomComboBox(HWND hDlg, UINT idComboBox, bool forChm, float cur
 
 static float GetZoomComboBoxValue(HWND hDlg, UINT idComboBox, float defaultZoom) {
     float newZoom = defaultZoom;
-    HWND dlg = GetDlgItem(hDlg, idComboBox);
+    HWND dlg = GetDlgItem(hDlg, (int)idComboBox);
     int idx = ComboBox_GetCurSel(dlg);
     if (idx == -1) {
         TempStr customZoom = HwndGetTextTemp(dlg);

@@ -57,6 +57,13 @@ jobs:
           Get-ChildItem ext -Recurse -Filter *.pdf | Select-Object -First 20 | Copy-Item -Destination out\fuzz\corpus-mupdf
           out\fuzz\fuzz-mupdf.exe -max_total_time=900 -print_final_stats=1 -max_len=1048576 out\fuzz\corpus-mupdf
 
+      - name: Fuzz html/markdown pipeline (10 min)
+        continue-on-error: true
+        run: |
+          New-Item -ItemType Directory -Force out\fuzz\corpus-htmlmd | Out-Null
+          Get-ChildItem ext,tests -Recurse -Include *.html,*.htm,*.md | Select-Object -First 20 | Copy-Item -Destination out\fuzz\corpus-htmlmd
+          out\fuzz\fuzz-htmlmd.exe -max_total_time=600 -print_final_stats=1 -max_len=262144 out\fuzz\corpus-htmlmd
+
       - name: Upload crash artifacts
         if: always()
         uses: actions/upload-artifact@v6

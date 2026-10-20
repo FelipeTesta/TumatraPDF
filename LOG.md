@@ -1,5 +1,31 @@
 # TumatraPDF — Development Log
 
+## 2026-10-20 (s36-ad) — B6 wave 3: narrowing-conversions 44 → 0 + D1: exif seeds + image-decoder harness
+
+### Fixed
+- **B6 wave 3 (`bugprone-narrowing-conversions`, 44 fork sites → 0)**, all zero-behavior-change explicit casts (int operands in float math; unsigned→int made explicit): `Canvas.cpp` (21: trim compute/drag int×float operands + refline slab-clip via new `sax/say` float locals), `Commands_Edit.cpp` (4: `(float)x/y` vs RectF — x/y are int), `HomePage.cpp` (8: triangle mid-Y `(float)rc.dy / 2.0f` + today cross-hair `(float)dpi(4)`), `Flashcard.cpp` (3: `(int)((float)interval * …)` — interval is int), `AutoScroll.cpp` (accum `-= (float)dy`), `FlashcardSidebar.cpp` (`(int)dis->itemID`), `MobiDoc.cpp` (`(int)(u32)…`), `SelectionTranslate.cpp` (dropped pointless `(u32)` on len), `SumatraDialogs.cpp` (`(int)idComboBox`), `SumatraLog.cpp` (`(int)(us->Length / sizeof(WCHAR))`), `base/ByteReaderWriter.cpp` ×2 (`(int)(u32)sizeHint`), `ifilter/FilterBase.h` (`(int)((size_t)size + 1)`). Vendored remainder: `chunk.h` (cmark) ×2 + WebView2 packages ×2 — out of scope. First-pass lesson: two fixes had the operand direction inverted (x/y are int in `EditToolsImageHoverTest`, `interval` is int) → verify loop caught them (redundant-casting + inverted-direction warnings).
+- **Follow-up (same wave)**: the fresh sweep exposed 33 narrowing sites CREATED by the wave-2a `/ 2.0f` fixes (the sweep they were verified against predated them): `OverlayScrollbar.cpp` ×32 + `InstallerCommon.cpp` ×1 — fixed with explicit operand casts (`(float)arrowTop.x + (float)arrowTop.dx / 2.0f` form; the wrapper-with-inner-cast form still leaves `.x/.y` implicit). Verified 0 narrowing on both TUs; build 0/0. Total narrowing eliminated: 77 sites (44 + 33).
+- `cmd/fuzz.ts` `-seeds <dir>` was IGNORED by every mode (hardcoded roots) — now each mode uses the given dir; `exif` mode regenerable seeds via System.Drawing (3 JPEGs, quality 50/85/95) in gitignored `out/fuzz/seeds-exif/`.
+
+### Added
+- **D1: image-decoder libFuzzer harness** (`tests/fuzz/ImageFuzzer.cpp`, second target in `cmd/build-fuzz-harness-mupdf.ts` → `out/fuzz/fuzz-images.exe`): `fz_new_buffer_from_copied_data` → `fz_new_image_from_buffer` (consumes the buffer ref on success) → `fz_get_pixmap_from_image` (all-NULL args) with a 64MP dimension clamp. Build script now loops a targets table (adding a third harness = one row).
+- **D1: html/markdown libFuzzer harness** (`tests/fuzz/HtmlMdFuzzer.cpp`, third target → `out/fuzz/fuzz-htmlmd.exe`): dispatches on the first byte — `<` opens the input as `.html`, anything else as `.md` (mupdf's `md_document_handler` → the vendored cmark-gfm); fresh `fz_context` per input, open + count pages + load/bound page 0. `fuzz.yml` gained the matching 10-min CI step (corpus seeded from ext+tests html/htm/md).
+- **D1 is complete**: four native harnesses (base parsers, mupdf PDF, images, html/md) + the app-level driver (render/extract-text/exif modes).
+
+### Verified
+- Wave 3: `clang-format` (12 files, +32/−31), `bun cmd/build.ts` 0/0 (89 s), `clang-tidy.ts -files` on the 12 TUs → **0 narrowing-conversions**; `PdfFilter.cpp`/`EpubFilter.cpp` (FilterBase.h includers) → clean (exit 0).
+- Exif campaign (fixed driver args): 150 execs / 80 s = **1.9 exec/s, 0 crashes** (real `-dump-exif` parsing).
+- Image campaign: 3218 runs / 45 s pre-clamp (71 execs/s), 16 785 / 21 s post-clamp (799 exec/s), **0 crashes** both; corpus = 10 png/jpg/bmp/gif/tif from ext+tests.
+- **Html/md campaign: 279 132 runs / 301 s = 927 exec/s, 0 crashes** (corpus = 5 ext/tests html/htm/md seeds).
+- B6 analyzer triage CLOSED for the 42-finding list: `EngineDump.cpp:365` = Str-family FP (ReportIf + len 0 bounds the index); `base/Base.h:743` = by-design FP (kFuncNoArg fn-pointer cast convention).
+
+### Notes
+- Definitive fresh sweep (`-sweep -jobs 6`, 262 TUs, post-waves 1-3): **29 240 user diagnostics / 93 checks / 0 errors** (was 29 922 / 95 / 8 error TUs), `clang-analyzer path findings` **42 → 32**, `bugprone-narrowing-conversions` **81 effective → 4** (only the vendored chunk.h/WebView2).
+- **Full campaign chain finished, 0 crashes everywhere** (~1.36M execs): parsers app-level 400 / 341 s (1.2 exec/s, real engine loads post-arg-fix); exif 300 / 170 s; images native **451 778 / 601 s (752/s)**; mupdf native **900 884 / 901 s (1000/s)**. Log: `%TEMP%\fuzz-campaigns.log`. NOTE: the app-level phases ran the STALE pre-F1 ASan exe (fuzz.ts targets `out/dbg64_asan/`) — re-validated below.
+- **ASan exe rebuilt post-F1/F4/F5** (`bun cmd/build-asan.ts`, 159.8 s, ASan DLL deployed; C1 infra re-validated after the dependency batch — smoke: `-dump-exif` + `-extract-text` both clean under ASan on mupdf 1.28.5). First REAL app-level ASan campaigns on current code: extract 120 / 174 s, render 50 / 166 s, exif 80 / 70 s — **250 execs, 0 crashes** (`%TEMP%\fuzz-campaigns2.log`).
+- B6 leftovers are two POLICY-scale classes: `switch-missing-default-case` 128 + `unhandled-code-paths` 102 (~230 enum-switch sites; mechanical via a per-check clang-tidy `--fix` run + compiler-verify, but large diff surface → awaiting user decision).
+- D1 remaining: cmark-gfm harness only (third table row when wanted).
+
 ## 2026-10-20 (s36-ac) — C3 App Verifier clean + D1 driver arg fix + headless -render finding
 
 ### Fixed

@@ -1418,11 +1418,11 @@ void HomeStatsWnd::Paint(VirtWndPaintCtx& ctx) {
     rcNext = {b.x + b.dx - pad - dpi(14), b.y, dpi(14), yearRowDy};
     Gdiplus::PointF p1[3] = {{(float)(rcPrev.x + 10), (float)rcPrev.y},
                              {(float)(rcPrev.x + 10), (float)(rcPrev.y + rcPrev.dy)},
-                             {(float)(rcPrev.x + 2), (float)(rcPrev.y + rcPrev.dy / 2.0f)}};
+                             {(float)(rcPrev.x + 2), (float)rcPrev.y + (float)rcPrev.dy / 2.0f}};
     HomeStatsDrawTriangle(g, p1, GpCol(ac.axis));
     Gdiplus::PointF p2[3] = {{(float)(rcNext.x + 4), (float)rcNext.y},
                              {(float)(rcNext.x + 4), (float)(rcNext.y + rcNext.dy)},
-                             {(float)(rcNext.x + 12), (float)(rcNext.y + rcNext.dy / 2.0f)}};
+                             {(float)(rcNext.x + 12), (float)rcNext.y + (float)rcNext.dy / 2.0f}};
     HomeStatsDrawTriangle(g, p2, GpCol(ac.axis));
     TempStr yearTxt = fmt("%d", year);
     Gdiplus::StringFormat sf(Gdiplus::StringFormatFlagsNoWrap);
@@ -1635,8 +1635,8 @@ void HomeStatsWnd::PaintGraph(Gdiplus::Graphics* g, Rect b, int heatX0, int heat
         pts.Append(Gdiplus::PointF(x, y));
         if (doy == todayDoy) {
             // TODAY marker: small orange cross-hair on the point
-            g->DrawLine(&todayPen, x - dpi(4), y, x + dpi(4), y);
-            g->DrawLine(&todayPen, x, y - dpi(4), x, y + dpi(4));
+            g->DrawLine(&todayPen, x - (float)dpi(4), y, x + (float)dpi(4), y);
+            g->DrawLine(&todayPen, x, y - (float)dpi(4), x, y + (float)dpi(4));
         }
     }
     // axes: x along the bottom
