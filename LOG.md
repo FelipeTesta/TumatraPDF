@@ -1,5 +1,19 @@
 # TumatraPDF — Development Log
 
+## 2026-10-20 (s36-ae) — TODO housekeeping: all `[x]` blocks archived to LOG (user request)
+
+### Changed
+- TODO.md rewritten to **open-work-only**. Removed done blocks (each already documented in its session entry):
+  - Dev-tooling DONE rows A1-A3 / B1-B3 / B5 / C1-C4 / D1-D3 / E1-E2 → LOG s36-q / s36-r / s36-t / s36-u..s36-ad / s36-v / s36-w (B6 keeps only its remaining triage list; A4 stays WIP; B4 still TODO).
+  - Dependency plan F1-F5 + the pre-work measured-diff snapshot → LOG s36-z + s36-aa (commits f9ab93e, feb5748, 1d30da4, 9827242, ee8a160); the full pre-work snapshot (182 commits / 152 files; 27 patches = 22 applied upstream; integration surface `585ce546`) is preserved in lemma `m419176b45317`.
+  - Render-perf R-P1..R-P3 + stale/verified-no-action lines → LOG s34-c / s36-m / s36-o.
+  - TC2 fixed validations, Stats D1-D12 shipped rounds, Bugs fixed list, USER fixed reports, FC-H2/FC-X1 done legs, s32-B shipped legs → LOG s34..s36 (per session).
+- Kept as OPEN: A4 / B4 / B6-remaining; suite baseline (17 pre-existing failures; exit 5 = 0xC0000005, debug-only); F6 deferrals + Bun 1.4.3; refactoring R3/R5/R6/R7/16D/TC2-leftovers; TC2 user live-confirms; flashcard open items + user test queue; Image Occlusion decisions; s32-B user-side save check; design centering rule; OCR research; Bookmarks Improve / Page Counting / Capture tool / Stats `book_stats` specs (translated PT→EN, kept uncompressed per §13); BUG-3/BUG-4; the dark-yellow-chrome pre-existing oddity (now its own open bug line); USER open reports (kept verbatim in PT — user-authored specs).
+
+### Notes
+- §13 rule applied: unfinished sections translated but never compressed; done sections removed (LOG is the archive).
+- TODO.md went from 277 lines to ~110; the header now states the housekeeping rule so future sessions keep it clean.
+
 ## 2026-10-20 (s36-ad) — B6 wave 3: narrowing-conversions 44 → 0 + D1: exif seeds + image-decoder harness
 
 ### Fixed
