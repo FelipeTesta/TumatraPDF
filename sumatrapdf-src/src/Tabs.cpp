@@ -448,9 +448,13 @@ void CloseAllTabs(MainWindow* win) {
         }
         toClose.Append(t);
     }
+    int groupsBefore = RecentlyClosedGroupCount();
     for (WindowTab* t : toClose) {
         CloseTab(t, false);
     }
+    // closing all tabs is a single user action: fold the per-tab remembers into
+    // one group so that one Ctrl+Shift+T restores the whole set
+    MergeRecentlyClosedGroups(RecentlyClosedGroupCount() - groupsBefore);
 }
 
 // TODO: add "Move to another window" sub-menu

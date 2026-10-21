@@ -255,6 +255,12 @@ struct DisplayModel : DocController {
     // correct VIRTUAL page + column-local rect (right column shifted -halfW).
     // Non-v2: identity. v2: physical k -> virtual 2k-1 (left) / 2k (right).
     int PhysicalToVirtualForRect(int physicalPageNo, RectF rect, RectF* rectOut) const;
+    // maps a PHYSICAL page number (PDF destinations / bookmarks / TOC store
+    // physical numbers) into the current page domain. Picks the column that
+    // contains `rect` when it identifies one; otherwise the page-order LEFT
+    // column, so a bookmark lands on "page N left" instead of the middle of
+    // the spread (user 2026-10-21). Non-v2: identity.
+    int PhysicalToVirtualPage(int physicalPageNo, RectF rect) const;
 
     bool InPresentation() const;
 
@@ -358,8 +364,11 @@ struct DisplayModel : DocController {
     float viewportCropV2SavedZoom = 1.0f;    // column zoom restored on quick-view release
     int viewportCropV2SavedColumn = 0; // column (0 left / 1 right) the user was reading when the quick view started
 
-    // margin trim (independent of viewport crop)
+    // margin trim (independent of viewport crop); the margins are per document
+    // so each book keeps the trim setup it was last saved with
     bool marginTrimEnabled = false;
+    int trimTop = 0;
+    int trimBottom = 0;
 
     /* when we're in presentation mode, _pres* contains the pre-presentation values */
     bool inPresentation = false;

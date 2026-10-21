@@ -887,6 +887,14 @@ void UpdateTabFileDisplayStateForTab(WindowTab* tab) {
     fs->invertColors = GetInvertPageColors();
     fs->contrastEnabled = win->contrastEnabled;
     fs->contrastOpacity = win->contrastOpacity;
+    // Persist margin trim + two-column (v2) per document, so each book keeps the
+    // setup it was last closed with and a new file starts with both off
+    if (auto* stateDm = tab->AsFixed()) {
+        fs->marginTrim = stateDm->marginTrimEnabled;
+        fs->trimTop = stateDm->trimTop;
+        fs->trimBottom = stateDm->trimBottom;
+        fs->viewportCropV2 = stateDm->viewportCropV2Enabled;
+    }
     // Persist arch tools state (per-document)
     if (gGlobalPrefs->archToolsEnabled) {
         // Serialize per-page scale states as
@@ -2151,7 +2159,6 @@ static void ReplaceDocumentInCurrentTab(LoadArgs* args, DocController* ctrl, Fil
         SetInvertPageColors(fs->invertColors);
         win->contrastEnabled = fs->contrastEnabled;
         win->contrastOpacity = fs->contrastOpacity;
-        // Restore arch tools state (per-document) — per-page scale states
         if (gGlobalPrefs->archToolsEnabled) {
             Str fp = tab->filePath;
             FileState* fs2 = gFileHistory.FindByPath(fp);
@@ -2314,6 +2321,22 @@ static void ReplaceDocumentInCurrentTab(LoadArgs* args, DocController* ctrl, Fil
             // WindowMargin / PageSpacing follow the window's dpi, not the
             // (physical-size) CustomScreenDPI used for zoom
             dm->SetUiDpi(win->frameDpi > 0 ? win->frameDpi : DpiGetForHwnd(win->hwndFrame));
+            // Per-document margin trim + two-column (v2) state: restored here,
+            // not with the other per-file state above, because the controller
+            // (and therefore the DisplayModel) only exists at this point. The
+            // flags must be in place before SetInitialViewSettings builds the
+            // first layout, since VirtualPageCount() gates on
+            // IsViewportCropV2Active().
+            if (fs) {
+                dm->marginTrimEnabled = fs->marginTrim;
+                if (fs->trimTop >= 0) {
+                    dm->trimTop = fs->trimTop;
+                }
+                if (fs->trimBottom >= 0) {
+                    dm->trimBottom = fs->trimBottom;
+                }
+                dm->viewportCropV2Enabled = fs->viewportCropV2;
+            }
             dm->SetInitialViewSettings(displayMode, ss.page, win->GetViewPortSize(), dpi);
             // TODO: also expose Manga Mode for image folders?
             if (tab->GetEngineType() == kindEngineComicBooks || tab->GetEngineType() == kindEngineImageDir) {
@@ -5126,6 +5149,19 @@ void CloseWindow(MainWindow* win, bool quitIfLast, bool forceClose) {
     if (lastWindow) {
         SaveSettings();
     }
+    // remember the whole window as one closed-document group so that a single
+    // Ctrl+Shift+T brings back every book that was open, not just the last one
+    StrVec closedPaths;
+    for (auto& tab : win->Tabs()) {
+        if (tab->IsAboutTab()) {
+            continue;
+        }
+        if (str::IsEmptyOrWhiteSpace(tab->filePath)) {
+            continue;
+        }
+        closedPaths.Append(tab->filePath);
+    }
+    RememberClosedDocumentGroup(closedPaths);
     TabsOnCloseWindow(win);
 
     if (forceClose) {
@@ -9020,12 +9056,24 @@ static void ListPrintersThread(HWND* hwndPtr) {
 }
 
 static void ReopenLastClosedFile(MainWindow* win) {
-    Str path = PopRecentlyClosedDocument();
-    if (!path) {
+    int nFiles = RecentlyClosedGroupSize();
+    if (nFiles <= 0) {
         return;
     }
-    LoadArgs args(path, win);
-    LoadDocument(&args);
+    // popping yields the most recently closed document first; collect the whole
+    // group (all tabs of a closed window) and load it back in the original order
+    StrVec paths;
+    for (int i = 0; i < nFiles; i++) {
+        Str path = PopRecentlyClosedDocument();
+        if (!path) {
+            break;
+        }
+        paths.Append(path);
+    }
+    for (int i = len(paths) - 1; i >= 0; i--) {
+        LoadArgs args(paths[i], win);
+        LoadDocument(&args);
+    }
 }
 
 void CopyFilePath(WindowTab* tab) {
@@ -11459,6 +11507,11 @@ static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, L
                         // mutual exclusion with v2: turning v1 on turns v2 off
                         if (cropDm->viewportCropV2Enabled) {
                             cropDm->viewportCropV2Enabled = false;
+                            if (WindowTab* cropTab = win->CurrentTab()) {
+                                if (FileState* cropFs = gFileHistory.FindByPath(cropTab->filePath)) {
+                                    cropFs->viewportCropV2 = false;
+                                }
+                            }
                             SetToolbarButtonCheckedState(win, CmdViewportCropV2Toggle, false);
                         }
                         cropDm->viewportCropSaved = Rect(); // fresh base capture inside ApplyViewportCrop
@@ -11503,9 +11556,13 @@ static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, L
                         SwitchToDisplayMode(win, DisplayMode::Continuous, false);
                     }
                     v2Dm->viewportCropV2Enabled = !wasEnabled;
-                    // persist the toggle so the next session starts in the
-                    // same mode (DisplayModel ctor applies this pref)
-                    gGlobalPrefs->viewportCrop.v2Enabled = v2Dm->viewportCropV2Enabled;
+                    // per-document: remember the mode for THIS file only, so a
+                    // newly opened book starts with two-column off
+                    if (WindowTab* v2Tab = win->CurrentTab()) {
+                        if (FileState* v2Fs = gFileHistory.FindByPath(v2Tab->filePath)) {
+                            v2Fs->viewportCropV2 = v2Dm->viewportCropV2Enabled;
+                        }
+                    }
                     if (v2Dm->viewportCropV2Enabled) {
                         // mutual exclusion with v1: turning v2 on turns v1 off
                         if (v2Dm->viewportCropEnabled) {
@@ -11557,7 +11614,15 @@ static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, L
                 auto trimDm = win->AsFixed();
                 if (trimDm) {
                     trimDm->marginTrimEnabled = !trimDm->marginTrimEnabled;
-                    gGlobalPrefs->trim.enabled = trimDm->marginTrimEnabled;
+                    // per-document: remember the mode for THIS file only (a new
+                    // file must open with trim off)
+                    if (WindowTab* trimTab = win->CurrentTab()) {
+                        if (FileState* trimFs = gFileHistory.FindByPath(trimTab->filePath)) {
+                            trimFs->marginTrim = trimDm->marginTrimEnabled;
+                            trimFs->trimTop = trimDm->trimTop;
+                            trimFs->trimBottom = trimDm->trimBottom;
+                        }
+                    }
                     // page heights depend on trim, so re-layout (keeps the view,
                     // recalculates visible parts and repaints)
                     trimDm->RelayoutKeepingView();

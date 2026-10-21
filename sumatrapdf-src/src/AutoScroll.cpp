@@ -210,6 +210,7 @@ void AutoScrollToggle(MainWindow* win) {
     // a manual toggle overrides the focus-pause state (never auto-resume after
     // the user explicitly turned it off, never double-resume after a manual on)
     win->autoScroll.autoPausedByFocus = false;
+    win->autoScroll.autoPausedByTrimConfig = false;
     if (win->autoScroll.active) {
         win->autoScroll.accum = 0;
         win->autoScroll.startTick = GetTickCount64();
@@ -289,6 +290,58 @@ void AutoScrollResumeFromFocus(MainWindow* win) {
     }
     SetToolbarButtonCheckedState(win, CmdAutoScrollToggle, true);
     LogInfo("[autoscroll] resumed: frame reactivated");
+}
+
+// Pause while the trim-config dialog is open. Same mechanics as the focus
+// pause, separate flag: closing the dialog resumes only what IT paused, even
+// when the window is still unfocused/inactive afterwards.
+void AutoScrollPauseForTrimConfig(MainWindow* win) {
+    if (!win || !win->autoScroll.active || win->autoScroll.autoPausedByTrimConfig) {
+        return;
+    }
+    win->autoScroll.autoPausedByTrimConfig = true;
+    win->autoScroll.active = false;
+    KillTimer(win->hwndCanvas, kContinuousAutoScrollTimerID);
+    if (win->AsMarkdown()) {
+        SetWebviewAutoScroll(win, 0);
+        win->autoScroll.webviewCtrlDown = false;
+    }
+    UpdateToolbarEtaText(win, -1);
+    SetToolbarButtonCheckedState(win, CmdAutoScrollToggle, false);
+    LogInfo("[autoscroll] paused: trim config dialog open");
+}
+
+// Resume the auto-scroll paused by AutoScrollPauseForTrimConfig when the dialog
+// closes (save or cancel). No-op when the user turned it off meanwhile or when
+// the window lost activation while the dialog was open (the focus pause then
+// owns the state and resumes on re-activation).
+void AutoScrollResumeFromTrimConfig(MainWindow* win) {
+    if (!win || !win->autoScroll.autoPausedByTrimConfig) {
+        return;
+    }
+    win->autoScroll.autoPausedByTrimConfig = false;
+    if (win->autoScroll.autoPausedByFocus) {
+        return;
+    }
+    auto dm = win->AsFixed();
+    auto mm = win->AsMarkdown();
+    if (!dm && !mm) {
+        return;
+    }
+    win->autoScroll.active = true;
+    win->autoScroll.accum = 0;
+    win->autoScroll.startTick = GetTickCount64();
+    win->autoScroll.lastScrollTick = win->autoScroll.startTick;
+    RecalcAutoScrollEta(win);
+    UpdateToolbarEtaText(win, win->autoScroll.etaMinutes);
+    SetTimer(win->hwndCanvas, kContinuousAutoScrollTimerID, USER_TIMER_MINIMUM, nullptr);
+    if (mm) {
+        win->autoScroll.webviewPxPerSec = AutoScrollPxPerSec(win);
+        win->autoScroll.webviewCtrlDown = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+        SetWebviewAutoScroll(win, win->autoScroll.webviewCtrlDown ? 0 : win->autoScroll.webviewPxPerSec);
+    }
+    SetToolbarButtonCheckedState(win, CmdAutoScrollToggle, true);
+    LogInfo("[autoscroll] resumed: trim config dialog closed");
 }
 
 // Adjust continuous auto-scroll speed multiplier (step of 0.01)

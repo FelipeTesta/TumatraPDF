@@ -196,6 +196,25 @@ int DisplayModel::PhysicalToVirtualForRect(int physicalPageNo, RectF rect, RectF
     return virtualPageNo;
 }
 
+// Map a PHYSICAL page number into the current page domain (see header). The
+// destination rect decides the column when it carries a real half-page anchor;
+// otherwise the page-order LEFT column is used. Callers are the destination
+// boundary (PDF links / bookmarks / TOC), never the internal virtual-page APIs.
+int DisplayModel::PhysicalToVirtualPage(int physicalPageNo, RectF rect) const {
+    if (!IsViewportCropV2Active()) {
+        return physicalPageNo;
+    }
+    if (physicalPageNo < 1 || physicalPageNo > engine->PageCount()) {
+        return physicalPageNo;
+    }
+    bool haveRect = rect.dx > 0 && rect.dy > 0 && rect.x != kDestUseDefault && rect.y != kDestUseDefault;
+    if (haveRect) {
+        return PhysicalToVirtualForRect(physicalPageNo, rect, nullptr);
+    }
+    int leftVirtual = 2 * physicalPageNo - 1;
+    return displayR2L ? leftVirtual + 1 : leftVirtual;
+}
+
 TempStr DisplayModel::GetPropertyTemp(DocProp prop) {
     return engine->GetPropertyTemp(prop);
 }
@@ -728,14 +747,14 @@ DisplayModel::DisplayModel(EngineBase* engine, DocControllerCallback* cb) : DocC
     ReportIf(!engine || engine->PageCount() <= 0);
     engineType = engine->kind;
 
-    marginTrimEnabled = gGlobalPrefs->trim.enabled;
-    // v2 persistence: apply the global setting at creation, before
-    // SetInitialViewSettings builds the first layout (VirtualPageCount()
-    // gates on IsViewportCropV2Active(), so a continuous document starts
-    // directly at 2N virtual pages). Latent flag in non-continuous modes is
-    // safe: all conversions gate on the layout truth, and any later switch
-    // to continuous relayouts through the same path.
-    viewportCropV2Enabled = gGlobalPrefs->viewportCrop.v2Enabled;
+    // per-document: trim and two-column v2 start OFF for every document and are
+    // restored from its FileState in LoadModelIntoTab (a new file must not inherit
+    // the mode another book was left in); the trim margins fall back to the
+    // global defaults until the document stores its own values
+    marginTrimEnabled = false;
+    viewportCropV2Enabled = false;
+    trimTop = gGlobalPrefs->trim.top;
+    trimBottom = gGlobalPrefs->trim.bottom;
 
     SetUiDpi(96);
 
@@ -1550,8 +1569,8 @@ void DisplayModel::Relayout(float newZoomVirtual, int newRotation) {
         params.windowMargin = ToDocumentLayoutMargin(windowMargin);
         params.pageSpacing = pageSpacing;
         params.paddingAfterLastPage = gGlobalPrefs->paddingAfterLastPage;
-        params.trimTop = gGlobalPrefs->trim.top;
-        params.trimBottom = gGlobalPrefs->trim.bottom;
+        params.trimTop = trimTop;
+        params.trimBottom = trimBottom;
         params.trimEnabled = marginTrimEnabled;
         layout.Relayout(params);
 
@@ -1839,7 +1858,7 @@ Point DisplayModel::CvtToScreen(int pageNo, PointF pt) {
     // selection/highlight/cloze overlays land too low on the page (the render
     // cache applies the same shift in GetTileRectUser).
     if (marginTrimEnabled) {
-        pt.y -= (float)gGlobalPrefs->trim.top;
+        pt.y -= (float)trimTop;
     }
 
     PointF p = engine->Transform(pt, VirtualToPhysical(pageNo), zoom, rotation);
@@ -1885,7 +1904,7 @@ PointF DisplayModel::CvtFromScreen(Point pt, int pageNo) {
     // margin trim: inverse of the CvtToScreen shift (screen strip -> untrimmed
     // page coords)
     if (marginTrimEnabled) {
-        res.y += (float)gGlobalPrefs->trim.top;
+        res.y += (float)trimTop;
     }
     return res;
 }
@@ -2607,13 +2626,16 @@ bool MaybeGetNextZoomByIncrement(float* currZoomInOut, float towardsLevel) {
     return true;
 }
 
-// differences to Adobe Reader: starts at 8.33 (instead of 1 and 6.25)
-// and has four additional intermediary zoom levels ("added")
+// Differences to Adobe Reader: starts at 8.33 (instead of 1 and 6.25) and has
+// extra intermediary levels ("added"). Those exist to keep the ratio between
+// neighbours at or below ~1.33: a bigger jump (200 -> 300 was 1.5x) is what
+// makes zoom-in/out feel like it overshoots at high magnification.
 // clang-format off
 static float defaultZoomLevels[] = {
-    8.33f, 12.5f, 18 /* added */, 25, 33.33f, 50, 66.67f, 75,
-    100, 125, 150, 200, 300, 400, 600, 800, 1000 /* added */,
-    1200, 1600, 2000 /* added */, 2400, 3200, 4800 /* added */, 6400
+    8.33f, 10 /* added */, 12.5f, 18 /* added */, 25, 33.33f, 50, 66.67f, 75,
+    100, 125, 150, 200, 250 /* added */, 300, 400, 500 /* added */, 600, 800,
+    1000 /* added */, 1200, 1600, 2000 /* added */, 2400, 3200,
+    4000 /* added */, 4800 /* added */, 6400
 };
 // clang-format on
 

@@ -14,6 +14,12 @@ void AutoScrollToggle(MainWindow* win);
 void AutoScrollPauseForFocus(MainWindow* win);
 void AutoScrollResumeFromFocus(MainWindow* win);
 
+// Pause while the trim-config dialog is open (dragging the red margin lines
+// while the page keeps scrolling under the pointer is unusable) and resume
+// when it closes. Independent of the focus pause, so both can nest.
+void AutoScrollPauseForTrimConfig(MainWindow* win);
+void AutoScrollResumeFromTrimConfig(MainWindow* win);
+
 // Adjust continuous auto-scroll speed multiplier (+1 = faster, -1 = slower)
 void AutoScrollSpeedAdjust(MainWindow* win, int direction);
 

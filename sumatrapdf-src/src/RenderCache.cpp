@@ -330,8 +330,8 @@ static Rect GetTileRectDevice(DisplayModel* dm, int pageNo, int rotation, float 
     if (trimEnabled) {
         // margin trim: shrink the tile rect to the visible strip (trim units
         // are page coords/points)
-        float t = (float)gGlobalPrefs->trim.top;
-        float b = (float)gGlobalPrefs->trim.bottom;
+        float t = (float)dm->trimTop;
+        float b = (float)dm->trimBottom;
         if (t + b >= mediabox.dy) {
             return Rect(); // fully trimmed, nothing to render
         }
@@ -362,7 +362,7 @@ static RectF GetTileRectUser(DisplayModel* dm, int pageNo, int rotation, float z
     if (trimEnabled) {
         // shift back into trimmed page coords (the layout uses the reduced
         // page height, so the render area starts at the top trim strip)
-        rect.y += (float)gGlobalPrefs->trim.top;
+        rect.y += (float)dm->trimTop;
     }
     return rect;
 }
@@ -1255,8 +1255,8 @@ int RenderCache::Paint(HDC hdc, Rect bounds, DisplayModel* dm, int pageNo, PageI
         // would stretch the pixmap over the full-height rect.
         if (dm->marginTrimEnabled) {
             RectF mb = dm->GetEngine()->PageMediabox(renderPageNo);
-            float t = (float)gGlobalPrefs->trim.top;
-            float b = (float)gGlobalPrefs->trim.bottom;
+            float t = (float)dm->trimTop;
+            float b = (float)dm->trimBottom;
             if (t + b >= mb.dy) {
                 return 0; // fully trimmed, nothing to render
             }

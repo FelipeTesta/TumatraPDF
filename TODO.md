@@ -6,7 +6,7 @@
 
 ## Housekeeping (quick)
 
-- [ ] Old stray local branches (`master`, `feature/*`) vs git-flow conventions — prune after confirming nothing unmerged.
+- [x] ~~Old stray local branches~~ — verified s36-ah: only `main` exists (tracks `origin/main`), no `master`/`feature/*` to prune.
 
 ## Dev tooling / analysis — open items (s36-q roadmap; DONE rows archived to LOG s36-q..s36-ad)
 
@@ -72,10 +72,10 @@ Scratch E2E harnesses live in `tests/tmp/` (gitignored): s34-replace/paint/crop/
 1. 'Reorder' on/off: allows click:hold and repositioning bookmark order.
    - Dropping a bookmark onto another includes it as 1 indent level; dropping at the far left removes it from the level;
    - Show a dynamic horizontal line representing where the bookmark will land on drop, depending on cursor position.
-2. Rename: Right-Click → Rename.
-3. Delete: Right-Click.
+2. 'Rename': Right-Click → Rename.
+3. 'Delete': Right-Click.
 4. 'Add': creates a bookmark at the end of the list for the CURRENT page.
-5. Update: Right-Click → changes the clicked bookmark to the current page.
+5. 'Update': Right-Click → changes the clicked bookmark to the current page.
 All changes must be saved into the document to persist.
 
 ## Page Counting Format
@@ -114,14 +114,10 @@ Shift+S: draw a rectangle that captures the image inside it at the document's DP
 
 ## USER reports — open
 
-- [ ] twocolumn deve abrir sempre 'off' em novos arquivos; a função não está fechando corretamente quando trim=on;
-- [ ] armazenar POR ARQUIVO, pelo menos para os últimos 10 arquivos: última velocidade de autoscroll + configuração de 'trim config'; para arquivos nunca abertos, usar config 'padrão';
-- [ ] melhorar o passo do zoom;
-- [ ] quando 'Trim Config'=on, pausar o autoscroll;
-- [ ] "MASTER" de tempo de leitura (backup) independente dos livros: o tempo não se pode perder quando um livro é renomeado, deletado ou movido; primeiro ligado ao livro, depois mantido mesmo sem o livro em disco — importante quando a lista de documentos lidos ficar grande demais e tiver que ser limitada;
-- [ ] Home: tempo de leitura deve ficar `Today 'Nm' | Total: 'Nh NNm'`; está aparecendo '7d' (não se sabe o que é); melhorar o contraste das cores — os tempos estão muito escuros, pouco legíveis;
-- [ ] 'Ctrl+shift+t' → reabrir sessão fechada com todos os livros (pode ser a última janela fechada com todos os livros);
-- [ ] TwoColumn=on: clicar em um bookmark deve levar à página LEFT do número registrado no bookmark (capítulo) — hoje vai para a página errada;
+Shipped in **s36-ah** (details + verification in LOG): twocolumn/trim now per file and OFF for new files; per-file trim config + autoscroll speed; Trim Config pauses autoscroll; master reading time (daily buckets, survives rename/delete/move); Home `Today | Total` + contrast; Ctrl+Shift+T restores the whole closed window; TC2 bookmark lands on the LEFT page.
+
+- [ ] melhorar o passo do zoom — **implemented, awaiting your verdict** (s36-ah): zoom levels refined to a ~1.33 ratio (added 10/18/250/500/1000/2000/4000 %). One-line revert if you dislike it.
+- [ ] Checkbox do Timer ainda sai da estrutura do botão cobrindo outros botões, investigar a fundo como fixar a posição e corrigir — **OPEN with evidence** (s36-ah): the trio is anchored to `TbGetRect(CmdAutoScrollToggle)` measured BEFORE `EnforceToolbarTextButtonWidths` widens that button by the trio width; after a 2-3 row wrap it bleeds 4 px into the row above, and the position is never recomputed once the wrap settles. Fix belongs in `ToolbarLayout.cpp PositionToolbarChildWindows` (clamp to the anchor + re-run after wrap) and needs visual verification.
 
 ## Vertical_Toolbar (PARKED — DO NOT DO)
 

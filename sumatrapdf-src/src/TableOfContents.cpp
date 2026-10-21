@@ -304,7 +304,13 @@ static void GoToTocLink(GoToTocLinkData* d) {
     if (d->dest) {
         ctrl->HandleLink(d->dest, win->linkHandler);
     } else if (d->pageNo > 0) {
-        ctrl->GoToPage(d->pageNo, true);
+        // TOC page numbers are PHYSICAL: map to the column domain in v2 mode so
+        // "chapter starts on page N" lands on N's left column (user 2026-10-21)
+        int pageNo = d->pageNo;
+        if (auto* dm = ctrl->AsFixed()) {
+            pageNo = dm->PhysicalToVirtualPage(pageNo, RectF());
+        }
+        ctrl->GoToPage(pageNo, true);
     }
     win->tocKeepSelection = false;
 

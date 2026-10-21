@@ -1685,7 +1685,7 @@ static void TrimComputeLineInfoForPage(MainWindow* win, DisplayModel* dm, int pa
     RectF mb = dm->GetEngine()->PageMediabox(dm->VirtualToPhysical(pageNo));
     float zoom = dm->GetZoomReal(pageNo);
     Point tl = dm->CvtToScreen(pageNo, PointF(0, 0));
-    int tRef = dm->marginTrimEnabled ? gGlobalPrefs->trim.top : 0;
+    int tRef = dm->marginTrimEnabled ? dm->trimTop : 0;
     out->tl = tl;
     out->zoom = zoom;
     out->mbDx = mb.dx;

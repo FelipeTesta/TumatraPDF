@@ -30,10 +30,14 @@ void HandleCmdAutoScrollSpeedDown(MainWindow* win) {
     AutoScrollSpeedAdjust(win, -1);
 }
 
-// Toggle auto-scroll timer on/off
+// Toggle auto-scroll timer on/off. The state lives in MainWindow (not in the
+// toolbar control), so a hidden/rebuilding toolbar can't leave it out of sync.
 void HandleCmdAutoScrollTimerToggle(MainWindow* win) {
-    bool on = (IsDlgButtonChecked(win->hwndToolbar, CmdAutoScrollTimerToggle) == BST_CHECKED);
+    bool on = !win->autoScroll.timerEnabled;
     win->autoScroll.timerEnabled = on;
+    // Own the check state here (the checkbox is a plain BS_CHECKBOX) so a
+    // keyboard/palette invocation stays in sync with the visual state.
+    CheckDlgButton(win->hwndToolbar, CmdAutoScrollTimerToggle, on ? BST_CHECKED : BST_UNCHECKED);
     if (win->autoScroll.active) {
         win->autoScroll.timerMinutes = on ? win->autoScroll.timerMinutesSetting : 0;
         win->autoScroll.startTick = GetTickCount64();

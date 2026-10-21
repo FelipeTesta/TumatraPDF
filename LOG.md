@@ -1,6 +1,32 @@
 # TumatraPDF — Development Log
 
-## 2026-10-20 (s36-ag) — B6 wave 4a: switch-missing-default-case 128 → 0 (113 default labels)
+## 2026-10-21 (s36-ah) — USER reports batch: 7 of 9 fixed (Home time/contrast, trim-pause, TC2 bookmarks, reopen-window, per-file prefs, master time)
+
+### Fixed
+- Home stats totals: now `Today <t> | Total: <t>`, `7d` gone. New `ReadingStatsGetTotalSec()` sums daily buckets (path-independent => survives rename/delete/move = the "MASTER" reading time). Dark accents had `textStrong` RGB(60,60,60) DARKER than `text` RGB(130,130,130), so times were invisible; now 170/232.
+- Trim Config dialog pauses autoscroll: `AutoScrollPauseForTrimConfig` / `AutoScrollResumeFromTrimConfig` + `autoPausedByTrimConfig` (resume on OnSave/OnCancel; toggle clears the flag).
+- TC2 bookmark lands on LEFT column: engine destinations carry PHYSICAL pages while `DisplayModel::ScrollTo` takes VIRTUAL. New `DisplayModel::PhysicalToVirtualPage(phys, rect)`; mapping applied at the single choke point `LinkHandler::ScrollTo(int, RectF, float)`.
+- Ctrl+Shift+T reopens the whole closed window: `FileHistory` gained group tracking (`gClosedGroupSizes` parallel Vec, `RememberClosedDocumentGroup`, `RecentlyClosedGroupSize/Count`, `MergeRecentlyClosedGroups`). `CloseWindow` records all tabs as one group, `CloseAllTabs` merges the per-tab singles, `ReopenLastClosedFile` pops the group and loads oldest-first.
+- Per-file state: `FileState` gained `MarginTrim` / `TrimTop` (-1 = inherit global) / `TrimBottom` / `ViewportCropV2` (via `cmd/gen-settings.ts`); `DisplayModel` keeps `trimTop/trimBottom` per document; global trim reads replaced in DisplayModel/Canvas/RenderCache; new file now opens with trim OFF and TC2 OFF (was inheriting the last session's globals). Autoscroll speed was already per file.
+- R6-left: autoscroll timer toggle no longer reads the checkbox HWND; `BS_AUTOCHECKBOX` -> `BS_CHECKBOX` and the handler owns the state, so keyboard/palette invocation stays in sync.
+
+### Fixed (found while verifying the above)
+- Per-document restore ran inside `if (fs)` at a point where `tab->AsFixed()` is still null (controller created later), so every assignment was silently skipped; moved just before `dm->SetInitialViewSettings()`.
+- `EngineMupdf::HandleLinkMupdf` calls `ScrollTo(pageNo + 1, r, zoom)` — the int overload — so the mapping placed in `ScrollTo(IPageDestination*)` never ran for TOC/outline links; moved to the int overload (removed from the dest overload to avoid a double map).
+
+### Verified
+- E5: two documents -> close window -> relaunch empty -> `CmdReopenLastClosedFile` -> both tabs restored, active = last.
+- E6/E7: settings file shows per-file `MarginTrim` / `ViewportCropV2` / `TrimTop` / `TrimBottom`; a new document gets false/false.
+- E2: autoscroll 70->140, open Trim Config -> frozen; close dialog -> resumed 244->314.
+- E3: TC2 on -> `TestTocNavigate` dest 2 -> landed 3 (= 2*2-1, LEFT); TC2-off gate `issue-2799` -> landed 2 (unchanged).
+- Build 0/0, no warnings.
+
+### Notes
+- E4 zoom step = taste change: `defaultZoomLevels` refined to a ~1.33 ratio (added 10/18/250/500/1000/2000/4000). Awaiting user verdict; one-line revert if disliked.
+- E9 timer trio stays OPEN: anchored to `TbGetRect(CmdAutoScrollToggle)` measured BEFORE `EnforceToolbarTextButtonWidths` widens the button by the trio width; after a 2-3 row wrap the trio bleeds 4 px into the row above and is never re-positioned once the wrap settles.
+- Traps: `bun cmd/gen-code.ts` fails here at the vk-codes step (no `cl` in PATH) -> run `bun cmd/gen-settings.ts`; concurrent agent builds cause LNK1104/C1083, poll `Get-Process MSBuild`; debug build always exits 5 on quit; debug always logs to `out/dbg64/sumlog.txt`; TC2 needs `DisplayMode = continuous`; `-for-testing` blocks settings SAVE but not read.
+
+## 2026-10-20 (s36-ag) - B6 wave 4a: switch-missing-default-case 128 → 0 (113 default labels)
 
 ### Fixed
 - `bugprone-switch-missing-default-case` (128 sites) eliminated via a custom inserter (the check has NO fix-it upstream): `tests/tmp/fix-switch-default2.ts` — per-TU clang-tidy diagnose → brace-matching `default:` + `break;` insertion (tracks strings/chars/comments; skips spans that already have a default; always behavior-neutral: falls-through == skip-switch). **113 labels in 55 files**; the remainder were already-default or vendor TUs.

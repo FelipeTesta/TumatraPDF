@@ -997,6 +997,18 @@ FileStates [
     ; contrast overlay opacity for this document (0-100)
     ContrastOpacity = 50
 
+    ; if true, margin trim is enabled for this document
+    MarginTrim = false
+
+    ; top margin trim for this document (-1 = use the global default)
+    TrimTop = -1
+
+    ; bottom margin trim for this document (-1 = use the global default)
+    TrimBottom = -1
+
+    ; if true, two-column reading (v2) is enabled for this document
+    ViewportCropV2 = false
+
     ; arch tools scale factor (page units per real unit)
     ArchScaleFactor = 0
 

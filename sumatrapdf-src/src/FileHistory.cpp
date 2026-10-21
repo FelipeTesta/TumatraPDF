@@ -280,6 +280,9 @@ void FileHistory::Purge(bool alwaysUseDefaultState) const {
 
 // list of recently closed documents, most recent at the end
 static StrVec gClosedDocuments;
+// how many documents each remember call added, oldest group first; a closing
+// window adds all its tabs as one group so a single reopen restores the window
+static Vec<int> gClosedGroupSizes;
 
 int RecentlyCloseDocumentsCount() {
     return len(gClosedDocuments);
@@ -290,14 +293,68 @@ void RememberRecentlyClosedDocument(Str path) {
         return;
     }
     gClosedDocuments.Append(path);
+    gClosedGroupSizes.Append(1);
+}
+
+void RememberClosedDocumentGroup(StrVec& paths) {
+    int added = 0;
+    for (Str p : paths) {
+        if (str::IsEmptyOrWhiteSpace(p)) {
+            continue;
+        }
+        gClosedDocuments.Append(p);
+        added++;
+    }
+    if (added > 0) {
+        gClosedGroupSizes.Append(added);
+    }
+}
+
+int RecentlyClosedGroupSize() {
+    int n = len(gClosedGroupSizes);
+    if (n == 0) {
+        return 0;
+    }
+    return gClosedGroupSizes[n - 1];
+}
+
+int RecentlyClosedGroupCount() {
+    return len(gClosedGroupSizes);
+}
+
+// fold the last n groups into one, keeping document order; used when several
+// tabs were closed by one user action (CmdCloseAllTabs) so one reopen restores
+// the whole set instead of one tab per reopen
+void MergeRecentlyClosedGroups(int n) {
+    int total = len(gClosedGroupSizes);
+    if (n <= 1 || n > total) {
+        return;
+    }
+    int size = 0;
+    for (int i = total - n; i < total; i++) {
+        size += gClosedGroupSizes[i];
+    }
+    int keep = total - n;
+    while (len(gClosedGroupSizes) > keep) {
+        gClosedGroupSizes.RemoveAtFast(len(gClosedGroupSizes) - 1);
+    }
+    gClosedGroupSizes.Append(size);
 }
 
 Str PopRecentlyClosedDocument() {
     int n = len(gClosedDocuments);
-    if (n > 0) {
-        return Str(gClosedDocuments.RemoveAtFast(n - 1));
+    if (n == 0) {
+        return Str();
     }
-    return Str();
+    Str res(gClosedDocuments.RemoveAtFast(n - 1));
+    int g = len(gClosedGroupSizes);
+    if (g > 0) {
+        gClosedGroupSizes[g - 1] -= 1;
+        if (gClosedGroupSizes[g - 1] <= 0) {
+            gClosedGroupSizes.RemoveAtFast(g - 1);
+        }
+    }
+    return res;
 }
 
 // --- thumbnail cache delete

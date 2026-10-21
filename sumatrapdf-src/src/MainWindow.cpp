@@ -579,6 +579,11 @@ void LinkHandler::GoToPage(int pageNo, bool addNavPoint) {
     if (!win || !win->ctrl || !win->IsDocLoaded()) {
         return;
     }
+    // callers (TOC items without a destination, engine link handlers) pass
+    // PHYSICAL page numbers; map to the column domain like GotoLink does
+    if (auto* dm = win->ctrl->AsFixed()) {
+        pageNo = dm->PhysicalToVirtualPage(pageNo, RectF());
+    }
     win->ctrl->GoToPage(pageNo, addNavPoint);
 }
 
@@ -602,6 +607,14 @@ void LinkHandler::ScrollTo(int pageNo, RectF rect, float zoom) {
     ReportIf(!win || !win->ctrl || win->linkHandler != this);
     if (!win || !win->ctrl || !win->IsDocLoaded()) {
         return;
+    }
+    // engines resolve outline / link destinations to PHYSICAL page numbers
+    // (EngineMupdf::HandleLinkMupdf -> ScrollTo(pageNo + 1, ...)); document
+    // ScrollTo() speaks the column (virtual) domain, so a bookmark to page N
+    // must be mapped to N's left column in two-column mode instead of landing
+    // in the middle of the spread (user 2026-10-21)
+    if (auto* dm = win->ctrl->AsFixed()) {
+        pageNo = dm->PhysicalToVirtualPage(pageNo, rect);
     }
     win->ctrl->ScrollTo(pageNo, rect, zoom);
 }

@@ -165,3 +165,15 @@ int ReadingStatsGetDaySec(int dateKey) {
     }
     return 0;
 }
+
+// all-time reading time, independent of the per-document FileState entries:
+// summing the daily buckets means a renamed/deleted/moved document cannot lose
+// the time it contributed (the sidecar is keyed by date, not by path)
+int ReadingStatsGetTotalSec() {
+    ReadingStatsLoadIfNeeded();
+    int total = 0;
+    for (int i = 0; i < len(gReadingStats.daily); i++) {
+        total += gReadingStats.daily[i].sec;
+    }
+    return total;
+}

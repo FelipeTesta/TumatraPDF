@@ -26,4 +26,9 @@ void ReadingStatsFlush(bool force);
 // seconds of reading time recorded for the given day (YYYYMMDD); 0 when none
 int ReadingStatsGetDaySec(int dateKey);
 
+// all-time reading time (sum of every daily bucket). This is the MASTER total:
+// it lives in the sidecar keyed by date, so it survives renaming, deleting or
+// moving the documents that produced it
+int ReadingStatsGetTotalSec();
+
 #endif

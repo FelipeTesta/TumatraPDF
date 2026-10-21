@@ -1388,30 +1388,20 @@ void HomeStatsWnd::Paint(VirtWndPaintCtx& ctx) {
             g->DrawString(ToWStrTemp(Str(more)).s, -1, &fontLabel,
                           Gdiplus::PointF((float)(b.x + pad), (float)(listBottom - dpi(14))), &txtBrush);
         }
-        // totals line at the bottom of the ranking column
+        // totals line at the bottom of the ranking column: today + all-time.
+        // The all-time value comes from the daily sidecar (not from the sum of
+        // the FileState entries), so it survives document rename/delete/move —
+        // it is the "master" reading-time total (user 2026-10-21; the old
+        // "7d" bucket was meaningless to the user)
         SYSTEMTIME st{};
         GetLocalTime(&st);
         int todayKey = (int)st.wYear * 10000 + (int)st.wMonth * 100 + (int)st.wDay;
         int todaySec = ReadingStatsGetDaySec(todayKey);
-        int weekSec = 0;
-        for (int back = 0; back < 7; back++) {
-            SYSTEMTIME d = st;
-            // go back `back` days via mktime
-            struct tm t{};
-            t.tm_year = st.wYear - 1900;
-            t.tm_mon = st.wMonth - 1;
-            t.tm_mday = st.wDay - back;
-            t.tm_isdst = -1;
-            time_t tt = mktime(&t);
-            struct tm lt{};
-            if (tt != (time_t)-1 && localtime_s(&lt, &tt) == 0) {
-                weekSec += ReadingStatsGetDaySec((lt.tm_year + 1900) * 10000 + (lt.tm_mon + 1) * 100 + lt.tm_mday);
-            }
-        }
+        int totalSec = ReadingStatsGetTotalSec();
         TempStr totals =
-            fmt("Today %s / 7d %s", Str(HomeStatsFormatMinTemp(todaySec)), Str(HomeStatsFormatMinTemp(weekSec)));
+            fmt("Today %s | Total: %s", Str(HomeStatsFormatMinTemp(todaySec)), Str(HomeStatsFormatMinTemp(totalSec)));
         g->DrawString(ToWStrTemp(Str(totals)).s, -1, &fontLabel,
-                      Gdiplus::PointF((float)(b.x + pad), (float)(b.y + b.dy - pad - dpi(14))), &txtBrush);
+                      Gdiplus::PointF((float)(b.x + pad), (float)(b.y + b.dy - pad - dpi(14))), &valBrush);
     }
 
     // --- year navigation row ---

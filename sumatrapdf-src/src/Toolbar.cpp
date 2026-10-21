@@ -2067,7 +2067,7 @@ static void CreateTimerControls(MainWindow* win) {
 
     // Checkbox: left-aligned, vertically centered in slot
     win->autoScroll.hwndTimerCheck = CreateWindowExW(
-        0, L"Button", L"", BS_AUTOCHECKBOX | WS_CHILD | WS_VISIBLE, r.x + ctrlGapX, r.y + (r.dy - ctrlH) / 2, ctrlH,
+        0, L"Button", L"", BS_CHECKBOX | WS_CHILD | WS_VISIBLE, r.x + ctrlGapX, r.y + (r.dy - ctrlH) / 2, ctrlH,
         ctrlH, win->hwndToolbar, (HMENU)(INT_PTR)CmdAutoScrollTimerToggle, h, nullptr);
 
     // Static "Timer:" label: right of checkbox with gap

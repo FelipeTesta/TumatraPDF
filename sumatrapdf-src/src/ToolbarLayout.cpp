@@ -29,8 +29,12 @@ static bool DsIsDarkTheme() {
 DsAccents DsAccentsGet() {
     DsAccents a{};
     if (DsIsDarkTheme()) {
-        a.text = RGB(130, 130, 130);
-        a.textStrong = RGB(60, 60, 60);
+        // dark theme: "strong" must be BRIGHTER than plain text, not darker —
+        // these used to be swapped (text 130 / strong 60), which made the
+        // reading-time values nearly invisible on a dark background (user
+        // 2026-10-21: "tempos muito escuros, pouco legíveis")
+        a.text = RGB(170, 170, 170);
+        a.textStrong = RGB(232, 232, 232);
         a.textHot = RGB(120, 130, 140);
         a.silver = RGB(120, 130, 140);
         a.silverHi = RGB(198, 209, 215);

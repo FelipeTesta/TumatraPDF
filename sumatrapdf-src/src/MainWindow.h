@@ -359,6 +359,10 @@ struct MainWindow {
         // (minimized / focus lost): re-activation resumes it automatically; a
         // manual toggle clears it (the user decided)
         bool autoPausedByFocus = false;
+        // true when auto-scroll was paused because the trim-config dialog is
+        // open (the red margin lines are being dragged; scrolling under the
+        // pointer would move the target). Resumed when the dialog closes.
+        bool autoPausedByTrimConfig = false;
     } autoScroll;
     // --- end auto-scroll feature ---
 

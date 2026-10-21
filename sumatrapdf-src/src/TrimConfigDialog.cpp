@@ -20,6 +20,7 @@
 #include "RenderCache.h"
 #include "SumatraConfig.h"
 #include "SumatraPDF.h"
+#include "AutoScroll.h"
 #include "Translations.h"
 #include "TrimConfigDialog.h"
 #include "Theme.h"
@@ -161,13 +162,21 @@ void TrimConfigWnd::OnReset() {
 }
 
 void TrimConfigWnd::OnSave() {
+    // the global values remain the defaults for documents that never stored
+    // their own trim; the current document gets its own copy below
     gGlobalPrefs->trim.top = win->trimConfigTop;
     gGlobalPrefs->trim.bottom = win->trimConfigBottom;
-    SaveSettings();
     win->trimConfigMode = 0;
     // page heights depend on the trim values, so re-layout (keeping the view)
     // before repainting
     auto* trimDm = win->AsFixed();
+    if (trimDm) {
+        trimDm->trimTop = win->trimConfigTop;
+        trimDm->trimBottom = win->trimConfigBottom;
+    }
+    // persist after the document values are updated, so SaveCurrentWindowTab
+    // snapshots them into this file's FileState
+    SaveSettings();
     // restore the trim that was temporarily disabled at dialog open (s29);
     // must happen before the relayout condition below, which reads the flag
     if (trimDm && hadTrimEnabled) {
@@ -187,6 +196,7 @@ void TrimConfigWnd::OnSave() {
     if (GetCurrentModelessDialog() == hwnd) {
         SetCurrentModelessDialog(nullptr);
     }
+    AutoScrollResumeFromTrimConfig(win);
     ScheduleDelete();
 }
 
@@ -215,6 +225,7 @@ void TrimConfigWnd::OnCancel() {
     if (GetCurrentModelessDialog() == hwnd) {
         SetCurrentModelessDialog(nullptr);
     }
+    AutoScrollResumeFromTrimConfig(win);
     ScheduleDelete();
 }
 
@@ -255,12 +266,18 @@ bool TrimConfigWnd::Create(MainWindow* mainWin) {
     savedTop = gGlobalPrefs->trim.top;
     savedBottom = gGlobalPrefs->trim.bottom;
     savedColGap = gGlobalPrefs->viewportCrop.colGap;
-    win->trimConfigTop = savedTop;
-    win->trimConfigBottom = savedBottom;
+    // trim margins are per document now: edit from the values this document is
+    // actually using, falling back to the global defaults
+    auto* cfgDm = mainWin->AsFixed();
+    win->trimConfigTop = cfgDm ? cfgDm->trimTop : savedTop;
+    win->trimConfigBottom = cfgDm ? cfgDm->trimBottom : savedBottom;
     win->trimConfigMode = 1; // dialog open → visible margin lines (context-aware, s28)
     win->trimConfigDragLine = 0;
     win->trimDragPageNo = 0;
     win->trimDragging = false;
+    // pause auto-scroll: dragging a margin line while the page scrolls under
+    // the pointer is unusable (user 2026-10-21); resumed on save/cancel
+    AutoScrollPauseForTrimConfig(win);
 
     {
         CreateCustomArgs args;

@@ -31,6 +31,10 @@ extern FileHistory gFileHistory;
 
 int RecentlyCloseDocumentsCount();
 void RememberRecentlyClosedDocument(Str path);
+void RememberClosedDocumentGroup(StrVec& paths);
+int RecentlyClosedGroupSize();
+int RecentlyClosedGroupCount();
+void MergeRecentlyClosedGroups(int n);
 Str PopRecentlyClosedDocument();
 void RemoveNonExistentFilesAsync();
 bool DocumentPathExists(Str path);
