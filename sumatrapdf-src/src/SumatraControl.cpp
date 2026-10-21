@@ -142,6 +142,7 @@ enum class ControlCmd : u16 {
     TestContextMenu = 45,
     TestStatsToggleGraph = 46,
     TestCvtRoundTrip = 47,
+    TestVirtWndHitTest = 48,
 };
 
 enum class ControlArgType : u16 {
@@ -745,6 +746,17 @@ static void ExecuteControlRequest(ControlRequest* req) {
             IntArg(req, 2, seed);
             int exitCode = 0;
             Str res = CvtRoundTripResultTemp(zoomPercent, sampleCount, seed, &exitCode);
+            AppendTestResult(req, exitCode, res);
+            break;
+        }
+
+        case ControlCmd::TestVirtWndHitTest: {
+            int samplesPerWnd = 8;
+            int seed = 42;
+            IntArg(req, 0, samplesPerWnd);
+            IntArg(req, 1, seed);
+            int exitCode = 0;
+            Str res = VirtWndHitTestResultTemp(samplesPerWnd, seed, &exitCode);
             AppendTestResult(req, exitCode, res);
             break;
         }

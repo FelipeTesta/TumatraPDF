@@ -84,6 +84,30 @@ export async function testit(): Promise<void> {
     throw new Error(`round-trip failed on multi-page doc: ${kv3["__firstLine"]}`);
   }
   console.log(`multi-page: pages=${kv3["pages"]} maxErr=${Number(kv3["maxErr"]).toFixed(3)} OK`);
+
+  // 4. VirtWnd local<->root bridge: no doc, so the home virtual tree exists.
+  // The tree is laid out by the home paint path; poll until NOTREADY clears
+  const deadline4 = Date.now() + 20_000;
+  let text4 = "";
+  for (;;) {
+    const res4 = await runControlCommand(EXE, ControlCommand.TestVirtWndHitTest, [8, 42]);
+    text4 = ((res4[1] as string) ?? "").trim();
+    if (!text4.startsWith("NOTREADY")) {
+      break;
+    }
+    if (Date.now() > deadline4) {
+      throw new Error(`virt-wnd tree never became ready: ${text4}`);
+    }
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  if (text4.startsWith("FAIL")) {
+    throw new Error(`virt-wnd bridge failed: ${text4}`);
+  }
+  const kv4 = parseResult([0, text4]);
+  if (!(Number(kv4["tested"]) > 0)) {
+    throw new Error(`virt-wnd bridge tested nothing: ${text4}`);
+  }
+  console.log(`virt-wnd bridge: ${text4.split("\n")[0]}`);
 }
 
 if (import.meta.main) {

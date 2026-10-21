@@ -8,6 +8,12 @@
 #include "Settings.h"
 #include "GlobalPrefs.h"
 #include "wingui/UIModels.h"
+#include "wingui/Layout.h"
+#include "wingui/WinGui.h"
+#include "wingui/PlatformFont.h"
+#include "wingui/Gfx.h"
+#include "wingui/IconPixmap.h"
+#include "wingui/VirtWnd.h"
 #include "DocController.h"
 #include "EngineBase.h"
 #include "base/GuessFileType.h"
@@ -1232,6 +1238,124 @@ TempStr CvtRoundTripResultTemp(int zoomPercent, int sampleCount, int seed, int* 
     out.Append(fmt(
         "OK pages=%d skipped=%d zoom=%d samples=%d maxErr=%.3f worstPage=%d virtual=%d physical=%d mappingErrs=%d\n",
         nPages, pagesSkipped, zoomPercent, sampleCount, (double)maxErr, worstPage, vCount, pCount, mappingErrs));
+    return ToStrTemp(out);
+}
+
+// Walks the home VirtWnd tree and verifies the local<->root hit-test bridge:
+// for every hit-testable wnd W and a local point p, WndFromPoint(W's
+// BoundsInWindow().xy + p) must return W with *ptLocalOut == p. A mismatch is
+// the local/root bridge bug class from the 2026-10-16 coordinate-space audit.
+// Overlapping windows hit topmost-first (legit); only bridge violations fail.
+TempStr VirtWndHitTestResultTemp(int samplesPerWnd, int seed, int* exitCodeOut) {
+    str::Builder out;
+    auto fail = [&](Str msg) -> Str {
+        out.Append(msg);
+        out.AppendChar('\n');
+        if (exitCodeOut) {
+            *exitCodeOut = 1;
+        }
+        return ToStrTemp(out);
+    };
+
+    if (len(gWindows) == 0) {
+        return fail("NOTREADY no-window");
+    }
+    MainWindow* win = gWindows[0];
+    if (!win->homeRoot) {
+        return fail("NOTREADY no-home-virt-tree (open the home page without a doc)");
+    }
+    // the tree is populated + laid out by the home page's paint path; a test
+    // polls until this stops being NOTREADY (HomeListRowsResultTemp pattern)
+    if (!win->homeRoot->child || win->homeRoot->bounds.dx <= 0) {
+        if (exitCodeOut) {
+            *exitCodeOut = 2;
+        }
+        out.Append("NOTREADY no-home-layout\n");
+        return ToStrTemp(out);
+    }
+
+    samplesPerWnd = std::clamp(samplesPerWnd, 1, 64);
+    u32 rng = (u32)seed | 1;
+    auto rnd = [&rng]() -> u32 {
+        rng ^= rng << 13;
+        rng ^= rng >> 17;
+        rng ^= rng << 5;
+        return rng;
+    };
+
+    // collect hit-testable wnds; VirtWndRoot holds a single `child` (the home
+    // chrome), the base-class `children` vec is unused at the root
+    Vec<VirtWnd*> wnds;
+    Vec<VirtWnd*> queue;
+    queue.Append((VirtWnd*)win->homeRoot);
+    if (win->homeRoot->child) {
+        queue.Append(win->homeRoot->child);
+    }
+    while (len(queue) > 0) {
+        VirtWnd* w = queue.Pop();
+        int n = w->ChildCount();
+        for (int i = 0; i < n; i++) {
+            queue.Append(w->children[i]);
+        }
+        if (w->IsHitTestable()) {
+            wnds.Append(w);
+        }
+    }
+
+    int tested = 0;
+    int overlap = 0;
+    int nullHits = 0;
+    for (VirtWnd* w : wnds) {
+        Rect b = w->BoundsInWindow();
+        if (b.dx <= 0 || b.dy <= 0) {
+            continue;
+        }
+        // bounds center + deterministic offsets inside the bounds (kept >=1px
+        // from the edges so rounding at the boundary stays out of the sample)
+        Point locals[1 + 64];
+        int nSamples = 0;
+        locals[nSamples++] = {b.x + b.dx / 2, b.y + b.dy / 2};
+        for (int s = 1; s < samplesPerWnd; s++) {
+            int lx = b.x + 1 + (int)(rnd() % (u32)std::max(1, b.dx - 2));
+            int ly = b.y + 1 + (int)(rnd() % (u32)std::max(1, b.dy - 2));
+            locals[nSamples++] = {lx, ly};
+        }
+        for (int s = 0; s < nSamples; s++) {
+            Point ptRoot = locals[s]; // BoundsInWindow() is already window coords
+            Point ptLocal = {ptRoot.x - b.x, ptRoot.y - b.y};
+            Point got{};
+            VirtWnd* hit = win->homeRoot->WndFromPoint(ptRoot, &got);
+            if (hit == w) {
+                if (got.x != ptLocal.x || got.y != ptLocal.y) {
+                    return fail(fmt("FAIL bridge wnd local=(%d,%d) got=(%d,%d)", ptLocal.x, ptLocal.y, got.x, got.y));
+                }
+                tested++;
+                continue;
+            }
+            if (!hit) {
+                nullHits++;
+                continue;
+            }
+            Rect hb = hit->BoundsInWindow();
+            if (hb.Contains(ptRoot)) {
+                // topmost-wins: a later sibling covers W; the bridge is only
+                // wrong if the winner's own local point does not match
+                if (got.x != ptRoot.x - hb.x || got.y != ptRoot.y - hb.y) {
+                    return fail(
+                        fmt("FAIL bridge overlap winner=(%d,%d) got=(%d,%d)", ptRoot.x, ptRoot.y, got.x, got.y));
+                }
+                overlap++;
+            } else {
+                nullHits++;
+            }
+        }
+    }
+
+    if (exitCodeOut) {
+        *exitCodeOut = 0;
+    }
+    out.Append(fmt("OK wnds=%d tested=%d overlap=%d null=%d samples=%d seed=%d\n", len(wnds), tested, overlap, nullHits,
+                   samplesPerWnd, seed));
     return ToStrTemp(out);
 }
 

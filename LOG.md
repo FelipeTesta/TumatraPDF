@@ -1,5 +1,15 @@
 # TumatraPDF — Development Log
 
+## 2026-10-20 (s36-aj) — B4 slice 2: VirtWnd local<->root hit-test bridge invariant
+
+### Added
+- `TestVirtWndHitTest` `-dbg-control` command (id 48; IntArgs [samplesPerWnd=8, seed=42]) → `VirtWndHitTestResultTemp` (SumatraTest.cpp): walks the home VirtWnd tree (the root holds a SINGLE `child` member — the home chrome; the base `children` vec stays empty at the root) and, for every hit-testable wnd W with non-empty bounds, samples the bounds center + N-1 deterministic PRNG points (kept 1px inside the edges); asserts `homeRoot->WndFromPoint(windowPt)` returns W with `*ptLocalOut == windowPt - BoundsInWindow().xy` **EXACTLY** (integer arithmetic). Topmost-wins overlaps are counted when the winner's own local point is consistent; consistent nulls (gaps between entries) counted.
+- `tests/ad-hoc-b4-coordinate-invariants.ts` case 4: polls until NOTREADY clears — the home tree is built + laid out by the home page's paint path (`HomeListRowsResultTemp` NOTREADY/exit-2 pattern), then asserts tested>0.
+
+### Verified
+- Build 0/0 (47.3 s). Full ad-hoc run 11.9 s: slice-1 cases unchanged (zoom 25-1600 err scales 1/zoom; alternate seed; multi-page TC2 mapping) + **`virt-wnd bridge: OK wnds=12 tested=62 overlap=16 null=18` — 0 bridge violations** on the home tree.
+- Include-order: `SumatraTest.cpp` needs the full wingui chain for `VirtWnd.h` (UIModels → Layout → WinGui → PlatformFont → Gfx → IconPixmap → VirtWnd — `VirtWnd.h` is not self-sufficient: needs `LayoutBase`, `Gfx`, `VirtWndMouseHandler`, `Insets`).
+
 ## 2026-10-21 (s36-ai) — E9: timer trio anchored by command id (`TbGetRect` index/id mixup)
 
 ### Fixed
