@@ -23,6 +23,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     if (!ctx) {
         return 0;
     }
+    fz_register_document_handlers(ctx);
     fz_stream* stream = fz_open_memory(ctx, data, size);
     fz_document* doc = nullptr;
     fz_page* page = nullptr;
@@ -35,8 +36,8 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
             page = fz_load_page(ctx, doc, 0);
             fz_rect bounds = fz_bound_page(ctx, page);
             // clamp: a malformed doc can claim a huge page box
-            if (bounds.x1 - bounds.x0 > 1 && bounds.x1 - bounds.x0 < 20000 &&
-                bounds.y1 - bounds.y0 > 1 && bounds.y1 - bounds.y0 < 20000) {
+            if (bounds.x1 - bounds.x0 > 1 && bounds.x1 - bounds.x0 < 20000 && bounds.y1 - bounds.y0 > 1 &&
+                bounds.y1 - bounds.y0 < 20000) {
                 fz_matrix ctm = fz_scale(0.25f, 0.25f);
                 fz_rect scaled = fz_transform_rect(bounds, ctm);
                 pix = fz_new_pixmap_with_bbox(ctx, fz_device_rgb(ctx), fz_round_rect(scaled), 0, 1);

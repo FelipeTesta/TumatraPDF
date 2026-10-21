@@ -1,5 +1,19 @@
 # TumatraPDF — Development Log
 
+## 2026-10-20 (s36-ag) — B6 wave 4a: switch-missing-default-case 128 → 0 (113 default labels)
+
+### Fixed
+- `bugprone-switch-missing-default-case` (128 sites) eliminated via a custom inserter (the check has NO fix-it upstream): `tests/tmp/fix-switch-default2.ts` — per-TU clang-tidy diagnose → brace-matching `default:` + `break;` insertion (tracks strings/chars/comments; skips spans that already have a default; always behavior-neutral: falls-through == skip-switch). **113 labels in 55 files**; the remainder were already-default or vendor TUs.
+- Two script bugs found on the way: (1) the diagnostic regex assumed MSVC `(line,col)` format — clang-tidy prints GNU `path:line:col:` (two full passes ran with 0 inserts before the fix); (2) `cmd/clang-flags.ts` include list predated F1 (missing `src/mupdf`, `mupdf/scripts/freetype`) → every TU failed to parse ("Found compiler error(s)").
+
+### Verified
+- `bun cmd/build.ts` 0/0 (112.8 s), exe deployed to Compiled. Per-TU verify: `clang-tidy.ts -files` → **0** switch-missing-default-case findings (Toolbar + Canvas spot-check).
+- git diff review: +273/−2 across 62 files (1-2 line inserts + comment alignment only).
+
+### Notes
+- Wave 4b (`bugprone-unhandled-code-paths`, 102) stays backlog: its `default` needs a per-function sensible value, not a mechanical `break`.
+- Inserter script lives in gitignored `tests/tmp/`; the stale stash-pop conflicts from the other agent were resolved in `c524e4d` (kept the HEAD/release 1.0.12 side).
+
 ## 2026-10-20 (s36-af) — fuzz harnesses: document handlers were missing (campaigns were vacuous) + cmark link dep
 
 ### Fixed

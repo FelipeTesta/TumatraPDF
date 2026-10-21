@@ -209,6 +209,8 @@ static bool IsEdgeMostlyBlackEx(DWORD* pixels, int stride, int x0, int y0, int w
                 total++;
             }
             break;
+        default:
+            break;
     }
     return total > 0 && blackCount > (total * 7 / 10);
 }
@@ -1053,6 +1055,8 @@ static LRESULT CALLBACK WndProcScreenshotOverlay(HWND hwnd, UINT msg, WPARAM wp,
                     SaveSelectedScreenshot(data);
                     DestroyWindow(hwnd);
                     return 0;
+                default:
+                    break;
             }
             break;
 

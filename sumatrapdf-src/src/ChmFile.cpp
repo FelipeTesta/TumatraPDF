@@ -285,6 +285,8 @@ bool ChmFile::ParseSystemData() {
             case 16:
                 // default font - ignore
                 break;
+            default:
+                break;
         }
     }
 
@@ -650,6 +652,8 @@ static bool ChmTocNeedsEntityRemap(uint cp) {
         case 1257: // Baltic
         case 1258: // Vietnamese
             return true;
+        default:
+            break;
     }
     return false;
 }

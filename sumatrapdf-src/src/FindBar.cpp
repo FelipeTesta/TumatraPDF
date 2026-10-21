@@ -94,6 +94,8 @@ static TempStr FindBarButtonTooltip(int cmd) {
             return _TRA("Open in a window");
         case kFindBarCloseCmdId:
             return _TRA("Close");
+        default:
+            break;
     }
     return {};
 }
@@ -378,6 +380,8 @@ bool FindBarWnd::PreTranslateMessage(MSG& msg) {
                 FindNext(win);
             }
             return true;
+        default:
+            break;
     }
     return false;
 }
@@ -403,6 +407,8 @@ bool FindBarWnd::OnCommand(WPARAM wparam, LPARAM /*lparam*/) {
         case kFindBarCloseCmdId:
             HideFindBar(win);
             return true;
+        default:
+            break;
     }
     return false;
 }

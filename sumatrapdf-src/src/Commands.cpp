@@ -1608,6 +1608,8 @@ CustomCommand* CreateCommandFromDefinition(Str definition) {
             argCmdId = CmdScrollUp;
             break;
         }
+        default:
+            break;
     }
 
     // find arguments for this cmdId

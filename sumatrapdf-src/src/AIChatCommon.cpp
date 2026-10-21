@@ -238,6 +238,8 @@ static HRESULT CALLBACK AIChatNotInstalledDialogCallback(HWND /*hwnd*/, UINT msg
                 return S_FALSE;
             }
             break;
+        default:
+            break;
     }
     return S_OK;
 }

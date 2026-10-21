@@ -1718,6 +1718,8 @@ AnnotationType CmdIdToAnnotationType(int cmdId) {
         case CmdCreateAnnotInk:            return AnnotationType::Ink;
         case CmdCreateAnnotPopup:          return AnnotationType::Popup;
         case CmdCreateAnnotFileAttachment: return AnnotationType::FileAttachment;
+    default:
+        break;
     }
     // clang-format on
     return AnnotationType::Unknown;

@@ -136,6 +136,8 @@ static bool EvalCalcExpr(const char* s, float& result) {
                 }
                 acc /= v;
                 break;
+            default:
+                break;
         }
         while (*p == ' ') {
             p++;

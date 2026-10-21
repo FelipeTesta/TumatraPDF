@@ -214,6 +214,8 @@ static TempStr getVirtTemp(BYTE key, bool isEng) {
                 return StrL("<-");
             case VK_RIGHT:
                 return StrL("->");
+            default:
+                break;
         }
     }
     return SeqStrNumStrByNumber(gVirtKeysNum, key);

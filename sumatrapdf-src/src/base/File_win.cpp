@@ -565,6 +565,8 @@ bool HasVariableDriveLetter(Str path) {
         case DRIVE_CDROM:
         case DRIVE_NO_ROOT_DIR:
             return true;
+        default:
+            break;
     }
     return false;
 }

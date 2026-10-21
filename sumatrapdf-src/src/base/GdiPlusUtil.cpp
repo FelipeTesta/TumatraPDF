@@ -113,6 +113,8 @@ RectF MeasureTextQuick(Graphics* g, Font* f, WStr s) {
                 case '!':
                     correct += 0.1f;
                     break;
+                default:
+                    break;
             }
         }
         bbox.Width *= (1.0f - (correct / (float)n)) * 0.99f;

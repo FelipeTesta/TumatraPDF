@@ -113,6 +113,7 @@ async function main() {
       // mupdf's own dependency archives (freetype, harfbuzz, ...); unreferenced
       // members are skipped by the linker, so listing them all is harmless
       join("out", "rel64", "obj-s", "freetype.lib"),
+    join("out", "rel64", "obj", "cmark-gfm.lib"), // mupdf 1.28.5 md.c references cmark-gfm
       join("out", "rel64", "obj-s", "harfbuzz.lib"),
       join("out", "rel64", "obj-s", "a-jbig2dec.lib"),
       join("out", "rel64", "obj-s", "lcms2.lib"),

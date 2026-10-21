@@ -369,6 +369,8 @@ static LRESULT CALLBACK TimerDoneOverlayProc(HWND hwnd, UINT msg, WPARAM wp, LPA
         case WM_DESTROY:
             gTimerDoneHwnd = nullptr;
             return 0;
+        default:
+            break;
     }
     return DefWindowProcW(hwnd, msg, wp, lp);
 }

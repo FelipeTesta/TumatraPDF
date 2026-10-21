@@ -209,6 +209,8 @@ static LRESULT CALLBACK SizingProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             delete pdd;
             return CallWindowProc(wndProc, hwnd, msg, wp, lp);
         }
+        default:
+            break;
     }
 
     return CallWindowProc(pdd->wndProc, hwnd, msg, wp, lp);

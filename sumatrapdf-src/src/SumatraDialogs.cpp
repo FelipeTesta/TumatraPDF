@@ -239,6 +239,8 @@ static INT_PTR CALLBACK Dialog_GetPassword_Proc(HWND hDlg, UINT msg, WPARAM wp, 
                     HwndInvalidate(hwndEdit, true);
                     return TRUE;
                 }
+                default:
+                    break;
             }
             break;
     }
@@ -325,6 +327,8 @@ static INT_PTR CALLBACK Dialog_GoToPage_Proc(HWND hDlg, UINT msg, WPARAM wp, LPA
                 case IDCANCEL:
                     EndDialog(hDlg, IDCANCEL);
                     return TRUE;
+                default:
+                    break;
             }
             break;
     }
@@ -404,6 +408,8 @@ static INT_PTR CALLBACK Dialog_Find_Proc(HWND hDlg, UINT msg, WPARAM wp, LPARAM 
                 case IDCANCEL:
                     EndDialog(hDlg, IDCANCEL);
                     return TRUE;
+                default:
+                    break;
             }
             break;
     }
@@ -533,6 +539,8 @@ static INT_PTR CALLBACK Dialog_ChangeLanguage_Proc(HWND hDlg, UINT msg, WPARAM w
                 case IDCANCEL:
                     EndDialog(hDlg, IDCANCEL);
                     return TRUE;
+                default:
+                    break;
             }
             break;
     }
@@ -736,6 +744,8 @@ static INT_PTR CALLBACK Dialog_CustomZoom_Proc(HWND hDlg, UINT msg, WPARAM wp, L
                 case IDCANCEL:
                     EndDialog(hDlg, IDCANCEL);
                     return TRUE;
+                default:
+                    break;
             }
             break;
     }
@@ -795,6 +805,8 @@ static INT_PTR CALLBACK Dialog_ChangeScrollbar_Proc(HWND hDlg, UINT msg, WPARAM 
                 case IDCANCEL:
                     EndDialog(hDlg, IDCANCEL);
                     return TRUE;
+                default:
+                    break;
             }
             break;
     }
@@ -962,6 +974,8 @@ static INT_PTR CALLBACK Dialog_Settings_Proc(HWND hDlg, UINT msg, WPARAM wp, LPA
                 case IDC_REMEMBER_STATE_PER_DOCUMENT:
                 case IDC_CHECK_FOR_UPDATES:
                     return TRUE;
+                default:
+                    break;
             }
             break;
     }
@@ -1009,6 +1023,8 @@ static INT_PTR CALLBACK Dialog_SetInverseSearch_Proc(HWND hDlg, UINT msg, WPARAM
                 case IDC_INVERSE_SEARCH_HELP:
                     LaunchDocumentation("/LaTeX-integration");
                     return TRUE;
+                default:
+                    break;
             }
             break;
     }
@@ -1141,6 +1157,8 @@ static INT_PTR CALLBACK Sheet_Print_Advanced_Proc(HWND hDlg, UINT msg, WPARAM wp
                     if (HIWORD(wp) == CBN_SELCHANGE) {
                         EnableWindow(GetDlgItem(GetParent(hDlg), ID_APPLY_NOW), TRUE);
                     }
+                    break;
+                default:
                     break;
             }
     }
@@ -1473,6 +1491,8 @@ static LRESULT CALLBACK ColorAreaSubclassProc(HWND hwnd, UINT msg, WPARAM wp, LP
         case WM_LBUTTONUP:
             ReleaseCapture();
             return 0;
+        default:
+            break;
     }
     return CallWindowProcW(gOrigColorAreaProc, hwnd, msg, wp, lp);
 }

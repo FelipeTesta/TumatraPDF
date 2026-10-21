@@ -1043,6 +1043,8 @@ static LRESULT CALLBACK ConfigWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
                 ReleaseCapture();
             }
             return 0;
+        default:
+            break;
     }
     return DefWindowProcW(hwnd, msg, wp, lp);
 }
@@ -1274,6 +1276,8 @@ static LRESULT CALLBACK ImportWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             }
             return 0;
         }
+        default:
+            break;
     }
     return DefWindowProcW(hwnd, msg, wp, lp);
 }
@@ -1626,6 +1630,8 @@ static LRESULT CALLBACK SessionWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp
             }
             return 0;
         }
+        default:
+            break;
     }
     return DefWindowProcW(hwnd, msg, wp, lp);
 }
@@ -1848,6 +1854,8 @@ static LRESULT CALLBACK OrderOptionsWndProc(HWND hwnd, UINT msg, WPARAM wp, LPAR
         case WM_CLOSE:
             DestroyWindow(hwnd);
             return 0;
+        default:
+            break;
     }
     return DefWindowProcW(hwnd, msg, wp, lp);
 }
@@ -2319,6 +2327,8 @@ static LRESULT CALLBACK FilterOptionsWndProc(HWND hwnd, UINT msg, WPARAM wp, LPA
                 ReleaseCapture();
             }
             return 0;
+        default:
+            break;
     }
     return DefWindowProcW(hwnd, msg, wp, lp);
 }

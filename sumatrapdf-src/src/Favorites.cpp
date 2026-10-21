@@ -1477,6 +1477,8 @@ static LRESULT CALLBACK WndProcFavBox(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
                 }
             }
             break;
+        default:
+            break;
     }
     return CallWindowProc(gWndProcFavBox, hwnd, msg, wp, lp);
 }

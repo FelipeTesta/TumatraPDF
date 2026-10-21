@@ -710,6 +710,8 @@ static HRESULT CALLBACK MoveAsideBlockedDialogCallback(HWND hwnd, UINT msg, WPAR
                 return S_OK; // abort install
             }
             return S_FALSE;
+        default:
+            break;
     }
     return S_OK;
 }
@@ -1453,6 +1455,8 @@ static HRESULT CALLBACK InstallationFailedDialogCallback(HWND /*hwnd*/, UINT msg
         case TDN_HYPERLINK_CLICKED:
             LaunchBrowser(ToUtf8Temp(WStr((wchar_t*)lParam)));
             break;
+        default:
+            break;
     }
     return S_OK;
 }
@@ -1656,6 +1660,8 @@ static int CALLBACK BrowseCallbackProc(HWND hwnd, UINT msg, LPARAM lp, LPARAM lp
             }
             EnableWindow(GetDlgItem(hwnd, IDOK), FALSE);
         } break;
+        default:
+            break;
     }
 
     return 0;

@@ -45,6 +45,8 @@ static LRESULT CALLBACK WndProcContrastOverlay(HWND hwnd, UINT msg, WPARAM wp, L
             logfa("[contrast] overlay WM_DESTROY win=%p enabled=%d\n", win, (int)win->contrastEnabled);
             win->hwndContrastOverlay = nullptr;
             break;
+        default:
+            break;
     }
     return DefWindowProcW(hwnd, msg, wp, lp);
 }

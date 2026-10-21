@@ -198,6 +198,8 @@ LRESULT CommandPaletteWnd::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                     int dir = cmdId == CmdNextTabSmart ? 1 : -1;
                     return AdvanceSelection(dir);
                 }
+                default:
+                    break;
             }
         }
     }

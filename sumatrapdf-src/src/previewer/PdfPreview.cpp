@@ -296,6 +296,8 @@ static LRESULT OnVScroll(HWND hwnd, WPARAM wp) {
         case SB_THUMBTRACK:
             si.nPos = si.nTrackPos;
             break;
+        default:
+            break;
     }
     si.fMask = SIF_POS;
     SetScrollInfo(hwnd, SB_VERT, &si, TRUE);

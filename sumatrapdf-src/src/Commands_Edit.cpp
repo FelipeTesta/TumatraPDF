@@ -557,6 +557,8 @@ void EditToolsImageDragMove(MainWindow* win, int x, int y) {
             nb.dx = clampf(b0.dx + dx, kMin, limits.x + limits.dx - b0.x);
             nb.dy = clampf(b0.dy + dy, kMin, limits.y + limits.dy - b0.y);
             break;
+        default:
+            break;
     }
     if (std::abs(nb.x - b0.x) < 0.001f && std::abs(nb.y - b0.y) < 0.001f && std::abs(nb.dx - b0.dx) < 0.001f &&
         std::abs(nb.dy - b0.dy) < 0.001f) {
@@ -1011,6 +1013,8 @@ bool HandleCommandEdit(MainWindow* win, int cmd) {
             }
             EditApplyImageEdits(win);
             return true;
+        default:
+            break;
     }
     return false;
 }

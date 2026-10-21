@@ -155,6 +155,8 @@ static TempStr FindWindowButtonTooltip(int cmd) {
             return AppendCmdAccel(_TRA("Match Whole Word"), cmd);
         case kFindWinPinCmdId:
             return _TRA("Dock to toolbar");
+        default:
+            break;
     }
     return {};
 }
@@ -726,6 +728,8 @@ LRESULT FindWindowWnd::WndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
             }
             break;
         }
+        default:
+            break;
     }
     return WndProcDefault(h, msg, wp, lp);
 }
@@ -800,6 +804,8 @@ bool FindWindowWnd::PreTranslateMessage(MSG& msg) {
             }
             return false; // Edit moves the caret
         }
+        default:
+            break;
     }
     return false;
 }
@@ -826,6 +832,8 @@ bool FindWindowWnd::OnCommand(WPARAM wparam, LPARAM /*lparam*/) {
         case kFindWinPinCmdId:
             ToggleFloatingFindUI(win); // dock back to the compact toolbar bar
             return true;
+        default:
+            break;
     }
     return false;
 }

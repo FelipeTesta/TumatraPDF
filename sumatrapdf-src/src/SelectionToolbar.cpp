@@ -400,6 +400,8 @@ static LRESULT CALLBACK WndProcSelectionToolbar(HWND hwnd, UINT msg, WPARAM wp, 
             EndPaint(hwnd, &ps);
             return 0;
         }
+        default:
+            break;
     }
     return DefWindowProc(hwnd, msg, wp, lp);
 }

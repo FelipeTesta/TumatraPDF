@@ -78,6 +78,8 @@ static Str ExceptionNameFromCode(DWORD excCode) {
         EXC(STATUS_ALREADY_REGISTERED)
         EXC(STATUS_SXS_EARLY_DEACTIVATION)
         EXC(STATUS_SXS_INVALID_DEACTIVATION)
+        default:
+            break;
     }
 #undef EXC
 

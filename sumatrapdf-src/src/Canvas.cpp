@@ -1097,6 +1097,8 @@ __unused static Str scrollMsgStr(USHORT msg) {
             return StrL("SB_PAGEDOWN");
         case SB_PAGEUP:
             return StrL("SB_PAGEUP");
+        default:
+            break;
     }
     return fmt("%d", (int)msg);
 }
@@ -1170,6 +1172,8 @@ static void OnVScroll(MainWindow* win, WPARAM wp) {
             case SB_THUMBTRACK:
                 targetPage = si.nTrackPos + 1;
                 break;
+            default:
+                break;
         }
 
         // Navigate to the target page
@@ -1227,6 +1231,8 @@ static void OnVScroll(MainWindow* win, WPARAM wp) {
             break;
         case SB_THUMBTRACK:
             si.nPos = si.nTrackPos;
+            break;
+        default:
             break;
     }
     // logf("OnVScroll: nPos: %d\n", si.nPos);
@@ -1312,6 +1318,8 @@ static void OnHScroll(MainWindow* win, WPARAM wp) {
             break;
         case SB_THUMBTRACK:
             si.nPos = si.nTrackPos;
+            break;
+        default:
             break;
     }
 
@@ -4912,6 +4920,8 @@ __unused static Str GiFlagsToStr(DWORD flags) {
             return StrL("GF_END");
         case GF_INERTIA | GF_END:
             return StrL("GF_INERTIA  | GF_END");
+        default:
+            break;
     }
     return StrL("unknown");
 }
@@ -5399,6 +5409,8 @@ static LRESULT WndProcCanvasFixedPageUI(MainWindow* win, HWND hwnd, UINT msg, WP
             // and can AV (null + 8) under dark themes (crash 8c1831c15000001).
             // Overlay/hidden modes strip WS_*SCROLL in WM_NCCALCSIZE instead.
             goto def;
+        default:
+            break;
     }
 def:
     return DefWindowProc(hwnd, msg, wp, lp);
@@ -5794,6 +5806,8 @@ static void OnTimer(MainWindow* win, HWND hwnd, WPARAM timerId) {
             // tick is work that competes with paint and adds hitchiness.
             break;
         }
+        default:
+            break;
     }
 }
 
@@ -6217,6 +6231,8 @@ LRESULT CALLBACK WndProcCanvas(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             }
             break;
         }
+        default:
+            break;
     }
 
     if (!win) {

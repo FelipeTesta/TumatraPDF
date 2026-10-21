@@ -803,6 +803,8 @@ bool VirtWndRoot::OnMessage(UINT msg, WPARAM wp, LPARAM lp, LRESULT& res) {
             }
             return focused->OnChar((int)wp);
         }
+        default:
+            break;
     }
     return false;
 }
@@ -1299,6 +1301,8 @@ void VirtWndScroll::OnVScroll(WPARAM wp) {
         case SB_THUMBTRACK:
         case SB_THUMBPOSITION:
             ScrollTo(HIWORD(wp));
+            break;
+        default:
             break;
     }
 }

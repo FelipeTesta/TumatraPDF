@@ -779,6 +779,8 @@ static bool IsNotifMouseMsg(UINT msg) {
         case WM_RBUTTONDOWN:
         case WM_RBUTTONUP:
             return true;
+        default:
+            break;
     }
     return false;
 }

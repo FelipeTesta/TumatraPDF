@@ -707,6 +707,8 @@ static bool KnownNonImageRec(Str d) {
         case VIDE_REC:
         case RESC_REC:
             return true;
+        default:
+            break;
     }
     return false;
 }

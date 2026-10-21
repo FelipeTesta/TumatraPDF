@@ -986,6 +986,8 @@ static HRESULT CALLBACK LoadLibsumatrapdfDialogCallback(HWND /*hwnd*/, UINT msg,
                 return S_FALSE; // don't close the dialog
             }
             break;
+        default:
+            break;
     }
     return S_OK;
 }
@@ -1354,6 +1356,8 @@ static HRESULT CALLBACK TaskdialogHandleLinkscallback(HWND /*hwnd*/, UINT msg, W
     switch (msg) {
         case TDN_HYPERLINK_CLICKED:
             LaunchBrowser(ToUtf8Temp(WStr((wchar_t*)lParam)));
+            break;
+        default:
             break;
     }
     return S_OK;

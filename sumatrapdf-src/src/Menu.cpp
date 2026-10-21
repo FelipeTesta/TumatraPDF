@@ -2326,6 +2326,8 @@ void OnWindowContextMenu(MainWindow* win, int x, int y) {
             HwndSendCommand(win->hwndFrame, cmdId, lpArg);
             return;
         }
+        default:
+            break;
     }
 
     switch (cmdId) {
@@ -2454,6 +2456,8 @@ void OnWindowContextMenu(MainWindow* win, int x, int y) {
             DelFavorite(filePath, pageNoUnderCursor);
             return;
         }
+        default:
+            break;
     }
     // everything else we forward to FrameOnCommand() in SumatraPDF.cpp
     HwndSendCommand(win->hwndFrame, cmdId);

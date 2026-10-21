@@ -268,6 +268,8 @@ ContinueParsing:
                     case '%':
                         skipcomment(m_pPtr);
                         break;
+                    default:
+                        break;
                 }
             }
             if (!start) {

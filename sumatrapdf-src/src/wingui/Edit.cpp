@@ -227,6 +227,8 @@ LRESULT Edit::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             }
             return 0;
         }
+        default:
+            break;
     }
     return WndProcDefault(hwnd, msg, wp, lp);
     // return FinalWindowProc(msg, wp, lp);

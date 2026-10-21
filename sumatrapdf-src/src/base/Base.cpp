@@ -110,6 +110,8 @@ u32 MurmurHash2(const void* key, int n) {
         case 1:
             h ^= data[0];
             h *= m;
+        default:
+            break;
     }
 
     /* Do a few final mixes of the hash to ensure the last few

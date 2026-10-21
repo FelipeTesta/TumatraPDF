@@ -3436,6 +3436,8 @@ bool IsValidDelayType(int type) {
         case TTDT_RESHOW:
         case TTDT_AUTOMATIC:
             return true;
+        default:
+            break;
     }
     return false;
 }

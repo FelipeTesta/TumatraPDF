@@ -3153,6 +3153,8 @@ static TempStr FileLoadErrorReasonTemp(Str path) {
         case ERROR_SHARING_VIOLATION:
         case ERROR_LOCK_VIOLATION:
             return str::DupTemp(_TRA("The file is in use by another program"));
+        default:
+            break;
     }
     return GetLastErrorStrTemp(err);
 }
@@ -4814,6 +4816,8 @@ static SaveChoice ShouldSaveAnnotationsDialog(HWND hwndParent, Str filePath) {
             return SaveChoice::Discard;
         case IDCANCEL:
             return SaveChoice::Cancel;
+        default:
+            break;
     }
     ReportIf(true);
     return SaveChoice::Cancel;
@@ -8412,6 +8416,8 @@ static void FrameOnChar(MainWindow* win, WPARAM key, LPARAM info = 0) {
         case VK_TAB:
             AdvanceFocus(win);
             break;
+        default:
+            break;
     }
 
     if (!win->IsDocLoaded()) {
@@ -8455,6 +8461,8 @@ static void FrameOnChar(MainWindow* win, WPARAM key, LPARAM info = 0) {
             break;
         case 'b':
             OnFrameKeyB(win);
+            break;
+        default:
             break;
     }
 }
@@ -9824,6 +9832,8 @@ static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, L
                 // tools are on never makes sense
                 isGatedCmd = true;
                 break;
+            default:
+                break;
         }
         if (isGatedCmd && !featureOn) {
             logf("[arch] blocked cmd %d while arch tools are on\n", cmdId);
@@ -9850,6 +9860,8 @@ static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, L
                 // starting autoscroll during flashcard study never makes sense
                 isGatedCmd = true;
                 break;
+            default:
+                break;
         }
         if (isGatedCmd && !featureOn) {
             logf("[fc] blocked cmd %d while flashcards are on\n", cmdId);
@@ -9867,6 +9879,8 @@ static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, L
             case CmdFlashcardToggle:
                 isGatedCmd = true;
                 featureOn = win->flashcard.on;
+                break;
+            default:
                 break;
         }
         if (isGatedCmd && !featureOn) {
@@ -11997,6 +12011,8 @@ static void HandleCaptionClick(MainWindow* win, int btnIdx) {
         case CB_SYSTEM_MENU:
             OpenSystemMenu(win);
             break;
+        default:
+            break;
     }
 }
 
@@ -12321,6 +12337,8 @@ static void DrawCaptionButton(MainWindow* win, HDC hdc, ButtonInfo* bi) {
                 break;
             case CB_RESTORE:
                 kind = CaptionSysButtonKind::Restore;
+                break;
+            default:
                 break;
         }
         int iconPx = DpiScale(win->hwndFrame, kCaptionGlyphDip);
@@ -12780,6 +12798,8 @@ static LRESULT CustomCaptionFrameProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp,
             break;
 
         case WM_SYSCOLORCHANGE:
+            break;
+        default:
             break;
     }
 
@@ -13934,6 +13954,8 @@ LRESULT CALLBACK WndProcSumatraFrame(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) 
                 case APPCOMMAND_BROWSER_FAVORITES:
                     HwndSendCommand(hwnd, CmdToggleBookmarks);
                     return TRUE;
+                default:
+                    break;
             }
             return DefWindowProc(hwnd, msg, wp, lp);
 

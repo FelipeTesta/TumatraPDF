@@ -575,6 +575,8 @@ static void TabsContextMenu(ContextMenuEvent* ev) {
             ReloadDocument(win, false);
             return;
         }
+        default:
+            break;
     }
     // everything we forward to main window
     HwndSendCommand(win->hwndFrame, cmdId);

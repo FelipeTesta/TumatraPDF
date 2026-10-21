@@ -268,6 +268,8 @@ static bool IsCmdAvailable(MainWindow* win, int cmdId) {
             return gGlobalPrefs->archToolsEnabled;
         case PageInfoId:
             return true;
+        default:
+            break;
     }
     auto* ctx = NewBuildMenuCtx(win->CurrentTab(), Point{0, 0});
     AutoCall delCtx(DeleteBuildMenuCtx, ctx);
@@ -327,6 +329,8 @@ static bool IsCmdEnabled(MainWindow* win, int cmdId) {
                 return false;
             }
             break;
+        default:
+            break;
     }
 
     bool remove, disable;
@@ -341,6 +345,8 @@ static bool IsCmdEnabled(MainWindow* win, int cmdId) {
             break;
         case CmdPrint:
             isAllowed = HasPermission(Perm::PrinterAccess);
+            break;
+        default:
             break;
     }
     if (!isAllowed) {
@@ -978,6 +984,8 @@ static LRESULT CALLBACK ReBarWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM
                         SelectObject(custDraw->nmcd.hdc, oldF);
                         return CDRF_DODEFAULT;
                     }
+                    default:
+                        break;
                 }
             }
         }
@@ -1689,6 +1697,8 @@ static LRESULT CALLBACK WndProcPageBox(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp
             case VK_TAB:
                 AdvanceFocus(win);
                 return 1;
+            default:
+                break;
         }
     } else if (WM_ERASEBKGND == msg) {
         RECT r;
@@ -1732,6 +1742,8 @@ static LRESULT CALLBACK WndProcTimerBox(HWND hwnd, UINT msg, WPARAM wp, LPARAM l
             case VK_TAB:
                 AdvanceFocus(win);
                 return 1;
+            default:
+                break;
         }
     }
 
@@ -1912,6 +1924,8 @@ static LRESULT CALLBACK WndProcEtaOverlay(HWND hwnd, UINT msg, WPARAM wp, LPARAM
             EndPaint(hwnd, &ps);
             return 0;
         }
+        default:
+            break;
     }
     return DefWindowProcW(hwnd, msg, wp, lp);
 }
@@ -2916,6 +2930,8 @@ static LRESULT CALLBACK MenuBarReBarWndProc(HWND hWnd, UINT uMsg, WPARAM wParam,
                     custDraw->clrText = col;
                     return CDRF_DODEFAULT;
                 }
+                default:
+                    break;
             }
         }
     }

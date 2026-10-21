@@ -1045,6 +1045,8 @@ static void TocContextMenu(ContextMenuEvent* ev) {
         case CmdOpenAttachment: {
             OpenAttachment(tab, fileName, attachmentNo);
         }
+        default:
+            break;
     }
 }
 
@@ -1590,6 +1592,8 @@ static LRESULT CALLBACK WndProcTocBox(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp,
             if (LOWORD(wp) == IDC_TOC_LABEL_WITH_CLOSE) {
                 ToggleTocBox(win);
             }
+            break;
+        default:
             break;
     }
     return DefSubclassProc(hwnd, msg, wp, lp);

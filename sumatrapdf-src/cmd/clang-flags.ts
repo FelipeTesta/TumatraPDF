@@ -7,9 +7,14 @@ import { join } from "node:path";
 // that header's declarations unknown, which silently degrades every check in the
 // files that include it (this used to affect 25 files, SumatraPDF.cpp among them).
 export const includeDirs = [
+  // keep in sync with the AdditionalIncludeDirectories of the app + mupdf
+  // vcxproj (post F1: src/mupdf carries the fork's mupdf patches, cmark-gfm
+  // is a real dep of mupdf's md.c)
   "mupdf/include",
+  "mupdf/scripts/freetype",
   "src",
   "src/base",
+  "src/mupdf",
   "src/wingui",
   "ext/chmdec",
   "ext/djvudec",

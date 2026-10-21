@@ -639,6 +639,8 @@ static LRESULT CALLBACK WndProcAbout(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) 
                 DeleteInfotip();
                 return DefWindowProc(hwnd, msg, wp, lp);
             }
+            default:
+                break;
         }
     }
 
@@ -3724,6 +3726,8 @@ void HomePageOnVScroll(MainWindow* win, WPARAM wp) {
             break;
         case SB_BOTTOM:
             newScrollY = INT_MAX; // will be clamped by layout
+            break;
+        default:
             break;
     }
     newScrollY = std::max(newScrollY, 0);

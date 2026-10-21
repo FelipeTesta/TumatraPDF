@@ -107,6 +107,8 @@ LRESULT WndProcCanvasAbout(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, LPAR
             }
             break;
         }
+        default:
+            break;
     }
     switch (msg) {
         case WM_CTLCOLOREDIT:
@@ -192,6 +194,8 @@ LRESULT WndProcCanvasAbout(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, LPAR
                         EnsureContrastOverlayState(win);
                         return 0;
                     }
+                    break;
+                default:
                     break;
             }
             break;

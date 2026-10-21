@@ -149,6 +149,8 @@ static TempStr UpdateCommandNameTemp(MainWindow* win, int cmdId, Str s) {
                 newIsOn = !EngineMupdfCadEnhanceActive(dm->GetEngine());
             }
         } break;
+        default:
+            break;
     }
 
     if (isToggle) {

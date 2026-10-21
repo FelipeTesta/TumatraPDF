@@ -774,6 +774,8 @@ static LRESULT CALLBACK WndProcOverlayScrollbar(HWND hwnd, UINT msg, WPARAM wp, 
             }
             return def;
         }
+        default:
+            break;
     }
 
     return DefWindowProcW(hwnd, msg, wp, lp);

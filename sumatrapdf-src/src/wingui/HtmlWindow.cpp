@@ -1189,6 +1189,8 @@ static LRESULT CALLBACK WndProcParent(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp,
         case WM_VSCROLL:
             win->SendMsg(msg, wp, lp);
             return 0;
+        default:
+            break;
     }
     return DefWindowProc(hwnd, msg, wp, lp);
 }
@@ -2031,6 +2033,8 @@ HRESULT HW_DWebBrowserEvents2::Invoke(DISPID dispIdMember, __unused REFIID riid,
                     break;
                 case CSC_NAVIGATEFORWARD:
                     fs->htmlWindow->canGoForward = pDispParams->rgvarg[0].boolVal;
+                    break;
+                default:
                     break;
             }
             break;

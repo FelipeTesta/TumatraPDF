@@ -434,6 +434,8 @@ LRESULT Wnd::MessageReflect(UINT msg, WPARAM wparam, LPARAM lparam) {
                 case WM_DESTROY:
                     wnd = reinterpret_cast<HWND>(lparam);
                     break;
+                default:
+                    break;
             }
     }
     if (!wnd) {
@@ -534,6 +536,8 @@ LRESULT TryReflectMessages(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
                 }
             }
         } break;
+        default:
+            break;
     }
     return 0;
 }

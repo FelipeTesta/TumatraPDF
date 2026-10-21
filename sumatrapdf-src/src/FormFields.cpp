@@ -147,6 +147,8 @@ static LRESULT CALLBACK WndProcFormCtrl(HWND hwnd, UINT msg, WPARAM wp, LPARAM l
             // text: clicking elsewhere commits; choice: clicking away cancels
             CommitFormFieldEdit(!isChoice);
             return 0;
+        default:
+            break;
     }
     return CallWindowProcW(gDefCtrlProc, hwnd, msg, wp, lp);
 }

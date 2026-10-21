@@ -355,6 +355,8 @@ static LRESULT CALLBACK WndProcListaHeader(HWND hwnd, UINT msg, WPARAM wp, LPARA
             EndPaint(hwnd, &ps);
             return 0;
         }
+        default:
+            break;
     }
     return CallWindowProc(gWndProcListaHeader, hwnd, msg, wp, lp);
 }
@@ -445,6 +447,8 @@ static LRESULT CALLBACK WndProcListaBox(HWND hwnd, UINT msg, WPARAM wp, LPARAM l
             }
             break;
         }
+        default:
+            break;
     }
     return CallWindowProc(gWndProcListaBox, hwnd, msg, wp, lp);
 }

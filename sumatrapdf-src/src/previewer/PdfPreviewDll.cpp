@@ -109,6 +109,8 @@ static Str GetReason(DWORD dwReason) {
             return "DLL_THREAD_DETACH";
         case DLL_PROCESS_DETACH:
             return "DLL_PROCESS_DETACH";
+        default:
+            break;
     }
     return "Unknown reason";
 }

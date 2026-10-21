@@ -228,6 +228,8 @@ HtmlTag FindHtmlTag(Str nameIn) {
         case CS4('v', 'i', 'd', 'e'):
             if (5 == n && CS1('o') == STR1i(name + 4)) return Tag_Video;
             break;
+        default:
+            break;
     }
     return Tag_NotFound;
 }
@@ -297,6 +299,8 @@ AlignAttr FindAlignAttr(Str nameIn) {
             break;
         case CS4('r', 'i', 'g', 'h'):
             if (5 == n && CS1('t') == STR1i(name + 4)) return AlignAttr::Right;
+            break;
+        default:
             break;
     }
     return AlignAttr::NotFound;
@@ -1482,6 +1486,8 @@ CssProp FindCssProp(Str nameIn) {
             break;
         case CS4('w', 'o', 'r', 'd'):
             if (9 == n && str::EqNI(name + 4, "-wrap", 5)) return Css_Word_Wrap;
+            break;
+        default:
             break;
     }
     return Css_Unknown;

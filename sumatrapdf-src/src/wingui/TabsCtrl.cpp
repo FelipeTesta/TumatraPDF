@@ -768,6 +768,8 @@ LRESULT TabsCtrl::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             ReleaseDC(hwnd, hdc);
             return 0;
         }
+        default:
+            break;
     }
 
     return WndProcDefault(hwnd, msg, wp, lp);

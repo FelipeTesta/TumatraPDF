@@ -20,6 +20,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     if (!ctx) {
         return 0;
     }
+    fz_register_document_handlers(ctx);
 
     fz_stream* stream = nullptr;
     fz_document* doc = nullptr;

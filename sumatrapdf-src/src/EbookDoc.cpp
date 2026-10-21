@@ -274,6 +274,8 @@ static TempStr Base64DecodeTemp(Str data) {
             case 3:
                 *curr++ = (char)((c << 6) | (n >> 0));
                 break;
+            default:
+                break;
         }
     }
     int size = (int)(curr - result);

@@ -1043,6 +1043,8 @@ static LRESULT CALLBACK WndProcAIChatBox(HWND hwnd, UINT msg, WPARAM wp, LPARAM 
                 }
             }
             break;
+        default:
+            break;
     }
     return DefSubclassProc(hwnd, msg, wp, lp);
 }

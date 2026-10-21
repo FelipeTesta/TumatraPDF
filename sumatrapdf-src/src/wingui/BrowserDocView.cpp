@@ -479,6 +479,8 @@ LRESULT BrowserDocView::ParentWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp,
                 view->cb->OnLButtonDown();
             }
             break;
+        default:
+            break;
     }
 
     // note: WM_DROPFILES is intentionally not handled here so it passes through
