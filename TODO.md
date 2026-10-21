@@ -117,7 +117,7 @@ Shift+S: draw a rectangle that captures the image inside it at the document's DP
 Shipped in **s36-ah** (details + verification in LOG): twocolumn/trim now per file and OFF for new files; per-file trim config + autoscroll speed; Trim Config pauses autoscroll; master reading time (daily buckets, survives rename/delete/move); Home `Today | Total` + contrast; Ctrl+Shift+T restores the whole closed window; TC2 bookmark lands on the LEFT page.
 
 - [ ] melhorar o passo do zoom — **implemented, awaiting your verdict** (s36-ah): zoom levels refined to a ~1.33 ratio (added 10/18/250/500/1000/2000/4000 %). One-line revert if you dislike it.
-- [ ] Checkbox do Timer ainda sai da estrutura do botão cobrindo outros botões, investigar a fundo como fixar a posição e corrigir — **OPEN with evidence** (s36-ah): the trio is anchored to `TbGetRect(CmdAutoScrollToggle)` measured BEFORE `EnforceToolbarTextButtonWidths` widens that button by the trio width; after a 2-3 row wrap it bleeds 4 px into the row above, and the position is never recomputed once the wrap settles. Fix belongs in `ToolbarLayout.cpp PositionToolbarChildWindows` (clamp to the anchor + re-run after wrap) and needs visual verification.
+- [ ] Checkbox do Timer — **root cause fixed s36-ai** (trio is now looked up by command id, so it can only be placed inside the Autoscroll button and hides instead of overflowing). Residual, pre-existing and NOT caused by the trio: at ~700-760 px the widened Autoscroll group is clipped at the right edge — the group packer accepts a stale available width (`PackToolbarGroupsByWidth`), while `ToolbarRewrapAfterSizing` self-heals only on rebar width changes. Fix belongs there; needs visual verification.
 
 ## Vertical_Toolbar (PARKED — DO NOT DO)
 

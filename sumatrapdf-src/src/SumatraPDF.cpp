@@ -13752,7 +13752,7 @@ static void ShowTtsVoiceMenu(MainWindow* win, NMTOOLBARW* nmtb) {
         return;
     }
 
-    Rect rect = TbGetRect(nmtb->hdr.hwndFrom, CmdReadAloud);
+    Rect rect = TbGetRectForCmd(nmtb->hdr.hwndFrom, CmdReadAloud);
     RECT rc = ToRECT(HwndMapRectToWindow(rect, nmtb->hdr.hwndFrom, HWND_DESKTOP));
 
     HMENU menu = CreatePopupMenu();

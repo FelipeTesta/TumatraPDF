@@ -52,16 +52,16 @@ The features below were developed on top of SumatraPDF and **do not exist in the
 - Play/Pause toggle button (▶/⏸ icon)
 - - and - buttons for speed adjustment
 - Speed label `%d px/min` in dedicated toolbar slot via fake placeholder button `SpeedInfoId` + `TbSetButtonDx` (cloned page-counter pattern) — occupies space like a native control, no overlap
-- Numeric field for timer (minutes, 0 = no limit) — `[checkbox][Timer:][input]` anchored to the Autoscroll button: moves with it on resize/wrap, hidden as a whole when the wrapped toolbar leaves no room
+- Numeric field for timer (minutes, 0 = no limit) — `[checkbox][Timer:][input]` anchored to the Autoscroll button rect looked up by **command id** (`TbGetRectForCmd` = `TB_COMMANDTOINDEX` + `TB_GETITEMRECT`): moves with it on resize/wrap, hidden as a whole when the wrapped toolbar leaves no room — it can only ever be placed inside that button, never over its neighbours
 - Label showing ETA (e.g.: "⏱ 12min remaining") — works on both PDF (fixed pages: remaining height / speed) and Markdown (webview `autoscrollProgress` ~100ms → `DocController::OnAutoScrollProgress` → `UpdateToolbarEtaText`); the label stays hidden until autoscroll is actually on (no empty black box at document open)
 
-**Persistence:** Speed and timer saved in `TumatraPDF-settings.txt` (`AutoScrollSpeed`, `AutoScrollTimerMinutes`). Fresh docs start at min speed `0.008×` (`kMinSpeedMultiplier = 0.008f` ≈ 100 px/min — never-used default). Persistence unchanged; any persisted value below min clamps to min.
+**Persistence:** Speed and timer saved in `TumatraPDF-settings.txt` (`AutoScrollSpeed`, `AutoScrollTimerMinutes`), and the **speed is also kept per document** (`FileState.autoScrollSpeedMultiplier`): a book reopens at the speed it was last read with, an unopened one at the default. Fresh docs start at min speed `0.008×` (`kMinSpeedMultiplier = 0.008f` ≈ 100 px/min — never-used default). Any persisted value below min clamps to min.
 
 **Advanced Options:** `AutoScrollShowEta` (default `true`) — set to `false` to hide the ETA label in the toolbar entirely.
 
 **Markdown (.md):** Works in WebView2 mode (default) via `window.scrollBy(0,dy)` JS injection; stop-at-bottom via JS `autoscrollBottom` → native `DocController::OnAutoScrollBottom`; ETA via JS `autoscrollProgress` → `OnAutoScrollProgress` → ETA `remainingPx / AutoScrollPxPerSec`. MuPDF fallback (`useFixedPageUI=true`) unchanged. F7/F8 multiplier shared. Toolbar buttons (toggle/±) now visible/enabled for .md — fixed 2026-08-25 (was `AsChm()||AsMarkdown()` CHM blacklist → `AsChm()` only + `removeIfMarkdown[]` for fixed-page cmds). PDF ETA path untouched — no regression.
 
-> **Timer UI (Phase 15):** `[checkbox][Timer:][input]` control added to toolbar before Autoscroll button — **BUILD OK** (awaiting user practical test — see `LOG.md` Phase 15).
+> **Timer UI:** `[checkbox][Timer:][input]` control on the toolbar before the Autoscroll button. Positioned from the Autoscroll button's rect (by command id), so wrapping and resizing keep it inside that button; it hides as a whole when the row has no room left.
 
 ---
 
@@ -120,6 +120,10 @@ The features below were developed on top of SumatraPDF and **do not exist in the
 
 **Quick toggle:** Temporarily switch to full-page "fit width" view and back without resetting crop settings or losing the current page position.
 
+**Bookmarks / TOC / outline links:** destinations store PHYSICAL page numbers, so in Two Columns they are mapped to the column domain before scrolling — clicking a bookmark lands on the **LEFT** column of the registered page (page `N` left = the start of the spread), never in the middle of it.
+
+**Persistence:** both modes are **per document** (`FileState.ViewportCropV2` / `MarginTrim` / `TrimTop` / `TrimBottom`) — every book keeps the setup it was saved with, and a **new file always opens with both OFF** instead of inheriting the mode the last book was left in. The per-file values survive for every document still in the history (the 10 most recent keep their full state).
+
 **Interface:**
 
 | Access                      | Action                      |
@@ -143,8 +147,10 @@ The features below were developed on top of SumatraPDF and **do not exist in the
 - Trim Config dialog with "margin-top" / "margin-bottom" buttons
 - Draggable red 2px horizontal line to set the trim distance
 - Context-aware lines: every margin line visible in the viewport is shown (near a page top you also get the previous page's bottom line; near a page bottom the next page's top line; a fully visible page shows its own two lines) — drag any of them
-- While the Trim Config dialog is open, trim is temporarily disabled so the FULL page is visible for placing the lines; it comes back on Save/Cancel
+- While the Trim Config dialog is open, trim is temporarily disabled so the FULL page is visible for placing the lines; it comes back on Save/Cancel. Auto-scroll **pauses** for as long as the dialog is open and resumes on Save/Cancel, so the page cannot drift while the lines are being placed
 - ✅ button saves the distances
+
+**Persistence:** trim on/off and the two margin distances are **per document** (`FileState.MarginTrim` / `TrimTop` / `TrimBottom`, `-1` = follow the global default), and the **first layout of a newly opened file is built with the document's own margins** — no flicker of untrimmed pages, and a new file starts with trim OFF.
 
 **Controls:**
 
@@ -276,7 +282,7 @@ Also: **Home (`⌂`) toolbar button** before Open — the Home tab no longer aut
 - **Sidebar starts hidden:** every document opens with favorites/TOC OFF (previous "show TOC by default" heuristics removed); enable manually via the bookmarks button, F9/F12, or the View menu.
 - **Digit keys stay digits:** `1`–`4` (and all bare digits) type into edit fields; only Ctrl+digit combos (zoom presets) remain global shortcuts.
 
-**Technical:** `src/Toolbar.cpp` (`AddAllToolbarButtons`, `RebuildToolbarButtonsForWidth`, `SetToolbarBandToRowHeight`, `WndProcToolbar` WM_SIZE/WM_TIMER), `src/ToolbarLayout.cpp` (timer trio anchored to the Autoscroll button rect), `src/Accelerators.cpp` (`isSafeAccel` bare-digit rule), `src/SvgIcons.cpp` (`gIconBookmarks`).
+**Technical:** `src/Toolbar.cpp` (`AddAllToolbarButtons`, `RebuildToolbarButtonsForWidth`, `SetToolbarBandToRowHeight`, `WndProcToolbar` WM_SIZE/WM_TIMER), `src/ToolbarLayout.cpp` (timer trio anchored to the Autoscroll button rect, looked up by command id via `TbGetRectForCmd` in `src/base/Win.cpp` — `TB_GETRECT` wants a *button index*, not a command id), `src/Accelerators.cpp` (`isSafeAccel` bare-digit rule), `src/SvgIcons.cpp` (`gIconBookmarks`).
 
 ### 10. ✏️ Edit Mode (paste images into the page + in-page image editing)
 
@@ -294,12 +300,12 @@ Toolbar toggle like Arch Tools/Flashcards. When ON:
 Time spent reading with **auto-scroll** active is tracked per document and per calendar day, and shown in a **stats band on the Home page** (top half, above the file thumbnails):
 
 - **Most-read ranking** — top 8 documents with right-aligned reading time.
-- **Today / last 7 days totals.**
+- **`Today <t> | Total: <t>` totals** — the all-time total is summed from the daily buckets in `reading-stats.txt`, so it is a **master counter that survives renaming, deleting or moving a book** (per-document time would be lost if the file left the history). Times are drawn with the strong text colour so they stay legible in dark themes.
 - **365-day heatmap** (GitHub/Anki style) — green gradient by minutes read per day, gray for empty days, month letters above, weekday letters (M W F S) on the left, ◀/▶ arrows to navigate years, hover shows "YYYY-MM-DD: time".
 - **Annual chart** — days × hours-read bar chart with the max labeled.
 - **Auto-pause:** minimizing the window or switching apps pauses the auto-scroll automatically; re-activation resumes it with a fresh time base (a manual toggle always overrides).
 
-**Technical:** `src/ReadingStats.{h,cpp}` (capture + daily sidecar `reading-stats.txt` — plain `YYYYMMDD <sec>` lines next to the settings file; per-doc `FileState.readingTimeSec` via gen-settings), hooks in `AutoScroll.cpp` (credit per tick, reset on every stall/pause, flush at stops + `SaveSettings`), focus pause in `WM_ACTIVATE` (`SumatraPDF.cpp`), `HomeStatsWnd` (VirtWnd in the home chrome tree) + `HomePageLayout.rcStats` band in `HomePage.cpp`.
+**Technical:** `src/ReadingStats.{h,cpp}` (capture + daily sidecar `reading-stats.txt` — plain `YYYYMMDD <sec>` lines next to the settings file; per-doc `FileState.readingTimeSec` via gen-settings; `ReadingStatsGetTotalSec()` = all-time total over the daily buckets), hooks in `AutoScroll.cpp` (credit per tick, reset on every stall/pause, flush at stops + `SaveSettings`), focus pause in `WM_ACTIVATE` (`SumatraPDF.cpp`), `HomeStatsWnd` (VirtWnd in the home chrome tree) + `HomePageLayout.rcStats` band in `HomePage.cpp`.
 
 ### 📋 Technical Summary for Developers
 
@@ -307,7 +313,7 @@ Time spent reading with **auto-scroll** active is tracked per document and per c
 | -------------------------- | -------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
 | AutoScroll                 | `src/AutoScroll.cpp`, `src/AutoScroll.h`, `src/Canvas.cpp`                                                                       | `OnTimer()`, `FrameOnCommand()`                                                                         |
 | Contrast Filter            | `src/ContrastOverlay.cpp`, `src/Canvas.cpp`                                                                                      | `WM_CREATE` (overlay window)                                                                            |
-| Viewport Crop              | `src/DisplayModel.cpp`, `src/SumatraPDF.cpp`                                                                                     | `GetViewPort()`, `ScrollYBy()`                                                                          |
+| Viewport Crop              | `src/DisplayModel.cpp`, `src/SumatraPDF.cpp`                                                                                     | `GetViewPort()`, `ScrollYBy()`, `PhysicalToVirtualPage()`                                                |
 | Update                     | `scripts/check-updates.ps1`, `MERGE.md`                                                                                          | N/A (external tool)                                                                                     |
 | Arch Tools (Scale+Measure) | `src/ArchScaleDialog.{h,cpp}`, `src/ArchVector.{h,cpp}`, `src/Canvas.cpp`, `src/Toolbar.cpp`, `src/SumatraPDF.cpp`               | `CmdArchToolsToggle`/`CmdArchScale`/`CmdArchMeasure`, `OnPaintDocument`, `UpdateToolbar2State`          |
 | Flashcards (Cloze SRS)     | `src/Flashcard.{h,cpp}`, `src/Commands_Flashcard.cpp`, `src/FlashcardToolbar.cpp`, `src/FlashcardSidebar.cpp`, `src/WindowTab.h` | `FrameOnCommand()` flashcard branch, `LoadModelIntoTab` (per-tab state), `OnPaintDocument` (mask paint) |

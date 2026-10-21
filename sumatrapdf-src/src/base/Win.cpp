@@ -3745,6 +3745,22 @@ Rect TbGetItemRect(HWND hwnd, int buttonIdx) {
     return Rect(rc);
 }
 
+// Rect of a toolbar button addressed by its COMMAND id. TB_GETRECT and
+// TB_GETITEMRECT both take a zero-based INDEX, so a command id has to be
+// translated first — passing the command id straight through asks for an
+// out-of-range index, and comctl answers with a rect that belongs to no
+// button (that is what placed the timer trio outside the Autoscroll button).
+Rect TbGetRectForCmd(HWND hwnd, int cmdId) {
+    if (!hwnd) {
+        return {};
+    }
+    int idx = (int)SendMessageW(hwnd, TB_COMMANDTOINDEX, (WPARAM)cmdId, 0);
+    if (idx < 0) {
+        return {};
+    }
+    return TbGetItemRect(hwnd, idx);
+}
+
 void TbGetMetrics(HWND hwnd, TBMETRICS* metrics) {
     LPARAM lp = (LPARAM)metrics;
     SendMessageW(hwnd, TB_GETMETRICS, 0, lp);

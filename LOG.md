@@ -1,5 +1,19 @@
 # TumatraPDF — Development Log
 
+## 2026-10-21 (s36-ai) — E9: timer trio anchored by command id (`TbGetRect` index/id mixup)
+
+### Fixed
+- `TbGetRect(hwnd, id)` sends `TB_GETRECT`, whose `wParam` is a **zero-based index** — every fork call site passed a **command id** (`CmdAutoScrollToggle` = 480 on a ~35-button bar), so comctl answered with a rect belonging to no button. That rect anchored the timer trio (checkbox | "Timer:" | minutes), which is why it could sit outside the Autoscroll button and cover its neighbours (user report).
+- New `TbGetRectForCmd(HWND, int cmdId)` in `base/Win.cpp` (`TB_COMMANDTOINDEX` + `TB_GETITEMRECT`); switched all five call sites: `ToolbarLayout.cpp PositionToolbarChildWindows`, `Toolbar.cpp` (page-box anchor, `CreateTimerControls`, `TbUpdateButtonRects`-helper path) and `SumatraPDF.cpp` (Read Aloud button).
+- `PositionToolbarChildWindows` fit guard documented and simplified: `trioDx` already counts the leading gap, so `anchor.dx >= trioDx + margin` both fits the trio and keeps it off the button's right edge; when it does not fit the trio hides instead of overflowing.
+
+### Verified
+- Build 0 errors / 0 warnings. Visual sweep at 1200 / 700 / 560 px: trio stays inside the widened Autoscroll button in one-row and wrapped (2-3 row) layouts; no overlap with neighbouring buttons.
+
+### Notes
+- **Measurement trap**: the bun/GUI probes are DPI-unaware, so every winapi rect they read is virtualized ÷1.25 on this 125% machine while the DPI-aware app logs physical pixels — the "trio is 110 px left of its button" and "4 px bleed into the row above" from s36-ah were this artifact. Compare app-side logs (`out/dbg64/sumlog.txt`) with probe rects only after scaling.
+- Pre-existing, not caused by the trio: at ~700-760 px the widened Autoscroll group is clipped at the toolbar's right edge — `PackToolbarGroupsByWidth` accepts a stale available width and `ToolbarRewrapAfterSizing` self-heals on rebar-width changes only. Tracked in TODO.
+
 ## 2026-10-21 (s36-ah) — USER reports batch: 7 of 9 fixed (Home time/contrast, trim-pause, TC2 bookmarks, reopen-window, per-file prefs, master time)
 
 ### Fixed

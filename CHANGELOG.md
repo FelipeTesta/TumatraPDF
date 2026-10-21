@@ -6,6 +6,34 @@ history in [LOG.md](LOG.md).
 
 ## v1.0.13 (pending)
 
+- **Trim and Two Columns are per book again.** Both modes are remembered per
+  document, and a newly opened file always starts with them OFF instead of
+  inheriting the mode the last book was left in. The trim margin distances are
+  per document too, and they are applied when the first layout is built, so a
+  book opens exactly as it was left (and new files start untrimmed).
+- **Bookmarks land on the correct page in Two Columns.** PDF destinations store
+  physical page numbers; they are now mapped to the column domain before
+  scrolling, so a bookmark opens the LEFT column of the registered page instead
+  of the middle of the spread.
+- **`Ctrl+Shift+T` reopens the whole window.** Closing a window with several
+  documents no longer loses all but the last one: the closed group is restored
+  in one go, with the original tab order.
+- **Reading time gets a master total.** The Home stats line reads
+  `Today <t> | Total: <t>` (the "7d" figure is gone) and the all-time total is
+  summed from the daily data, so it survives renaming, deleting or moving a
+  book. The times are also drawn in the strong text colour, which fixes them
+  being nearly invisible in dark themes.
+- **Auto-scroll speed is remembered per book**, so a long read resumes at the
+  speed it was last read with.
+- **The Trim Config dialog pauses auto-scroll** while it is open and resumes it
+  on save or cancel, so the page cannot drift while the margin lines are placed.
+- **Auto-scroll timer controls stay inside their button.** They are positioned
+  from the Autoscroll button rect looked up by command id (`TB_GETRECT` wants a
+  button index, not a command id, which is why they could previously be placed
+  over neighbouring buttons), and they hide as a whole when the row is too
+  narrow.
+- **Finer zoom steps.** Intermediate levels were added so the zoom buttons keep
+  a ~1.33 ratio instead of jumping 1.5× (200→300, 400→600, 3200→4800).
 - **Flashcards span page breaks.** A cloze whose text selection continues onto
   the next page is now ONE card, not two: every page the selection covers is
   masked at once during study, and the review counter, queue and study history

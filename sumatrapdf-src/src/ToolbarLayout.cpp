@@ -187,7 +187,7 @@ void PositionToolbarChildWindows(MainWindow* win) {
     HWND hwndEdit = win->autoScroll.hwndTimerEdit;
     if (!hwndCheck || !hwndLabel || !hwndEdit) return;
 
-    Rect anchor = TbGetRect(hwndToolbar, CmdAutoScrollToggle);
+    Rect anchor = TbGetRectForCmd(hwndToolbar, CmdAutoScrollToggle);
     int gap = DpiScale(win->hwndFrame, gToolbarTokens.ctrlGapX);
     int ctrlH = DpiScale(win->hwndFrame, gToolbarTokens.ctrlH);
 
@@ -199,8 +199,15 @@ void PositionToolbarChildWindows(MainWindow* win) {
 
     // no anchor (button hidden / not created yet) or a button narrower than
     // the trio (should not happen — Enforce widens it) -> hide; lay the trio
-    // left-to-right from the button's left edge otherwise
-    bool show = !anchor.IsEmpty() && anchor.dx >= trioDx + DpiScale(win->hwndFrame, 4);
+    // left-to-right from the button's left edge otherwise. The anchor must be
+    // looked up BY COMMAND: TB_GETRECT takes an index, and passing the command
+    // id (CmdAutoScrollToggle = 480 on a ~35 button bar) used to return a rect
+    // from no button at all, which is why the trio sat outside the button and
+    // bled into the row above (user 2026-10-21).
+    int margin = DpiScale(win->hwndFrame, 4);
+    // trioDx already counts the leading gap, so this also guarantees the edit
+    // control ends at least `margin` inside the button's right edge
+    bool show = !anchor.IsEmpty() && anchor.dx >= trioDx + margin;
     if (show) {
         int y = anchor.y + (anchor.dy - ctrlH) / 2;
         int x = anchor.x + gap;

@@ -1783,7 +1783,7 @@ void UpdateToolbarPageText(MainWindow* win, int pageCount, bool updateOnly) {
         return;
     }
     int anchorCmd = HasPermission(Perm::PrinterAccess) ? CmdPrint : CmdOpenFile;
-    Rect r = TbGetRect(win->hwndToolbar, anchorCmd);
+    Rect r = TbGetRectForCmd(win->hwndToolbar, anchorCmd);
     ShowWindow(win->hwndPageLabel, SW_SHOW);
     ShowWindow(win->hwndPageBg, SW_SHOW);
     ShowWindow(win->hwndPageEdit, SW_SHOW);
@@ -2054,7 +2054,7 @@ static void CreateTimerControls(MainWindow* win) {
     if (win->autoScroll.hwndTimerCheck != nullptr) {
         return; // already created
     }
-    Rect r = TbGetRect(win->hwndToolbar, CmdAutoScrollToggle);
+    Rect r = TbGetRectForCmd(win->hwndToolbar, CmdAutoScrollToggle);
     HFONT font = (HFONT)SendMessageW(win->hwndToolbar, WM_GETFONT, 0, 0);
     if (!font) {
         font = GetDefaultGuiFontOfSize(GetAppFontSize(win->hwndFrame));
@@ -2067,8 +2067,8 @@ static void CreateTimerControls(MainWindow* win) {
 
     // Checkbox: left-aligned, vertically centered in slot
     win->autoScroll.hwndTimerCheck = CreateWindowExW(
-        0, L"Button", L"", BS_CHECKBOX | WS_CHILD | WS_VISIBLE, r.x + ctrlGapX, r.y + (r.dy - ctrlH) / 2, ctrlH,
-        ctrlH, win->hwndToolbar, (HMENU)(INT_PTR)CmdAutoScrollTimerToggle, h, nullptr);
+        0, L"Button", L"", BS_CHECKBOX | WS_CHILD | WS_VISIBLE, r.x + ctrlGapX, r.y + (r.dy - ctrlH) / 2, ctrlH, ctrlH,
+        win->hwndToolbar, (HMENU)(INT_PTR)CmdAutoScrollTimerToggle, h, nullptr);
 
     // Static "Timer:" label: right of checkbox with gap
     win->autoScroll.hwndTimerLabel =
@@ -2474,7 +2474,7 @@ Rect GetToolbarButtonScreenRect(MainWindow* win, int cmdId) {
     if (!win->hwndToolbar || !HwndIsVisible(win->hwndToolbar)) {
         return {};
     }
-    Rect r = TbGetRect(win->hwndToolbar, cmdId);
+    Rect r = TbGetRectForCmd(win->hwndToolbar, cmdId);
     return HwndMapRectToWindow(r, win->hwndToolbar, HWND_DESKTOP);
 }
 

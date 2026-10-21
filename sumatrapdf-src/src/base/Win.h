@@ -189,6 +189,7 @@ void TbSetPadding(HWND, int padX, int padY);
 void TbGetMetrics(HWND hwnd, TBMETRICS* metrics);
 void TbSetMetrics(HWND hwnd, TBMETRICS* metrics);
 Rect TbGetRect(HWND hwnd, int buttonId);
+Rect TbGetRectForCmd(HWND hwnd, int cmdId);
 Rect TbGetItemRect(HWND hwnd, int buttonIdx);
 
 //--- tree view
