@@ -1123,6 +1123,118 @@ TempStr I18nErrorStringResultTemp(int* exitCodeOut) {
     return ToStrTemp(out);
 }
 
+// B4 (coordinate-namespace invariants): for every page, CvtToScreen ->
+// CvtFromScreen must round-trip deterministic random page points within a
+// tight rounding tolerance, and the TC2 virtual->physical page mapping must
+// stay consistent (monotonic physical pages, column in 1..2). This targets the
+// repo's most repeated bug class (mixed coordinate spaces / virtual-physical
+// pageNo) against the real DisplayModel layout.
+TempStr CvtRoundTripResultTemp(int zoomPercent, int sampleCount, int seed, int* exitCodeOut) {
+    str::Builder out;
+    auto fail = [&](Str msg) -> Str {
+        out.Append(msg);
+        out.AppendChar('\n');
+        if (exitCodeOut) {
+            *exitCodeOut = 1;
+        }
+        return ToStrTemp(out);
+    };
+
+    if (len(gWindows) == 0) {
+        return fail("NOTREADY no-window");
+    }
+    MainWindow* win = gWindows[0];
+    DisplayModel* dm = win ? win->AsFixed() : nullptr;
+    if (!dm) {
+        return fail("NOTREADY no-doc");
+    }
+
+    zoomPercent = std::clamp(zoomPercent, 10, 6400);
+    sampleCount = std::clamp(sampleCount, 1, 64);
+    // SetZoomVirtual/Relayout take the VIRTUAL zoom in PERCENT (kZoomMin 8.33%
+    // .. kZoomMax 6400%); GetZoomReal returns the effective doc->screen ratio
+    dm->SetZoomVirtual((float)zoomPercent, nullptr);
+    dm->Relayout((float)zoomPercent, dm->rotation);
+    dm->viewPort.x = 0;
+    dm->viewPort.y = 0;
+    dm->RecalcVisibleParts();
+    dm->RenderVisibleParts();
+
+    u32 rng = (u32)seed | 1;
+    auto nextRand = [&rng]() {
+        rng ^= rng << 13;
+        rng ^= rng >> 17;
+        rng ^= rng << 5;
+        return rng;
+    };
+
+    int nPages = dm->PageCount();
+    float maxErr = 0;
+    int worstPage = 0;
+    int pagesSkipped = 0;
+    for (int pageNo = 1; pageNo <= nPages; pageNo++) {
+        RectF media = dm->PageMediaBox(pageNo);
+        if (media.dx <= 0 || media.dy <= 0) {
+            pagesSkipped++;
+            continue;
+        }
+        float zoom = dm->GetZoomReal(pageNo);
+        // the round-trip quantizes to integer screen pixels twice (CvtToScreen
+        // biases by 0.499px, CvtFromScreen rounds), so the worst-case error in
+        // page units is ~1 px / zoom; measured worst was 1.25 px at the
+        // boundary, so allow 1.6 px of headroom
+        float tol = 1.6f / zoom;
+        for (int s = 0; s < sampleCount; s++) {
+            float fx = (float)(nextRand() % 4096) / 4096.f;
+            float fy = (float)(nextRand() % 4096) / 4096.f;
+            PointF pt{media.x + fx * media.dx, media.y + fy * media.dy};
+            Point scr = dm->CvtToScreen(pageNo, pt);
+            PointF back = dm->CvtFromScreen(scr, pageNo);
+            float dx = back.x - pt.x;
+            float dy = back.y - pt.y;
+            float err = sqrtf(dx * dx + dy * dy);
+            if (err > maxErr) {
+                maxErr = err;
+                worstPage = pageNo;
+            }
+            if (err > tol) {
+                return fail(
+                    fmt("FAIL page=%d sample=%d pt=(%.2f,%.2f) screen=(%d,%d) back=(%.2f,%.2f) err=%.3f tol=%.3f",
+                        pageNo, s, (double)pt.x, (double)pt.y, scr.x, scr.y, (double)back.x, (double)back.y,
+                        (double)err, (double)tol));
+            }
+        }
+    }
+
+    // TC2 virtual/physical mapping invariants (only meaningful when the doc
+    // has more virtual than physical pages)
+    int vCount = dm->VirtualPageCount();
+    int pCount = dm->PageCount();
+    int mappingErrs = 0;
+    if (vCount > 0 && vCount != pCount) {
+        int prevPhys = 0;
+        for (int v = 1; v <= vCount; v++) {
+            int col = dm->ColumnOfVirtual(v);
+            int phys = dm->VirtualToPhysical(v);
+            if (col < 1 || col > 2 || phys < 1 || phys > pCount || phys < prevPhys) {
+                mappingErrs++;
+            }
+            prevPhys = phys;
+        }
+        if (mappingErrs > 0) {
+            return fail(fmt("FAIL mapping virtual=%d physical=%d errors=%d", vCount, pCount, mappingErrs));
+        }
+    }
+
+    if (exitCodeOut) {
+        *exitCodeOut = 0;
+    }
+    out.Append(fmt(
+        "OK pages=%d skipped=%d zoom=%d samples=%d maxErr=%.3f worstPage=%d virtual=%d physical=%d mappingErrs=%d\n",
+        nPages, pagesSkipped, zoomPercent, sampleCount, (double)maxErr, worstPage, vCount, pCount, mappingErrs));
+    return ToStrTemp(out);
+}
+
 static void AppendTocItems(str::Builder& out, TocItem* item) {
     for (; item; item = item->next) {
         if (item->title) {

@@ -141,6 +141,7 @@ enum class ControlCmd : u16 {
     TestHomeListRows = 44,
     TestContextMenu = 45,
     TestStatsToggleGraph = 46,
+    TestCvtRoundTrip = 47,
 };
 
 enum class ControlArgType : u16 {
@@ -731,6 +732,19 @@ static void ExecuteControlRequest(ControlRequest* req) {
         case ControlCmd::TestStatsToggleGraph: {
             int exitCode = 0;
             Str res = StatsToggleGraphResultTemp(&exitCode);
+            AppendTestResult(req, exitCode, res);
+            break;
+        }
+
+        case ControlCmd::TestCvtRoundTrip: {
+            int zoomPercent = 100;
+            int sampleCount = 8;
+            int seed = 42;
+            IntArg(req, 0, zoomPercent);
+            IntArg(req, 1, sampleCount);
+            IntArg(req, 2, seed);
+            int exitCode = 0;
+            Str res = CvtRoundTripResultTemp(zoomPercent, sampleCount, seed, &exitCode);
             AppendTestResult(req, exitCode, res);
             break;
         }
