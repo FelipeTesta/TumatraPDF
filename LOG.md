@@ -1,5 +1,14 @@
 # TumatraPDF — Development Log
 
+## 2026-10-20 (s36-af) — fuzz harnesses: document handlers were missing (campaigns were vacuous) + cmark link dep
+
+### Fixed
+- **All mupdf-based fuzz campaigns before this entry were engine-noop**: the harnesses never called `fz_register_document_handlers(ctx)`, so every `fz_open_document_with_stream` failed with "No document handlers registered" — context create + immediate open failure + cleanup only (the "999 execs/s / 900k runs" numbers were the vacuous signature). Added the registration to `MupdfFuzzer.cpp` + `HtmlMdFuzzer.cpp` (ImageFuzzer needs none — `fz_new_image_from_buffer` is handler-free).
+- Harness link: mupdf 1.28.5's `md.obj` references cmark-gfm → added `out/rel64/obj/cmark-gfm.lib` to the shared link list (new `cmark-gfm.vcxproj` from the F1 merge; it lives in `obj/`, not `obj-s/`).
+
+### Verified
+- Honest re-campaign (mupdf 1.28.5, 5-pdf corpus): **69 545 runs / 181 s = 384 execs/s, 0 crashes**, corpus still growing (+71 units), peak RSS 521 MB — the exec/s drop (999 → 384) is the signal that real PDF parsing now happens. `HtmlMdFuzzer` shares the fix (no separate campaign yet).
+
 ## 2026-10-20 (s36-ae) — TODO housekeeping: all `[x]` blocks archived to LOG (user request)
 
 ### Changed
