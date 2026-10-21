@@ -1,5 +1,23 @@
 # TumatraPDF — Development Log
 
+## 2026-10-21 (s36-ak) — Residual toolbar fix: label width owned by baked spaces, pack measures post-`TB_AUTOSIZE` rects
+
+### Fixed
+- **The Autoscroll button's explicit width never stuck and fought its own paint.** `EnforceToolbarTextButtonWidths` set `TBIF_SIZE` cx (309) that comctl re-derives from the label string on every layout pass (measured: set=309 → cx=194), and the transient wider layout PAINTED — leaving ghost label pixels right of the button when comctl shrank back. Now the Enforce pass skips the cx set for `CmdAutoScrollToggle` entirely: the leading spaces baked into the label (`AddAllToolbarButtons`) are the width mechanism, now computed as `ceil((trioDx + DpiScale(24)) / spaceDx) + 1` — the +24 slack so the visible label (drawn by comctl AFTER the spaces) never clips at the button's right edge. Result: stable `cx=226` (`set=-1`), label fully inside 572..798.
+- **Group pack measured stale rects**: right after (re-)adding buttons, `TB_GETITEMRECT` still reports pre-derivation widths, so the greedy pack planned wrong breaks (the Autoscroll group overflowed its row instead of wrapping). `TB_AUTOSIZE` (`TbAutosIZE`) is now sent before `TB_SETROWS(1)` + pack, forcing the string-derived widths NOW.
+- **Custom-draw index/command-id mixups** (pre-existing, silently inert): `CDDS_ITEMPREPAINT` fed `nmcd.dwItemSpec` (an INDEX) to `TB_ISBUTTONCHECKED`/`TB_GETBUTTONINFO` (both take a command id) and `CDDS_ITEMPOSTPAINT` queried without `TBIF_BYINDEX` — so the checked-bold style and the trimmed centered label re-draw never ran. Both now query by index (`TBIF_BYINDEX`) and resolve the real command id first. (Item notifications still don't reach the handler in this build — the comctl draw stands — but the code is now correct for when they do.)
+- Full `InvalidateRect`+`UpdateWindow` at the end of `RebuildToolbarButtonsForWidth` so no intermediate-layout pixels survive.
+
+### Verified
+- `bun cmd/build.ts` 0 errors / 0 warnings; all temp instrumentation (`[e9p]`, pack-groups dump) stripped (grep = 0).
+- Control dump sweep (physical px): 1200/800 single row, trio at 577..683 inside button 572..798; 760/745/700/640/560 wrap coherently, trio repositioned to row 2 (5,33), `vis=1/1/1` everywhere, `cx=226` stable.
+- Pixel-level probe at 745: no content beyond the button rect; screenshots `tests/tmp/res/final-{1200,800,745,560}.png` show the trio inside the block and the complete "Autoscroll" label in 1-row and wrapped layouts.
+
+### Notes
+- **Probe capture trap**: `captureWindowToPng` from the DPI-unaware bun process creates the bitmap at the VIRTUAL window size (745) while `PrintWindow` renders PHYSICAL pixels (931) — the capture is the top-left CROP. Every "label cut at the right edge" in probe screenshots at x > window-width-in-virtual was this artifact, not a paint clip. The earlier s36-ah "110 px offset / 4 px bleed" and the s36-ai residual claim were partly this.
+- At 745 the coherent block wrap needs 3 rows (the correctly-sized Autoscroll group no longer fits row 1 after Find; 2 rows is impossible with this group order) — band grows, nothing clipped.
+- Widths sweep: single row ≥ ~800 client phys; wrap boundary moved from ~700 to ~800 frame px because the button now has its real width.
+
 ## 2026-10-20 (s36-aj) — B4 slice 2: VirtWnd local<->root hit-test bridge invariant
 
 ### Added

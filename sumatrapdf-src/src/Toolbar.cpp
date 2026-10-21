@@ -919,26 +919,30 @@ static LRESULT CALLBACK ReBarWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM
                         if (itemState & (CDIS_DISABLED | CDIS_GRAYED)) {
                             col = ThemeWindowTextDisabledColor();
                         }
-                        // checked toggle buttons (Trim/Crop/Autoscroll/Contrast) get bold white text
+                        // nmcd.dwItemSpec is the button INDEX; the old code fed
+                        // it to TB_ISBUTTONCHECKED / TB_GETBUTTONINFO (both take
+                        // a command id), so the checked-bold style and the
+                        // postpaint text re-draw silently never ran and comctl's
+                        // own draw of the space-padded label stood (user
+                        // 2026-10-21: label artifacts at narrow widths)
                         HWND hwndToolbar = custDraw->nmcd.hdr.hwndFrom;
-                        int cmdId = (int)custDraw->nmcd.dwItemSpec;
+                        int btnIdx = (int)custDraw->nmcd.dwItemSpec;
                         bool isCheckedToggle = false;
                         bool isTextBtn = false;
-                        if (cmdId > 0 && SendMessageW(hwndToolbar, TB_ISBUTTONCHECKED, cmdId, 0)) {
-                            col = ThemeWindowTextColor();
-                            SelectObject(custDraw->nmcd.hdc, GetAppTreeFontEx(hwndToolbar, true, false));
-                            isCheckedToggle = true;
-                        }
-                        // text buttons (BTNS_SHOWTEXT) need POSTPAINT so we can re-draw centered text
-                        if (!isCheckedToggle) {
-                            TBBUTTONINFOW bi1{};
-                            bi1.cbSize = sizeof(bi1);
-                            bi1.dwMask = TBIF_STYLE | TBIF_TEXT;
-                            WCHAR tbuf1[256]{};
-                            bi1.pszText = tbuf1;
-                            bi1.cchText = dimof(tbuf1);
-                            if (TbGetButtonInfo(hwndToolbar, cmdId, &bi1) && (bi1.fsStyle & BTNS_SHOWTEXT) &&
-                                tbuf1[0]) {
+                        TBBUTTONINFOW bi1{};
+                        bi1.cbSize = sizeof(bi1);
+                        bi1.dwMask = TBIF_BYINDEX | TBIF_COMMAND | TBIF_STYLE | TBIF_TEXT;
+                        WCHAR tbuf1[256]{};
+                        bi1.pszText = tbuf1;
+                        bi1.cchText = dimof(tbuf1);
+                        if (TbGetButtonInfo(hwndToolbar, btnIdx, &bi1)) {
+                            if (bi1.idCommand > 0 && SendMessageW(hwndToolbar, TB_ISBUTTONCHECKED, bi1.idCommand, 0)) {
+                                col = ThemeWindowTextColor();
+                                SelectObject(custDraw->nmcd.hdc, GetAppTreeFontEx(hwndToolbar, true, false));
+                                isCheckedToggle = true;
+                            }
+                            // text buttons (BTNS_SHOWTEXT) need POSTPAINT so we can re-draw centered text
+                            if (!isCheckedToggle && (bi1.fsStyle & BTNS_SHOWTEXT) && tbuf1[0]) {
                                 isTextBtn = true;
                             }
                         }
@@ -952,7 +956,11 @@ static LRESULT CALLBACK ReBarWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM
                         int idx2 = (int)custDraw->nmcd.dwItemSpec;
                         TBBUTTONINFOW bi2{};
                         bi2.cbSize = sizeof(bi2);
-                        bi2.dwMask = TBIF_STYLE | TBIF_TEXT | TBIF_COMMAND;
+                        // BYINDEX: nmcd.dwItemSpec is the item index — the old
+                        // code passed it as a command id, the query failed and
+                        // this re-draw (trimmed label, centered right of the
+                        // trio) never ran
+                        bi2.dwMask = TBIF_BYINDEX | TBIF_STYLE | TBIF_TEXT | TBIF_COMMAND;
                         WCHAR txtBuf[256]{};
                         bi2.pszText = txtBuf;
                         bi2.cchText = dimof(txtBuf);
@@ -1069,10 +1077,16 @@ static void AddAllToolbarButtons(MainWindow* win, HWND hwndToolbar, const bool* 
     {
         // a space is much narrower than an 'n' (comctl measured 14 'n'-based
         // spaces at ~4px each): derive the real space width from the
-        // difference of two measured strings, then over-reserve by one
+        // difference of two measured strings
         int spaceDx = HwndMeasureText(hwndToolbar, "n n").dx - HwndMeasureText(hwndToolbar, "nn").dx;
         int trioDx = MeasureTimerTrioDx(win, hwndToolbar);
-        int nSpaces = spaceDx > 0 ? (trioDx + spaceDx - 1) / spaceDx + 1 : 0;
+        // the spaces ARE the button's width mechanism (comctl re-derives
+        // BTNS_SHOWTEXT cx from the string): they must cover the trio PLUS
+        // slack, because comctl draws the whole string and the visible label
+        // starts only after the spaces — without slack the label's tail
+        // clipped at the button's right edge (user 2026-10-21)
+        int slack = DpiScale(win->hwndFrame, 24);
+        int nSpaces = spaceDx > 0 ? (trioDx + slack + spaceDx - 1) / spaceDx + 1 : 0;
         for (int i = 0; i < kButtonsCount; i++) {
             if (gToolbarButtons[i].cmdId != CmdAutoScrollToggle || nSpaces <= 0) {
                 continue;
@@ -1217,17 +1231,20 @@ static void EnforceToolbarTextButtonWidths(MainWindow* win, HWND hwndToolbar) {
         Size sz = HwndMeasureText(hwndToolbar, label);
         int pad = DpiScale(win->hwndFrame, 12);
         int needed = sz.dx + pad;
-        if (bi.idCommand == CmdAutoScrollToggle) {
+        bool isAutoscroll = bi.idCommand == CmdAutoScrollToggle;
+        if (isAutoscroll) {
             // the timer trio lives inside this button, left of the label (see
-            // PositionToolbarChildWindows): widen it by the trio's width so the
-            // whole group is ONE wrap unit. The old dedicated slot button
-            // wrapped apart from Autoscroll on narrow windows — the trio lost
-            // its room and vanished, and the slot's rect landed over row 1 as
-            // a dead zone (user 2026-10-16)
+            // PositionToolbarChildWindows)
             needed += MeasureTimerTrioDx(win, hwndToolbar);
             sDbgAutoscrollNeeded = needed;
         }
-        if ((int)bi.cx < needed) {
+        // The explicit cx never sticks for the Autoscroll button: comctl
+        // re-derives BTNS_SHOWTEXT widths from the string on every layout pass
+        // (measured: set=309 -> cx=194), and the transient wider layout PAINTS,
+        // leaving ghost label pixels right of the button when comctl shrinks
+        // back. Its width is owned by the leading spaces baked into the label
+        // (see AddAllToolbarButtons), which reserve trioDx + slack instead.
+        if ((int)bi.cx < needed && !isAutoscroll) {
             TBBUTTONINFOW biSet{};
             biSet.cbSize = sizeof(biSet);
             biSet.dwMask = TBIF_SIZE;
@@ -1280,6 +1297,12 @@ static void RebuildToolbarButtonsForWidth(MainWindow* win, HWND hwndToolbar) {
     GetClientRect(hwndToolbar, &rcClient);
     int nBtns = (int)SendMessageW(hwndToolbar, TB_BUTTONCOUNT, 0, 0);
     if (nBtns > 0 && rcClient.right > 0) {
+        // comctl derives BTNS_SHOWTEXT widths from their strings lazily —
+        // right after (re-)adding, TB_GETITEMRECT still reports the default
+        // width, and a group pack against those stale rects plans the wrong
+        // breaks (the Autoscroll group overflowed the row instead of
+        // wrapping). TB_AUTOSIZE forces the derivation NOW.
+        TbAutosIZE(hwndToolbar);
         SendMessageW(hwndToolbar, TB_SETROWS, MAKEWPARAM(1, TRUE), 0);
         // pack against the REBAR's client width: the toolbar child's own
         // client can lag mid-transition (a stale transient width measured
@@ -1344,6 +1367,16 @@ static void RebuildToolbarButtonsForWidth(MainWindow* win, HWND hwndToolbar) {
 
     UpdateToolbarPageText(win, win->ctrl ? win->ctrl->PageCount() : -1);
     LayoutToolbarChildWindows(win);
+
+    // The Enforce pass above sets an explicit cx that comctl re-derives from
+    // the label string on its next layout pass (measured: set=309 -> cx=194)
+    // WITHOUT repainting the freed area, and the delete+re-add dance can
+    // leave pixels from intermediate layouts on screen. Force one full
+    // erase+repaint in the FINAL state so no stale label pixels survive
+    // (user 2026-10-21: ghost label fragment floating right of the Autoscroll
+    // button at narrow widths).
+    InvalidateRect(hwndToolbar, nullptr, TRUE);
+    UpdateWindow(hwndToolbar);
 }
 
 static WNDPROC DefWndProcToolbar = nullptr;
@@ -2533,6 +2566,32 @@ TempStr ToolbarButtonsResultTemp(int* exitCodeOut) {
             if (TbGetButtonInfo(hwnd, CmdAutoScrollToggle, &biAs) >= 0) {
                 out.Append(fmt("d6b autoscroll style=0x%02X cx=%d needed=%d set=%d\n", (int)biAs.fsStyle, (int)biAs.cx,
                                sDbgAutoscrollNeeded, sDbgAutoscrollSet));
+            }
+        }
+        // E9-class cross-check: where the floating trio children really are
+        // (toolbar-client coords) vs the anchor rect the positioner reads now
+        {
+            MainWindow* winT = FindMainWindowByHwnd(hwnd);
+            if (winT) {
+                POINT org{0, 0};
+                ClientToScreen(hwnd, &org);
+                auto relRect = [&](HWND h) {
+                    RECT r{};
+                    if (!h || !IsWindow(h) || !GetWindowRect(h, &r)) {
+                        return Rect{0, 0, -1, -1};
+                    }
+                    return Rect{r.left - org.x, r.top - org.y, (int)(r.right - r.left), (int)(r.bottom - r.top)};
+                };
+                Rect rcC = relRect(winT->autoScroll.hwndTimerCheck);
+                Rect rcL = relRect(winT->autoScroll.hwndTimerLabel);
+                Rect rcE = relRect(winT->autoScroll.hwndTimerEdit);
+                Rect anc = TbGetRectForCmd(hwnd, CmdAutoScrollToggle);
+                out.Append(fmt("d6c trio check=%d,%d %dx%d label=%d,%d %dx%d edit=%d,%d %dx%d vis=%d/%d/%d\n", rcC.x,
+                               rcC.y, rcC.dx, rcC.dy, rcL.x, rcL.y, rcL.dx, rcL.dy, rcE.x, rcE.y, rcE.dx, rcE.dy,
+                               IsWindowVisible(winT->autoScroll.hwndTimerCheck) ? 1 : 0,
+                               IsWindowVisible(winT->autoScroll.hwndTimerLabel) ? 1 : 0,
+                               IsWindowVisible(winT->autoScroll.hwndTimerEdit) ? 1 : 0));
+                out.Append(fmt("d6d anchor=%d,%d %dx%d\n", anc.x, anc.y, anc.dx, anc.dy));
             }
         }
     }
