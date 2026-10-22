@@ -39,6 +39,7 @@ DsAccents DsAccentsGet() {
         a.silver = RGB(120, 130, 140);
         a.silverHi = RGB(198, 209, 215);
         a.today = RGB(255, 140, 0);
+        a.flashcardActive = RGB(205, 133, 63); // Peru: warm, readable on dark pages
         a.cellEmpty = RGB(20, 20, 20);
         a.cellOutline = RGB(90, 90, 90);
         a.separator = RGB(200, 200, 200);
@@ -54,6 +55,7 @@ DsAccents DsAccentsGet() {
         a.silver = RGB(140, 150, 165);
         a.silverHi = RGB(90, 110, 140);
         a.today = RGB(215, 110, 0);
+        a.flashcardActive = RGB(184, 115, 51); // Peru, deepened for white pages
         a.cellEmpty = RGB(235, 235, 235);
         a.cellOutline = RGB(205, 205, 205);
         a.separator = RGB(210, 210, 210);

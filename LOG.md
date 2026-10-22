@@ -1,5 +1,23 @@
 # TumatraPDF — Development Log
 
+## 2026-10-22 (s36-al) — Flashcard: active card rect in Peru/orange
+
+### Added
+- `DsAccents::flashcardActive` design token (`ToolbarLayout.h` / `DsAccentsGet()`): dark `RGB(205,133,63)` (Peru), light `RGB(184,115,51)` (deeper Peru for white pages). Theme resolved per paint, same as the other tokens.
+
+### Changed
+- `PaintFlashcardMasks` (`Canvas.cpp`): the card being studied (`i == studyCardIdx`) now fills with the accent token instead of opaque gray — still fully opaque, so cloze text stays hidden — plus a `DpiScale(..., 2)` outline in the same color. On **reveal** (fill gone, original text visible) the marker shrinks to a single bottom **underline** instead of a full outline, so the card stays identifiable without boxing the text in. Inactive/reading cards keep the translucent gray marker, now lighter (**alpha 30 → 20** of 255) so it reads as a hint, not a block.
+- Matches the three user asks in sequence: active rect Peru/orange; inactive stays gray; reveal = underline; plus "um pouco mais de transparência" on the gray.
+
+### Verified
+- `bun cmd/build.ts` 0 errors / 0 warnings; exe deployed to `Compiled/`.
+- Probe `tests/tmp/s36al-fc-color.ts`: two clozes on page 1 of `ext/a-zlib/zlib.3.pdf` (keyboard selection → `S`), study mode, pixel scan of the canvas → **791 accent px** while hidden (fill + outline), **171 accent px** after reveal (underline only; was 444 with the full outline), modal color `#c78544`. Screenshots `tests/tmp/fc-color-light-active.png` (active card orange, inactive gray) / `fc-color-light-reveal.png` (underline under the active card, text visible, inactive cards gray).
+
+### Notes
+- **`-appdata <dir>` does not load settings** for a `-for-testing` instance: proof probe `tests/tmp/s36al-appdata-probe.ts` with `MainWindowBackground = #ff00ff00` in the override dir → **0.0%** green pixels, app kept the real settings. `CmdToggleLightDarkTheme` was also a no-op in the harness. Since the tester's real settings are `Theme = Dark`, the captured evidence IS the dark-theme token; the light value is the same paint path but has no screenshot.
+- `Gdiplus::Pen` takes `const Color&` (a `Color*` → C2665). Scratch probes: `s36al-themecheck.ts`, `s36al-themetoggle.ts`, `s36al-theme-roundtrip.ts`, `s36al-appdata-probe.ts`.
+- The gray-marker alpha is verified by code + eye, not by pixel histogram: `captureWindowPixels` reports DPI-**virtual** w/h for a **physical**-size buffer, so the marker block lands partly outside the scan (and at 200% zoom the view scrolls off the card). The accent color (a large opaque area) is still measurable, hence the 791/171 numbers.
+
 ## 2026-10-21 (s36-ak) — B6 wave 4b: unhandled-code-paths 102 → 0
 
 ### Fixed

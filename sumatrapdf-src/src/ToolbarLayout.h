@@ -29,17 +29,18 @@ struct ToolbarTokens {
 // repaints (it never re-runs cached setup), so these must not be baked into a
 // class brush or a static.
 struct DsAccents {
-    COLORREF text;         // body text (labels, ticks, totals)
-    COLORREF textStrong;   // emphasized text (values, titles)
-    COLORREF textHot;      // interactive text / accent
-    COLORREF silver;       // silver accent (bars, curve)
-    COLORREF silverHi;     // hovered cell (bright silver)
-    COLORREF today;        // TODAY marker (orange)
-    COLORREF cellEmpty;    // heatmap: no-data cell fill
-    COLORREF cellOutline;  // heatmap: outline around an empty cell
-    COLORREF separator;    // section separator line
-    COLORREF axis;         // chart axis + nav triangle glyphs
-    COLORREF cellGrade[4]; // heatmap fill by minutes (<30, <60, <120, else)
+    COLORREF text;            // body text (labels, ticks, totals)
+    COLORREF textStrong;      // emphasized text (values, titles)
+    COLORREF textHot;         // interactive text / accent
+    COLORREF silver;          // silver accent (bars, curve)
+    COLORREF silverHi;        // hovered cell (bright silver)
+    COLORREF today;           // TODAY marker (orange)
+    COLORREF flashcardActive; // flashcard being studied (Peru/orange rect)
+    COLORREF cellEmpty;       // heatmap: no-data cell fill
+    COLORREF cellOutline;     // heatmap: outline around an empty cell
+    COLORREF separator;       // section separator line
+    COLORREF axis;            // chart axis + nav triangle glyphs
+    COLORREF cellGrade[4];    // heatmap fill by minutes (<30, <60, <120, else)
 };
 DsAccents DsAccentsGet();
 

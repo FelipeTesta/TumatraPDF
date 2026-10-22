@@ -64,6 +64,7 @@
 #include "TextToSpeech.h"
 #include "HomePage.h"
 #include "Toolbar.h"
+#include "ToolbarLayout.h"
 #include "AutoScroll.h"
 #include "Translations.h"
 
@@ -3344,9 +3345,15 @@ static void PaintFlashcardMasks(MainWindow* win, DisplayModel* dm, HDC hdc) {
             studyCardIdx = e.cardIdx;
         }
     }
+    COLORREF colActiveTb = DsAccentsGet().flashcardActive;
     for (int i = 0; cards && i < len(*cards); i++) {
         const Flashcard& card = (*cards)[i];
-        bool opaque = (i == studyCardIdx && !win->flashcard.revealMode);
+        // The card being studied is marked in the accent color (Peru/orange)
+        // instead of gray so it is identifiable at a glance among the other
+        // cards (user 2026-10-22: "o retângulo do flashcard ativo está pouco
+        // identificável"). Inactive cards keep the gray marker.
+        bool isActiveCard = (i == studyCardIdx);
+        bool opaque = (isActiveCard && !win->flashcard.revealMode);
         Gdiplus::Graphics gs(hdc);
         // Paint each quad subrect separately so a multi-line cloze covers
         // exactly the highlighted text (not the union bbox). Under TC2 the
@@ -3365,16 +3372,36 @@ static void PaintFlashcardMasks(MainWindow* win, DisplayModel* dm, HDC hdc) {
                 }
                 Rect rc = dm->CvtToScreen(vPage, vr);
                 if (opaque) {
-                    // Studying this card: opaque mask hides the cloze text ([_____])
-                    Gdiplus::Color col(255, 100, 100, 100); // dark gray, fully opaque
+                    // Studying this card: opaque mask hides the cloze text ([_____]).
+                    // The ACTIVE card uses the Peru/orange accent so it stands out
+                    // from the inactive gray markers.
+                    Gdiplus::Color col =
+                        isActiveCard ? GdiRgbFromCOLORREF(colActiveTb) : Gdiplus::Color(255, 100, 100, 100);
                     Gdiplus::SolidBrush brush(col);
                     gs.FillRectangle(&brush, rc.x, rc.y, rc.dx, rc.dy);
                 } else {
                     // Reading / reveal / non-current card: subtle translucent marker
                     // (text stays visible; on reveal the current card shows its original text)
-                    Gdiplus::Color col(30, 128, 128, 128); // light gray, very transparent
+                    // alpha 20/255 — lighter than the old 30 so the gray reads as a hint
+                    // instead of a block over the text (user 2026-10-22)
+                    Gdiplus::Color col(20, 128, 128, 128); // light gray, very transparent
                     Gdiplus::SolidBrush brush(col);
                     gs.FillRectangle(&brush, rc.x, rc.y, rc.dx, rc.dy);
+                }
+                if (isActiveCard) {
+                    // Marks the studied card in EVERY state. While the answer is
+                    // hidden the rectangle is outlined; on reveal the text is
+                    // visible again, so only a bottom underline marks the card
+                    // (a full outline clutters the text) — user 2026-10-22.
+                    Gdiplus::Color colEdge = GdiRgbFromCOLORREF(colActiveTb);
+                    Gdiplus::REAL wEdge = (Gdiplus::REAL)DpiScale(win->hwndCanvas, 2);
+                    Gdiplus::Pen pen(colEdge, wEdge);
+                    if (win->flashcard.revealMode) {
+                        Gdiplus::REAL yLine = (Gdiplus::REAL)(rc.y + rc.dy - 1);
+                        gs.DrawLine(&pen, (Gdiplus::REAL)rc.x, yLine, (Gdiplus::REAL)(rc.x + rc.dx), yLine);
+                    } else {
+                        gs.DrawRectangle(&pen, rc.x, rc.y, rc.dx - 1, rc.dy - 1);
+                    }
                 }
             }
         };
