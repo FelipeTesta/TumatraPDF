@@ -2051,6 +2051,8 @@ HRESULT HW_DWebBrowserEvents2::Invoke(DISPID dispIdMember, __unused REFIID riid,
             // to be opened, so we have to fail silently
             *pDispParams->rgvarg[0].pboolVal = VARIANT_FALSE;
             break;
+        default:
+            break;
     }
 
     return S_OK;

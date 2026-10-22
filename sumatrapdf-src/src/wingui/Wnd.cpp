@@ -437,6 +437,8 @@ LRESULT Wnd::MessageReflect(UINT msg, WPARAM wparam, LPARAM lparam) {
                 default:
                     break;
             }
+        default:
+            break;
     }
     if (!wnd) {
         return 0;

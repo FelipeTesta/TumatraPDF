@@ -1092,6 +1092,8 @@ static LRESULT CALLBACK WndProcScreenshotOverlay(HWND hwnd, UINT msg, WPARAM wp,
                 SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
             }
             return 0;
+        default:
+            break;
     }
 
     return DefWindowProcW(hwnd, msg, wp, lp);

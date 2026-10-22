@@ -412,6 +412,8 @@ static INT_PTR CALLBACK Dialog_Find_Proc(HWND hDlg, UINT msg, WPARAM wp, LPARAM 
                     break;
             }
             break;
+        default:
+            break;
     }
     return FALSE;
 }
@@ -748,6 +750,8 @@ static INT_PTR CALLBACK Dialog_CustomZoom_Proc(HWND hDlg, UINT msg, WPARAM wp, L
                     break;
             }
             break;
+        default:
+            break;
     }
     return FALSE;
 }
@@ -808,6 +812,8 @@ static INT_PTR CALLBACK Dialog_ChangeScrollbar_Proc(HWND hDlg, UINT msg, WPARAM 
                 default:
                     break;
             }
+            break;
+        default:
             break;
     }
     return FALSE;
@@ -978,6 +984,8 @@ static INT_PTR CALLBACK Dialog_Settings_Proc(HWND hDlg, UINT msg, WPARAM wp, LPA
                     break;
             }
             break;
+        default:
+            break;
     }
     return FALSE;
 }
@@ -1026,6 +1034,8 @@ static INT_PTR CALLBACK Dialog_SetInverseSearch_Proc(HWND hDlg, UINT msg, WPARAM
                 default:
                     break;
             }
+            break;
+        default:
             break;
     }
     return FALSE;
@@ -1161,6 +1171,8 @@ static INT_PTR CALLBACK Sheet_Print_Advanced_Proc(HWND hDlg, UINT msg, WPARAM wp
                 default:
                     break;
             }
+        default:
+            break;
     }
     return FALSE;
 }
@@ -1698,6 +1710,8 @@ static INT_PTR CALLBACK Dialog_ChangeBgColor_Proc(HWND hDlg, UINT msg, WPARAM wp
             }
             break;
         }
+        default:
+            break;
     }
     return FALSE;
 }

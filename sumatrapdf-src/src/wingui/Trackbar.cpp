@@ -80,6 +80,8 @@ LRESULT Trackbar::OnMessageReflect(UINT msg, WPARAM wp, LPARAM /*lparam*/) {
             // "if an application processes this message, it should return zero"
             return 0;
         }
+        default:
+            break;
     }
 
     return 0;

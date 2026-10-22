@@ -1,5 +1,17 @@
 # TumatraPDF — Development Log
 
+## 2026-10-21 (s36-ak) — B6 wave 4b: unhandled-code-paths 102 → 0
+
+### Fixed
+- `bugprone-unhandled-code-paths` ("potential uncovered code path; add a default label") cleared. **90 of the original 102 were fixed as a side effect of wave 4a** (adding `default: break;` satisfies both checks); the fresh full diagnose (`tests/tmp/diagnose-unhandled.ts`, 269 TUs) found the remaining 12 — all message-dispatcher switches (WndProc/DialogProc/IDispatch::Invoke/entity table) where `default: break;` is behavior-neutral (the post-switch fall-through already defines the semantics). **12 labels in 7 files** via the adapted inserter (`fix-unhandled-default.ts`: the skip rule now scopes the has-default test to the switch's own brace depth — a `default:` in a NESTED switch does not satisfy the check) + 1 manual (`base/HtmlTags.cpp` — the entity-table switch exceeds the brace-matcher's 20k-char scan cap).
+
+### Verified
+- Full diagnose rerun: **0 sites / 269 TUs**. Build 0/0 (124.9 s), exe deployed to Compiled.
+
+### Notes
+- Stale-line trap: the definitive sweep log's line numbers predate later edits — always re-derive current sites with a fresh per-TU pass before fixing.
+- `WebView.cpp`/`HarfBuzzPch.cpp` exit 1 in standalone clang-tidy (PCH TU + WebView2 include gap) — 0 sites, no impact.
+
 ## 2026-10-21 (s36-ak) — Residual toolbar fix: label width owned by baked spaces, pack measures post-`TB_AUTOSIZE` rects
 
 ### Fixed

@@ -1426,6 +1426,8 @@ u32 FindHtmlEntityRune(Str nameIn) {
         case CS4('z', 'w', 'n', 'j'):
             if (4 == n) return 8204;
             break;
+        default:
+            break;
     }
     return (u32)-1;
 }

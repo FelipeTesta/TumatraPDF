@@ -202,6 +202,8 @@ LRESULT CommandPaletteWnd::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                     break;
             }
         }
+        default:
+            break;
     }
 
     return WndProcDefault(hwnd, msg, wp, lp);
