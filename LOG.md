@@ -1,5 +1,40 @@
 # TumatraPDF — Development Log
 
+## 2026-10-22 (s36-am) — A4: clangd index warmed 282/282 TUs; unscoped find_symbol 240s-timeout → 35s
+
+### Added
+- `tests/before-release.ts` now also runs `tests/ad-hoc-b4-coordinate-invariants.ts` (the two B4 invariant commands) before every release.
+- `tests/tmp/run-clangd-index.ts` (gitignored): LSP driver that spawns standalone clangd 23, does the initialize handshake, didOpen-s every CDB entry and watches shard growth (kept as a tool; NOT used for the final warm-up, see Notes).
+
+### Fixed
+- **A4 closed**: unscoped `find_symbol` (project-wide) used to hit the 240 s MCP timeout; a Serena warm-up pass calling `get_symbols_overview(relative_path)` for **all 282 CDB TUs** (chunks of 30, ~4.3 s/file, 0 failures, ~21 min total) made it return in **35 s**.
+
+### Notes
+- **clangd shard versions are incompatible across majors**: the project `.cache/clangd/index` held v19 shards (written by Serena's bundled clangd 19). Standalone clangd 23 reports "wrong version: want 20, got 19" for all of them — never mix clangd majors writing into the same `.cache`, and don't delete the v19 shards (they are what Serena reads).
+- clangd 23 + `-j 8` OOM-crashed on this 7.8 GB machine while re-parsing with all its own shards unreadable ("Allocation failed"); a warm-up through Serena's own clangd sidesteps both problems.
+- `get_symbols_overview(relative_path)` on an unopened TU forces the full parse+index (the warm-up primitive); post-warm-up it is how any file gets (re)indexed after edits.
+- Serena's clangd is served from `.cache/clangd/index` in the PROJECT (602+ shards), not `%LOCALAPPDATA%\clangd\index` (587 stale v19 system-header shards from earlier experiments).
+
+## 2026-10-22 (s36-an) — Dark-theme chrome: "yellow" not reproducible; toolbars now follow the theme
+
+### Findings (no code change)
+- **No yellow in the dark-theme chrome on the current build.** Two configs checked, both `yellow-ish px: 0` (r>200, g>200, b<90): (a) the tester's real settings via `-for-testing`, (b) an isolated settings dir (`tests/tmp/chromedark/TumatraPDF-settings.txt` = `Theme = Dark`, `ColorizeControls = true`, `ShowMenubar = false`, default `MainWindowBackground = #80fff200`) launched **without** `-for-testing` so `-appdata` applies (log: `LoadSettings('<dir>/TumatraPDF-settings.txt')`). Captures: `tests/tmp/s36an-chrome.png`, `s36an-chrome-colorized.png`. Pixel histograms are identical in both: `top rows = #000000 x58801, #ffffff x11785, #f9fafb x394, #9ca3af x274`; whole frame = white page + black chrome only.
+- The only saturated-yellow literal in the tree is the **installer/uninstaller** background: `kInstallerWinBgColor = RGB(0xff,0xf2,0)` (`InstallerCommon.cpp:27`, also `Installer.cpp:1927`, `Uninstaller.cpp:261`). `MainWindowBackground`'s default `#80fff200` uses the same yellow as a legacy sentinel, but both consumers guard it (`IsDefaultMainWinColor`, `Theme.cpp:787` / `:1010`). So a yellow window capture most likely came from an installer window, not the reader chrome.
+- **Mixed chrome was the real oddity**: with `Theme = Dark` the tab/title strip is black (`#000000` background of the Dark theme) while the icon toolbars still rendered with the classic light background — and toggling `ColorizeControls` (`true` vs the default `false`) changed **nothing**, although the Dark theme table has `ControlBackgroundColor = #000000` (`Theme.cpp:145`, `ColorizeControls = true` at `:157`). Diagnosed and fixed below.
+
+### Fixed
+- **Rebar-hosted toolbars painted a classic light background in every non-default theme.** comctl's `ToolbarWindow32` always fills its own client with the system "btnface" brush; the rebar strip behind it was already erased with `ThemeControlBackgroundColor()` (`ReBarWndProc`), but the toolbar covered it. Neither `TB_SETBKCOLOR` (does not exist in the SDK) nor `CCM_SETBKCOLOR` (accepted and ignored by the toolbar) helps — measured: histograms byte-identical before/after. Fix: add `TBSTYLE_TRANSPARENT` to the main, Arch-tools and menu-bar toolbars when `!IsCurrentThemeDefault()`, so the already-themed rebar erase shows through. Default (Light) theme untouched.
+- Verified row-by-row on a `Theme = Dark` run: the toolbar band went from `#ffffff` to `#000000` with light-gray glyphs (`#858586`), screenshot `tests/tmp/s36an-dark-chrome.png`; probe `tests/tmp/s36an-rows.ts` prints the dominant colour per row.
+- Side observation, left alone: the active tab still paints a **white** underline under the tab title in dark theme (rows 36-39 of the capture).
+- **Capture caveat**: both `captureWindowToPng` (window bounds) and `captureWindowPixels` (PrintWindow `PW_CLIENTONLY|PW_RENDERFULLCONTENT` into a DIB sized from the DPI-**virtual** client rect) are PrintWindow-based and disagree for colorized chrome — the PNG shows a light toolbar where the pixel buffer is mostly black. Judge theme/color questions by pixel histograms, not by eyeballing these PNGs.
+
+### Changed
+- Corrected the s36-al note: `-appdata` does load settings (with or without `-for-testing`); what failed earlier was `MainWindowBackground`, which only applies to the Light theme (`Theme.cpp:1010`).
+
+### Notes
+- TODO item closed as not reproducible; re-open only with a screenshot plus which window produced it.
+- Probes: `tests/tmp/s36an-chrome.ts`, `s36an-chrome-colorized.ts`, `s36an-chrome-hist.ts`.
+
 ## 2026-10-22 (s36-am) — Flashcard study JSON: loader restored only the first card; orphan states pruned
 
 ### Fixed
@@ -46,7 +81,7 @@
 - Probe `tests/tmp/s36al-fc-color.ts`: two clozes on page 1 of `ext/a-zlib/zlib.3.pdf` (keyboard selection → `S`), study mode, pixel scan of the canvas → **791 accent px** while hidden (fill + outline), **171 accent px** after reveal (underline only; was 444 with the full outline), modal color `#c78544`. Screenshots `tests/tmp/fc-color-light-active.png` (active card orange, inactive gray) / `fc-color-light-reveal.png` (underline under the active card, text visible, inactive cards gray).
 
 ### Notes
-- **`-appdata <dir>` does not load settings** for a `-for-testing` instance: proof probe `tests/tmp/s36al-appdata-probe.ts` with `MainWindowBackground = #ff00ff00` in the override dir → **0.0%** green pixels, app kept the real settings. `CmdToggleLightDarkTheme` was also a no-op in the harness. Since the tester's real settings are `Theme = Dark`, the captured evidence IS the dark-theme token; the light value is the same paint path but has no screenshot.
+- **`MainWindowBackground` cannot force the theme**: it is only honoured by the **Light** theme (`Theme.cpp:1010` guards on `gCurrThemeIndex == 0`), so an isolated settings dir with a magenta value changed nothing on this machine (its theme is `Dark`) — that is by design, not a load failure. `-appdata <dir>` DOES load settings (log: `LoadSettings('<dir>/TumatraPDF-settings.txt')`), including `Theme = Dark` / `ColorizeControls = true`; `-for-testing` only blocks saving. `CmdToggleLightDarkTheme` was a no-op in the harness.
 - `Gdiplus::Pen` takes `const Color&` (a `Color*` → C2665). Scratch probes: `s36al-themecheck.ts`, `s36al-themetoggle.ts`, `s36al-theme-roundtrip.ts`, `s36al-appdata-probe.ts`.
 - The gray-marker alpha is verified by code + eye, not by pixel histogram: `captureWindowPixels` reports DPI-**virtual** w/h for a **physical**-size buffer, so the marker block lands partly outside the scan (and at 200% zoom the view scrolls off the card). The accent color (a large opaque area) is still measurable, hence the 791/171 numbers.
 

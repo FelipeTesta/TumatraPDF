@@ -16,6 +16,7 @@ import { testit as adHocPasteImageAnnot } from "./ad-hoc-paste-image-annot.ts";
 import { testit as adHocUia } from "./ad-hoc-uia.ts";
 import { testit as adHocUpdate } from "./ad-hoc-update.ts";
 import { testit as adHocFlashcardCrossPage } from "./ad-hoc-flashcard-crosspage.ts";
+import { testit as adHocB4CoordinateInvariants } from "./ad-hoc-b4-coordinate-invariants.ts";
 import { testit as latexTests } from "./latex.ts";
 import { testit as issueChmLzx } from "./issue-chm-lzx.ts";
 
@@ -29,6 +30,7 @@ const adHocTests: [string, () => void | Promise<void>][] = [
   ["ad-hoc-uia", adHocUia],
   ["ad-hoc-update", adHocUpdate],
   ["ad-hoc-flashcard-crosspage", adHocFlashcardCrossPage],
+  ["ad-hoc-b4-coordinate-invariants", adHocB4CoordinateInvariants],
   ["issue-chm-lzx", issueChmLzx],
 ];
 

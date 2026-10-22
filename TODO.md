@@ -10,7 +10,7 @@
 
 ## Dev tooling / analysis — open items (s36-q roadmap; DONE rows archived to LOG s36-q..s36-ad)
 
-- [ ] **A4** clangd one-time index build (shards in `%LOCALAPPDATA%\clangd\index`) — WIP; when finished, project-wide `find_symbol` stops hitting the 240 s MCP timeout on this tree (file-scoped queries already instant, see Serena recipe in AGENTS.md §6b).
+- [x] **A4** clangd one-time index build - DONE s36-am: Serena warm-up pass over all 282 CDB TUs (get_symbols_overview per file, ~21 min); unscoped find_symbol now returns in ~35 s (was 240 s MCP timeout). Shard-version trap: never mix clangd majors in the same `.cache` (v19 vs v20); details LOG s36-am.
 - [ ] **B4** Property/invariant tests for the coordinate + pageNo namespaces: `CvtToScreen`/`CvtFromScreen` round-trip, VirtWnd local↔root bridge (`pt + bounds.{x,y}`). Kills the most repeated bug class in this repo at test level (mixed virtual/physical pageNo, screen vs page coords, hit-test spaces). s36-ag slice 1 DONE: `TestCvtRoundTrip` `-dbg-control` command + `tests/ad-hoc-b4-coordinate-invariants.ts` - zoom 25-1600% + seeds + multi-page TC2 mapping all OK, err scales 1/zoom as the 2x pixel-quantization model predicts; s36-aj slice 2 DONE: `TestVirtWndHitTest` bridge invariant on the home tree (12 wnds, 62 exact local round-trips, 0 violations; NOTREADY polling pattern). B4 CLOSED.
 - [ ] **B6** clang-tidy sweep triage - WIP s36-r; REMAINING: roundings/unchecked-conv deferred (behavior-visible: lround/strtol change semantics, needs functional verification) + the 8 `clang-diagnostic-error` TUs (flag/std gap vs MSVC; platform-suffix files excluded). switch-missing-default-case 128 → 0 in wave 4a (s36-ag); narrowing 81 → 4 vendored (s36-ad); analyzer findings 42 → 32, all triaged. The ~24k stylistic bulk (signed-bitwise, macro-to-enum, named-parameter, designated-initializers, redundant-parentheses, concise-preprocessor-directives, explicit-constructor) is a separate policy decision, not a defect list. Baseline: `out/lint/clang-tidy-summary.txt`. Waves 1-5 + analyzer triage: LOG s36-r / s36-ac / s36-ad / s36-ag / s36-ak / s36-al (roundings 17 -> 0 via lround; unchecked-conv 7 -> 0: 6 fixed with strtol/strtod + 1 NOLINT deserializer).
 
@@ -108,7 +108,6 @@ Shift+S: draw a rectangle that captures the image inside it at the document's DP
 - [ ] **BUG-4** Contrast × Trim Config ONE-SHOT vanish (first trim-config open after launch). Fix v2 (`EnsureContrastOverlayState` invariant + self-healing) deployed 2026-09-22 — awaiting user confirmation of the exact flow; `[contrast]` breadcrumbs in debug build.
 - [ ] **Ctrl+click flashcard highlight opens List** — implemented s34-b (Canvas ctrl+click detects /T author TumatraPDF-Flashcard → FlashcardSidebarShow; turns flashcard mode on if off). USER live-test pending (needs a book with flashcard highlights).
 - [ ] **s34-g user validation pending**: Arch Measure Radius + Ref Line UX, resize-enlarge on a real book, flicker-free drag confirm (shipped + E2E 2026-10-11).
-- [ ] **Dark-mode chrome yellow** (from s36-aa darkmodelib verification, NOT a regression): dark-theme chrome paints a saturated yellow (≈ rgb 245,237,19) on this machine in BOTH old and new darkmodelib builds; PrintWindow and BitBlt agree. Investigate source (accent color / theme preset).
 
 ## USER reports — open
 
