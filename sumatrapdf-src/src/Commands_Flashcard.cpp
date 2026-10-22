@@ -389,8 +389,15 @@ static void HandleFlashcardRate(MainWindow* win, int rating) {
         e.tab->flashcard.studyDoc.states.Append(entry);
     }
 
-    // Save to disk — the card's own book's JSON (per-book, keyed by MD5 of path)
+    // Save to disk — the card's own book's JSON (per-book, keyed by MD5 of path).
+    // Prune first: states of cards whose highlight was deleted must not be
+    // written back (FC-H3-left); a deleted cloze leaves no card behind.
     if (e.tab->filePath) {
+        int pruned = FlashcardStudyPruneStates(e.tab->flashcard.studyDoc, e.tab->flashcard.cards);
+        if (pruned > 0) {
+            logf("[fc] HandleFlashcardRate - pruned %d state(s) of deleted cards in '%s'\n", pruned,
+                 FlashcardTabLogName(e.tab));
+        }
         FlashcardStudySave(e.tab->filePath.s, e.tab->flashcard.studyDoc);
     }
     logf("[fc] HandleFlashcardRate - rated %d card %d of '%s'\n", rating, e.cardIdx, FlashcardTabLogName(e.tab));

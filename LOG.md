@@ -1,5 +1,23 @@
 # TumatraPDF — Development Log
 
+## 2026-10-22 (s36-am) — Flashcard study JSON: loader restored only the first card; orphan states pruned
+
+### Fixed
+- **Study progress restored for the FIRST card only.** `ParseJsonObject` (`Flashcard.cpp`) had two defects: (a) `str::TrimWSInPlace` is *destructive* (memmove + `s.s[end] = 0`), and the field parser ran it on slices of the whole JSON document — every parsed field NUL-terminated the buffer mid-parse; (b) after a state object the cursor sat on its closing `}` and was compared against `,`, so the loop always `break`ed. User-visible effect: cards 2..N always came back as "new" and were re-studied from scratch. Fix: local non-destructive `SkipWsLeft` / `TrimWsBoth` helpers (pointer arithmetic only, no buffer writes) for every trim in the parser, plus stepping past `}` before the `,` test.
+- **Orphan study states** (states of cards whose highlight was deleted) piled up in the per-book JSON forever. New `FlashcardStudyPruneStates(doc, cards)` (`Flashcard.h` / `.cpp`) keeps only entries whose key still matches a card; `HandleFlashcardRate` prunes before each save and logs `pruned N state(s)`.
+
+### Verified
+- `bun cmd/build.ts` 0 errors / 0 warnings.
+- `tests/tmp/s36am-fc-load2.ts` — two clozes, both rated, relaunch: JSON holds 2 states, loader logs **`loaded 2 entries`** (was 1). PASS.
+- `tests/tmp/s36am-fc-prune.ts` — inject fake key `123456789`, zero `nextReviewAt`, rate again: `loaded 2 entries` → **`pruned 1 state(s)`** → `saved 1 entries`; file keeps only the live key. PASS.
+
+### Notes
+- Debug exe runs portable: study JSON lives in `out/dbg64/FlashcardStudy/`, one `<md5-of-book-path>.json` per book.
+- A cloze highlight is not inside the PDF until `CmdSaveAnnotations`; without it the next launch finds 0 cards.
+- `str::TrimWSInPlace` mutates its argument — never call it on a slice of a buffer you still need.
+- R6-left verified stale this session (`Commands_AutoScroll.cpp` already owns the toggle state since s36-ah); its TODO line was removed and landed inside `a6000e7` (the other agent's commit swept it).
+- Reading the probe log: `logSize`/`logSince` is unreliable (a live app appends, 5 MB rotation) — read the tail from the last `FlashcardStudyLoad - loading`.
+
 ## 2026-10-22 (s36-al) — B6 wave 5: roundings + unchecked conversions 24 → 0
 
 ### Fixed

@@ -613,6 +613,40 @@ int FlashcardStudyRecoverBackup() {
     return 0;
 }
 
+// Drop study states whose card no longer exists in the document. A card dies
+// when its highlight annotation is deleted, but its SM-2 entry stayed in the
+// JSON forever: every save wrote it back and the Config window counted states
+// for cards that are not in the book. Returns how many entries were dropped.
+int FlashcardStudyPruneStates(FlashcardStudyDoc& doc, const Vec<Flashcard>& cards) {
+    int n = len(doc.states);
+    if (n == 0) {
+        return 0;
+    }
+    int kept = 0;
+    for (int i = 0; i < n; i++) {
+        u64 key = doc.states[i].key;
+        bool alive = false;
+        for (int j = 0; j < len(cards); j++) {
+            if (cards[j].key == key) {
+                alive = true;
+                break;
+            }
+        }
+        if (!alive) {
+            continue;
+        }
+        if (kept != i) {
+            doc.states[kept] = doc.states[i];
+        }
+        kept++;
+    }
+    int removed = n - kept;
+    if (removed > 0) {
+        doc.states.len = kept;
+    }
+    return removed;
+}
+
 // Save flashcard study state to external JSON file
 void FlashcardStudySave(const char* filePath, const FlashcardStudyDoc& doc) {
     logf("[fc] FlashcardStudySave - saving to %s\n", Str(filePath));
@@ -868,6 +902,32 @@ bool FlashcardFilterEval(Str expr, int pageCount, Vec<u8>& pages) {
 
 // Simple JSON parser for the flashcard study file.
 // Only handles the specific format we write.
+// Non-destructive whitespace trim over a slice of the study JSON.
+// str::TrimWSInPlace rewrites the string it is given (memmove + NUL at the new
+// end); applied to a slice of the whole document that NUL-terminates the buffer
+// mid-parse, so every later Str built from a pointer (strlen) silently ends
+// early and only the first state of the file could ever be parsed.
+static bool IsJsonWs(char c) {
+    return c == ' ' || c == '\t' || c == '\r' || c == '\n';
+}
+
+static Str SkipWsLeft(Str s) {
+    int i = 0;
+    while (i < len(s) && IsJsonWs(s.s[i])) {
+        i++;
+    }
+    return Str(s.s + i, len(s) - i);
+}
+
+static Str TrimWsBoth(Str s) {
+    s = SkipWsLeft(s);
+    int n = len(s);
+    while (n > 0 && IsJsonWs(s.s[n - 1])) {
+        n--;
+    }
+    return Str(s.s, n);
+}
+
 static bool ParseJsonObject(Str json, Vec<FlashcardStudyDoc::StateEntry>* outStates) {
     // Find "states": {
     Str statesKey = StrL("\"states\"");
@@ -877,12 +937,12 @@ static bool ParseJsonObject(Str json, Vec<FlashcardStudyDoc::StateEntry>* outSta
     }
     const char* statesStart = json.s + statesIdx;
     Str afterStates = Str(statesStart + len(statesKey));
-    str::TrimWSInPlace(afterStates, str::TrimOpt::Left);
+    afterStates = SkipWsLeft(afterStates);
     if (!afterStates || afterStates.s[0] != ':') {
         return false;
     }
     afterStates = Str(afterStates.s + 1);
-    str::TrimWSInPlace(afterStates, str::TrimOpt::Left);
+    afterStates = SkipWsLeft(afterStates);
     if (!afterStates || afterStates.s[0] != '{') {
         return false;
     }
@@ -900,7 +960,7 @@ static bool ParseJsonObject(Str json, Vec<FlashcardStudyDoc::StateEntry>* outSta
 
     // Parse key-value pairs: "annotId": { ... }
     while (afterStates && afterStates.s[0] != '}') {
-        str::TrimWSInPlace(afterStates, str::TrimOpt::Left);
+        afterStates = SkipWsLeft(afterStates);
         if (!afterStates || afterStates.s[0] != '"') {
             break;
         }
@@ -916,12 +976,12 @@ static bool ParseJsonObject(Str json, Vec<FlashcardStudyDoc::StateEntry>* outSta
 
         // Find the value object
         Str afterKey = Str(keyStart.s + keyEndIdx + 1);
-        str::TrimWSInPlace(afterKey, str::TrimOpt::Left);
+        afterKey = SkipWsLeft(afterKey);
         if (!afterKey || afterKey.s[0] != ':') {
             break;
         }
         afterKey = Str(afterKey.s + 1);
-        str::TrimWSInPlace(afterKey, str::TrimOpt::Left);
+        afterKey = SkipWsLeft(afterKey);
         if (!afterKey || afterKey.s[0] != '{') {
             break;
         }
@@ -951,20 +1011,20 @@ static bool ParseJsonObject(Str json, Vec<FlashcardStudyDoc::StateEntry>* outSta
             int fieldIdx = str::IndexOf(valueJson, fieldName);
             if (fieldIdx < 0) return;
             Str afterField = Str(valueJson.s + fieldIdx + len(fieldName));
-            str::TrimWSInPlace(afterField, str::TrimOpt::Left);
+            afterField = SkipWsLeft(afterField);
             // skip the key's closing quote: we searched the field NAME only
             // ("rating"), so s[0] is the '"' that ends the key, not the ':'
             if (afterField && afterField.s[0] == '"') {
                 afterField = Str(afterField.s + 1);
-                str::TrimWSInPlace(afterField, str::TrimOpt::Left);
+                afterField = SkipWsLeft(afterField);
             }
             if (!afterField || afterField.s[0] != ':') return;
             afterField = Str(afterField.s + 1);
-            str::TrimWSInPlace(afterField, str::TrimOpt::Left);
+            afterField = SkipWsLeft(afterField);
             int valEndIdx = findAnyChar(afterField, StrL(",\n}"));
             if (valEndIdx < 0) return;
             Str valStr = Str(afterField.s, valEndIdx);
-            str::TrimWSInPlace(valStr, str::TrimOpt::Both);
+            valStr = TrimWsBoth(valStr);
             out = parser(valStr);
         };
 
@@ -984,7 +1044,12 @@ static bool ParseJsonObject(Str json, Vec<FlashcardStudyDoc::StateEntry>* outSta
         entry.state = state;
         outStates->Append(entry);
 
-        str::TrimWSInPlace(valueEnd, str::TrimOpt::Left);
+        // valueEnd sits ON the '}' that closes the state object; step PAST it
+        // before looking for the ',' that separates entries. Comparing the '}'
+        // itself to ',' broke the loop, so only the FIRST state of a study file
+        // was ever loaded and every other card came back as "new".
+        valueEnd = Str(valueEnd.s + 1);
+        valueEnd = SkipWsLeft(valueEnd);
         if (!valueEnd || valueEnd.s[0] != ',') {
             break;
         }

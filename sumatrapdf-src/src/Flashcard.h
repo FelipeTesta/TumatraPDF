@@ -121,6 +121,9 @@ int FlashcardImportDiffCount(Vec<Flashcard>& existing, const char* srcPath, int*
 // Save flashcard study state to external JSON file
 void FlashcardStudySave(const char* filePath, const FlashcardStudyDoc& doc);
 
+// Drop study states whose card no longer exists in the document
+int FlashcardStudyPruneStates(FlashcardStudyDoc& doc, const Vec<Flashcard>& cards);
+
 // Load flashcard study state from external JSON file
 FlashcardStudyDoc FlashcardStudyLoad(const char* filePath);
 
