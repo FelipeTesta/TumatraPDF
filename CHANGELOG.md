@@ -4,7 +4,7 @@ Per-version changelog for TumatraPDF — new functions + bug fixes, newest first
 Feature details live in [README.md](README.md); full per-session development
 history in [LOG.md](LOG.md).
 
-## v1.0.13 (pending)
+## v1.0.13 (2026-10-21)
 
 - **Trim and Two Columns are per book again.** Both modes are remembered per
   document, and a newly opened file always starts with them OFF instead of

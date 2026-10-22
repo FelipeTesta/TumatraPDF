@@ -4,7 +4,26 @@ Per-version changelog for TumatraPDF — new functions + bug fixes, newest first
 Feature details live in [README.md](README.md); full per-session development
 history in [LOG.md](LOG.md).
 
-## v1.0.7 (pending)
+## v1.0.13 (2026-10-21)
+
+- Trim and Two Columns are per book again; new books start with both OFF.
+- Bookmarks land on the left column of the registered page in Two Columns.
+- `Ctrl+Shift+T` reopens the whole closed window group in one go.
+- Reading time gets an all-time master total on the Home stats line.
+- Auto-scroll speed is remembered per book; the Trim Config dialog pauses
+  auto-scroll while it is open.
+- Auto-scroll timer controls are anchored by command id and stay inside their
+  button; the toolbar SHOWTEXT width is owned by baked label spaces.
+- Finer zoom steps (~1.33 ratio between levels).
+- Flashcards span page breaks: one card per cross-page cloze, all covered
+  pages masked together.
+- Engineering hardening (invisible to users): mupdf 1.28.0-rc2 → 1.28.5
+  (security) + libarchive/libjpeg-turbo/mujs/xz updates, static analyzers
+  (CodeQL, MSVC /analyze, clang-tidy) cleared from 120+29k findings to
+  near-zero on the fork's own code, ASan/libFuzzer harnesses wired into a
+  nightly fuzz CI, TTD/App-Verifier recipes documented.
+
+## v1.0.7 (2026-10-01)
 
 - **Keyboard shortcuts sheet** (`?` / Shift+/): new **Flashcards** and
   **Auto-Scroll & Contrast** sections (fork commands were missing from the
