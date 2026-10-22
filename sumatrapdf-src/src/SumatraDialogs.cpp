@@ -692,7 +692,7 @@ static float GetZoomComboBoxValue(HWND hDlg, UINT idComboBox, float defaultZoom)
         if (len(customZoom) == 0) {
             return defaultZoom;
         }
-        float zoom = (float)atof(CStrTemp(customZoom));
+        float zoom = (float)strtod(CStrTemp(customZoom), nullptr);
         if (zoom == 0) {
             return defaultZoom;
         }

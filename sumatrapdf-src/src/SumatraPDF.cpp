@@ -843,6 +843,7 @@ static Vec<ArchMeasurement> DeserializeMeasurements(const char* s) {
     while (*s) {
         ArchMeasurement m = {};
         int scaledInt = 0;
+        // NOLINTNEXTLINE(bugprone-unchecked-string-to-number-conversion) partial-parse deserializer
         int n = sscanf(s, "%d,%g,%g,%g,%g,%g,%g,%g,%d,%d,%g,%g,%d", &m.pageNo, &m.p1x, &m.p1y, &m.p2x, &m.p2y, &m.len,
                        &m.x, &m.y, (int*)&m.unit, &scaledInt, &m.p3x, &m.p3y, &m.kind);
         if (n >= 10) {

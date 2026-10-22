@@ -1,6 +1,8 @@
 /* Copyright 2026 the TumatraPDF project authors. All rights reserved.
    License: GPLv3 */
 
+#include <cmath>
+
 #include "base/Base.h"
 #include "base/BitManip.h"
 #include "base/WinDynCalls.h"
@@ -81,7 +83,7 @@ static constexpr float kSpeedStepSize = 0.01f;
 static float SnapSpeedMultiplier(float mlt) {
     mlt = std::max(mlt, kMinSpeedMultiplier);
     mlt = std::min(mlt, kMaxSpeedMultiplier);
-    return (float)((int)(mlt * 100.0f + 0.5f)) / 100.0f;
+    return (float)lround(mlt * 100.0f) / 100.0f;
 }
 
 // Calculate effective scroll speed in pixels per second

@@ -6,6 +6,8 @@
 // grabs the clipboard image; the next left-click on a page places it as a
 // Stamp annotation (click-to-place), clamped to fit the page.
 
+#include <cmath>
+
 #include "base/Base.h"
 #include "base/Win.h"
 #include "base/Dpi.h"
@@ -791,10 +793,10 @@ static void EditApplyImageEdits(MainWindow* win) {
         double sx = (double)imgW / ed.imageRect.dx;
         double sy = (double)imgH / ed.imageRect.dy;
         // content sub-rect in source pixels (what the user sees now)
-        int csx = std::max(0, (int)((double)(ed.content.x - ed.imageRect.x) * sx + 0.5));
-        int csy = std::max(0, (int)((double)(ed.content.y - ed.imageRect.y) * sy + 0.5));
-        int csw = (int)((double)ed.content.dx * sx + 0.5);
-        int csh = (int)((double)ed.content.dy * sy + 0.5);
+        int csx = std::max(0, (int)lround((double)(ed.content.x - ed.imageRect.x) * sx));
+        int csy = std::max(0, (int)lround((double)(ed.content.y - ed.imageRect.y) * sy));
+        int csw = (int)lround((double)ed.content.dx * sx);
+        int csh = (int)lround((double)ed.content.dy * sy);
         if (csx + csw > imgW) {
             csw = imgW - csx;
         }
@@ -850,10 +852,10 @@ static void EditApplyImageEdits(MainWindow* win) {
             continue;
         }
         RectF fb{fx0, fy0, fx1 - fx0, fy1 - fy0};
-        int dx = (int)((double)(fb.x - ed.imageRect.x) * sx + 0.5);
-        int dy = (int)((double)(fb.y - ed.imageRect.y) * sy + 0.5);
-        int dw = (int)((double)fb.dx * sx + 0.5);
-        int dh = (int)((double)fb.dy * sy + 0.5);
+        int dx = (int)lround((double)(fb.x - ed.imageRect.x) * sx);
+        int dy = (int)lround((double)(fb.y - ed.imageRect.y) * sy);
+        int dw = (int)lround((double)fb.dx * sx);
+        int dh = (int)lround((double)fb.dy * sy);
         if (dw < 1 || dh < 1) {
             continue;
         }

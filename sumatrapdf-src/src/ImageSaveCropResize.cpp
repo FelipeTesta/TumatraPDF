@@ -1,6 +1,8 @@
 /* Copyright 2022 the SumatraPDF project authors (see AUTHORS file).
    License: GPLv3 */
 
+#include <cmath>
+
 #include "base/Base.h"
 #include "base/ScopedWin.h"
 #include "base/File.h"
@@ -294,9 +296,9 @@ static bool HandleImageEditArrowKey(ImageEditWindow* ew, WPARAM wp) {
         // Shift keeps the aspect ratio of the current image
         if (GetKeyState(VK_SHIFT) & 0x8000) {
             if (wp == VK_LEFT || wp == VK_RIGHT) {
-                ew->newH = (int)(((double)ew->newW * ew->imgH / ew->imgW) + 0.5);
+                ew->newH = (int)lround((double)ew->newW * ew->imgH / ew->imgW);
             } else {
-                ew->newW = (int)(((double)ew->newH * ew->imgW / ew->imgH) + 0.5);
+                ew->newW = (int)lround((double)ew->newH * ew->imgW / ew->imgH);
             }
         }
         ew->newW = std::max(ew->newW, 1);
@@ -1863,9 +1865,9 @@ LRESULT CALLBACK WndProcImageEdit(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                     // edges that drive width derive height and vice versa
                     if (GetKeyState(VK_SHIFT) & 0x8000) {
                         if (edge == DragEdge::Top || edge == DragEdge::Bottom) {
-                            nw = (int)(((double)nh * ew->imgW / ew->imgH) + 0.5);
+                            nw = (int)lround((double)nh * ew->imgW / ew->imgH);
                         } else {
-                            nh = (int)(((double)nw * ew->imgH / ew->imgW) + 0.5);
+                            nh = (int)lround((double)nw * ew->imgH / ew->imgW);
                         }
                     }
 

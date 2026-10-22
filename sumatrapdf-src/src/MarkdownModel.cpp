@@ -1,6 +1,8 @@
 /* Copyright 2026 the SumatraPDF project authors (see AUTHORS file).
    License: GPLv3 */
 
+#include <cmath>
+
 #include "base/Base.h"
 #include "base/Dict.h"
 #include "base/File.h"
@@ -438,7 +440,7 @@ TempStr MarkdownContrastJs(bool enabled, int opacity, bool invert) {
             "document.body.style.color='';");
     }
     int op = limitValue(opacity, 0, 100);
-    int gray = invert ? (int)(255.0 * (op / 100.0) + 0.5) : (int)(255.0 * (1.0 - op / 100.0) + 0.5);
+    int gray = invert ? (int)lround(255.0 * (op / 100.0)) : (int)lround(255.0 * (1.0 - op / 100.0));
     return fmt(
         "document.documentElement.style.filter='';"
         "document.body.style.backgroundColor='%s';"

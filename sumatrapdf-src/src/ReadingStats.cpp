@@ -60,11 +60,20 @@ static void ReadingStatsLoadIfNeeded() {
         char buf[64]{};
         int lenCopy = std::min(len(line), (int)(dimof(buf) - 1));
         memcpy(buf, line.s, (size_t)lenCopy);
-        int dateKey = 0;
-        int sec = 0;
-        int n = sscanf(buf, "%d %d", &dateKey, &sec);
-        if (n == 2 && dateKey > 19000101 && sec >= 0) {
-            DailyEntry e{dateKey, sec};
+        char* p1 = nullptr;
+        long dateKeyL = strtol(buf, &p1, 10);
+        long secL = 0;
+        int n = 0;
+        if (p1 != buf) {
+            n = 1;
+            char* p2 = p1;
+            secL = strtol(p2, &p2, 10);
+            if (p2 != p1) {
+                n = 2;
+            }
+        }
+        if (n == 2 && dateKeyL > 19000101 && secL >= 0) {
+            DailyEntry e{(int)dateKeyL, (int)secL};
             gReadingStats.daily.Append(e);
         }
     }

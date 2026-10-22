@@ -84,7 +84,7 @@ void TrimConfigWnd::OnEditTopChanged() {
         return;
     }
     TempStr txt = HwndGetTextTemp(editTop->hwnd);
-    int val = atoi(txt.s);
+    int val = (int)strtol(txt.s, nullptr, 10);
     if (val < 0) {
         val = 0;
     }
@@ -108,7 +108,7 @@ void TrimConfigWnd::OnEditBottomChanged() {
         return;
     }
     TempStr txt = HwndGetTextTemp(editBottom->hwnd);
-    int val = atoi(txt.s);
+    int val = (int)strtol(txt.s, nullptr, 10);
     if (val < 0) {
         val = 0;
     }
@@ -130,7 +130,7 @@ void TrimConfigWnd::OnEditColGapChanged() {
         return;
     }
     TempStr txt = HwndGetTextTemp(editColGap->hwnd);
-    int val = atoi(txt.s);
+    int val = (int)strtol(txt.s, nullptr, 10);
     if (val < 0) {
         val = 0;
     }

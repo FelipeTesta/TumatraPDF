@@ -1723,7 +1723,7 @@ static int WineDpiFromEnv() {
         if (!val) {
             continue;
         }
-        float scale = (float)atof(val.s);
+        float scale = (float)strtod(val.s, nullptr);
         if (scale < 1.f) {
             continue;
         }

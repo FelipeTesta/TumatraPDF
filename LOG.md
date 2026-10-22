@@ -1,5 +1,19 @@
 # TumatraPDF — Development Log
 
+## 2026-10-22 (s36-al) — B6 wave 5: roundings + unchecked conversions 24 → 0
+
+### Fixed
+- **`bugprone-incorrect-roundings` (17 sites → 0)**: `(int)(x + 0.5)` → `(int)lround(x)` on every site whose domain is provably non-negative (image sub-rect math in `Commands_Edit` guarded by the footprint checks, aspect-ratio keeps in `ImageSaveCropResize` with dims clamped ≥1, `SnapSpeedMultiplier` clamped positive, `MarkdownModel` opacity 0-100). `<cmath>` added to 4 files — placed BEFORE `base/Base.h`: after windows.h the min/max macros break MSVC's `<cmath>` (C2589 "do: token inválido" cascade).
+- **`bugprone-unchecked-string-to-number-conversion` (7 sites → 0)**: `atoi` → `(int)strtol(s, nullptr, 10)` and `atof` → `strtod(s, nullptr)` (behavior-identical; strtol/strtod only differ from atoi/atof on overflow, where the latter are UB) in `TrimConfigDialog` ×3, `SumatraDialogs`, `SumatraStartup`; the `sscanf("%d %d")` in `ReadingStats` became a two-pointer strtol parse reproducing the `n==2` semantics exactly; the 13-field `sscanf` ArchMeasurement deserializer in `SumatraPDF.cpp` kept with `// NOLINTNEXTLINE(...)` (partial-parse deserializer — wants n≥10 of 13 fields; a strtol rewrite would risk the persisted format).
+
+### Verified
+- Fresh per-TU diagnose (`tests/tmp/diagnose-b6w5.ts`, both checks, 269 TUs): full pass found 24 sites; after the fixes the 9 touched TUs re-diagnose **0 sites** (NOLINTNEXTLINE verified suppressing).
+- `bun cmd/build.ts` 0/0 (77.8 s), exe deployed to Compiled. clang-format on all 9 touched files.
+
+### Notes
+- NOLINTNEXTLINE trap: clang-format re-wraps a long NEXTLINE comment into two lines, moving the suppression OFF the diagnostic line — keep it short enough to stay on one line.
+- The stale-line lesson held again: the s36-ad sweep's 17+7 line numbers were all shifted by waves 4a/4b + the other agent's commits; the fresh diagnose pass is the only trustworthy source.
+
 ## 2026-10-22 (s36-al) — Flashcard: active card rect in Peru/orange
 
 ### Added
