@@ -2661,6 +2661,13 @@ void CreateToolbar(MainWindow* win) {
     // TBSTATE_WRAP breaks baked in by RebuildToolbarButtonsForWidth
     // (PackToolbarGroupsByWidth) — the classic manual multi-row technique.
     style |= TBSTYLE_LIST | CCS_NODIVIDER | CCS_NOPARENTALIGN;
+    if (!IsCurrentThemeDefault()) {
+        // Rebar-hosted toolbar: skip the control's own background (comctl always
+        // paints it in the classic light "btnface") and let the rebar's themed
+        // erase show through. A dark theme otherwise showed black tabs sitting
+        // on light-gray icon bars (s36-an).
+        style |= TBSTYLE_TRANSPARENT;
+    }
     exStyle = 0;
     if (isRtl) exStyle |= WS_EX_LAYOUTRTL;
     HMENU cmd = (HMENU)IDC_TOOLBAR;
@@ -2814,6 +2821,10 @@ void CreateToolbar2(MainWindow* win) {
 
     style = WS_CHILD | WS_CLIPSIBLINGS | TBSTYLE_TOOLTIPS | TBSTYLE_FLAT;
     style |= TBSTYLE_LIST | CCS_NODIVIDER | CCS_NOPARENTALIGN | TBSTYLE_WRAPABLE;
+    if (!IsCurrentThemeDefault()) {
+        // rebar-hosted: let the rebar's themed background show through (s36-an)
+        style |= TBSTYLE_TRANSPARENT;
+    }
     exStyle = 0;
     if (isRtl) exStyle |= WS_EX_LAYOUTRTL;
     HMENU cmd = (HMENU)IDC_TOOLBAR;
@@ -3220,6 +3231,10 @@ void CreateMenuBarRebar(MainWindow* win) {
 
     style = WS_CHILD | WS_CLIPSIBLINGS | TBSTYLE_FLAT | TBSTYLE_LIST;
     style |= CCS_NODIVIDER | CCS_NOPARENTALIGN;
+    if (!IsCurrentThemeDefault()) {
+        // rebar-hosted: let the rebar's themed background show through (s36-an)
+        style |= TBSTYLE_TRANSPARENT;
+    }
     exStyle = 0;
     if (isRtl) {
         exStyle |= WS_EX_LAYOUTRTL;
