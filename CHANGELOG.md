@@ -4,6 +4,40 @@ Per-version changelog for TumatraPDF — new functions + bug fixes, newest first
 Feature details live in [README.md](README.md); full per-session development
 history in [LOG.md](LOG.md).
 
+## v1.0.14 (2026-10-23)
+
+- **Much lighter scrolling.** Auto-scroll used to invalidate and blit the whole
+  canvas on every 64 Hz tick; it now shifts the previous frame and repaints
+  only the 1-4 pixel strip the scroll actually exposed (~958x less repainted
+  area per tick), falling back to a full repaint whenever the layout changed
+  under it (e.g. a lazy page-size measurement) or an overlay that cannot be
+  preserved is on screen (flashcard masks, text selection, Arch tools).
+- **Lighter flashcard mask overlay.** The mask paint used to loop every card
+  with a GDI+ object per rect; it now paints one shared object set and skips
+  every card/rect outside the visible area, so books with hundreds of clozes
+  no longer pay for off-screen cards.
+- **Faster flashcard advance.** The next cards in the study queue prefetch
+  their rendered bitmaps, so moving to the next card is a blit instead of a
+  page render.
+- **Two Columns: favorites and flashcard filters use the column domain.**
+  Favorites store the physical page (so the star and menu work for both
+  columns of a spread), and a flashcard page filter now matches a physical
+  page number when either of its two columns is shown.
+- **Flashcard study feedback.** The card being studied is marked in the accent
+  colour (orange) instead of grey, and on reveal the rectangle becomes a
+  bottom underline so the answer text stays readable.
+- **Cross-page flashcards restore fully.** The per-book study JSON no longer
+  keeps only the first card of a multi-page cloze, and cards of deleted files
+  are pruned from the saved states.
+- **Image context menu reports failures.** Crop/Resize, Image > Save / Convert
+  to PDF and Copy Image show a notification instead of silently doing nothing
+  when the page element has no bitmap.
+- **Toolbars follow the theme.** Rebar toolbars painted with the default
+  background even on non-default themes; they now use the theme background.
+- **Version reporting fixed.** v1.0.12/v1.0.13 builds still reported 1.0.11 in
+  About (the version constant was not bumped with the tag), which also made
+  the update check loop; the reported version now matches the release tag.
+
 ## v1.0.13 (2026-10-21)
 
 - **Trim and Two Columns are per book again.** Both modes are remembered per
