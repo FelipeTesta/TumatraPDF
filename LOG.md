@@ -1,5 +1,26 @@
 # TumatraPDF — Development Log
 
+## 2026-10-22 (s36-am2) — perf audit: TC2 render + autoscroll + flashcards (plan in TODO)
+
+### Changed
+- TODO.md: new section `Performance audit: TC2 render + autoscroll + flashcards` — PA1 flashcard paint culling + rect cache (the real find: `PaintFlashcardMasks` is O(cards×rects) per paint with no culling, 64 Hz during autoscroll), PA2 scroll-dirty-rect repaint (ScrollWindowEx strip vs full invalidate, gated), PA3 prefetch→render-cache, PA4 point-to-page binary search, PA5 autoscroll debug-log removal; plus verified-GOOD notes so nothing gets re-audited.
+
+### Verified
+- Code-walk of the hot chains with Serena (post-A4 index): scroll tick `AutoScrollContinuousTick` → `ScrollYBy` (TC2 column advance O(1)) → `RecalcVisibleParts` (direct recompute) → `EnsureMediaBoxesForVisiblePages` (bounded) → `RenderVisibleParts` (dedup + predictive LIFO) → `RepaintDisplay`; nav-point stability window does NOT flood during autoscroll; `RenderCache::RequestRendering` dedups (swap-front + Exists + abort-not-nearby); `ReadAloudOnUserViewChanged` early-outs when not speaking.
+
+## 2026-10-22 (s36-ao) — BUG-3: image context menu live-checked; silent image failures now notify
+
+### Verified
+- **Menus are filtered correctly** (probe `tests/tmp/s36ao-bug3-menu.ts`, dumps the real popup with `getMenuItems`): text-only PDF (`zlib.3.pdf`) → 54 items, **no `Image` submenu, no Copy Link/Comment**; image doc (`HarfBuzz.png`) → `Image >` = Replace Image…, Edit With Paint, Save, Crop, Resize, **Convert page to PDF [DISABLED]**, Convert to PDF….
+- **`Image > Save` is not dead** (probe `tests/tmp/s36ao-bug3-save.ts`): the editor opens titled `Save Image`, its `&Save` button writes `<book>_page_1.png` next to the image (126 bytes) and closes the window. So the top-level Save-as path works in this build.
+
+### Fixed
+- Three silent `return`s in the context-menu dispatch (`Menu.cpp`) made clicks look dead whenever `GetImageForPageElement` returned null: the Crop/Resize path, `CmdSaveImage`/`CmdConvertImageToPdf`, and `CmdCopyImage`. Each now shows `MaybeDelayedWarningNotification("Couldn't extract the image under the cursor")` instead of doing nothing. Added `#include "Notifications.h"`.
+
+### Notes
+- No repro found for the "non-image items reported dead": those entries are removed or disabled by design (`CmdCopyLinkTarget` requires a link element under the cursor, `CmdCopyComment` a comment, `CmdSaveAttachment` an embedded file). Closing that part needs the user's exact steps (which file, which item).
+- Probes live in `tests/tmp/` (gitignored): `s36ao-bug3-menu.ts`, `s36ao-bug3-save.ts`; screenshots `s36ao-ctx-*.png`, `s36ao-save-editor.png`.
+
 ## 2026-10-22 (s36-am) — A4: clangd index warmed 282/282 TUs; unscoped find_symbol 240s-timeout → 35s
 
 ### Added

@@ -43,6 +43,7 @@
 #include "Commands_Edit.h"
 #include "CommandAvailability.h"
 #include "Menu.h"
+#include "Notifications.h"
 #include "NavFilesInFolder.h"
 #include "ReadAloudHighlight.h"
 
@@ -2350,6 +2351,8 @@ void OnWindowContextMenu(MainWindow* win, int x, int y) {
             // non-mupdf image docs: fall back to the editor window
             RenderedBitmap* bmpCrop = dm->GetEngine()->GetImageForPageElement(pageEl);
             if (!bmpCrop) {
+                // was a silent no-op: clicking Crop/Resize looked "dead"
+                MaybeDelayedWarningNotification(StrL("Couldn't extract the image under the cursor"));
                 return;
             }
             TempStr dirCrop = path::GetDirTemp(filePath);
@@ -2370,6 +2373,8 @@ void OnWindowContextMenu(MainWindow* win, int x, int y) {
             }
             RenderedBitmap* bmp = dm->GetEngine()->GetImageForPageElement(pageEl);
             if (!bmp) {
+                // silent return made "Image > Save" look dead when extraction failed
+                MaybeDelayedWarningNotification(StrL("Couldn't extract the image under the cursor"));
                 return;
             }
             TempStr dir = path::GetDirTemp(filePath);
@@ -2441,6 +2446,9 @@ void OnWindowContextMenu(MainWindow* win, int x, int y) {
                 RenderedBitmap* bmp = dm->GetEngine()->GetImageForPageElement(pageEl);
                 if (bmp) {
                     CopyImageToClipboard(bmp->GetBitmap(), false);
+                } else {
+                    // was a silent no-op (clipboard unchanged, looked dead)
+                    MaybeDelayedWarningNotification(StrL("Couldn't extract the image under the cursor"));
                 }
                 delete bmp;
             }
