@@ -1,5 +1,50 @@
 # TumatraPDF — Development Log
 
+## 2026-10-22 (s36-ar) — Flashcard mask paint: viewport culling + hoisted GDI+ objects (PA1)
+
+### Changed
+- `PaintFlashcardMasks` (`Canvas.cpp`) allocates one `Gdiplus::Graphics`, one brush per state (translucent marker / opaque gray / opaque accent) and one accent pen for the whole paint, instead of a Graphics per card and a `SolidBrush`/`Pen` per quad — the overlay is now O(1) GDI+ objects instead of O(cards × rects).
+- Every quad is culled against the visible viewport before drawing, so cards scrolled out of view cost only the rect transform. The clip rect is anchored at the origin with the viewport SIZE because `CvtToScreen` returns viewport-relative coords (same idiom as `PaintContentBox`).
+- Gated QPC stats: `[fc] paint: N cards, M rects drawn, X ms/paint avg (K paints)` is logged when card visibility flips (rects appear/disappear, which also proves the culling) and otherwise every 240 paints, so autoscroll logging stays quiet.
+- No screen-rect cache: the rects move on every scroll tick, so a cache keyed by layout epoch would miss on each autoscroll paint — culling is what removes the cost there.
+
+### Fixed
+- `Rect::Intersect` returns a NEW rect; it does not mutate the receiver. The first version of the cull called it as if it were in-place and rejected nothing (log showed `1 cards, 2 rects drawn` for a rect at y=-819).
+
+### Verified
+- Probe `tests/tmp/s36pa1-paint.ts` (one cloze on page 1, masks on): `1 cards, 2 rects drawn` at fit-page; after zoom-in + two page-downs (cloze above the viewport) `1 cards, 0 rects drawn`. With the cull disabled the same run reported `2 rects drawn` while off-screen. PASS.
+- Study-mode screenshot `tests/tmp/s36pa1-active.png`: the active card still paints the opaque Peru fill and inactive cards keep the alpha-20 marker (visual check after hoisting the brushes).
+- Observed cost: 0.05-0.15 ms/paint with 1 card / 2 rects, 0.25-0.38 ms/paint with 4 cards / 3 visible rects (`tests/tmp/s36pa1-bench.ts`). No isolated before/after number for the hoist — at that card count the brush construction is lost in the rasterization cost.
+- `bun cmd/build.ts` 0 errors / 0 warnings.
+
+## 2026-10-22 (s36-aq) — Flashcard page filter follows the page numbers the user sees
+
+### Changed
+- With two-column v2 active the flashcard page filter is evaluated in the **VIRTUAL** page space (`DisplayModel::VirtualPageCount()`), so typing `2` means the right column of physical page 1 instead of physical page 2. Cards still store PHYSICAL pages: a card passes when either of its columns (`2k-1` / `2k`) is in the filter. v2 off → virtual == physical, behaviour unchanged. Log line now states the space and size: `filter '2' -> active (virtual pages, 4)`.
+
+### Verified
+- Probe `tests/tmp/s36am4-filter.ts`: one cloze on physical page 1, v2 on, filter `2` → `1 cards pass (of 1)`; filter `3` (left column of physical 2) → `0 cards pass (of 1)`. PASS.
+- Revert check: forcing `v2 = false` makes the same run report `0 cards pass` for `2` and the probe FAILS, so the test detects the bug. Restored, rebuilt, PASS again.
+- `bun cmd/build.ts` 0 errors / 0 warnings.
+
+### Notes
+- The Study Filter dialog is a custom window class `TUMATRA_FLASHCARD_FILTER` ("Study Filter"), not `#32770`; its EDIT is subclassed (Enter = apply, Esc = close), so drive it with `sendText(edit, expr)` plus posted `VK_RETURN` / `VK_ESCAPE`.
+
+## 2026-10-22 (s36-ap) — Favorites persist PHYSICAL page numbers under two-column v2
+
+### Fixed
+- A favorite added while two-column v2 was active stored the **VIRTUAL** page number (left column of physical page 2 was saved as `3`). The right-click toggle ("Remove from favorites") keyed on the same virtual number, so the entry could not be removed, and after reopening without v2 the bookmark jumped to the wrong page. New `FavoritePageNoPhysical(win, virtualPageNo)` (`Favorites.h` / `.cpp`) converts through `DisplayModel::VirtualToPhysical` when `IsViewportCropV2Active()`; used by `AddFavoriteForPage`, `RebuildFavMenu` and both context-menu paths (`IsPageInFavorites`, `DelFavorite`). The stored `PageLabel` still comes from the virtual page, so a v2 favorite keeps its column label.
+- `Favorites.cpp` now includes its own header (`Favorites.h` last) — the helper was otherwise undeclared for `RebuildFavMenu` (C3861).
+
+### Verified
+- Probe `tests/tmp/s36ap-fav.ts`: isolated `-appdata` (no `-for-testing`, so settings save), v2 on, two `CmdGoToNextPage` (virtual page 3), `CmdFavoriteAdd` + confirm the modal `Add Favorite` dialog, `CmdExit` → settings contain `Favorites [ [ PageNo = 2  PageLabel = 2L ] ]`. PASS.
+- Revert check: with the helper returning the virtual number the same run stores `PageNo = 3` and the probe FAILS, so the test detects the bug. Restored, rebuilt, PASS again.
+- `bun cmd/build.ts` 0 errors / 0 warnings.
+
+### Notes
+- TODO item only partly closed: the uia `PageProvider` and the legacy tile math virtual→physical routing are still open.
+- The probe must launch WITHOUT `-for-testing` (settings have to save on exit) and must confirm `IDD_DIALOG_FAV_ADD` (`#32770`), otherwise nothing is stored and the settings file looks unchanged.
+
 ## 2026-10-22 (s36-am2) — perf audit: TC2 render + autoscroll + flashcards (plan in TODO)
 
 ### Changed

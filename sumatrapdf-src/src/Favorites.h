@@ -22,6 +22,9 @@ per-file basis in FileHistory.
 struct WindowTab;
 
 bool HasFavorites();
+// Favorites persist PHYSICAL page numbers; UI code hands us the VIRTUAL page
+// (win->currPageNo / DisplayModel::GetPageNoByPoint, up to 2N under two-column v2).
+int FavoritePageNoPhysical(MainWindow* win, int virtualPageNo);
 void AddFavoriteWithLabelAndName(MainWindow* win, int pageNo, Str pageLabel, Str nameIn);
 void AddFavoriteForPage(MainWindow* win, int pageNo);
 void AddFavoriteForCurrentPage(MainWindow* win);

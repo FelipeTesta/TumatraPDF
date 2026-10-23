@@ -2253,7 +2253,8 @@ void OnWindowContextMenu(MainWindow* win, int x, int y) {
     if (favsSupported) {
         if (pageNoUnderCursor > 0) {
             TempStr pageLabel = win->ctrl->GetPageLabeTemp(pageNoUnderCursor);
-            bool isBookmarked = IsPageInFavorites(filePath, pageNoUnderCursor);
+            // pageNoUnderCursor is VIRTUAL; stored favorites are PHYSICAL
+            bool isBookmarked = IsPageInFavorites(filePath, FavoritePageNoPhysical(win, pageNoUnderCursor));
             if (isBookmarked) {
                 MenuRemove(popup, CmdFavoriteAdd);
 
@@ -2461,7 +2462,7 @@ void OnWindowContextMenu(MainWindow* win, int x, int y) {
             return;
         }
         case CmdFavoriteDel: {
-            DelFavorite(filePath, pageNoUnderCursor);
+            DelFavorite(filePath, FavoritePageNoPhysical(win, pageNoUnderCursor));
             return;
         }
         default:

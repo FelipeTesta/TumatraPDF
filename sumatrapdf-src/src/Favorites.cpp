@@ -30,6 +30,7 @@
 #include "Tabs.h"
 #include "Theme.h"
 #include "FilterHighlightDraw.h"
+#include "Favorites.h"
 
 static void RememberFavTreeExpansionStateForAllWindows();
 void LayoutFavoritesContainer(MainWindow* win);
@@ -618,7 +619,8 @@ void RebuildFavMenu(MainWindow* win, HMENU menu) {
         AppendFavMenus(menu, {});
     } else {
         TempStr label = win->ctrl->GetPageLabeTemp(win->currPageNo);
-        bool isBookmarked = IsPageInFavorites(win->ctrl->GetFilePath(), win->currPageNo);
+        // stored favorites are PHYSICAL, win->currPageNo is virtual under v2
+        bool isBookmarked = IsPageInFavorites(win->ctrl->GetFilePath(), FavoritePageNoPhysical(win, win->currPageNo));
         if (isBookmarked) {
             MenuSetEnabled(menu, CmdFavoriteAdd, false);
             TempStr s = fmt(_TRA("Remove page %s from favorites").s, label);
@@ -1122,6 +1124,23 @@ static TocItem* TocItemForPageNo(TocItem* item, int pageNo) {
     return currItem;
 }
 
+// UI callers hand us a VIRTUAL page number (win->currPageNo,
+// DisplayModel::GetPageNoByPoint); favorites store PHYSICAL ones so a favorite
+// still lands on the right page outside a two-column v2 session.
+int FavoritePageNoPhysical(MainWindow* win, int virtualPageNo) {
+    if (virtualPageNo < 1) {
+        return virtualPageNo;
+    }
+    DisplayModel* dm = win ? win->AsFixed() : nullptr;
+    if (dm && dm->IsViewportCropV2Active()) {
+        int physicalPageNo = dm->VirtualToPhysical(virtualPageNo);
+        if (physicalPageNo > 0) {
+            return physicalPageNo;
+        }
+    }
+    return virtualPageNo;
+}
+
 void AddFavoriteWithLabelAndName(MainWindow* win, int pageNo, Str pageLabel, Str nameIn) {
     Str name = str::Dup(nameIn);
     bool shouldAdd = Dialog_AddFavorite(win->hwndFrame, pageLabel, name);
@@ -1149,17 +1168,22 @@ void AddFavoriteForPage(MainWindow* win, int pageNo) {
     Str name;
     auto* tab = win->CurrentTab();
     auto* ctrl = tab->ctrl;
+    // pageNo arrives VIRTUAL (callers pass win->currPageNo or the page under the
+    // cursor); ToC destinations and stored favorites are PHYSICAL
+    int physicalPageNo = FavoritePageNoPhysical(win, pageNo);
     if (ctrl->HasToc()) {
         // use the current ToC heading as default name
         auto* docTree = ctrl->GetToc();
         TocItem* root = docTree->root;
-        TocItem* item = TocItemForPageNo(root, pageNo);
+        TocItem* item = TocItemForPageNo(root, physicalPageNo);
         if (item) {
             name = item->title;
         }
     }
+    // label still comes from the virtual page so a two-column v2 favorite keeps
+    // its column ("3L"/"3R")
     TempStr pageLabel = ctrl->GetPageLabeTemp(pageNo);
-    AddFavoriteWithLabelAndName(win, pageNo, pageLabel, name);
+    AddFavoriteWithLabelAndName(win, physicalPageNo, pageLabel, name);
 }
 
 void AddFavoriteForCurrentPage(MainWindow* win) {

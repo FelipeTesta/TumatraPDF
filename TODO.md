@@ -3,6 +3,7 @@
 2. Completed features/fixes live in [LOG.md](LOG.md) (per-session) + [CHANGELOG.md](CHANGELOG.md) (per-release).
 3. User manual-test items = items only the user can validate.
 4. Housekeeping (2026-10-20, s36-ae): all `[x]` blocks archived — details live in LOG per session entry; this file lists open work only.
+5. Mark with ´🟡´ → [🟡] the processes in development so other agents can schedule themselves and avoid conflicts.
 
 ## Housekeeping (quick)
 
@@ -18,7 +19,7 @@
 
 Audit of the hot paths with TwoColumns=on: scroll-tick chain (`AutoScrollContinuousTick` at 64 Hz time-based accum → `MoveDocBy` → `ScrollYBy` → `RecalcVisibleParts` → `EnsureMediaBoxesForVisiblePages` → `RenderVisibleParts` → `UpdateScrollbars` → `RepaintDisplay`) and the WM_PAINT chain (tile blits → overlays → `PaintFlashcardMasks`). Verified GOOD (do not re-audit): nav-point stability window (no flood during autoscroll — commits only after the view stabilizes), `RenderCache::RequestRendering` dedup (swap-front + `Exists()` + abort-not-nearby), `RecalcVisibleParts` direct recompute (s35, O(nPages) trivial), lazy media boxes bounded (kMaxRelayouts 4), ReadAloud hook early-outs when not speaking, flashcard prefetch (GetFzPageInfo loadQuick, upcoming-4).
 
-- [ ] **PA1 (P1, S-M): flashcard paint culling + rect cache.** `PaintFlashcardMasks` (Canvas.cpp:3328) loops ALL cards × rects × (`PhysicalToVirtualForRect` + `CvtToScreen`) + constructs SolidBrush/Pen per rect on EVERY paint, no viewport culling — during autoscroll with masks on that is O(cards) per 64 Hz tick. Fix: (a) reject cards whose page's `pageOnScreen` does not intersect the viewPort; (b) cache screen-space rects per card keyed by a layout epoch (invalidated on Relayout/zoom/rotation/TC2/trim change) so a paint is a blit list; (c) hoist brush/pen out of the rect loop. Add a gated QPC counter (cards/visible/ms) to measure before/after.
+- [x] **PA1 (P1, S-M): flashcard paint culling + rect cache.** DONE s36-ar: per-quad viewport culling + one Graphics/brush/pen per paint (was one Graphics per card, one brush per rect) + gated QPC stats `[fc] paint: N cards, M rects drawn, X ms/paint`. Screen-rect cache dropped on purpose: rects move every scroll tick, so a cache would miss on each autoscroll paint — culling is what removes that cost. Probe `tests/tmp/s36pa1-paint.ts`.
 - [ ] **PA2 (P2, M): scroll-dirty-rect repaint.** `ScrollYBy` → `RepaintDisplay` invalidates the WHOLE canvas every tick; a 1-4 px scroll could `ScrollWindowEx` the preserved region and invalidate only the exposed strip (paint cost ∝ strip, not canvas). RISK: overlay painters (flashcard masks crossing the strip, selection) can ghost in the preserved area — gate the optimization to when `flashcard.on == false && !selection.showSelection && !find-matches`, else keep full invalidate. Measure with the PA1 counter.
 - [ ] **PA3 (P3, S): flashcard prefetch → render cache.** `FlashcardPrefetchUpcoming` warms mupdf page info but not the bitmap cache; routing the upcoming card's page through `RenderCache::RequestRendering` makes card-advance blit-only. Check first whether `FlashcardNavigateToEntry`'s repaint already triggers it (it likely does — low value if so).
 - [ ] **PA4 (P4, S): `GetPageNoByPoint`/`GetPageNextToPoint` O(nPages) scans** (DisplayModel.cpp:1760/1780) on click/mouse-move paths — binary-search `pageOnScreen.y` (monotonic per column in continuous mode). Only matters on 1000+ page books; verify callers first.
@@ -38,7 +39,7 @@ Audit of the hot paths with TwoColumns=on: scroll-tick chain (`AutoScrollContinu
 - [ ] **R5-left**: remove v1 crop stack (`DisplayModel.h` viewportCrop v1 fields) — BLOCKED: v1 button (Scan View) still live. Do when/if v1 is retired.
 - [ ] **R7 / 16C-next**: continue god-file extraction — SumatraPDF.cpp (~14.2k lines, target ~10k), then Canvas.cpp (~5.7k; needs a dependency MAP first — mouse/keyboard interleaved with rendering, no established pattern), EngineMupdf.cpp (~6.7k, decouple rendering helpers per format).
 - [ ] **16D**: typed `gGlobalPrefs` accessors (152 accesses in SumatraPDF.cpp) — only when tests exist.
-- [ ] **TC2 leftovers**: uia `PageProvider` + legacy tile math not routed virtual→physical (non-cache path diverts; MVP-acceptable); favorites saved under v2 store VIRTUAL pageNo — normalize to physical at creation (same class as the FileState fix).
+- [ ] **TC2 leftovers**: uia `PageProvider` + legacy tile math not routed virtual→physical (non-cache path diverts; MVP-acceptable). Favorites fixed in s36-ap (stored PHYSICAL now; probe `tests/tmp/s36ap-fav.ts`).
 
 ## Two Columns v2 — pending USER live-confirmations (code complete, all E2E-verified)
 
@@ -49,7 +50,7 @@ Audit of the hot paths with TwoColumns=on: scroll-tick chain (`AutoScrollContinu
 - [ ] **FC-X1 live test** (shipped s36-m): cross-page cloze — user test on a real book (2-page passage).
 - [ ] **FC-M1** tests: SM-2 (intervals/ease cap/relearn), study-JSON roundtrip, due filter — after Image Occlusion lands.
 - [ ] **FC-M5** rate keys 1-4 have no visual hint (no rate buttons/tooltips on toolbar).
-- [ ] **FC-M4-left** filter expression compares PHYSICAL pageNo while TC2 shows virtual "3L" labels — decide dialog hint or virtual-input mapping.
+- [x] **FC-M4-left** filter expression now runs in the VIRTUAL page space under TC2 v2 (s36-aq): the number you see includes both columns of that physical page; v2 off unchanged. Probe `tests/tmp/s36am4-filter.ts` + revert check.
 - [ ] User live tests (queue): Filter window + global session (cross-tab jumping, per-book saves); List panel visual on real books; Settings window (folder picker + Drive backup, clear-selected, dark theme); bookmark-mirror on real TOC books (test PDF has none — automated test skipped the mirror).
 
 ## Image Occlusion cards — PLANNED (awaiting user decisions)

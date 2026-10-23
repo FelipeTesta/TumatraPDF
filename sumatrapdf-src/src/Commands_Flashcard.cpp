@@ -12,6 +12,7 @@
 #include "DocController.h"
 #include "EngineBase.h"
 #include "DisplayModel.h"
+#include "RenderCache.h"
 extern "C" {
 #include <mupdf/pdf.h>
 }
@@ -121,16 +122,31 @@ static void CollectTabCards(MainWindow* win, WindowTab* tab, i64 now, Vec<Flashc
         return;
     }
     int pageCount = dm->PageCount();
+    // The filter expression is typed against the page numbers the USER SEES.
+    // Under two-column v2 those are VIRTUAL (physical page k renders as virtual
+    // 2k-1 / 2k), so the filter is evaluated in that space. Cards store PHYSICAL
+    // pages, so a card passes when either of its virtual columns is included.
+    // v2 off: virtual == physical, behaviour unchanged.
+    bool v2 = dm->IsViewportCropV2Active();
+    int filterPageCount = v2 ? dm->VirtualPageCount() : pageCount;
     // evaluate the page filter once per tab: pages[i-1] = 1 when included
     Vec<u8> pages;
     bool filtered = false;
     if (tab->flashcard.filterEnabled && tab->flashcard.filterExpr) {
-        filtered = FlashcardFilterEval(tab->flashcard.filterExpr, pageCount, pages);
-        logf("[fc] CollectTabCards - '%s': filter '%s' -> %s\n", FlashcardTabLogName(tab), tab->flashcard.filterExpr,
-             filtered ? StrL("active") : StrL("inactive (empty/invalid)"));
+        filtered = FlashcardFilterEval(tab->flashcard.filterExpr, filterPageCount, pages);
+        logf("[fc] CollectTabCards - '%s': filter '%s' -> %s (%s pages, %d)\n", FlashcardTabLogName(tab),
+             tab->flashcard.filterExpr, filtered ? StrL("active") : StrL("inactive (empty/invalid)"),
+             v2 ? StrL("virtual") : StrL("physical"), filterPageCount);
     }
+    auto virtualPageInFilter = [&](int vpg) { return vpg >= 1 && vpg <= len(pages) && pages[vpg - 1]; };
     // a cross-page card passes the page filter when ANY of its pages is in it
-    auto pageInFilter = [&](int pg) { return pg >= 1 && pg <= len(pages) && pages[pg - 1]; };
+    auto pageInFilter = [&](int physicalPageNo) {
+        if (!v2) {
+            return virtualPageInFilter(physicalPageNo);
+        }
+        int leftColumn = 2 * physicalPageNo - 1;
+        return virtualPageInFilter(leftColumn) || virtualPageInFilter(leftColumn + 1);
+    };
     int nBefore = len(newCards) + len(dueCards);
     for (int i = 0; i < len(tab->flashcard.cards); i++) {
         Flashcard& card = tab->flashcard.cards[i];
@@ -229,6 +245,51 @@ static void BuildFilteredStudyOrder(MainWindow* win) {
          nDue);
 }
 
+// PA3: warm the BITMAP cache (not only the fz page info) for the cards that
+// come next, so advancing is a blit instead of a first-touch tile render.
+// Only the next two entries: RenderCache aborts in-flight renders whose page is
+// not "visible nearby" (current page +-1), so a deeper prefetch would be thrown
+// away, and MAX_PAGE_REQUESTS is 8 - flooding the queue would starve the page
+// the user is actually looking at. Adjacent pages are usually already covered
+// by predictive rendering (gPredictiveRender, +-1/+-2); this pays off for the
+// multi-page jumps of a study session.
+static void FlashcardPrefetchRenderUpcoming(MainWindow* win, int fromIdx) {
+    if (!gRenderCache) {
+        return;
+    }
+    auto& order = win->flashcard.studyOrder;
+    int done = 0;
+    for (int i = fromIdx + 1; i < len(order) && done < 2; i++) {
+        FlashcardQueueEntry& e = order[i];
+        if (!e.tab || e.cardIdx < 0 || e.cardIdx >= len(e.tab->flashcard.cards)) {
+            continue;
+        }
+        DisplayModel* dm = e.tab->AsFixed();
+        if (!dm) {
+            continue;
+        }
+        Flashcard& card = e.tab->flashcard.cards[e.cardIdx];
+        int vPage = dm->PhysicalToVirtualPage(card.pageNo, card.bounds);
+        if (!dm->ValidPageNo(vPage)) {
+            continue;
+        }
+        float zoom = dm->GetZoomReal(vPage);
+        if (zoom <= 0) {
+            continue;
+        }
+        if (gRenderCache->Exists(dm, vPage, dm->GetRotation(), zoom)) {
+            continue; // already blittable at this zoom
+        }
+        if (gRenderCache->IsRenderQueueFull()) {
+            break;
+        }
+        gRenderCache->RequestRendering(dm, vPage);
+        logf("[fc][perf] prefetch-render idx=%d card=%d page=%d (virtual %d) zoom=%.2f -> requested\n", i, e.cardIdx,
+             card.pageNo, vPage, zoom);
+        done++;
+    }
+}
+
 // FC prefetch (user request: "fila pré-carregada dos próximos cards"): parse
 // the PAGES of the next study-queue cards so advancing never pays a
 // first-touch fz_load_page on the UI thread. loadQuick=true = page dict +
@@ -264,6 +325,7 @@ static void FlashcardPrefetchUpcoming(MainWindow* win, int fromIdx, int count) {
         logf("[fc][perf] prefetch idx=%d card=%d page=%d extra=%d: %dms\n", i, e.cardIdx, card.pageNo, nExtra,
              (int)(GetTickCount64() - t0));
     }
+    FlashcardPrefetchRenderUpcoming(win, fromIdx);
 }
 
 // Called after study-order settings changed (Order dialog), after the page
@@ -317,6 +379,14 @@ static void FlashcardNavigateToEntry(MainWindow* win, const FlashcardQueueEntry&
     int vPage = dm->PhysicalToVirtualForRect(card.pageNo, card.bounds, &vr);
     if (!dm->ValidPageNo(vPage)) {
         return;
+    }
+    // PA3 measurement: a cached tile set means this advance is a blit; cached=0
+    // means the page is about to pay a first-touch tile render.
+    if (gRenderCache) {
+        float zoomCached = dm->GetZoomReal(vPage);
+        bool cached = zoomCached > 0 && gRenderCache->Exists(dm, vPage, dm->GetRotation(), zoomCached);
+        logf("[fc][perf] navigate: card=%d page=%d (virtual %d) cached=%d\n", e.cardIdx, card.pageNo, vPage,
+             (int)cached);
     }
     // CvtToScreen returns VIEWPORT-RELATIVE coords (it adds pageOnScreen,
     // which moves with the scroll). Same idiom as ScrollScreenToRect: compute
