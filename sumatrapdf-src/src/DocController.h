@@ -29,6 +29,10 @@ struct DocControllerCallback {
     virtual void GotoLink(IPageDestination*) = 0;
     // DisplayModel //
     virtual void Repaint() = 0;
+    // repaint after a pure viewPort scroll by (dx, dy) screen pixels. The UI
+    // may shift the previous frame and only redraw the exposed strip instead
+    // of invalidating the whole canvas. Default: full repaint (== Repaint).
+    virtual void RepaintScroll(int dx, int dy) { Repaint(); }
     virtual void UpdateScrollbars(Size canvas) = 0;
     virtual void RequestRendering(DisplayModel* dm, int pageNo) = 0;
     // start (or continue) chained predictive rendering anchored to originPageNo

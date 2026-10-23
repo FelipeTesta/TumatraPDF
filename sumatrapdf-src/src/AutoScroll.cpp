@@ -507,7 +507,6 @@ void AutoScrollContinuousTick(MainWindow* win, HWND hwnd) {
             win->autoScroll.accum = 0;
             win->autoScroll.lastScrollTick = GetTickCount64();
             ReadingStatsResetTick();
-            logf("[autoscroll-dbg] stall: viewportCropV2QuickToggled\n");
             return;
         }
         // Check end of document (quick view returns above, so this only sees
@@ -519,7 +518,6 @@ void AutoScrollContinuousTick(MainWindow* win, HWND hwnd) {
         if (dm->GetCanvasSize().dy <= 0) {
             win->autoScroll.lastScrollTick = GetTickCount64();
             ReadingStatsResetTick();
-            logf("[autoscroll-dbg] stall guard: layout mid-rebuild, tick skipped\n");
             return;
         }
         if (dm->IsAtDocumentEnd()) {
@@ -528,8 +526,6 @@ void AutoScrollContinuousTick(MainWindow* win, HWND hwnd) {
             UpdateToolbarEtaText(win, -1);
             SetToolbarButtonCheckedState(win, CmdAutoScrollToggle, false);
             ReadingStatsFlush(true);
-            logf("[autoscroll-dbg] stall: IsAtDocumentEnd(vp=%.1f of %.1f)\n", (float)dm->GetViewPort().y,
-                 (float)dm->GetCanvasSize().dy);
             return;
         }
         // Timer check
@@ -563,14 +559,6 @@ void AutoScrollContinuousTick(MainWindow* win, HWND hwnd) {
         if (dy != 0) {
             win->autoScroll.accum -= (float)dy;
             win->MoveDocBy(0, dy);
-        }
-        // TEMP s35: once per second, log scroll state so we can see where a
-        // stall comes from (gates vs scroll amount)
-        static int dbgTick = 0;
-        if ((++dbgTick % 60) == 0) {
-            logf("[autoscroll-dbg] tick accum=%.2f dy=%d vpY=%.1f/%.1f%s\n", win->autoScroll.accum, dy,
-                 (float)dm->GetViewPort().y, (float)dm->GetCanvasSize().dy,
-                 dm->IsAtDocumentEnd() ? StrL(" [END]") : StrL(""));
         }
         // ETA: recompute each tick from remaining pixels / declared speed and
         // dedupe label updates. Purely positional: pauses and manual drags

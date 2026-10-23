@@ -2342,6 +2342,22 @@ void DoubleBuffer::Flush(HDC hdc) const {
     }
 }
 
+// Partial flush for update-rect aware paints (e.g. the scroll strip only
+// redraws the exposed rows): blit exactly the redrawn area instead of the
+// whole buffer. Blitting more would copy stale buffer pixels over the
+// preserved (already scrolled) screen content.
+void DoubleBuffer::Flush(HDC hdc, const Rect& rc) const {
+    ReportIf(hdc == hdcBuffer);
+    if (!hdcBuffer) {
+        return;
+    }
+    Rect isect = rc.Intersect(rect);
+    if (isect.IsEmpty()) {
+        return;
+    }
+    BitBlt(hdc, isect.x, isect.y, isect.dx, isect.dy, hdcBuffer, isect.x - rect.x, isect.y - rect.y, SRCCOPY);
+}
+
 DeferWinPosHelper::DeferWinPosHelper() : hdwp(::BeginDeferWindowPos(32)) {}
 
 DeferWinPosHelper::~DeferWinPosHelper() {

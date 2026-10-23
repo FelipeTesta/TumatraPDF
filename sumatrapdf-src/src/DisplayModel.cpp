@@ -2392,15 +2392,22 @@ void DisplayModel::ScrollXTo(int xOff) {
     }
 
     int currPageNo = CurrentPageNo();
+    int prevX = viewPort.x;
     viewPort.x = xOff;
     RecalcVisibleParts();
-    EnsureMediaBoxesForVisiblePages();
+    // a lazy media-box measurement relayouts (pages shift non-uniformly), so
+    // the strip repaint below must fall back to a full invalidate then
+    bool relayouted = EnsureMediaBoxesForVisiblePages();
     cb->UpdateScrollbars(canvasSize);
 
     if (CurrentPageNo() != currPageNo) {
         cb->PageNoChanged(this, CurrentPageNo());
     }
-    RepaintDisplay();
+    if (relayouted) {
+        RepaintDisplay();
+    } else {
+        cb->RepaintScroll(xOff - prevX, 0);
+    }
     RememberStableNavPointCandidateAfterViewChange(this, GetScrollState());
 }
 
@@ -2417,9 +2424,12 @@ void DisplayModel::ScrollYTo(int yOff) {
     }
 
     int currPageNo = CurrentPageNo();
+    int prevY = viewPort.y;
     viewPort.y = yOff;
     RecalcVisibleParts();
-    EnsureMediaBoxesForVisiblePages();
+    // a lazy media-box measurement relayouts (pages shift non-uniformly), so
+    // the strip repaint below must fall back to a full invalidate then
+    bool relayouted = EnsureMediaBoxesForVisiblePages();
     RenderVisibleParts();
     // Match ScrollXTo: keep scrollbar thumb (and smart overlay reveal) in sync.
     cb->UpdateScrollbars(canvasSize);
@@ -2428,7 +2438,11 @@ void DisplayModel::ScrollYTo(int yOff) {
     if (newPageNo != currPageNo) {
         cb->PageNoChanged(this, newPageNo);
     }
-    RepaintDisplay();
+    if (relayouted) {
+        RepaintDisplay();
+    } else {
+        cb->RepaintScroll(0, yOff - prevY);
+    }
     RememberStableNavPointCandidateAfterViewChange(this, GetScrollState());
 }
 
@@ -2529,14 +2543,22 @@ void DisplayModel::ScrollYBy(int dy, bool changePage) {
     currPageNo = CurrentPageNo();
     viewPort.y = newYOff;
     RecalcVisibleParts();
-    EnsureMediaBoxesForVisiblePages();
+    // a lazy media-box measurement relayouts (pages shift non-uniformly), so
+    // the strip repaint below must fall back to a full invalidate then
+    bool relayouted = EnsureMediaBoxesForVisiblePages();
     RenderVisibleParts();
     cb->UpdateScrollbars(canvasSize);
     newPageNo = CurrentPageNo();
     if (newPageNo != currPageNo) {
         cb->PageNoChanged(this, newPageNo);
     }
-    RepaintDisplay();
+    if (relayouted) {
+        RepaintDisplay();
+    } else {
+        // pure scroll: the UI can shift the old frame and only repaint the
+        // exposed strip (no-op fallback = full repaint in the cb default)
+        cb->RepaintScroll(0, newYOff - currYOff);
+    }
     RememberStableNavPointCandidateAfterViewChange(this, GetScrollState());
 }
 

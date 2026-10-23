@@ -309,6 +309,9 @@ struct DoubleBuffer {
 
     HDC GetDC() const;
     void Flush(HDC hdc) const;
+    // blit only the part of the buffer that was redrawn (update-rect aware);
+    // rc is in target client coords and is clipped to the buffer rect
+    void Flush(HDC hdc, const Rect& rc) const;
 };
 
 class DeferWinPosHelper {

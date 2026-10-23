@@ -1153,6 +1153,10 @@ struct ControllerCallbackHandler : DocControllerCallback {
     ~ControllerCallbackHandler() override = default;
 
     void Repaint() override { ScheduleRepaint(win, 0); }
+    // PA2: pure viewPort scrolls shift the previous frame and invalidate only
+    // the exposed strip (fallback inside ScrollStripRepaint when overlays or
+    // relayout make the strip unsafe)
+    void RepaintScroll(int dx, int dy) override { ScrollStripRepaint(win, dx, dy); }
     void PageNoChanged(DocController* ctrl, int pageNo) override;
     void ZoomChanged(DocController* ctrl, float zoomVirtual) override;
     void UpdateScrollbars(Size canvas) override;

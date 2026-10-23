@@ -1,5 +1,24 @@
 # TumatraPDF — Development Log
 
+## 2026-10-23 (s36-as) — PA2 scroll strip-invalidate + PA5 autoscroll log removal (perf audit s36-am2)
+
+### Added
+- `DocControllerCallback::RepaintScroll(int dx, int dy)` (DocController.h) — default `Repaint()`, so other controllers keep full repaints.
+- `DoubleBuffer::Flush(HDC hdc, const Rect& rc)` (base/Win.{h,cpp}) — partial blit of exactly the redrawn region; full flush would copy stale buffer pixels over ScrollWindowEx-preserved screen content.
+- `ScrollStripRepaint` + gate `CanvasCanStripScroll` (MainWindow.{h,cpp}) — ScrollWindowEx shifts the previous frame (pending update region shifts along) and invalidates only the exposed strip; falls back to `ScheduleRepaint` when fixed-model only / flashcard on / selection showing / Arch tools on.
+- `tests/ad-hoc-pa2-strip-scroll.ts` — TC2 + autoscroll + wheel-up visual verification with screenshots (not registered in before-release; visual probe).
+
+### Changed
+- `ScrollYBy`/`ScrollYTo`/`ScrollXTo` tails (DisplayModel.cpp): call `cb->RepaintScroll` with the ACTUAL viewPort delta instead of `RepaintDisplay()`, falling back to full repaint when `EnsureMediaBoxesForVisiblePages()` returned true (measurement relayout = non-uniform page shift, preserved bits would go stale).
+- `OnPaintDocument` (Canvas.cpp): `buffer->Flush(hdc)` → `Flush(hdc, ToRect(ps.rcPaint))` — blit only what was just redrawn; correct for any update-region size.
+- AutoScroll.cpp: removed all 4 TEMP s35 `[autoscroll-dbg]` logf sites + the every-60-ticks state dump (1 Hz log noise during autoscroll).
+
+### Verified
+- Temp `gRedrawLog = true` run (`tests/ad-hoc-pa2-strip-scroll.ts`, debug build logs `out/dbg64/sumlog.txt`): autoscroll ticks produce 1px strips `rc=(0,927,772,928)` (89 bottom strips during forward scroll, 53 top strips on wheel-up) vs full `rc=(0,0,772,958)` before — ~958x less repainted area per 64 Hz tick; only startup/TC2 toggle/resize remain full-size (4). Screenshots (TC2 on, flashcards off — user invariant: autoscroll=on implies flashcard=off): no smearing/ghosting in preserved regions, content crisp both scroll directions.
+- `bun cmd/build.ts` green; `bun cmd/run-unit-tests.ts -dbg` green (base/Win.cpp covered by test_util).
+- Session note: PA1 (Canvas.cpp masks) done by the s36-ar agent in parallel; PA3 (prefetch → bitmap cache) landed in commit 1932f37. PA4 deferred — callers verified mouse-event-only, not in the tick chain.
+- Coordination trap hit: Canvas.cpp changed under me mid-edit (other agent implementing PA1) — edit failed atomically, no corruption; waited for the file to free before the Flush one-liner.
+
 ## 2026-10-22 (s36-ar) — Flashcard mask paint: viewport culling + hoisted GDI+ objects (PA1)
 
 ### Changed

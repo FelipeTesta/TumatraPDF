@@ -440,6 +440,55 @@ void MainWindow::MoveDocBy(int dx, int dy) const {
     CurrentTab()->MoveDocBy(dx, dy);
 }
 
+// Strip-repaint gate: ScrollWindowEx preserves (blits) the previous frame, so
+// anything that does NOT scroll with the document would smear. All overlays
+// anchored to document coordinates (masks, highlights, find matches, edit
+// marks, trim separators) scroll correctly with the preserved bits; overlays
+// that float (refHover card, autoscroll timer overlay) are separate popup
+// windows and are untouched by ScrollWindowEx. What remains unsafe:
+//  - flashcard masks: audit gate (s36-am2) — keep the plan's conservative
+//    exclusion even though the masks are document-anchored
+//  - text selection: transient screen feedback while dragging
+//  - Arch tools: in-progress drag line / erase crosshair are screen-anchored
+// Also fixed-model only: webview/home paint paths manage their own invalidation.
+static bool CanvasCanStripScroll(MainWindow* win) {
+    if (!win || !win->AsFixed()) {
+        return false;
+    }
+    if (win->flashcard.on) {
+        return false;
+    }
+    if (win->selection.showSelection) {
+        return false;
+    }
+    if (win->archTools.on) {
+        return false;
+    }
+    return true;
+}
+
+// PA2 (perf audit s36-am2): scroll ticks (autoscroll ~64 Hz) invalidated the
+// whole canvas, and DoubleBuffer::Flush blits the whole buffer, so every tick
+// paid an O(canvas) copy for a few changed rows. Here ScrollWindowEx shifts
+// the preserved bits (it also offsets any pending update region) and marks
+// only the exposed strip invalid; WM_PAINT then redraws and flushes just the
+// strip (rect-aware DoubleBuffer::Flush). A (0,0) delta means the view didn't
+// change (scroll clamped at the edge) — nothing to repaint at all.
+void ScrollStripRepaint(MainWindow* win, int dx, int dy) {
+    if (!IsMainWindowValid(win)) {
+        return;
+    }
+    if (0 == dx && 0 == dy) {
+        return;
+    }
+    if (!CanvasCanStripScroll(win)) {
+        ScheduleRepaint(win, 0);
+        return;
+    }
+    // the content moves opposite to the viewPort offset
+    ScrollWindowEx(win->hwndCanvas, -dx, -dy, nullptr, nullptr, nullptr, nullptr, SW_INVALIDATE);
+}
+
 void MainWindow::ShowToolTip(Str text, Rect& rc, bool multiline) const {
     if (len(text) == 0 || IsIconic(hwndFrame)) {
         // Track-mode tips are WS_EX_TOPMOST popups; never show while minimized

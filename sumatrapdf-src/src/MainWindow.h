@@ -821,6 +821,11 @@ struct MainWindow {
 bool HasOpenedDocuments(MainWindow*);
 void UpdateControlsColors(MainWindow*);
 void ScheduleRepaint(MainWindow*, int delay);
+// Scroll strip repaint (PA2): after a pure viewPort scroll, shift the previous
+// frame with ScrollWindowEx and invalidate only the exposed strip instead of
+// the whole canvas. Falls back to ScheduleRepaint when anything screen-anchored
+// is drawn on the canvas. See MainWindow.cpp.
+void ScrollStripRepaint(MainWindow* win, int dx, int dy);
 void CreateMovePatternLazy(MainWindow*);
 void ClearMouseState(MainWindow*);
 bool IsRightDragging(MainWindow*);
