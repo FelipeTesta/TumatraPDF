@@ -19,6 +19,11 @@
 - Session note: PA1 (Canvas.cpp masks) done by the s36-ar agent in parallel; PA3 (prefetch → bitmap cache) landed in commit 1932f37. PA4 deferred — callers verified mouse-event-only, not in the tick chain.
 - Coordination trap hit: Canvas.cpp changed under me mid-edit (other agent implementing PA1) — edit failed atomically, no corruption; waited for the file to free before the Flush one-liner.
 
+### Notes — perf audit closed (TODO section removed s36-at, knowledge kept here)
+- Audit plan: s36-am2 (2026-10-22); executed PA1 (s36-ar, commit b1cc108), PA2+PA5 (s36-as, commit 7372eab), PA3 (s36-ap, commit 1932f37). PA4 (`GetPageNoByPoint`/`GetPageNextToPoint` binary search) DEFERRED for good: callers are mouse events + `CvtFromScreen` fallbacks only, nothing in the autoscroll tick chain, O(nPages) per event is µs-scale.
+- Verified GOOD in the TC2+autoscroll+flashcard hot paths (do not re-audit): nav-point stability window (no flood during autoscroll), `RenderCache::RequestRendering` dedup (swap-front + `Exists()` + abort-not-nearby), `RecalcVisibleParts` direct recompute (O(nPages) trivial), lazy media boxes bounded (kMaxRelayouts 4), ReadAloud hook early-outs when not speaking, TC2 column-advance branch in `ScrollYBy` O(1), predictive render chain LIFO-guarded, `Relayout` user-initiated only.
+- Measured result of the cycle: flashcard mask paint went O(cards×rects) per paint → visible-page culling + one GDI+ object set; scroll repaint went full-canvas per 64 Hz tick → 1px strip (958x smaller paint area).
+
 ## 2026-10-22 (s36-ar) — Flashcard mask paint: viewport culling + hoisted GDI+ objects (PA1)
 
 ### Changed
