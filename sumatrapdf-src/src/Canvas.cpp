@@ -3345,8 +3345,30 @@ static void PaintFlashcardMasks(MainWindow* win, DisplayModel* dm, HDC hdc) {
             studyCardIdx = e.cardIdx;
         }
     }
+    if (!cards || len(*cards) == 0) {
+        return;
+    }
+    // paint-time stats, gated to one line every 240 paints: enough to read the
+    // overlay cost during autoscroll (~64 paints/s) without flooding the log
+    LARGE_INTEGER qpcFreq, qpcStart, qpcEnd;
+    QueryPerformanceFrequency(&qpcFreq);
+    QueryPerformanceCounter(&qpcStart);
+    int paintedRects = 0;
+
+    // CvtToScreen returns coords relative to the visible area, so the clip rect
+    // is anchored at the origin (same idiom as PaintContentBox)
+    Rect viewPortRect(Point(), dm->GetViewPort().Size());
     COLORREF colActiveTb = DsAccentsGet().flashcardActive;
-    for (int i = 0; cards && i < len(*cards); i++) {
+    // GDI+ objects live for the whole paint, not per quad: constructing a
+    // SolidBrush/Pen for every rect made this O(cards x rects) allocations per
+    // paint, which is what made masks expensive while autoscrolling (PA1).
+    Gdiplus::Graphics gs(hdc);
+    Gdiplus::SolidBrush markerBrush(Gdiplus::Color(20, 128, 128, 128)); // light gray, very transparent
+    Gdiplus::SolidBrush opaqueGrayBrush(Gdiplus::Color(255, 100, 100, 100));
+    Gdiplus::SolidBrush opaqueAccentBrush(GdiRgbFromCOLORREF(colActiveTb));
+    Gdiplus::Pen edgePen(GdiRgbFromCOLORREF(colActiveTb), (Gdiplus::REAL)DpiScale(win->hwndCanvas, 2));
+
+    for (int i = 0; i < len(*cards); i++) {
         const Flashcard& card = (*cards)[i];
         // The card being studied is marked in the accent color (Peru/orange)
         // instead of gray so it is identifiable at a glance among the other
@@ -3354,7 +3376,6 @@ static void PaintFlashcardMasks(MainWindow* win, DisplayModel* dm, HDC hdc) {
         // identificável"). Inactive cards keep the gray marker.
         bool isActiveCard = (i == studyCardIdx);
         bool opaque = (isActiveCard && !win->flashcard.revealMode);
-        Gdiplus::Graphics gs(hdc);
         // Paint each quad subrect separately so a multi-line cloze covers
         // exactly the highlighted text (not the union bbox). Under TC2 the
         // display uses virtual pages: map the physical rect to its column
@@ -3371,36 +3392,35 @@ static void PaintFlashcardMasks(MainWindow* win, DisplayModel* dm, HDC hdc) {
                     continue;
                 }
                 Rect rc = dm->CvtToScreen(vPage, vr);
+                // cull rects outside the visible viewport: during autoscroll
+                // almost every card is off-screen and drawing it is pure waste
+                // (Rect::Intersect returns a NEW rect - it does not mutate)
+                if (rc.Intersect(viewPortRect).IsEmpty()) {
+                    continue;
+                }
+                paintedRects++;
                 if (opaque) {
                     // Studying this card: opaque mask hides the cloze text ([_____]).
                     // The ACTIVE card uses the Peru/orange accent so it stands out
                     // from the inactive gray markers.
-                    Gdiplus::Color col =
-                        isActiveCard ? GdiRgbFromCOLORREF(colActiveTb) : Gdiplus::Color(255, 100, 100, 100);
-                    Gdiplus::SolidBrush brush(col);
-                    gs.FillRectangle(&brush, rc.x, rc.y, rc.dx, rc.dy);
+                    gs.FillRectangle(isActiveCard ? &opaqueAccentBrush : &opaqueGrayBrush, rc.x, rc.y, rc.dx, rc.dy);
                 } else {
                     // Reading / reveal / non-current card: subtle translucent marker
                     // (text stays visible; on reveal the current card shows its original text)
                     // alpha 20/255 — lighter than the old 30 so the gray reads as a hint
                     // instead of a block over the text (user 2026-10-22)
-                    Gdiplus::Color col(20, 128, 128, 128); // light gray, very transparent
-                    Gdiplus::SolidBrush brush(col);
-                    gs.FillRectangle(&brush, rc.x, rc.y, rc.dx, rc.dy);
+                    gs.FillRectangle(&markerBrush, rc.x, rc.y, rc.dx, rc.dy);
                 }
                 if (isActiveCard) {
                     // Marks the studied card in EVERY state. While the answer is
                     // hidden the rectangle is outlined; on reveal the text is
                     // visible again, so only a bottom underline marks the card
                     // (a full outline clutters the text) — user 2026-10-22.
-                    Gdiplus::Color colEdge = GdiRgbFromCOLORREF(colActiveTb);
-                    Gdiplus::REAL wEdge = (Gdiplus::REAL)DpiScale(win->hwndCanvas, 2);
-                    Gdiplus::Pen pen(colEdge, wEdge);
                     if (win->flashcard.revealMode) {
                         Gdiplus::REAL yLine = (Gdiplus::REAL)(rc.y + rc.dy - 1);
-                        gs.DrawLine(&pen, (Gdiplus::REAL)rc.x, yLine, (Gdiplus::REAL)(rc.x + rc.dx), yLine);
+                        gs.DrawLine(&edgePen, (Gdiplus::REAL)rc.x, yLine, (Gdiplus::REAL)(rc.x + rc.dx), yLine);
                     } else {
-                        gs.DrawRectangle(&pen, rc.x, rc.y, rc.dx - 1, rc.dy - 1);
+                        gs.DrawRectangle(&edgePen, rc.x, rc.y, rc.dx - 1, rc.dy - 1);
                     }
                 }
             }
@@ -3409,6 +3429,25 @@ static void PaintFlashcardMasks(MainWindow* win, DisplayModel* dm, HDC hdc) {
         for (int g = 0; g < len(card.extraPages); g++) {
             paintPage(card.extraPages[g].pageNo, card.extraPages[g].rects);
         }
+    }
+
+    QueryPerformanceCounter(&qpcEnd);
+    static i64 fcPaintCount = 0;
+    static i64 fcPaintTicks = 0;
+    static int fcLastDrawn = 0;
+    fcPaintCount++;
+    fcPaintTicks += qpcEnd.QuadPart - qpcStart.QuadPart;
+    // Log on a visibility flip (proves the culling: drawn rects appear and
+    // disappear with the viewport) and otherwise once per 240 paints, so this
+    // stays quiet during autoscroll while still reporting the average cost.
+    bool visibilityChanged = (paintedRects == 0) != (fcLastDrawn == 0);
+    fcLastDrawn = paintedRects;
+    if (visibilityChanged || fcPaintCount >= 240) {
+        double msAvg = (double)fcPaintTicks * 1000.0 / ((double)qpcFreq.QuadPart * (double)fcPaintCount);
+        logf("[fc] paint: %d cards, %d rects drawn, %.3f ms/paint avg (%d paints)\n", len(*cards), paintedRects, msAvg,
+             (int)fcPaintCount);
+        fcPaintTicks = 0;
+        fcPaintCount = 0;
     }
 }
 
@@ -4268,7 +4307,11 @@ static void OnPaintDocument(MainWindow* win) {
                 }
             }
 
-            win->buffer->Flush(hdc);
+            // blit only the region DrawDocument just repainted: with the
+            // strip-scroll path (PA2) WM_PAINT covers just the exposed rows,
+            // and a full-buffer blit would copy stale pixels over the
+            // ScrollWindowEx-preserved screen content
+            win->buffer->Flush(hdc, ToRect(ps.rcPaint));
         }
     }
 
