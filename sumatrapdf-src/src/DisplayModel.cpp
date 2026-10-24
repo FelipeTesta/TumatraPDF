@@ -2393,6 +2393,10 @@ void DisplayModel::ScrollXTo(int xOff) {
 
     int currPageNo = CurrentPageNo();
     int prevX = viewPort.x;
+    // clamp like ScrollXBy: an out-of-range offset leaves the viewPort outside
+    // the canvas, which breaks every screen<->page mapping and the strip-scroll
+    // rigid-shift assumption (callers can aim past the end, e.g. smooth scroll)
+    xOff = limitValue(xOff, 0, canvasSize.dx - viewPort.dx);
     viewPort.x = xOff;
     RecalcVisibleParts();
     // a lazy media-box measurement relayouts (pages shift non-uniformly), so
@@ -2425,6 +2429,9 @@ void DisplayModel::ScrollYTo(int yOff) {
 
     int currPageNo = CurrentPageNo();
     int prevY = viewPort.y;
+    // see ScrollXTo: keep the viewPort inside the canvas (the smooth-scroll
+    // animation can aim past the document edge and already expects the clamp)
+    yOff = limitValue(yOff, 0, canvasSize.dy - viewPort.dy);
     viewPort.y = yOff;
     RecalcVisibleParts();
     // a lazy media-box measurement relayouts (pages shift non-uniformly), so

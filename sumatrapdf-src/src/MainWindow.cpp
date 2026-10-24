@@ -474,6 +474,17 @@ static bool CanvasCanStripScroll(MainWindow* win) {
 // only the exposed strip invalid; WM_PAINT then redraws and flushes just the
 // strip (rect-aware DoubleBuffer::Flush). A (0,0) delta means the view didn't
 // change (scroll clamped at the edge) — nothing to repaint at all.
+//
+// The strip is only safe while the exposed band is small: it holds the previous
+// frame's pixels until WM_PAINT runs, and during a fast drag the deltas are
+// 100-300 px while WM_PAINT (lowest priority) is starved by WM_MOUSEMOVE, so the
+// band kept old glyphs for several frames — the "duplicated / vertically
+// stretched letters" artifact. Deltas above kStripScrollMaxPx therefore repaint
+// the whole canvas again (the pre-PA2 path, ~1-3 ms): a stale-but-coherent
+// frame never tears. Autoscroll (1-4 px/tick) and the tail of the smooth-scroll
+// animation stay on the strip path.
+static constexpr int kStripScrollMaxPx = 8;
+
 void ScrollStripRepaint(MainWindow* win, int dx, int dy) {
     if (!IsMainWindowValid(win)) {
         return;
@@ -481,12 +492,23 @@ void ScrollStripRepaint(MainWindow* win, int dx, int dy) {
     if (0 == dx && 0 == dy) {
         return;
     }
-    if (!CanvasCanStripScroll(win)) {
+    bool bigDelta =
+        dx < -kStripScrollMaxPx || dx > kStripScrollMaxPx || dy < -kStripScrollMaxPx || dy > kStripScrollMaxPx;
+    int mode = 1; // 1 = strip (shift pixels, paint the band), 2 = full canvas
+    if (!CanvasCanStripScroll(win) || bigDelta) {
+        mode = 2;
         ScheduleRepaint(win, 0);
-        return;
+    } else {
+        // the content moves opposite to the viewPort offset
+        ScrollWindowEx(win->hwndCanvas, -dx, -dy, nullptr, nullptr, nullptr, nullptr, SW_INVALIDATE);
     }
-    // the content moves opposite to the viewPort offset
-    ScrollWindowEx(win->hwndCanvas, -dx, -dy, nullptr, nullptr, nullptr, nullptr, SW_INVALIDATE);
+    // breadcrumb only when the path changes: per-tick logging would flood the
+    // file during autoscroll
+    static int lastMode = 0;
+    if (mode != lastMode) {
+        logf("[scroll] paint path -> %s (dx=%d dy=%d)\n", mode == 1 ? StrL("strip") : StrL("full"), dx, dy);
+        lastMode = mode;
+    }
 }
 
 void MainWindow::ShowToolTip(Str text, Rect& rc, bool multiline) const {

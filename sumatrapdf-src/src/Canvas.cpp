@@ -4128,11 +4128,18 @@ static void OnPaintDocument(MainWindow* win) {
     } else if (win->presentation == PM_WHITE_SCREEN) {
         HdcFillRect(hdc, ToRect(ps.rcPaint), GetStockBrush(WHITE_BRUSH));
     } else {
-        bool shouldPaint = DrawDocument(win, win->buffer->GetDC(), ToRect(ps.rcPaint));
+        Rect paintRc = ToRect(ps.rcPaint);
+        bool shouldPaint = DrawDocument(win, win->buffer->GetDC(), paintRc);
         // Flush when the focus ring is needed so DrawFocusRect is not XOR'd
         // on top of a stale frame that already had a ring.
         bool showFocus = CanvasShouldShowKeyboardFocus(win);
-        if (!gNoFlickerRender || shouldPaint || showFocus) {
+        // A partial (strip) paint must always flush: DrawDocument just repainted
+        // that band into the buffer (background + whatever tiles are ready), and
+        // skipping the blit leaves the previous frame's glyphs there — the
+        // "duplicated / stretched letters" artifact on a fast drag. The
+        // no-flicker skip only matters for a full repaint of an empty buffer.
+        bool partialPaint = paintRc.dx < win->buffer->rect.dx || paintRc.dy < win->buffer->rect.dy;
+        if (!gNoFlickerRender || shouldPaint || showFocus || partialPaint) {
             // Arch Tools: draw scale line, measurements, and in-progress line INTO offscreen buffer BEFORE Flush
             // to prevent flicker. Gated by archToolsOn (not archToolMode).
             if (gGlobalPrefs->archToolsEnabled && win->archTools.on && win->AsFixed()) {
@@ -4311,7 +4318,7 @@ static void OnPaintDocument(MainWindow* win) {
             // strip-scroll path (PA2) WM_PAINT covers just the exposed rows,
             // and a full-buffer blit would copy stale pixels over the
             // ScrollWindowEx-preserved screen content
-            win->buffer->Flush(hdc, ToRect(ps.rcPaint));
+            win->buffer->Flush(hdc, paintRc);
         }
     }
 
