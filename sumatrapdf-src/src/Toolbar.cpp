@@ -531,6 +531,13 @@ static void SetToolbarButtonToolTipByIdx(HWND hwnd, int idx, int cmdId, Str s) {
     TbSetButtonInfo(hwnd, idx, &bi);
 }
 
+// Posted (never sent) to the toolbar after a button-visibility change: comctl
+// recomputes the button rects only after ToolbarUpdateStateForWindow returns, so
+// the child windows anchored to a button (timer trio inside Autoscroll, page
+// box) have to be repositioned on the next message-loop turn. Handled in
+// WndProcToolbar. WM_APP + 0x424 is unused (0x421 TTS, 0x422 DPI settled).
+static const UINT kMsgToolbarRelocateChildren = WM_APP + 0x424;
+
 // TODO: this is called too often
 // TODO: also set checked state instead of calling SetToolbarButtonCheckedState() all over
 void ToolbarUpdateStateForWindow(MainWindow* win, bool setButtonsVisibility) {
@@ -586,6 +593,13 @@ void ToolbarUpdateStateForWindow(MainWindow* win, bool setButtonsVisibility) {
     // current document doesn't support find) when toolbar buttons change
     if (setButtonsVisibility) {
         UpdateToolbarFindText(win);
+        // Buttons appearing/disappearing shift every button after them, so the
+        // child windows anchored to a button (timer trio inside Autoscroll, page
+        // box) must be repositioned too. Missing this left the trio at its old x
+        // after a cold start (start page -> open a book), on top of the
+        // neighbouring buttons (user 2026-10-22). Button rects lag the state
+        // change, hence the posted relocation instead of a synchronous call.
+        PostMessageW(win->hwndToolbar, kMsgToolbarRelocateChildren, 0, 0);
     }
 
     // update dirty (unsaved annotations) flag and tooltip on each tab
@@ -1647,6 +1661,18 @@ static LRESULT CALLBACK WndProcToolbar(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp
             }
         }
         return sizeRes;
+    }
+
+    if (kMsgToolbarRelocateChildren == msg) {
+        MainWindow* win = FindMainWindowByHwnd(hwnd);
+        if (win && !win->isBeingClosed && hwnd == win->hwndToolbar) {
+            // deferred half of ToolbarUpdateStateForWindow: the button rects are
+            // final by now. Reposition ONLY the anchor-based child windows — the
+            // page box owns its own width (UpdateToolbarPageText) and must not be
+            // re-sized from here.
+            PositionToolbarChildWindows(win);
+        }
+        return 0;
     }
 
     if (WM_TIMER == msg && kRewrapToolbarTimerId == (int)wp) {
