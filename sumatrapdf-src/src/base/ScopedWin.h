@@ -267,12 +267,13 @@ class ScopedGdiPlus {
     ULONG_PTR token = 0;
     ULONG_PTR hookToken = 0;
     bool noBgThread = false;
+    bool endOnExit = true;
 
   public:
     // suppress the GDI+ background thread when initiating in WinMain,
     // as that thread causes DDE messages to be sent too early and
     // thus causes unexpected timeouts
-    explicit ScopedGdiPlus(bool inWinMain = false) : noBgThread(inWinMain) {
+    explicit ScopedGdiPlus(bool inWinMain = false, bool endOnExit = true) : noBgThread(inWinMain) {
         si.SuppressBackgroundThread = noBgThread;
         Gdiplus::GdiplusStartup(&token, &si, &so);
         if (noBgThread) {
@@ -280,6 +281,9 @@ class ScopedGdiPlus {
         }
     }
     ~ScopedGdiPlus() {
+        if (!endOnExit) {
+            return;
+        }
         if (noBgThread) {
             so.NotificationUnhook(hookToken);
         }

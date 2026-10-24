@@ -2203,7 +2203,16 @@ int APIENTRY WinMain(_In_ HINSTANCE /*hInstance*/, _In_opt_ HINSTANCE /*hPrevIns
         logf("WinMain: OleInitialize() failed with 0x%08x\n", (uint)ole.hr);
     }
     InitAllCommonControls();
-    ScopedGdiPlus gdiPlus(true);
+    // endOnExit=false: GDI+ must outlive WinMain. The CRT runs the atexit
+    // table AFTER this scope ends, and function-local `static Gdiplus::*`
+    // objects (brushes/pens/fonts in Canvas.cpp, TabWnd, ...) are destroyed
+    // there — with GDI+ already deinitialized (NotificationUnhook ends the
+    // suppressed session just like GdiplusShutdown ends a normal one) their
+    // destructors fault in gdiplus.dll. Debug builds crash there with exit
+    // code 5; release takes the fastExit path which skips the atexit table
+    // entirely, which is why it never reproduced there. Leaving GDI+ alive
+    // for the OS to reclaim at process exit is the standard remedy.
+    ScopedGdiPlus gdiPlus(true, false);
 
     // when running a command-line tool (e.g. `info file.pdf`), keep logging off
     // the console so it doesn't contaminate the tool's stdout (issue #5677)

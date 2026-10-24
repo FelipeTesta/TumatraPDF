@@ -1,5 +1,17 @@
 # TumatraPDF — Development Log
 
+## 2026-10-24 (s36-au) — debug-only graceful-quit exit code 5 fixed (GDI+ statics vs atexit)
+
+### Fixed
+- Graceful quit of a document-open session returned exit code 5 in DEBUG builds (Release exited 0), poisoning 9 suite tests (issue-5529, issue-2629, issue-4684, issue-5922, issue-5924, issue-5926, find-results-sorted, issue-5874, issue-2252). NOT an access violation at quit as previously assumed: the message loop returns 0 and WinMain completes; the death is in the CRT atexit table after WinMain returns. Function-local `static Gdiplus::*` objects register atexit destructors, and WinMain's `ScopedGdiPlus` ends the GDI+ session at scope exit (both `NotificationUnhook` in suppressed-thread mode and `GdiplusShutdown` deinitialize) — so the destructors fault in gdiplus.dll (`GdipDeleteStringFormat` → `RtlEnterCriticalSection` on a dead session lock; first crasher: `TabWnd::Paint`'s `sfRtl`).
+- Why debug-only: Release takes the `fastExit` path (`AreDangerousThreadsPending`) → `ExitProcess` skips the atexit table entirely; debug waits for threads and runs the full CRT exit.
+- Fix (belt and suspenders): `ScopedGdiPlus(winMain, endOnExit=false)` — WinMain leaves GDI+ alive for the OS to reclaim at process exit; `TabWnd::Paint`'s `sfLtr`/`sfRtl` converted to deliberately leaked pointers (no atexit destructor). Any future function-local `static Gdiplus::*` should follow the leak pattern.
+- Verified: `tests/tmp/s36au-exitcode.ts` probe → raw exit 0 with the normal teardown (crash handler uninstalled as before); all 9 previously-failing tests now PASS (`--no-build` runs).
+- Instrumentation note for future hunts: after `DestroyLogging()`, file logging is silenced (`gDestroyedLogging` early-return in log2), so atexit-time crashes are invisible to sumlog — use the fork's crash handler (skip `UninstallCrashHandler` temporarily) + the probe's stderr capture; `gh run`-style exit-code probes distinguish deliberate exits from NTSTATUS deaths.
+
+### Remaining (separate defects, still in TODO)
+- The other 8 suite failures are independent: `-unit-tests exit 1` group (issue-5840, issue-5842, issue-5846, parse-tip-brackets — real assertion failures in the test binary) and UI/timing flake group (issue-1914, issue-5866, issue-5869, issue-5792). Re-verified failing after this fix.
+
 ## 2026-10-23 (s36-as) — PA2 scroll strip-invalidate + PA5 autoscroll log removal (perf audit s36-am2)
 
 ### Added

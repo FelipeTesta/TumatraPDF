@@ -1,4 +1,4 @@
-# TODO ['N'/'N Total']
+# TODO
 1. Open work ONLY.
 2. Completed features/fixes live in [LOG.md](LOG.md) (per-session) + [CHANGELOG.md](CHANGELOG.md) (per-release).
 3. User manual-test items = items only the user can validate.
@@ -98,6 +98,7 @@ Shift+S: draw a rectangle that captures the image inside it at the document's DP
   ```
 # Bugs open
 
+- [x] ~~**s36-au** debug-build graceful-quit exit code 5~~ — FIXED s36-au (details in LOG): GDI+ function statics destructed at atexit after `ScopedGdiPlus` ended the session; WinMain now passes `endOnExit=false` + `TabWnd::Paint` string formats leaked. All 9 affected tests PASS. The other 8 suite failures (unit-tests exit 1 + UI/timing groups) are separate defects and stay open below.
 - [ ] **BUG-3** right-click image context menu: s34 E2E confirmed Replace/Paint/Crop work + submenu visibility fixed; s36-ao live-checked the rest — `Image > Save` works (editor → `<book>_page_1.png`), menus filter correctly, and the silent null-bitmap returns now show a notification (fdcafde). No repro for the "non-image items dead" claim: those items are removed by design (link/comment/attachment). REMAINING: user's exact steps (file + item) to reproduce anything still dead.
 - [ ] **BUG-4** Contrast × Trim Config ONE-SHOT vanish (first trim-config open after launch). Fix v2 (`EnsureContrastOverlayState` invariant + self-healing) deployed 2026-09-22 — awaiting user confirmation of the exact flow; `[contrast]` breadcrumbs in debug build.
 - [ ] **Ctrl+click flashcard highlight opens List** — implemented s34-b (Canvas ctrl+click detects /T author TumatraPDF-Flashcard → FlashcardSidebarShow; turns flashcard mode on if off). USER live-test pending (needs a book with flashcard highlights).

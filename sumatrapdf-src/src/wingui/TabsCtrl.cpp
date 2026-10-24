@@ -162,23 +162,27 @@ void TabWnd::Paint(VirtWndPaintCtx& ctx) {
         gfx.FillRectangle(&ulBr, ToGdipRect(rUl));
     }
 
-    // StringFormat hoisted to function-local static (UI thread only, thread-safe)
+    // StringFormat hoisted to function-local static (UI thread only, thread-safe).
+    // Deliberately leaked (never destructed): Gdiplus::* function statics register
+    // atexit destructors that run AFTER the app shut GDI+ down (debug builds crash
+    // there with exit code 5 — see ScopedGdiPlus in base/ScopedWin.h). A leaked
+    // pointer has no atexit destructor; the OS reclaims it at process exit.
     bool isRtl = IsTabsRtl(hwnd);
-    static StringFormat sfLtr(StringFormat::GenericDefault());
-    static StringFormat sfRtl(StringFormat::GenericDefault());
+    static StringFormat* sfLtr = new StringFormat(StringFormat::GenericDefault());
+    static StringFormat* sfRtl = new StringFormat(StringFormat::GenericDefault());
     static bool sfInit = false;
     if (!sfInit) {
-        sfLtr.SetFormatFlags(Gdiplus::StringFormatFlagsNoWrap);
-        sfLtr.SetLineAlignment(StringAlignmentCenter);
-        sfLtr.SetTrimming(Gdiplus::StringTrimmingEllipsisCharacter);
-        sfLtr.SetAlignment(Gdiplus::StringAlignmentNear);
-        sfRtl.SetFormatFlags(Gdiplus::StringFormatFlagsNoWrap);
-        sfRtl.SetLineAlignment(StringAlignmentCenter);
-        sfRtl.SetTrimming(Gdiplus::StringTrimmingEllipsisCharacter);
-        sfRtl.SetAlignment(Gdiplus::StringAlignmentFar);
+        sfLtr->SetFormatFlags(Gdiplus::StringFormatFlagsNoWrap);
+        sfLtr->SetLineAlignment(StringAlignmentCenter);
+        sfLtr->SetTrimming(Gdiplus::StringTrimmingEllipsisCharacter);
+        sfLtr->SetAlignment(Gdiplus::StringAlignmentNear);
+        sfRtl->SetFormatFlags(Gdiplus::StringFormatFlagsNoWrap);
+        sfRtl->SetLineAlignment(StringAlignmentCenter);
+        sfRtl->SetTrimming(Gdiplus::StringTrimmingEllipsisCharacter);
+        sfRtl->SetAlignment(Gdiplus::StringAlignmentFar);
         sfInit = true;
     }
-    StringFormat& sf = isRtl ? sfRtl : sfLtr;
+    StringFormat& sf = *(isRtl ? sfRtl : sfLtr);
 
     // draw text — padded from the tab edges; the ✕ close glyph is gone, so no
     // close-gutter space is reserved and text spans the full padded width
