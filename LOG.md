@@ -1,5 +1,28 @@
 # TumatraPDF — Development Log
 
+## 2026-10-25 (s36-aw) — Save toolbar button (right of Print) + page-box anchor fix
+
+### Added
+- `{TbIcon::Save, CmdSaveAnnotations, _TRN("Save")}` in `gToolbarButtons[]` (Toolbar.cpp) — icon-only button right of Print, posts the same WM_COMMAND as Ctrl+Shift+S (save into the EXISTING document). Tooltip auto-picks the accelerator ("Save (Ctrl + Shift + S)"). State for free from upstream rules: visible-but-disabled while `!hasUnsavedAnnotations` (CommandVisibility rule, CommandAvailability.cpp:741), enabled on every annotation edit (30+ `ToolbarUpdateStateForWindow` call-sites), hidden on home overlay (D5).
+- `enabled=%d` field in the `TestToolbarButtons` dump (`ToolbarButtonsResultTemp`) — E2E can assert enable state via `-dbg-control`.
+- `tests/tmp/s36aw-savebtn.ts` (scratch, gitignored) — full E2E: clean(disabled) → keyboard-select+highlight(enabled) → save via the button's WM_COMMAND (mtime changes) → disabled again; plus page-box overlap check.
+
+### Fixed
+- `UpdateToolbarPageText` anchored the page-number box on `CmdPrint`'s rect; inserting Save between Print and the slot made the box cover the new icon (16px). Anchor now walks `gToolbarButtons[]` backwards from the PageInfoId slot to the last actually-available button (skips separators/hidden, falls back to CmdOpenFile) — robust to future insertions/hiding (issue #5563 case still covered).
+
+### Verified
+- E2E probe PASS (exit 0): overlap check `label.left=140 > save.right=128` (12px gap), mtime changed after the save command, Save disabled after. Pixel check on the dark-theme capture: 594 non-bg px in the Save rect (icon drawn, not covered), 885 px of page-box text to its right. Light theme: same monochrome icon infra as every other button — left to user live-check.
+- tree-sitter + Serena map (§0b) done: callers of UpdateToolbarPageText / ToolbarUpdateStateForWindow / TbGetRectForCmd / AddAllToolbarButtons / SaveAnnotationsToExistingFile. Other anchors (ReadAloud dropdown SumatraPDF.cpp:13760, AutoScroll timer trio ToolbarLayout.cpp:192) key on their OWN buttons — unaffected by the insertion.
+
+### Notes / traps
+- DPI: the bun test process is DPI-unaware — its `GetWindowRect`/`clientToScreen` return VIRTUALIZED coords (÷1.25 here) while `-dbg-control` dumps report the app's PHYSICAL rects. Comparing them naively gives false overlaps; derive the scale first (toolbarClientDx from dump vs tbRect width: 791/633 = 1.25).
+- Comctl toolbar clicks cannot be synthesized in this environment: posted AND sent `WM_LBUTTONDOWN/UP` on the toolbar hwnd do nothing, `TB_PRESSBUTTON` (0x403) press+release fires no WM_COMMAND. The WM_COMMAND path (`sendCommand`) is the reliable equivalent; real user clicks are native comctl and fine.
+- `CmdCreateAnnotHighlight` applies to the CURRENT text selection (`MakeAnnotationsFromSelection`) — NOT a drag-create mode. Selection synthesis: mouse drag unreliable (known — ad-hoc-flashcard-cloze.ts), use `CmdZoomFitPage` + `CmdSelectTextViaKeyboard` + `CmdExtendSelectionWordRight`.
+- `TB_GETSTATE` takes a COMMAND id, not an index (index → returns -1).
+- `withControlledSumatra`'s quit-timeout error MASKS the fn's own throw — log stages inside fn before blaming the quit.
+- issue-5869.ts parse regex (`^idx=... rect=(\S+) text=`) no longer matches the dump line (style/cx fields were added since; now `enabled` too) — suspect for its open failure; fix the parse when taking the UI-flake group.
+- Coordination: commit 80de1ac (other agent, "flashcard study time tracking + Home stats UI") swept this session's Toolbar.cpp work into its batch — verified complete on HEAD (button line 82, anchor walk, enabled dump, no TEMP debug left). LOG/TODO untouched by it.
+
 ## 2026-10-24 (s36-au) — debug-only graceful-quit exit code 5 fixed (GDI+ statics vs atexit)
 
 ### Fixed

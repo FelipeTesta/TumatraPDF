@@ -4,6 +4,15 @@ Per-version changelog for TumatraPDF — new functions + bug fixes, newest first
 Feature details live in [README.md](README.md); full per-session development
 history in [LOG.md](LOG.md).
 
+## Unreleased
+
+- **Save toolbar button.** A disk (save) icon right of Print saves annotations
+  and edits into the open document — same as `Ctrl + Shift + S`. Greyed out
+  while there is nothing unsaved; lights up as soon as a highlight, annotation
+  or edit marks the document dirty. The page-number box used to anchor on
+  Print's rect and now follows the nearest visible button to its left, so it
+  no longer covers the new icon.
+
 ## v1.0.14 (2026-10-23)
 
 - **Much lighter scrolling.** Auto-scroll used to invalidate and blit the whole
