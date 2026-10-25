@@ -53,6 +53,7 @@
 #include "ArchVector.h"
 #include "Commands.h"
 #include "Commands_Edit.h"
+#include "Commands_Flashcard.h"
 #include "uia/Provider.h"
 #include "SearchAndDDE.h"
 #include "Selection.h"
@@ -3363,7 +3364,10 @@ static void PaintFlashcardMasks(MainWindow* win, DisplayModel* dm, HDC hdc) {
     // SolidBrush/Pen for every rect made this O(cards x rects) allocations per
     // paint, which is what made masks expensive while autoscrolling (PA1).
     Gdiplus::Graphics gs(hdc);
-    Gdiplus::SolidBrush markerBrush(Gdiplus::Color(20, 128, 128, 128)); // light gray, very transparent
+    // Use the flashcard marker alpha setting for subtle highlighting
+    // Default alpha 10 makes the gray very transparent; user can adjust 0-255
+    u8 markerAlpha = (u8)gGlobalPrefs->flashcardSettings.flashcardMarkerAlpha;
+    Gdiplus::SolidBrush markerBrush(Gdiplus::Color(20, 128, 128, markerAlpha));
     Gdiplus::SolidBrush opaqueGrayBrush(Gdiplus::Color(255, 100, 100, 100));
     Gdiplus::SolidBrush opaqueAccentBrush(GdiRgbFromCOLORREF(colActiveTb));
     Gdiplus::Pen edgePen(GdiRgbFromCOLORREF(colActiveTb), (Gdiplus::REAL)DpiScale(win->hwndCanvas, 2));
@@ -5736,6 +5740,10 @@ static void OnTimer(MainWindow* win, HWND hwnd, WPARAM timerId) {
 
         case kContinuousAutoScrollTimerID:
             AutoScrollContinuousTick(win, hwnd);
+            break;
+
+        case kFlashcardStudyTimerID:
+            FlashcardStudyTick(win, hwnd);
             break;
 
         case kHideCursorTimerID:

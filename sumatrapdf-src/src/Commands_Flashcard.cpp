@@ -29,6 +29,10 @@ extern "C" {
 #include "Selection.h"
 #include "Flashcard.h"
 #include "FlashcardSidebar.h"
+#include "FlashcardStats.h"
+#include "Canvas.h" // kFlashcardStudyTimerID
+#include "Theme.h"  // ThemeWindowBackgroundColor, DpiScale
+#include "base/Dpi.h" // DpiScale
 #include "Commands_Flashcard.h"
 
 bool RelayoutFrame(MainWindow* win, bool updateToolbars = true, int sidebarDx = -1);
@@ -503,7 +507,9 @@ void FlashcardStopSession(MainWindow* win) {
     win->flashcard.studyMode = false;
     win->flashcard.revealMode = false;
     win->flashcard.currentCardIdx = -1;
+    win->flashcard.studyTimeSec = 0;
     win->flashcard.studyOrder.Reset();
+    FlashcardStudyTimerStop(win);
 }
 
 // Called from LoadModelIntoTab: after a tab switch, refresh flashcard state —
@@ -637,6 +643,7 @@ bool HandleCommandFlashcard(MainWindow* win, int cmd) {
             win->flashcard.studyMode = !win->flashcard.studyMode;
             win->flashcard.revealMode = false;
             win->flashcard.currentCardIdx = -1;
+            win->flashcard.studyTimeSec = 0;
             if (win->flashcard.studyMode) {
                 // Build filtered study order (respects scope + per-tab filters)
                 BuildFilteredStudyOrder(win);
@@ -646,8 +653,10 @@ bool HandleCommandFlashcard(MainWindow* win, int cmd) {
                     FlashcardPrefetchUpcoming(win, 0, 5);
                     FlashcardNavigateToEntry(win, win->flashcard.studyOrder[0], true);
                 }
+                FlashcardStudyTimerStart(win);
             } else {
                 logf("[fc] CmdFlashcardStudy - study OFF\n");
+                FlashcardStudyTimerStop(win);
             }
             FlashcardToolbarUpdateState(win);
             MainWindowRerender(win);
@@ -760,4 +769,332 @@ bool HandleCommandFlashcard(MainWindow* win, int cmd) {
         default:
             return false;
     }
+}
+
+// Start the flashcard study timer (kFlashcardStudyTimerID on hwndCanvas).
+// Called when study mode becomes active.
+void FlashcardStudyTimerStart(MainWindow* win) {
+    if (!win || !win->hwndCanvas) {
+        return;
+    }
+    // USER_TIMER_MINIMUM = 10ms (100Hz) — same as auto-scroll continuous tick
+    SetTimer(win->hwndCanvas, kFlashcardStudyTimerID, USER_TIMER_MINIMUM, nullptr);
+    // Start the progress bar UI
+    FlashcardStudyTimerUIStart(win);
+    logf("[fc] StudyTimerStart - timer started\n");
+}
+
+// Stop the flashcard study timer.
+void FlashcardStudyTimerStop(MainWindow* win) {
+    if (!win || !win->hwndCanvas) {
+        return;
+    }
+    KillTimer(win->hwndCanvas, kFlashcardStudyTimerID);
+    // Stop the progress bar UI
+    FlashcardStudyTimerUIStop(win);
+    // flush any fractional seconds accumulated in FlashcardStats
+    FlashcardStatsOnSessionEnd();
+    logf("[fc] StudyTimerStop - timer stopped\n");
+}
+
+// Flashcard study timer tick: called from Canvas.cpp when kFlashcardStudyTimerID fires.
+// Credits study time to the current card (capped at maxPerCardSec = 60s).
+// When cap is reached, stops capturing time for that card (does NOT auto-advance).
+void FlashcardStudyTick(MainWindow* win, HWND hwnd) {
+    if (!win || !win->flashcard.studyMode) {
+        return;
+    }
+    // When revealMode is ON, the user is looking at the answer — pause time capture
+    if (win->flashcard.revealMode) {
+        return;
+    }
+    int curIdx = win->flashcard.currentCardIdx;
+    if (curIdx < 0 || curIdx >= len(win->flashcard.studyOrder)) {
+        return; // no valid current card
+    }
+    FlashcardQueueEntry& e = win->flashcard.studyOrder[curIdx];
+    if (!e.tab || e.cardIdx < 0 || e.cardIdx >= len(e.tab->flashcard.cards)) {
+        return;
+    }
+
+    // Per-card cap: stop capturing time once maxPerCardSec is reached
+    if (win->flashcard.studyTimeSec >= win->flashcard.maxPerCardSec) {
+        // Show expiry overlay once per card when cap is reached
+        static int sLastExpiryCardIdx = -1;
+        if (sLastExpiryCardIdx != curIdx) {
+            sLastExpiryCardIdx = curIdx;
+            FlashcardStudyTimerShowExpiry(win);
+        }
+        return; // just stop counting; user advances manually
+    }
+
+    // Accumulate study time for the current card
+    win->flashcard.studyTimeSec += 1; // 1 tick = ~10ms, but we add whole seconds via accum in FlashcardStats
+    // Use FlashcardStatsAddSeconds which handles fractional accumulation
+    FlashcardStatsAddSeconds(win, 0.01f); // 10ms per tick
+}
+
+// --- Flashcard Study Timer UI (progress bar at bottom + expiry overlay) ---
+
+// Overlay window for the progress bar (shrinking line at bottom of screen)
+static HWND gFlashcardTimerUIHwnd = nullptr;
+static constexpr UINT_PTR kFlashcardTimerUIOverlayTimerId = 98;
+static constexpr wchar_t kFlashcardTimerUIOverlayClass[] = L"TumatraFlashcardTimerUIOverlay";
+
+// Timer for the progress bar animation (separate from the study tick)
+static UINT_PTR gFlashcardTimerUIProgressTimer = 0;
+static int gFlashcardTimerUIProgress = 0; // 0..600 (60 seconds * 10 ticks per second)
+
+static LRESULT CALLBACK FlashcardTimerUIOverlayProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    switch (msg) {
+        case WM_ERASEBKGND: {
+            RECT rc;
+            GetClientRect(hwnd, &rc);
+            HBRUSH br = CreateSolidBrush(ThemeWindowBackgroundColor());
+            FillRect((HDC)wp, &rc, br);
+            DeleteObject(br);
+            return 1;
+        }
+        case WM_PAINT: {
+            PAINTSTRUCT ps;
+            HDC hdc = BeginPaint(hwnd, &ps);
+            RECT rc;
+            GetClientRect(hwnd, &rc);
+
+            // Draw the progress bar: a thin line at the bottom that shrinks from both ends to center
+            // Progress: 0 = full width, 600 = center (line disappeared)
+            int screenW = rc.right - rc.left;
+            int lineY = rc.bottom - 2; // 2px from bottom
+            int lineH = 2; // 2px high (silver line)
+            int maxHalfW = screenW / 2;
+            int currentHalfW = (maxHalfW * (600 - gFlashcardTimerUIProgress)) / 600;
+            if (currentHalfW < 0) currentHalfW = 0;
+
+            // Silver color for the line
+            COLORREF silver = RGB(192, 192, 192);
+            HBRUSH br = CreateSolidBrush(silver);
+            // Left segment
+            RECT leftRect = {rc.left, lineY, rc.left + currentHalfW, lineY + lineH};
+            FillRect(hdc, &leftRect, br);
+            // Right segment
+            RECT rightRect = {rc.right - currentHalfW, lineY, rc.right, lineY + lineH};
+            FillRect(hdc, &rightRect, br);
+            DeleteObject(br);
+
+            EndPaint(hwnd, &ps);
+            return 0;
+        }
+        case WM_TIMER:
+            if (wp == 1) {
+                // Progress animation timer (100ms interval) - update progress
+                FlashcardStudyTimerUITick(nullptr);
+            } else if (wp == kFlashcardTimerUIOverlayTimerId) {
+                // Expiry overlay timer - destroy the overlay window
+                KillTimer(hwnd, kFlashcardTimerUIOverlayTimerId);
+                DestroyWindow(hwnd);
+                gFlashcardTimerUIHwnd = nullptr;
+            }
+            return 0;
+        case WM_LBUTTONDOWN:
+            KillTimer(hwnd, kFlashcardTimerUIOverlayTimerId);
+            DestroyWindow(hwnd);
+            gFlashcardTimerUIHwnd = nullptr;
+            return 0;
+        case WM_DESTROY:
+            gFlashcardTimerUIHwnd = nullptr;
+            return 0;
+        default:
+            break;
+    }
+    return DefWindowProcW(hwnd, msg, wp, lp);
+}
+
+static void RegisterFlashcardTimerUIOverlayClass() {
+    static bool registered = false;
+    if (registered) return;
+    registered = true;
+    WNDCLASSEXW wc = {};
+    wc.cbSize = sizeof(wc);
+    wc.lpfnWndProc = FlashcardTimerUIOverlayProc;
+    wc.hInstance = GetModuleHandleW(nullptr);
+    wc.lpszClassName = kFlashcardTimerUIOverlayClass;
+    wc.hbrBackground = nullptr; // WM_ERASEBKGND paints the theme surface
+    RegisterClassExW(&wc);
+}
+
+// Start the flashcard study timer UI (progress bar at bottom of screen)
+void FlashcardStudyTimerUIStart(MainWindow* win) {
+    if (!win || !win->hwndFrame) {
+        return;
+    }
+    // Reset progress
+    gFlashcardTimerUIProgress = 0;
+    RegisterFlashcardTimerUIOverlayClass();
+
+    // Get screen dimensions
+    int screenW = GetSystemMetrics(SM_CXSCREEN);
+    int screenH = GetSystemMetrics(SM_CYSCREEN);
+    int overlayH = DpiScale(win->hwndFrame, 8); // thin bar at bottom
+
+    // Create full-screen width overlay at bottom
+    HWND hwndOverlay = CreateWindowExW(
+        WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT,
+        kFlashcardTimerUIOverlayClass, L"",
+        WS_POPUP | WS_VISIBLE,
+        0, screenH - overlayH, screenW, overlayH,
+        nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+
+    if (!hwndOverlay) {
+        logf("[fc] TimerUIStart - failed to create overlay window\n");
+        return;
+    }
+
+    gFlashcardTimerUIHwnd = hwndOverlay;
+    ShowWindow(hwndOverlay, SW_SHOW);
+    UpdateWindow(hwndOverlay);
+
+    // Start progress animation timer (100ms = 10 ticks per second, 600 ticks = 60 seconds)
+    gFlashcardTimerUIProgressTimer = SetTimer(hwndOverlay, 1, 100, nullptr);
+    logf("[fc] TimerUIStart - progress bar started\n");
+}
+
+// Stop the flashcard study timer UI
+void FlashcardStudyTimerUIStop(MainWindow* win) {
+    (void)win; // unused
+    if (gFlashcardTimerUIHwnd) {
+        if (gFlashcardTimerUIProgressTimer) {
+            KillTimer(gFlashcardTimerUIHwnd, gFlashcardTimerUIProgressTimer);
+            gFlashcardTimerUIProgressTimer = 0;
+        }
+        DestroyWindow(gFlashcardTimerUIHwnd);
+        gFlashcardTimerUIHwnd = nullptr;
+    }
+    gFlashcardTimerUIProgress = 0;
+    logf("[fc] TimerUIStop - progress bar stopped\n");
+}
+
+// Progress bar tick - called from the overlay window's timer
+void FlashcardStudyTimerUITick(MainWindow* win) {
+    (void)win; // unused, progress is global
+    if (!gFlashcardTimerUIHwnd) {
+        return;
+    }
+    gFlashcardTimerUIProgress++;
+    if (gFlashcardTimerUIProgress >= 600) {
+        // 60 seconds reached - stop progress bar, show expiry overlay
+        gFlashcardTimerUIProgress = 600;
+        if (gFlashcardTimerUIProgressTimer) {
+            KillTimer(gFlashcardTimerUIHwnd, gFlashcardTimerUIProgressTimer);
+            gFlashcardTimerUIProgressTimer = 0;
+        }
+        // Repaint to show fully shrunk (centered)
+        InvalidateRect(gFlashcardTimerUIHwnd, nullptr, TRUE);
+        // Schedule expiry overlay after a brief moment
+        SetTimer(gFlashcardTimerUIHwnd, kFlashcardTimerUIOverlayTimerId, 500, nullptr);
+    } else {
+        // Repaint to show progress
+        InvalidateRect(gFlashcardTimerUIHwnd, nullptr, TRUE);
+    }
+}
+
+// Show the "timer done" overlay (beep + timer glyph) when 60s cap is reached
+// Forward declaration
+void FlashcardShowTimerDoneOverlay(MainWindow* win);
+
+void FlashcardStudyTimerShowExpiry(MainWindow* win) {
+    // Play beep
+    MessageBeep(MB_OK);
+    // Show our own timer done overlay (centered "∴" glyph)
+    FlashcardShowTimerDoneOverlay(win);
+    logf("[fc] TimerUIShowExpiry - 60s cap reached, showing expiry overlay\n");
+}
+
+// --- Timer Done Overlay (similar to AutoScroll's, but local to avoid static linkage) ---
+
+static HWND gFlashcardTimerDoneHwnd = nullptr;
+static constexpr UINT_PTR kFlashcardTimerDoneOverlayTimerId = 97;
+static constexpr wchar_t kFlashcardTimerDoneOverlayClass[] = L"TumatraFlashcardTimerDoneOverlay";
+
+static LRESULT CALLBACK FlashcardTimerDoneOverlayProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    switch (msg) {
+        case WM_ERASEBKGND: {
+            RECT rc;
+            GetClientRect(hwnd, &rc);
+            HBRUSH br = CreateSolidBrush(ThemeWindowBackgroundColor());
+            FillRect((HDC)wp, &rc, br);
+            DeleteObject(br);
+            return 1;
+        }
+        case WM_PAINT: {
+            PAINTSTRUCT ps;
+            HDC hdc = BeginPaint(hwnd, &ps);
+            RECT rc;
+            GetClientRect(hwnd, &rc);
+            SetBkMode(hdc, TRANSPARENT);
+            SetTextColor(hdc, ThemeWindowTextColor());
+            HFONT hFont = CreateFontW(DpiScale(hwnd, 52), 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+                                      OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+                                      DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
+            HFONT hOld = (HFONT)SelectObject(hdc, hFont);
+            DrawTextW(hdc, L"\u2234", -1, &rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+            SelectObject(hdc, hOld);
+            DeleteObject(hFont);
+            EndPaint(hwnd, &ps);
+            return 0;
+        }
+        case WM_TIMER:
+            if (wp == kFlashcardTimerDoneOverlayTimerId) {
+                KillTimer(hwnd, kFlashcardTimerDoneOverlayTimerId);
+                DestroyWindow(hwnd);
+                gFlashcardTimerDoneHwnd = nullptr;
+            }
+            return 0;
+        case WM_LBUTTONDOWN:
+            KillTimer(hwnd, kFlashcardTimerDoneOverlayTimerId);
+            DestroyWindow(hwnd);
+            gFlashcardTimerDoneHwnd = nullptr;
+            return 0;
+        case WM_DESTROY:
+            gFlashcardTimerDoneHwnd = nullptr;
+            return 0;
+        default:
+            break;
+    }
+    return DefWindowProcW(hwnd, msg, wp, lp);
+}
+
+static void RegisterFlashcardTimerDoneOverlayClass() {
+    static bool registered = false;
+    if (registered) return;
+    registered = true;
+    WNDCLASSEXW wc = {};
+    wc.cbSize = sizeof(wc);
+    wc.lpfnWndProc = FlashcardTimerDoneOverlayProc;
+    wc.hInstance = GetModuleHandleW(nullptr);
+    wc.lpszClassName = kFlashcardTimerDoneOverlayClass;
+    wc.hbrBackground = nullptr; // WM_ERASEBKGND paints the theme surface
+    RegisterClassExW(&wc);
+}
+
+void FlashcardShowTimerDoneOverlay(MainWindow* win) {
+    if (gFlashcardTimerDoneHwnd) {
+        KillTimer(gFlashcardTimerDoneHwnd, kFlashcardTimerDoneOverlayTimerId);
+        DestroyWindow(gFlashcardTimerDoneHwnd);
+        gFlashcardTimerDoneHwnd = nullptr;
+    }
+    RegisterFlashcardTimerDoneOverlayClass();
+    int screenW = GetSystemMetrics(SM_CXSCREEN);
+    int screenH = GetSystemMetrics(SM_CYSCREEN);
+    int overlayW = DpiScale(win->hwndFrame, 200);
+    int overlayH = DpiScale(win->hwndFrame, 80);
+    int x = (screenW - overlayW) / 2;
+    int y = screenH - overlayH - DpiScale(win->hwndFrame, 40);
+    HWND hwndPopup = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, kFlashcardTimerDoneOverlayClass, L"",
+                                     WS_POPUP | WS_VISIBLE, x, y, overlayW, overlayH, nullptr, nullptr,
+                                     GetModuleHandleW(nullptr), nullptr);
+    if (!hwndPopup) return;
+    gFlashcardTimerDoneHwnd = hwndPopup;
+    ShowWindow(hwndPopup, SW_SHOW);
+    UpdateWindow(hwndPopup);
+    SetTimer(hwndPopup, kFlashcardTimerDoneOverlayTimerId, 3000, nullptr);
 }

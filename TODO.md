@@ -3,7 +3,6 @@
 2. Completed features/fixes live in [LOG.md](LOG.md) (per-session) + [CHANGELOG.md](CHANGELOG.md) (per-release).
 3. User manual-test items = items only the user can validate.
 4. Housekeeping (2026-10-20, s36-ae; re-triaged s36-at): all `[x]` blocks archived — details live in LOG per session entry; this file lists open work only.
-5. Mark with ´🟡´ → [🟡] the processes in development so other agents can schedule themselves and avoid conflicts.
 
 ## Dev tooling / analysis — open items
 
@@ -28,8 +27,21 @@
 
 - [ ] User confirm on a real book: autoscroll acceptance over TC2 (1L→1R→2L→2R, no jump), drag speed, OCR text selection per column. The three s35 fixes (stall-on-hover, drag-slow, per-column selection) are code-verified + E2E PASS — see LOG s35/s36-l.
 
-## Flashcards — open
+## Flashcards
+- [x] Timer capture core (shipped):
+  - Study timer (100Hz tick) starts when study mode is ON, stops when OFF
+  - Per-card cap: 60 seconds — stops counting time for that card (user advances manually, NO auto-advance)
+  - Main total (flashcard-stats.txt sidecar, keyed by date) — survives rename/delete/move
+  - Per-book reference: FileState.flashcardStudyTimeSec (persisted with file history)
+  - No time captured while revealMode is ON
+  - Files added: FlashcardStats.h/.cpp, timer ID kFlashcardStudyTimerID=16 in Canvas.h
 
+- [x] Home page: "Flashcards" tab under "Most Read" space (same structure as Read, showing book list + flashcard times)
+- [x] Calendar hover label: show "Read: Xh Ym / Flashcards: Xh Ym" for each day
+- [x] Graph: add peru-colored line for flashcard study time (separate from reading time)
+- [x] Study timer UI: horizontal progress bar at bottom (symmetrical shrink to center), 2px silver line, beep + timer glyph on expiry (like autoscroll)
+
+### Tests
 - [ ] **FC-X1 live test** (shipped s36-m): cross-page cloze — user test on a real book (2-page passage).
 - [ ] **FC-M1** tests: SM-2 (intervals/ease cap/relearn), study-JSON roundtrip, due filter — after Image Occlusion lands.
 - [ ] **FC-M5** rate keys 1-4 have no visual hint (no rate buttons/tooltips on toolbar).

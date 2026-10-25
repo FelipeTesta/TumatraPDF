@@ -690,6 +690,7 @@ function sumatrapdf_files()
     "Flashcard.*",
     "FlashcardSidebar.*",
     "FlashcardToolbar.*",
+    "FlashcardStats.*",
     "Commands_Flashcard.*",
     "Commands_AutoScroll.*",
     "Commands_ArchTools.*",

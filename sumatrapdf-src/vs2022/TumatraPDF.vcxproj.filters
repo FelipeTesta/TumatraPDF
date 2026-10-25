@@ -249,6 +249,9 @@
     <ClInclude Include="..\src\FlashcardSidebar.h">
       <Filter>src</Filter>
     </ClInclude>
+    <ClInclude Include="..\src\FlashcardStats.h">
+      <Filter>src</Filter>
+    </ClInclude>
     <ClInclude Include="..\src\FormFields.h">
       <Filter>src</Filter>
     </ClInclude>
@@ -795,6 +798,9 @@
       <Filter>src</Filter>
     </ClCompile>
     <ClCompile Include="..\src\FlashcardSidebar.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\FlashcardStats.cpp">
       <Filter>src</Filter>
     </ClCompile>
     <ClCompile Include="..\src\FlashcardToolbar.cpp">

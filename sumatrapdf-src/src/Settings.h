@@ -67,6 +67,9 @@ struct FlashcardSettings {
     // study queue: 0 = new first, 1 = new last, 2 = mixed (interleaved
     // proportionally)
     int newCardsPosition;
+    // alpha (0-255) for the flashcard translucent gray marker. Lower values
+    // make the marker more subtle. Default 10 for very subtle highlighting.
+    int flashcardMarkerAlpha;
 };
 
 // top, right, bottom and left margin (in that order) between window and
@@ -608,6 +611,8 @@ struct FileState {
     float autoScrollSpeedMultiplier;
     // total seconds of reading time (auto-scroll active) for this document
     int readingTimeSec;
+    // total seconds of flashcard study time for this document
+    int flashcardStudyTimeSec;
     // invert page colors for this document
     bool invertColors;
     // contrast overlay enabled for this document
@@ -1095,15 +1100,16 @@ static const StructInfo gTrimInfo = {sizeof(Trim),
 static const FieldInfo gFlashcardSettingsFields[] = {
     {offsetof(FlashcardSettings, randomOrder), SettingType::Bool, false},
     {offsetof(FlashcardSettings, newCardsPosition), SettingType::Int, 2},
+    {offsetof(FlashcardSettings, flashcardMarkerAlpha), SettingType::Int, 10},
 };
 static const StructInfo gFlashcardSettingsInfo = {
     sizeof(FlashcardSettings),
-    2,
+    3,
     gFlashcardSettingsFields,
-    "RandomOrder\0NewCardsPosition",
+    "RandomOrder\0NewCardsPosition\0FlashcardMarkerAlpha",
     "if true, flashcard study presents cards in random order instead of document order\0where new (never rated) cards "
     "go relative to due reviews in the study queue: 0 = new first, 1 = new last, 2 = mixed (interleaved "
-    "proportionally)",
+    "proportionally)\0flashcard marker alpha (0-255, lower = more subtle, default 10)",
     false};
 
 static const FieldInfo gWindowMarginFields[] = {
@@ -1652,6 +1658,7 @@ static const FieldInfo gFileStateFields[] = {
     {offsetof(FileState, tocState), SettingType::IntArray, 0},
     {offsetof(FileState, autoScrollSpeedMultiplier), SettingType::Float, (intptr_t)"0.008"},
     {offsetof(FileState, readingTimeSec), SettingType::Int, 0},
+    {offsetof(FileState, flashcardStudyTimeSec), SettingType::Int, 0},
     {offsetof(FileState, invertColors), SettingType::Bool, false},
     {offsetof(FileState, contrastEnabled), SettingType::Bool, false},
     {offsetof(FileState, contrastOpacity), SettingType::Int, 50},
@@ -1674,7 +1681,7 @@ static const FieldInfo gFileStateFields[] = {
 };
 static StructInfo gFileStateInfo = {
     sizeof(FileState),
-    42,
+    43,
     gFileStateFields,
     "FilePath\0Favorites\0IsPinned\0IsMissing\0OpenCount\0DecryptionKey\0UseDefaultState\0DisplayMode\0ScrollPos\0PageN"
     "o\0Zoom\0Rotation\0WindowState\0WindowPos\0ShowToc\0SidebarDx\0DisplayR2L\0BgCol\0TabCol\0ReparseIdx\0TocState\0Au"

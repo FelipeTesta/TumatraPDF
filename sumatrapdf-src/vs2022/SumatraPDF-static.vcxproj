@@ -1200,6 +1200,7 @@
     <ClInclude Include="..\src\Flags.h" />
     <ClInclude Include="..\src\Flashcard.h" />
     <ClInclude Include="..\src\FlashcardSidebar.h" />
+    <ClInclude Include="..\src\FlashcardStats.h" />
     <ClInclude Include="..\src\FormFields.h" />
     <ClInclude Include="..\src\GlobalPrefs.h" />
     <ClInclude Include="..\src\GumboHelpers.h" />
@@ -1421,6 +1422,7 @@
     <ClCompile Include="..\src\Flags.cpp" />
     <ClCompile Include="..\src\Flashcard.cpp" />
     <ClCompile Include="..\src\FlashcardSidebar.cpp" />
+    <ClCompile Include="..\src\FlashcardStats.cpp" />
     <ClCompile Include="..\src\FlashcardToolbar.cpp" />
     <ClCompile Include="..\src\FormFields.cpp" />
     <ClCompile Include="..\src\GlobalPrefs.cpp" />

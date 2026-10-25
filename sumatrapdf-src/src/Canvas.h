@@ -41,6 +41,8 @@ constexpr uint kSelectionToolbarShowDelayInMs = 500;
 constexpr UINT_PTR kTouchLongPressTimerID = 14;
 // Timer for continuous auto-scroll (CmdAutoScrollToggle)
 constexpr UINT_PTR kContinuousAutoScrollTimerID = 15;
+// Flashcard study timer ID
+constexpr UINT_PTR kFlashcardStudyTimerID = 16;
 
 void CreateContrastOverlay(MainWindow* win);
 void DestroyContrastOverlay(MainWindow* win);

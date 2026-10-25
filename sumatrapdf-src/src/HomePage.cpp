@@ -39,6 +39,7 @@
 #include "AppSettings.h"
 #include "Darkmodelib.h"
 #include "SvgIcons.h"
+#include "FlashcardStats.h"
 
 // how the shared tip code (TipText.cpp) opens a url link
 static void OpenTipUrl(Str url) {
@@ -1212,6 +1213,10 @@ struct HomeStatsWnd : VirtWnd {
     int rankScroll = 0; // first visible row
     int rankRows = 0;   // rows that fit (recomputed in Paint)
     int rankCount = 0;  // total ranked books (recomputed in Paint)
+    // Flashcards tab (user request): toggle between Reading and Flashcards stats
+    bool flashcardMode = false; // false = Reading stats, true = Flashcards stats
+    Rect rcReadTab;     // Read tab hit rect
+    Rect rcFlashcardTab; // Flashcards tab hit rect
     // month-separated grid geometry (Paint refreshes; shared with handlers):
     // monthGapPx = extra x separation between month blocks; monthStartCol[m]
     // = first week column of month m (index 1..12)
@@ -1297,29 +1302,80 @@ void HomeStatsWnd::Paint(VirtWndPaintCtx& ctx) {
     }
     int heatX0 = b.x + rankW + (rankW > 0 ? pad * 2 : 0);
     int heatW = b.x + b.dx - heatX0;
+
+    // ranked is used in both rankW > 0 and totals line, so declare here
+    Vec<FileState*> ranked;
+
     if (rankW > 0) {
         g->DrawString(L"Most read", -1, &fontTitle, Gdiplus::PointF((float)b.x, (float)b.y), &valBrush);
+
+        // --- tabs: Read / Flashcards ---
+        int tabY = b.y + dpi(18);
+        int tabDy = dpi(20);
+        int tabPad = dpi(10);
+        // measure tab widths
+        TempStr readLabel = _TRA("Read");
+        TempStr fcLabel = _TRA("Flashcards");
+        Gdiplus::RectF rRead, rFc;
+        g->MeasureString(ToWStrTemp(Str(readLabel)).s, -1, &fontLabel, Gdiplus::PointF(0, 0), &rRead);
+        g->MeasureString(ToWStrTemp(Str(fcLabel)).s, -1, &fontLabel, Gdiplus::PointF(0, 0), &rFc);
+        int readTabDx = (int)rRead.Width + tabPad * 2;
+        int fcTabDx = (int)rFc.Width + tabPad * 2;
+        int tabsTotalW = readTabDx + fcTabDx;
+        int tabsStartX = b.x + (rankW - tabsTotalW) / 2; // centered in ranking column
+        if (tabsStartX < b.x) tabsStartX = b.x;
+        // store tab rects for hit-testing
+        rcReadTab = {tabsStartX, tabY, readTabDx, tabDy};
+        rcFlashcardTab = {tabsStartX + readTabDx, tabY, fcTabDx, tabDy};
+        // draw tabs
+        Gdiplus::Pen tabBorderPen(GpCol(ac.cellOutline));
+        Gdiplus::SolidBrush tabActiveBrush(GpCol(ac.silverHi));
+        Gdiplus::SolidBrush tabInactiveBrush(GpCol(ac.cellEmpty));
+        Gdiplus::SolidBrush tabTextActiveBrush(GpCol(ac.textStrong));
+        Gdiplus::SolidBrush tabTextInactiveBrush(GpCol(ac.text));
+        // Read tab
+        Gdiplus::SolidBrush* readBrush = flashcardMode ? &tabInactiveBrush : &tabActiveBrush;
+        Gdiplus::SolidBrush* readTextBrush = flashcardMode ? &tabTextInactiveBrush : &tabTextActiveBrush;
+        g->FillRectangle(readBrush, rcReadTab.x, rcReadTab.y, rcReadTab.dx, rcReadTab.dy);
+        g->DrawRectangle(&tabBorderPen, rcReadTab.x, rcReadTab.y, rcReadTab.dx, rcReadTab.dy);
+        g->DrawString(ToWStrTemp(Str(readLabel)).s, -1, &fontLabel,
+                      Gdiplus::PointF((float)(rcReadTab.x + tabPad), (float)(rcReadTab.y + (rcReadTab.dy - (int)rRead.Height) / 2)),
+                      readTextBrush);
+        // Flashcards tab
+        Gdiplus::SolidBrush* fcBrush = flashcardMode ? &tabActiveBrush : &tabInactiveBrush;
+        Gdiplus::SolidBrush* fcTextBrush = flashcardMode ? &tabTextActiveBrush : &tabTextInactiveBrush;
+        g->FillRectangle(fcBrush, rcFlashcardTab.x, rcFlashcardTab.y, rcFlashcardTab.dx, rcFlashcardTab.dy);
+        g->DrawRectangle(&tabBorderPen, rcFlashcardTab.x, rcFlashcardTab.y, rcFlashcardTab.dx, rcFlashcardTab.dy);
+        g->DrawString(ToWStrTemp(Str(fcLabel)).s, -1, &fontLabel,
+                      Gdiplus::PointF((float)(rcFlashcardTab.x + tabPad), (float)(rcFlashcardTab.y + (rcFlashcardTab.dy - (int)rFc.Height) / 2)),
+                      fcTextBrush);
+
+        // build the ranked list (same for both tabs — we filter by time > 0 in the
+        // active mode's field, so the list reflects the selected view)
         Vec<FileState*> all;
         gFileHistory.GetRecentlyOpenedOrder(all);
-        // sort by reading time desc (selection: top 8 with time > 0)
-        Vec<FileState*> ranked;
         for (int i = 0; i < len(all); i++) {
             FileState* fs = all[i];
-            if (fs && fs->readingTimeSec > 0 && len(fs->filePath) > 0) {
+            int timeSec = flashcardMode ? fs->flashcardStudyTimeSec : fs->readingTimeSec;
+            if (fs && timeSec > 0 && len(fs->filePath) > 0) {
                 ranked.Append(fs);
             }
         }
-        // insertion sort desc by readingTimeSec (Vec has no iterators)
+        // insertion sort desc by the active time field (Vec has no iterators)
         for (int i = 1; i < len(ranked); i++) {
             FileState* e = ranked[i];
             int j = i - 1;
-            while (j >= 0 && ranked[j]->readingTimeSec < e->readingTimeSec) {
+            int eSec = flashcardMode ? e->flashcardStudyTimeSec : e->readingTimeSec;
+            while (j >= 0) {
+                int jSec = flashcardMode ? ranked[j]->flashcardStudyTimeSec : ranked[j]->readingTimeSec;
+                if (jSec >= eSec) break;
                 ranked[j + 1] = ranked[j];
                 j--;
             }
             ranked[j + 1] = e;
         }
-        int y = b.y + pad + dpi(18);
+
+        int y = b.y + pad + dpi(40); // below tabs
         int rowDy = dpi(17);
         // D3: internal scroll — rows window over the ranked list (wheel-driven)
         int totalsDy = dpi(14);
@@ -1338,7 +1394,14 @@ void HomeStatsWnd::Paint(VirtWndPaintCtx& ctx) {
         }
         rcRank = {b.x, listTop, rankW, listBottom - listTop};
         // bars are proportional to the top reader (ranked[0] after the sort)
-        int maxSecRanked = rankCount > 0 ? ranked[0]->readingTimeSec : 1;
+        int maxSecRanked = 1;
+        if (rankCount > 0) {
+            if (flashcardMode) {
+                maxSecRanked = ranked[0]->flashcardStudyTimeSec;
+            } else {
+                maxSecRanked = ranked[0]->readingTimeSec;
+            }
+        }
         if (maxSecRanked < 1) {
             maxSecRanked = 1;
         }
@@ -1347,7 +1410,8 @@ void HomeStatsWnd::Paint(VirtWndPaintCtx& ctx) {
         for (int i = 0; i < nRows; i++) {
             FileState* fs = ranked[rankScroll + i];
             TempStr baseName = path::GetBaseNameTemp(fs->filePath);
-            TempStr timeTxt = HomeStatsFormatMinTemp(fs->readingTimeSec);
+            int sec = flashcardMode ? fs->flashcardStudyTimeSec : fs->readingTimeSec;
+            TempStr timeTxt = HomeStatsFormatMinTemp(sec);
             int rowY = listTop + i * rowDy;
             // name column (approximate clip to ~55% of the ranking width)
             int nameW = (rankW * 55) / 100 - pad;
@@ -1362,7 +1426,7 @@ void HomeStatsWnd::Paint(VirtWndPaintCtx& ctx) {
             }
             g->DrawString(ToWStrTemp(nameStr).s, -1, &fontLabel, Gdiplus::PointF((float)(b.x + pad), (float)rowY),
                           &txtBrush);
-            // time text, then a bar proportional to the reading time (D3)
+            // time text, then a bar proportional to the time (D3)
             Gdiplus::RectF txtRc;
             g->MeasureString(ToWStrTemp(Str(timeTxt)).s, -1, &fontLabel, Gdiplus::PointF(0, 0), &txtRc);
             int barX = b.x + pad + nameW + dpi(6);
@@ -1373,14 +1437,14 @@ void HomeStatsWnd::Paint(VirtWndPaintCtx& ctx) {
             if (barMaxW < dpi(10)) {
                 barMaxW = dpi(10);
             }
-            int barW = (int)(((float)fs->readingTimeSec / (float)maxSecRanked) * (float)barMaxW);
-            if (fs->readingTimeSec > 0 && barW < 2) {
+            int barW = (int)(((float)sec / (float)maxSecRanked) * (float)barMaxW);
+            if (sec > 0 && barW < 2) {
                 barW = 2;
             }
             g->FillRectangle(&barBrush, barStartX, rowY + dpi(4), barW, rowDy - dpi(9));
         }
         if (rankCount == 0) {
-            g->DrawString(L"Read with auto-scroll to collect stats", -1, &fontLabel,
+            g->DrawString(flashcardMode ? L"Study flashcards to collect stats" : L"Read with auto-scroll to collect stats", -1, &fontLabel,
                           Gdiplus::PointF((float)(b.x + pad), (float)y), &txtBrush);
         } else if (rankCount > rankRows) {
             // scroll hint
@@ -1396,10 +1460,17 @@ void HomeStatsWnd::Paint(VirtWndPaintCtx& ctx) {
         SYSTEMTIME st{};
         GetLocalTime(&st);
         int todayKey = (int)st.wYear * 10000 + (int)st.wMonth * 100 + (int)st.wDay;
-        int todaySec = ReadingStatsGetDaySec(todayKey);
-        int totalSec = ReadingStatsGetTotalSec();
-        TempStr totals =
-            fmt("Today %s | Total: %s", Str(HomeStatsFormatMinTemp(todaySec)), Str(HomeStatsFormatMinTemp(totalSec)));
+        int todaySec, totalSec;
+        TempStr totals;
+        if (flashcardMode) {
+            todaySec = FlashcardStatsGetDaySec(todayKey);
+            totalSec = FlashcardStatsGetTotalSec();
+            totals = fmt("Today %s | Total: %s", Str(HomeStatsFormatMinTemp(todaySec)), Str(HomeStatsFormatMinTemp(totalSec)));
+        } else {
+            todaySec = ReadingStatsGetDaySec(todayKey);
+            totalSec = ReadingStatsGetTotalSec();
+            totals = fmt("Today %s | Total: %s", Str(HomeStatsFormatMinTemp(todaySec)), Str(HomeStatsFormatMinTemp(totalSec)));
+        }
         g->DrawString(ToWStrTemp(Str(totals)).s, -1, &fontLabel,
                       Gdiplus::PointF((float)(b.x + pad), (float)(b.y + b.dy - pad - dpi(14))), &valBrush);
     }
@@ -1563,7 +1634,7 @@ void HomeStatsWnd::Paint(VirtWndPaintCtx& ctx) {
 // D7: line-graph calendar mode — day-of-year (x) x reading hours (y) for the
 // browsed year. Month ticks on the x axis, data points + a smooth curve,
 // hours scale on the left. Same data as the heatmap, one point per day with
-// reading time > 0.
+// reading time > 0. Also draws a separate peru-colored line for flashcard study time.
 void HomeStatsWnd::PaintGraph(Gdiplus::Graphics* g, Rect b, int heatX0, int heatW, int pad) {
     auto dpi = [this](int v) { return DpiScale(win->hwndFrame, v); };
     DsAccents ac = DsAccentsGet(); // theme design tokens (D4); resolved per paint
@@ -1573,6 +1644,8 @@ void HomeStatsWnd::PaintGraph(Gdiplus::Graphics* g, Rect b, int heatX0, int heat
     Gdiplus::SolidBrush silverBrush(GpCol(ac.silverHi));
     Gdiplus::Pen axisPen(GpCol(ac.axis));
     Gdiplus::Pen curvePen(GpCol(ac.silver), 1.8f);
+    // peru color for flashcard line (RGB: 205, 133, 63)
+    Gdiplus::Pen fcCurvePen(Gdiplus::Color(255, 205, 133, 63), 1.8f);
     Gdiplus::Pen todayPen(GpCol(ac.today), 1.6f); // orange: TODAY
 
     int chartTop = b.y + dpi(16) + dpi(12);
@@ -1586,18 +1659,20 @@ void HomeStatsWnd::PaintGraph(Gdiplus::Graphics* g, Rect b, int heatX0, int heat
     rcGrid = {heatX0 + labelDx, chartTop, heatW - labelDx, chartH};
 
     int daysInYear = HomeStatsDaysInYear(year);
-    // pass 1: max seconds (y scale)
+    // pass 1: max seconds (y scale) — reading AND flashcard
     int maxSec = 1;
     for (int doy = 1; doy <= daysInYear; doy++) {
         int mm = 0, dd = 0;
         HomeStatsDateFromDayOfYear(year, doy, &mm, &dd, nullptr);
-        int sec = ReadingStatsGetDaySec(year * 10000 + mm * 100 + dd);
-        if (sec > maxSec) {
-            maxSec = sec;
-        }
+        int dateKey = year * 10000 + mm * 100 + dd;
+        int readSec = ReadingStatsGetDaySec(dateKey);
+        int fcSec = FlashcardStatsGetDaySec(dateKey);
+        if (readSec > maxSec) maxSec = readSec;
+        if (fcSec > maxSec) maxSec = fcSec;
     }
-    // pass 2: points for days with data
-    Vec<Gdiplus::PointF> pts;
+    // pass 2: points for days with data (reading)
+    Vec<Gdiplus::PointF> readPts;
+    Vec<Gdiplus::PointF> fcPts;
     int todayDoy = 0;
     {
         SYSTEMTIME st{};
@@ -1618,17 +1693,23 @@ void HomeStatsWnd::PaintGraph(Gdiplus::Graphics* g, Rect b, int heatX0, int heat
     for (int doy = 1; doy <= daysInYear; doy++) {
         int mm = 0, dd = 0;
         HomeStatsDateFromDayOfYear(year, doy, &mm, &dd, nullptr);
-        int sec = ReadingStatsGetDaySec(year * 10000 + mm * 100 + dd);
-        if (sec <= 0) {
-            continue;
-        }
+        int dateKey = year * 10000 + mm * 100 + dd;
+        int readSec = ReadingStatsGetDaySec(dateKey);
+        int fcSec = FlashcardStatsGetDaySec(dateKey);
         float x = (float)rcGrid.x + ((float)(doy - 1) / (float)(daysInYear - 1)) * (float)rcGrid.dx;
-        float y = (float)chartBottom - ((float)sec / (float)maxSec) * (float)chartH;
-        pts.Append(Gdiplus::PointF(x, y));
+        if (readSec > 0) {
+            float y = (float)chartBottom - ((float)readSec / (float)maxSec) * (float)chartH;
+            readPts.Append(Gdiplus::PointF(x, y));
+        }
+        if (fcSec > 0) {
+            float y = (float)chartBottom - ((float)fcSec / (float)maxSec) * (float)chartH;
+            fcPts.Append(Gdiplus::PointF(x, y));
+        }
         if (doy == todayDoy) {
             // TODAY marker: small orange cross-hair on the point
-            g->DrawLine(&todayPen, x - (float)dpi(4), y, x + (float)dpi(4), y);
-            g->DrawLine(&todayPen, x, y - (float)dpi(4), x, y + (float)dpi(4));
+            float yRead = (float)chartBottom - ((float)ReadingStatsGetDaySec(dateKey) / (float)maxSec) * (float)chartH;
+            g->DrawLine(&todayPen, x - (float)dpi(4), yRead, x + (float)dpi(4), yRead);
+            g->DrawLine(&todayPen, x, yRead - (float)dpi(4), x, yRead + (float)dpi(4));
         }
     }
     // axes: x along the bottom
@@ -1654,17 +1735,27 @@ void HomeStatsWnd::PaintGraph(Gdiplus::Graphics* g, Rect b, int heatX0, int heat
                           &txtBrush);
         }
     }
-    // curve + data points
-    int nPts = len(pts);
-    if (nPts >= 2) {
-        g->DrawCurve(&curvePen, pts.LendData(), nPts);
+    // reading curve + data points (silver)
+    int nReadPts = len(readPts);
+    if (nReadPts >= 2) {
+        g->DrawCurve(&curvePen, readPts.LendData(), nReadPts);
     }
-    for (int i = 0; i < nPts; i++) {
-        const Gdiplus::PointF& p = pts[i];
+    for (int i = 0; i < nReadPts; i++) {
+        const Gdiplus::PointF& p = readPts[i];
         g->FillEllipse(&silverBrush, p.X - 2.5f, p.Y - 2.5f, 5.0f, 5.0f);
     }
-    if (nPts == 0) {
-        g->DrawString(L"Read with auto-scroll to collect stats", -1, &fontLabel,
+    // flashcard curve + data points (peru)
+    int nFcPts = len(fcPts);
+    if (nFcPts >= 2) {
+        g->DrawCurve(&fcCurvePen, fcPts.LendData(), nFcPts);
+    }
+    for (int i = 0; i < nFcPts; i++) {
+        const Gdiplus::PointF& p = fcPts[i];
+        Gdiplus::SolidBrush fcDotBrush(Gdiplus::Color(255, 205, 133, 63)); // peru
+        g->FillEllipse(&fcDotBrush, p.X - 2.5f, p.Y - 2.5f, 5.0f, 5.0f);
+    }
+    if (nReadPts == 0 && nFcPts == 0) {
+        g->DrawString(L"Read with auto-scroll or study flashcards to collect stats", -1, &fontLabel,
                       Gdiplus::PointF((float)rcGrid.x, (float)(chartTop + dpi(6))), &txtBrush);
     }
     // D1: section separator (the grid path draws it at the end of Paint)
@@ -1682,6 +1773,21 @@ bool HomeStatsWnd::OnMouseUp(VirtWndMouseEvent& e) {
     // ptWindow), while the rc* rects are in WINDOW coords (set in Paint from
     // ctx.bounds) — convert before hit-testing
     Point pt{e.pt.x + bounds.x, e.pt.y + bounds.y};
+    // Flashcards / Read tabs
+    if (rcReadTab.Contains(pt)) {
+        if (flashcardMode) {
+            flashcardMode = false;
+            HwndInvalidate(win->hwndCanvas);
+        }
+        return true;
+    }
+    if (rcFlashcardTab.Contains(pt)) {
+        if (!flashcardMode) {
+            flashcardMode = true;
+            HwndInvalidate(win->hwndCanvas);
+        }
+        return true;
+    }
     // D7: Grid <-> Graph toggle
     if (rcMode.Contains(pt)) {
         graphMode = !graphMode;
@@ -1742,7 +1848,8 @@ bool HomeStatsWnd::OnMouseMove(VirtWndMouseEvent& e) {
 bool HomeStatsWnd::OnSetCursor(Point pt) {
     // pt arrives LOCAL to our bounds; rcPrev/rcNext/rcMode are in window coords
     Point ptAbs{pt.x + bounds.x, pt.y + bounds.y};
-    if (rcPrev.Contains(ptAbs) || rcNext.Contains(ptAbs) || rcMode.Contains(ptAbs)) {
+    if (rcPrev.Contains(ptAbs) || rcNext.Contains(ptAbs) || rcMode.Contains(ptAbs)
+        || rcReadTab.Contains(ptAbs) || rcFlashcardTab.Contains(ptAbs)) {
         SetCursorCached(IDC_HAND);
     } else {
         SetCursorCached(IDC_ARROW);
@@ -1785,9 +1892,12 @@ TempStr HomeStatsWnd::GetTooltipTemp(Point pt) {
     if (!HomeStatsDateFromDayOfYear(year, hoverDay, &mm, &dd, nullptr)) {
         return {};
     }
-    int sec = ReadingStatsGetDaySec(year * 10000 + mm * 100 + dd);
-    TempStr t = HomeStatsFormatMinTemp(sec);
-    return fmt("%d-%02d-%02d: %s", year, mm, dd, Str(t));
+    int dateKey = year * 10000 + mm * 100 + dd;
+    int readSec = ReadingStatsGetDaySec(dateKey);
+    int fcSec = FlashcardStatsGetDaySec(dateKey);
+    TempStr readT = HomeStatsFormatMinTemp(readSec);
+    TempStr fcT = HomeStatsFormatMinTemp(fcSec);
+    return fmt("%d-%02d-%02d: Read: %s | Flashcards: %s", year, mm, dd, Str(readT), Str(fcT));
 }
 
 struct HomePageLayoutCache {

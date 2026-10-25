@@ -79,6 +79,7 @@ static ToolbarButtonInfo gToolbarButtons[] = {
     // symbol-only toggle (Tabler "bookmarks", MIT) — checked = sidebar visible
     {TbIcon::Bookmarks, CmdToggleBookmarks, _TRN("Bookmarks")},
     {TbIcon::Print, CmdPrint, _TRN("Print")},
+    {TbIcon::Save, CmdSaveAnnotations, _TRN("Save")},
     {TbIcon::None, PageInfoId, nullptr}, // text box for page number + show current page / no of pages
     {TbIcon::PagePrev, CmdGoToPrevPage, _TRN("Previous Page")},
     {TbIcon::PageNext, CmdGoToNextPage, _TRN("Next Page")},
@@ -1841,7 +1842,30 @@ void UpdateToolbarPageText(MainWindow* win, int pageCount, bool updateOnly) {
         ShowWindow(win->hwndPageTotal, SW_HIDE);
         return;
     }
-    int anchorCmd = HasPermission(Perm::PrinterAccess) ? CmdPrint : CmdOpenFile;
+    // anchor on the built-in button right before the page box slot, walking
+    // the table backwards for the last one that is actually available (TB_GETRECT
+    // fails for hidden buttons, e.g. CmdPrint without PrinterAccess — issue
+    // #5563). Was hard-coded to CmdPrint: inserting the Save button (s36-aw)
+    // between Print and the slot made the box overlap the Save icon.
+    int slotIdx = -1;
+    for (int i = 0; i < kButtonsCount; i++) {
+        if (gToolbarButtons[i].cmdId == PageInfoId) {
+            slotIdx = i;
+            break;
+        }
+    }
+    int anchorCmd = CmdOpenFile; // always shown when a document is open
+    for (int i = slotIdx - 1; i >= 0; i--) {
+        int cmd = gToolbarButtons[i].cmdId;
+        if (cmd == 0 || gToolbarButtons[i].bmpIndex == TbIcon::None) {
+            continue; // separator or text placeholder
+        }
+        if (!IsCmdAvailable(win, cmd)) {
+            continue;
+        }
+        anchorCmd = cmd;
+        break;
+    }
     Rect r = TbGetRectForCmd(win->hwndToolbar, anchorCmd);
     ShowWindow(win->hwndPageLabel, SW_SHOW);
     ShowWindow(win->hwndPageBg, SW_SHOW);
@@ -2632,9 +2656,10 @@ TempStr ToolbarButtonsResultTemp(int* exitCodeOut) {
         RECT r{};
         SendMessageW(hwnd, TB_GETITEMRECT, (WPARAM)i, (LPARAM)&r);
         bool hidden = (bi.fsState & TBSTATE_HIDDEN) != 0;
-        out.Append(fmt("idx=%d cmd=%d hidden=%d rect=%d,%d,%d,%d style=0x%02X cx=%d text=%s\n", i, (int)bi.idCommand,
-                       hidden ? 1 : 0, (int)r.left, (int)r.top, (int)r.right, (int)r.bottom, (int)bi.fsStyle,
-                       (int)bi.cx, ToUtf8Temp(buf)));
+        bool enabled = (bi.fsState & TBSTATE_ENABLED) != 0;
+        out.Append(fmt("idx=%d cmd=%d hidden=%d enabled=%d rect=%d,%d,%d,%d style=0x%02X cx=%d text=%s\n", i,
+                       (int)bi.idCommand, hidden ? 1 : 0, enabled ? 1 : 0, (int)r.left, (int)r.top, (int)r.right,
+                       (int)r.bottom, (int)bi.fsStyle, (int)bi.cx, ToUtf8Temp(buf)));
     }
     for (int i = 0; i < nTools; i++) {
         TTTOOLINFOW ti{};
