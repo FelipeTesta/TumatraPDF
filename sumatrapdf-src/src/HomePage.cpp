@@ -41,6 +41,9 @@
 #include "SvgIcons.h"
 #include "FlashcardStats.h"
 
+// Forward declaration (defined in ToolbarLayout.cpp)
+bool DsIsDarkTheme();
+
 // how the shared tip code (TipText.cpp) opens a url link
 static void OpenTipUrl(Str url) {
     // documentation links open in the embedded manual browser
@@ -1327,12 +1330,15 @@ void HomeStatsWnd::Paint(VirtWndPaintCtx& ctx) {
         // store tab rects for hit-testing
         rcReadTab = {tabsStartX, tabY, readTabDx, tabDy};
         rcFlashcardTab = {tabsStartX + readTabDx, tabY, fcTabDx, tabDy};
-        // draw tabs
+        // draw tabs - improved contrast for readability
+        // Active tab: dark background with white text; Inactive: light background with dark text
+        // This works on both light and dark themes
+        bool darkTheme = DsIsDarkTheme();
         Gdiplus::Pen tabBorderPen(GpCol(ac.cellOutline));
-        Gdiplus::SolidBrush tabActiveBrush(GpCol(ac.silverHi));
-        Gdiplus::SolidBrush tabInactiveBrush(GpCol(ac.cellEmpty));
-        Gdiplus::SolidBrush tabTextActiveBrush(GpCol(ac.textStrong));
-        Gdiplus::SolidBrush tabTextInactiveBrush(GpCol(ac.text));
+        Gdiplus::SolidBrush tabActiveBrush(darkTheme ? GpCol(ac.textStrong) : GpCol(ac.text));
+        Gdiplus::SolidBrush tabInactiveBrush(darkTheme ? GpCol(ac.cellOutline) : GpCol(ac.cellEmpty));
+        Gdiplus::SolidBrush tabTextActiveBrush(darkTheme ? GpCol(ac.text) : GpCol(ac.textStrong));
+        Gdiplus::SolidBrush tabTextInactiveBrush(darkTheme ? GpCol(ac.silverHi) : GpCol(ac.text));
         // Read tab
         Gdiplus::SolidBrush* readBrush = flashcardMode ? &tabInactiveBrush : &tabActiveBrush;
         Gdiplus::SolidBrush* readTextBrush = flashcardMode ? &tabTextInactiveBrush : &tabTextActiveBrush;
@@ -1452,7 +1458,7 @@ void HomeStatsWnd::Paint(VirtWndPaintCtx& ctx) {
             g->DrawString(ToWStrTemp(Str(more)).s, -1, &fontLabel,
                           Gdiplus::PointF((float)(b.x + pad), (float)(listBottom - dpi(14))), &txtBrush);
         }
-        // totals line at the bottom of the ranking column: today + all-time.
+        // totals line at the bottom of the ranking column: today + all-time for BOTH reading and flashcards.
         // The all-time value comes from the daily sidecar (not from the sum of
         // the FileState entries), so it survives document rename/delete/move —
         // it is the "master" reading-time total (user 2026-10-21; the old
@@ -1460,17 +1466,13 @@ void HomeStatsWnd::Paint(VirtWndPaintCtx& ctx) {
         SYSTEMTIME st{};
         GetLocalTime(&st);
         int todayKey = (int)st.wYear * 10000 + (int)st.wMonth * 100 + (int)st.wDay;
-        int todaySec, totalSec;
-        TempStr totals;
-        if (flashcardMode) {
-            todaySec = FlashcardStatsGetDaySec(todayKey);
-            totalSec = FlashcardStatsGetTotalSec();
-            totals = fmt("Today %s | Total: %s", Str(HomeStatsFormatMinTemp(todaySec)), Str(HomeStatsFormatMinTemp(totalSec)));
-        } else {
-            todaySec = ReadingStatsGetDaySec(todayKey);
-            totalSec = ReadingStatsGetTotalSec();
-            totals = fmt("Today %s | Total: %s", Str(HomeStatsFormatMinTemp(todaySec)), Str(HomeStatsFormatMinTemp(totalSec)));
-        }
+        int readTodaySec = ReadingStatsGetDaySec(todayKey);
+        int readTotalSec = ReadingStatsGetTotalSec();
+        int fcTodaySec = FlashcardStatsGetDaySec(todayKey);
+        int fcTotalSec = FlashcardStatsGetTotalSec();
+        TempStr totals = fmt("Read: Today %s | Total: %s    Flashcards: Today %s | Total: %s",
+                             Str(HomeStatsFormatMinTemp(readTodaySec)), Str(HomeStatsFormatMinTemp(readTotalSec)),
+                             Str(HomeStatsFormatMinTemp(fcTodaySec)), Str(HomeStatsFormatMinTemp(fcTotalSec)));
         g->DrawString(ToWStrTemp(Str(totals)).s, -1, &fontLabel,
                       Gdiplus::PointF((float)(b.x + pad), (float)(b.y + b.dy - pad - dpi(14))), &valBrush);
     }

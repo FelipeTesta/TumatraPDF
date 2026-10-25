@@ -20,7 +20,7 @@ ToolbarTokens gToolbarTokens;
 // --- shared design tokens (colors + fonts) ---
 // True when the current theme is dark: decided from the window background
 // luminance so it follows any theme (incl. custom ones), not a fixed list.
-static bool DsIsDarkTheme() {
+bool DsIsDarkTheme() {
     COLORREF bg = ThemeWindowBackgroundColor();
     int lum = (GetRValue(bg) * 299 + GetGValue(bg) * 587 + GetBValue(bg) * 114) / 1000;
     return lum < 128;

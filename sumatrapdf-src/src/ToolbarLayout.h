@@ -49,6 +49,10 @@ const WCHAR* DsFontFamily();
 float DsFontSizeLabel();
 float DsFontSizeTitle();
 
+// True when the current theme is dark: decided from the window background
+// luminance so it follows any theme (incl. custom ones), not a fixed list.
+bool DsIsDarkTheme();
+
 // Specification for a single child window within a toolbar slot
 struct ToolbarChildSpec {
     int ctrlId;              // Command ID (e.g., CmdAutoScrollTimerToggle) or 0 for static
