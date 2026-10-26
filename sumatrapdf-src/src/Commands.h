@@ -333,7 +333,9 @@ enum {
     CmdEditImageApply = 522,
     CmdArchMeasureRadius = 523,
     CmdArchRefLine = 524,
-    CmdNone = 525,
+    CmdFlashcardStudyTimerToggle = 525,
+    CmdFlashcardStudyTimerEdit = 526,
+    CmdNone = 527,
 
     /* range for file history */
     CmdFileHistoryFirst,

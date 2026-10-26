@@ -26,8 +26,10 @@ extern "C" {
 #include "MainWindow.h"
 #include "WindowTab.h"
 #include "Toolbar.h"
+#include "SvgIcons.h"
 #include "ToolbarLayout.h"
 #include "Theme.h"
+#include "Darkmodelib.h"
 #include "AppSettings.h"
 #include "Flashcard.h"
 
@@ -44,6 +46,368 @@ static COLORREF kFcSyncMissing = RGB(229, 57, 53);    // red: PDF missing (resyn
 static COLORREF kFcHoldMinor = RGB(255, 152, 0);      // hold-to-confirm minor (2s, orange)
 static COLORREF kFcHoldMajor = RGB(229, 57, 53);      // hold-to-confirm major (5s, red)
 static COLORREF kFcCheckedAccent = RGB(66, 133, 244); // selected/checked accent (blue)
+
+// ---- study timer trio (checkbox + "Timer:" + minutes edit) ----------------
+// The trio lives INSIDE the Study button's rect, copying the autoscroll
+// format (CreateTimerControls / PositionToolbarChildWindows, Toolbar.cpp):
+// the button is widened by leading spaces in its label, the three controls
+// are children of the toolbar positioned over the button's left part, and
+// the custom-draw POSTPAINT (FlashcardReBarSubclassProc) draws the real
+// label centered in the remaining right part (user sketch: "| [] timer -
+// Study |"). BS_CHECKBOX (not BS_AUTOCHECKBOX): the command handler owns the
+// state (R6-left lesson — keyboard/palette invocation stays in sync).
+
+// subclass ids for the flashcard-specific rebar/toolbar layers (the generic
+// ones installed by ToolbarApplyThemeToRebar use 0)
+constexpr UINT_PTR kFcRebarSubclassId = 0x4652;   // 'FR'
+constexpr UINT_PTR kFcToolbarSubclassId = 0x4653; // 'FS'
+
+// Width the trio occupies inside the Study button
+// (gap|checkbox|gap|"Timer:"|gap|edit), measured from the toolbar's font —
+// control-independent, so it can run at button-build time.
+static int FlashcardMeasureTimerTrioDx(MainWindow* /*win*/, HWND hwndToolbar) {
+    const int gap = DpiScale(hwndToolbar, gToolbarTokens.ctrlGapX);
+    const int ctrlH = DpiScale(hwndToolbar, gToolbarTokens.ctrlH);
+    Size lbl = HwndMeasureText(hwndToolbar, "Timer:");
+    Size edit = HwndMeasureText(hwndToolbar, "8888");
+    int editW = std::max(edit.dx, DpiScale(hwndToolbar, 20));
+    return gap + ctrlH + gap + lbl.dx + gap + editW;
+}
+
+// Lay the trio out inside the Study button (copy of the autoscroll trio
+// layout): measure the pieces, hide the group when the anchor is missing or
+// too narrow, else place checkbox | label | edit left-to-right from the
+// button's left edge.
+static void FlashcardPositionTimerTrio(MainWindow* win) {
+    HWND hwndToolbar = win->flashcard.hwndToolbarFlashcard;
+    HWND hwndCheck = win->flashcard.hwndStudyTimerCheck;
+    HWND hwndLabel = win->flashcard.hwndStudyTimerLabel;
+    HWND hwndEdit = win->flashcard.hwndStudyTimerEdit;
+    if (!hwndToolbar || !hwndCheck || !hwndLabel || !hwndEdit) {
+        return;
+    }
+    Rect anchor = TbGetRectForCmd(hwndToolbar, CmdFlashcardStudy);
+    int gap = DpiScale(hwndToolbar, gToolbarTokens.ctrlGapX);
+    int ctrlH = DpiScale(hwndToolbar, gToolbarTokens.ctrlH);
+    Size editSz = HwndMeasureText(hwndEdit, "8888");
+    int editW = std::max(editSz.dx, DpiScale(hwndToolbar, 20));
+    Size labelSz = HwndMeasureText(hwndLabel, "Timer:");
+    int trioDx = gap + ctrlH + gap + labelSz.dx + gap + editW;
+    int margin = DpiScale(hwndToolbar, 4);
+    bool show = !anchor.IsEmpty() && anchor.dx >= trioDx + margin;
+    if (show) {
+        int y = anchor.y + (anchor.dy - ctrlH) / 2;
+        int x = anchor.x + gap;
+        MoveWindow(hwndCheck, x, y, ctrlH, ctrlH, TRUE);
+        x += ctrlH + gap;
+        MoveWindow(hwndLabel, x, y, labelSz.dx, ctrlH, TRUE);
+        x += labelSz.dx + gap;
+        MoveWindow(hwndEdit, x, y, editW, ctrlH, TRUE);
+    }
+    // one-shot witness for the E2E probe: in-proc geometry of anchor + trio
+    // (cross-process TB_GET* queries are unreliable — marshalling)
+    static bool logged = false;
+    if (!logged) {
+        logged = true;
+        RECT rcChk{}, rcLbl{}, rcEdt{};
+        GetWindowRect(hwndCheck, &rcChk);
+        GetWindowRect(hwndLabel, &rcLbl);
+        GetWindowRect(hwndEdit, &rcEdt);
+        MapWindowPoints(HWND_DESKTOP, hwndToolbar, (LPPOINT)&rcChk, 2);
+        MapWindowPoints(HWND_DESKTOP, hwndToolbar, (LPPOINT)&rcLbl, 2);
+        MapWindowPoints(HWND_DESKTOP, hwndToolbar, (LPPOINT)&rcEdt, 2);
+        logf("[fc] trio: anchor=(%d,%d %dx%d) trioDx=%d show=%d\n", anchor.x, anchor.y, anchor.dx, anchor.dy, trioDx,
+             show ? 1 : 0);
+        logf("[fc] trio: check=(%d,%d %dx%d) label=(%d,%d %dx%d) edit=(%d,%d %dx%d) [toolbar-client]\n", rcChk.left,
+             rcChk.top, rcChk.right - rcChk.left, rcChk.bottom - rcChk.top, rcLbl.left, rcLbl.top,
+             rcLbl.right - rcLbl.left, rcLbl.bottom - rcLbl.top, rcEdt.left, rcEdt.top, rcEdt.right - rcEdt.left,
+             rcEdt.bottom - rcEdt.top);
+    }
+    for (HWND h : {hwndCheck, hwndLabel, hwndEdit}) {
+        bool visible = IsWindowVisible(h) != FALSE;
+        if (visible != show) {
+            ShowWindow(h, show ? SW_SHOW : SW_HIDE);
+        }
+    }
+}
+
+// Rebar-side custom draw for the flashcard toolbar: themed text colors, bold
+// for checked toggles, and the labels re-drawn CENTERED (horizontally AND
+// vertically — design-system rule) in the POSTPAINT, the way the main
+// toolbar does in ReBarWndProc (which only serves win->hwndToolbar). The
+// Study label is drawn in the space right of the trio (its leading spaces
+// only widen the button). This subclass runs FIRST (installed after the
+// generic ones) and consumes ONLY the flashcard toolbar's NM_CUSTOMDRAW;
+// everything else falls through to ReBarWndProc / dmlib.
+static LRESULT CALLBACK FlashcardReBarSubclassProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam,
+                                                   UINT_PTR uIdSubclass, DWORD_PTR /*dwRefData*/) {
+    // themed band background (copy of ReBarWndProc's erase, which the main
+    // toolbar chain installs — the flashcard rebar has no ReBarWndProc)
+    if (WM_ERASEBKGND == uMsg && ThemeColorizeControls()) {
+        HDC hdc = (HDC)wParam;
+        SetTextColor(hdc, ThemeWindowTextColor());
+        COLORREF bgCol = ThemeControlBackgroundColor();
+        SetBkColor(hdc, bgCol);
+        auto* bgBrush = CreateSolidBrush(bgCol);
+        HdcFillRect(hdc, HwndClientRect(hWnd), bgBrush);
+        DeleteObject(bgBrush);
+        return 1;
+    }
+    if (WM_NOTIFY == uMsg) {
+        NMHDR* hdr = (NMHDR*)lParam;
+        MainWindow* win = FindMainWindowByHwnd(hWnd);
+        if (win && hdr && hdr->code == NM_CUSTOMDRAW && hdr->hwndFrom == win->flashcard.hwndToolbarFlashcard) {
+            auto* custDraw = (NMTBCUSTOMDRAW*)lParam;
+            switch (custDraw->nmcd.dwDrawStage) {
+                case CDDS_PREPAINT:
+                    return CDRF_NOTIFYITEMDRAW;
+                case CDDS_ITEMPREPAINT: {
+                    auto col = ThemeWindowTextColor();
+                    UINT itemState = custDraw->nmcd.uItemState;
+                    if (itemState & (CDIS_DISABLED | CDIS_GRAYED)) {
+                        col = ThemeWindowTextDisabledColor();
+                    }
+                    HWND hwndToolbar = custDraw->nmcd.hdr.hwndFrom;
+                    // toolbar custom draw puts the COMMAND id in dwItemSpec
+                    // (toolbars are the documented exception — NOT the index),
+                    // so query BY COMMAND and never pass dwItemSpec as an index
+                    int btnCmd = (int)custDraw->nmcd.dwItemSpec;
+                    bool isTextBtn = false;
+                    TBBUTTONINFOW bi1{};
+                    bi1.cbSize = sizeof(bi1);
+                    bi1.dwMask = TBIF_COMMAND | TBIF_STYLE | TBIF_TEXT;
+                    WCHAR tbuf1[256]{};
+                    bi1.pszText = tbuf1;
+                    bi1.cchText = dimof(tbuf1);
+                    // raw query: the TbGetButtonInfo wrapper asserts on res<0,
+                    // but comctl can answer -1 for separators/placeholder ids —
+                    // log it once and fall back to defaults
+                    int res1 = (int)SendMessageW(hwndToolbar, TB_GETBUTTONINFOW, btnCmd, (LPARAM)&bi1);
+                    if (res1 < 0) {
+                        static bool gLoggedFcBtnInfoFail = false;
+                        if (!gLoggedFcBtnInfoFail) {
+                            gLoggedFcBtnInfoFail = true;
+                            logf("[fc] customdraw: TB_GETBUTTONINFOW failed cmd=%d count=%d state=%d\n", btnCmd,
+                                 (int)SendMessageW(hwndToolbar, TB_BUTTONCOUNT, 0, 0), (int)custDraw->nmcd.uItemState);
+                        }
+                    } else {
+                        // ALL text buttons get POSTPAINT (checked included):
+                        // comctl's classic checked render paints a WHITE face
+                        // (theme stripped) — the wipe in POSTPAINT replaces it
+                        // with the theme bg + bold label + underline
+                        if ((bi1.fsStyle & BTNS_SHOWTEXT) && tbuf1[0]) {
+                            isTextBtn = true;
+                        }
+                    }
+                    custDraw->clrText = col;
+                    SetTextColor(custDraw->nmcd.hdc, col);
+                    return isTextBtn ? CDRF_NEWFONT | CDRF_NOTIFYPOSTPAINT : CDRF_NEWFONT;
+                }
+                case CDDS_ITEMPOSTPAINT: {
+                    HWND hwndToolbar = custDraw->nmcd.hdr.hwndFrom;
+                    // dwItemSpec = command id (see ITEMPREPAINT) — resolve the
+                    // real index only for TB_GETITEMRECT, which is index-based
+                    int cmd = (int)custDraw->nmcd.dwItemSpec;
+                    TBBUTTONINFOW bi2{};
+                    bi2.cbSize = sizeof(bi2);
+                    bi2.dwMask = TBIF_STYLE | TBIF_TEXT | TBIF_COMMAND;
+                    WCHAR txtBuf[256]{};
+                    bi2.pszText = txtBuf;
+                    bi2.cchText = dimof(txtBuf);
+                    int res2 = (int)SendMessageW(hwndToolbar, TB_GETBUTTONINFOW, cmd, (LPARAM)&bi2);
+                    if (res2 < 0 || !(bi2.fsStyle & BTNS_SHOWTEXT) || !txtBuf[0]) {
+                        return CDRF_DODEFAULT;
+                    }
+                    int idx = (int)SendMessageW(hwndToolbar, TB_COMMANDTOINDEX, cmd, 0);
+                    RECT rcBtn{};
+                    if (idx < 0) {
+                        return CDRF_DODEFAULT; // cmd not in this toolbar
+                    }
+                    SendMessageW(hwndToolbar, TB_GETITEMRECT, idx, (LPARAM)&rcBtn);
+                    // text-only buttons get comctl's own label draw (LIST
+                    // style, ellipsized) UNDER this re-draw — wipe it first
+                    // (full rect: the padded Study label centers on the whole
+                    // button and extends left of the trio-shifted text rect),
+                    // else the user sees two overlapping labels
+                    {
+                        UINT st = custDraw->nmcd.uItemState;
+                        COLORREF bg = (st & CDIS_HOT) ? ThemeHotBackgroundColor() : ThemeControlBackgroundColor();
+                        HBRUSH bgBr = CreateSolidBrush(bg);
+                        FillRect(custDraw->nmcd.hdc, &rcBtn, bgBr);
+                        DeleteObject(bgBr);
+                        // comctl may reset the DC between draw stages — set the
+                        // label color explicitly (disabled-aware)
+                        SetTextColor(custDraw->nmcd.hdc, (st & (CDIS_DISABLED | CDIS_GRAYED))
+                                                             ? ThemeWindowTextDisabledColor()
+                                                             : ThemeWindowTextColor());
+                    }
+                    WCHAR* txt = txtBuf;
+                    if (bi2.idCommand == CmdFlashcardStudy) {
+                        // the trio sits on the button's left: keep the label
+                        // inside the remaining right part so it can't slide
+                        // under the edit box
+                        MainWindow* win2 = FindMainWindowByHwnd(hWnd);
+                        if (win2) {
+                            rcBtn.left += FlashcardMeasureTimerTrioDx(win2, hwndToolbar);
+                        }
+                        // the width was reserved by prefixing the label with
+                        // spaces (see FlashcardToolbarCreate) — draw only the
+                        // real label
+                        while (*txt == L' ') {
+                            txt++;
+                        }
+                    }
+                    // checked buttons draw their label BOLD (the classic
+                    // checked face was wiped above — bg + underline carry the
+                    // state now)
+                    bool checkedBtn =
+                        bi2.idCommand > 0 && SendMessageW(hwndToolbar, TB_ISBUTTONCHECKED, bi2.idCommand, 0);
+                    HFONT fnt = checkedBtn ? GetAppTreeFontEx(hwndToolbar, true, false)
+                                           : (HFONT)SendMessageW(hwndToolbar, WM_GETFONT, 0, 0);
+                    HGDIOBJ oldF = SelectObject(custDraw->nmcd.hdc, fnt);
+                    SetBkMode(custDraw->nmcd.hdc, TRANSPARENT);
+                    DrawTextW(custDraw->nmcd.hdc, txt, -1, &rcBtn, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+                    SelectObject(custDraw->nmcd.hdc, oldF);
+                    return CDRF_DODEFAULT;
+                }
+                default:
+                    break;
+            }
+            return CDRF_DODEFAULT;
+        }
+        // not our notification → next in the subclass chain
+        return DefSubclassProc(hWnd, uMsg, wParam, lParam);
+    }
+    // re-lay the trio inside the Study button whenever the rebar — and with it
+    // the band, the toolbar and the button rects — changes
+    if (WM_SIZE == uMsg) {
+        LRESULT res = DefSubclassProc(hWnd, uMsg, wParam, lParam);
+        MainWindow* win = FindMainWindowByHwnd(hWnd);
+        if (win && win->flashcard.hwndToolbarFlashcard && !win->isBeingClosed) {
+            FlashcardPositionTimerTrio(win);
+        }
+        return res;
+    }
+    if (WM_NCDESTROY == uMsg) {
+        RemoveWindowSubclass(hWnd, FlashcardReBarSubclassProc, uIdSubclass);
+    }
+    return DefSubclassProc(hWnd, uMsg, wParam, lParam);
+}
+
+// Toolbar-side layer (the flashcard toolbar's ONLY subclass — WndProcToolbar
+// is deliberately NOT in its chain). Covers what the generic chain gave the
+// other toolbars: themed WM_CTLCOLOR for the trio controls, a deterministic
+// ON underline under checked buttons, and trio repositioning on resize.
+// TRAP (s36-ax): never install a subclass on top of a toolbar whose base proc
+// is WndProcToolbar — its fallthrough is CallWindowProc(DefWndProcToolbar),
+// a GLOBAL captured proc, so an extra subclass layer re-dispatches the chain
+// head and recurses until the stack dies (hang). Here the base is comctl's
+// original ToolbarWndProc, so DefSubclassProc lands there directly.
+static LRESULT CALLBACK FlashcardToolbarSubclassProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR uIdSubclass,
+                                                     DWORD_PTR /*dwRefData*/) {
+    if (WM_CTLCOLORSTATIC == msg || WM_CTLCOLOREDIT == msg || WM_CTLCOLORBTN == msg) {
+        MainWindow* win = FindMainWindowByHwnd(hwnd);
+        if (!win) {
+            return DefSubclassProc(hwnd, msg, wp, lp);
+        }
+        HDC hdc = (HDC)wp;
+        SetTextColor(hdc, ThemeWindowTextColor());
+        SetBkMode(hdc, TRANSPARENT);
+        return (LRESULT)win->brControlBgColor;
+    }
+    // deterministic ON indicator: let the toolbar paint, then underline every
+    // TBSTATE_CHECKED button (plain GetDC draw, not clipped to the update
+    // region — same trick as the main toolbar's WndProcToolbar)
+    if (WM_PAINT == msg) {
+        LRESULT res = DefSubclassProc(hwnd, msg, wp, lp);
+        HDC hdc = GetDC(hwnd);
+        if (hdc) {
+            HBRUSH br = CreateSolidBrush(ThemeWindowTextColor());
+            int count = (int)SendMessageW(hwnd, TB_BUTTONCOUNT, 0, 0);
+            for (int i = 0; i < count; i++) {
+                TBBUTTONINFOW bi{};
+                bi.cbSize = sizeof(bi);
+                bi.dwMask = TBIF_BYINDEX | TBIF_STATE;
+                if (SendMessageW(hwnd, TB_GETBUTTONINFO, i, (LPARAM)&bi)) {
+                    if (bi.fsState & TBSTATE_CHECKED) {
+                        RECT rc{};
+                        if (SendMessageW(hwnd, TB_GETITEMRECT, i, (LPARAM)&rc)) {
+                            RECT rcLine = {rc.left + 2, rc.bottom - 3, rc.right - 2, rc.bottom};
+                            FillRect(hdc, &rcLine, br);
+                        }
+                    }
+                }
+            }
+            DeleteObject(br);
+            ReleaseDC(hwnd, hdc);
+        }
+        return res;
+    }
+    if (WM_SIZE == msg) {
+        LRESULT res = DefSubclassProc(hwnd, msg, wp, lp);
+        MainWindow* win = FindMainWindowByHwnd(hwnd);
+        if (win && win->flashcard.hwndToolbarFlashcard == hwnd && !win->isBeingClosed) {
+            FlashcardPositionTimerTrio(win);
+        }
+        return res;
+    }
+    if (WM_NCDESTROY == msg) {
+        RemoveWindowSubclass(hwnd, FlashcardToolbarSubclassProc, uIdSubclass);
+    }
+    return DefSubclassProc(hwnd, msg, wp, lp);
+}
+
+// Create the session-timer controls (checkbox + "Timer:" label + minutes
+// edit) as children of the flashcard toolbar, laid out INSIDE the Study
+// button (autoscroll trio format). Positions are finalized by
+// FlashcardPositionTimerTrio.
+void FlashcardCreateStudyTimerControls(MainWindow* win) {
+    if (win->flashcard.hwndStudyTimerCheck) {
+        return; // already created
+    }
+    HWND hwndToolbar = win->flashcard.hwndToolbarFlashcard;
+    if (!hwndToolbar) {
+        return;
+    }
+    Rect r = TbGetRectForCmd(hwndToolbar, CmdFlashcardStudy);
+    HFONT font = (HFONT)SendMessageW(hwndToolbar, WM_GETFONT, 0, 0);
+    if (!font) {
+        font = GetDefaultGuiFontOfSize(GetAppFontSize(win->hwndFrame));
+    }
+    auto* h = GetModuleHandle(nullptr);
+
+    const int ctrlGapX = DpiScale(hwndToolbar, gToolbarTokens.ctrlGapX);
+    const int ctrlH = DpiScale(hwndToolbar, gToolbarTokens.ctrlH);
+    const int labelW = DpiScale(hwndToolbar, 40);
+
+    // Checkbox: left-aligned inside the Study button, vertically centered
+    win->flashcard.hwndStudyTimerCheck = CreateWindowExW(
+        0, L"Button", L"", BS_CHECKBOX | WS_CHILD | WS_VISIBLE, r.x + ctrlGapX, r.y + (r.dy - ctrlH) / 2, ctrlH, ctrlH,
+        hwndToolbar, (HMENU)(INT_PTR)CmdFlashcardStudyTimerToggle, h, nullptr);
+
+    // Static "Timer:" label: right of the checkbox
+    win->flashcard.hwndStudyTimerLabel =
+        CreateWindowExW(0, WC_STATICW, L"Timer:", SS_CENTER | WS_CHILD | WS_VISIBLE, r.x + ctrlGapX + ctrlH + ctrlGapX,
+                        r.y, labelW, r.dy, hwndToolbar, nullptr, h, nullptr);
+
+    // Minutes edit: right of the label, into the remaining button width
+    int editX = r.x + ctrlGapX + ctrlH + 2 * ctrlGapX + labelW;
+    int editW = std::max(r.dx - (editX - r.x) - ctrlGapX, 20);
+    win->flashcard.hwndStudyTimerEdit = CreateWindowExW(
+        0, WC_EDITW, L"30", ES_NUMBER | ES_AUTOHSCROLL | ES_CENTER | WS_CHILD | WS_VISIBLE, editX,
+        r.y + (r.dy - ctrlH) / 2, editW, ctrlH, hwndToolbar, (HMENU)(INT_PTR)CmdFlashcardStudyTimerEdit, h, nullptr);
+
+    SetWindowFont(win->flashcard.hwndStudyTimerCheck, font, FALSE);
+    SetWindowFont(win->flashcard.hwndStudyTimerLabel, font, FALSE);
+    SetWindowFont(win->flashcard.hwndStudyTimerEdit, font, FALSE);
+
+    // Initialize from state
+    CheckDlgButton(hwndToolbar, CmdFlashcardStudyTimerToggle,
+                   win->flashcard.studyTimerEnabled ? BST_CHECKED : BST_UNCHECKED);
+    SetWindowTextW(win->flashcard.hwndStudyTimerEdit, ToWStrTemp(fmt("%u", win->flashcard.studyTimerMinutesSetting)).s);
+
+    FlashcardPositionTimerTrio(win);
+}
 
 void FlashcardToolbarCreate(MainWindow* win) {
     if (win->flashcard.hwndToolbarFlashcard) {
@@ -78,6 +442,51 @@ void FlashcardToolbarCreate(MainWindow* win) {
                                        (HMENU)IDC_FLASHCARD_TOOLBAR, hinst, nullptr);
     TbSetButtonStructSize(hwndToolbar, sizeofi(TBBUTTON));
 
+    // ---- theming + subclassing, ALL inline (no ToolbarApplyThemeToRebar) ----
+    // s36-ax traps that forced this layout (all reproduced empirically):
+    //  - SetWindowTheme(toolbar, L"", L"") AFTER TbAddButtons invalidates
+    //    comctl's per-button layout: TB_GETITEMRECT returns FALSE (debug
+    //    assert kills the creation), and a second strip after the buttons
+    //    paints the band blank with no buttons (white bar, only the trio);
+    //  - ToolbarApplyThemeToRebar BEFORE TbAddButtons makes TB_ADDBUTTONS
+    //    itself fail (regardless of iBitmap);
+    //  - ToolbarApplyThemeToRebar's WndProcToolbar (base proc via
+    //    SetWindowLongPtr) must NOT be wrapped with a SetWindowSubclass
+    //    layer — its CallWindowProc(DefWndProcToolbar) fallthrough
+    //    re-dispatches the chain head and recurses forever (hang).
+    // So: strip the theme HERE (the only strip, before buttons), theme the
+    // rebar directly, and use the flashcard's OWN subclass pair (see
+    // FlashcardReBarSubclassProc / FlashcardToolbarSubclassProc).
+    SetWindowTheme(hwndToolbar, L"", L"");
+    if (!IsCurrentThemeDefault()) {
+        SendMessageW(hwndRebar, RB_SETBKCOLOR, 0, ThemeControlBackgroundColor());
+    }
+    if (UseDarkModeLib()) {
+        dmlib::setWindowNotifyCustomDrawSubclass(hwndRebar);
+    }
+    // flashcard layers: centered-label custom draw + themed erase + trio
+    // repositioning on the rebar; themed control colors + checked underline +
+    // trio repositioning on the toolbar
+    SetWindowSubclass(hwndRebar, FlashcardReBarSubclassProc, kFcRebarSubclassId, 0);
+    SetWindowSubclass(hwndToolbar, FlashcardToolbarSubclassProc, kFcToolbarSubclassId, 0);
+
+    // comctl centers a button's own text under TBSTYLE_EX_MIXEDBUTTONS, so the
+    // POSTPAINT centered re-draw lands on the same spot instead of ghosting
+    // over a left-aligned draw (same combo as the main toolbar)
+    DWORD tbEx = TbGetExtendedStyle(hwndToolbar);
+    tbEx |= TBSTYLE_EX_MIXEDBUTTONS;
+    TbSetExtendedStyle(hwndToolbar, tbEx);
+
+    // The Study button hosts the timer trio INSIDE its rect (autoscroll
+    // format). comctl re-derives a BTNS_AUTOSIZE button's width from its
+    // label on every layout pass, so leading spaces are the width mechanism:
+    // they must cover the trio plus slack (a space is much narrower than an
+    // 'n' — derive the real space width from two measured strings).
+    int spaceDx = HwndMeasureText(hwndToolbar, "n n").dx - HwndMeasureText(hwndToolbar, "nn").dx;
+    int trioDx = FlashcardMeasureTimerTrioDx(win, hwndToolbar);
+    int slack = DpiScale(hwndParent, 24);
+    int nStudySpaces = spaceDx > 0 ? (trioDx + slack + spaceDx - 1) / spaceDx + 1 : 0;
+
     // Add study-control buttons (text-only, no icons)
     struct ToolbarButtonInfo2 {
         int cmdId;
@@ -103,11 +512,30 @@ void FlashcardToolbarCreate(MainWindow* win) {
         const ToolbarButtonInfo2& bi = gFlashcardToolbarButtons[i];
         TBBUTTON b{};
         b.idCommand = bi.cmdId;
-        b.iBitmap = 0;
+        // I_IMAGENONE via TbIcon::Text: these are text-only buttons and the
+        // toolbar has no image list. iBitmap=0 asked comctl for image index 0
+        // of a nonexistent list — tolerated while the comctl theme was still
+        // active, but TB_ADDBUTTONS starts failing once SetWindowTheme(L"")
+        // strips it (s36-ax).
+        b.iBitmap = (int)TbIcon::Text;
         b.fsState = TBSTATE_ENABLED;
         b.fsStyle = BTNS_BUTTON | BTNS_SHOWTEXT | BTNS_AUTOSIZE;
         Str s = trans::GetTranslation(bi.toolTip);
-        b.iString = (INT_PTR)CWStrTemp(s);
+        if (bi.cmdId == CmdFlashcardStudy && nStudySpaces > 0) {
+            // widen the Study button to host the trio: leading spaces (trimmed
+            // by the POSTPAINT draw, which shifts the real label right)
+            WCHAR* lbl = CWStrTemp(s);
+            int lblLen = lstrlenW(lbl);
+            WCHAR* buf = AllocArrayTemp<WCHAR>(nStudySpaces + lblLen + 1);
+            for (int k = 0; k < nStudySpaces; k++) {
+                buf[k] = L' ';
+            }
+            memcpy(buf + nStudySpaces, lbl, lblLen * sizeof(WCHAR));
+            buf[nStudySpaces + lblLen] = 0;
+            b.iString = (INT_PTR)buf;
+        } else {
+            b.iString = (INT_PTR)CWStrTemp(s);
+        }
         tbButtons[i] = b;
     }
     TbAddButtons(hwndToolbar, kFlashcardToolbarButtonsCount, tbButtons);
@@ -118,9 +546,6 @@ void FlashcardToolbarCreate(MainWindow* win) {
     TbSetBitmapSize(hwndToolbar, Size(iconSize, iconSize));
     TbSetButtonSize(hwndToolbar, Size(iconSize, iconSize));
 
-    // Apply theme settings (dark mode, custom draw, etc.) to match arch tools toolbar
-    ToolbarApplyThemeToRebar(hwndRebar, hwndToolbar);
-
     Rect rc = TbGetItemRect(hwndToolbar, 0);
 
     ShowWindow(hwndToolbar, SW_SHOW);
@@ -128,9 +553,10 @@ void FlashcardToolbarCreate(MainWindow* win) {
     REBARBANDINFOW rbBand{};
     rbBand.cbSize = sizeof(REBARBANDINFOW);
     rbBand.fMask = RBBIM_STYLE | RBBIM_CHILD | RBBIM_CHILDSIZE;
-    // same wrap-on-narrow behavior as the main toolbar (SetToolbarBandToRowHeight
-    // in Toolbar.cpp; this toolbar is subclassed with the same WndProcToolbar
-    // via ToolbarApplyThemeToRebar)
+    // same wrap-on-narrow intent as the main toolbar; NOTE: the flashcard
+    // toolbar is NOT subclassed with WndProcToolbar (own subclass chain —
+    // see FlashcardToolbarCreate), so band-height-on-wrap tracking
+    // (SetToolbarBandToRowHeight) does NOT run for it (known limitation)
     rbBand.fStyle = RBBS_FIXEDSIZE | RBBS_VARIABLEHEIGHT;
     if (IsAppThemed() && IsCurrentThemeDefault()) {
         rbBand.fStyle |= RBBS_CHILDEDGE;
@@ -160,6 +586,14 @@ void FlashcardToolbarCreate(MainWindow* win) {
     win->flashcard.hwndReBarFlashcard = hwndRebar;
     win->flashcard.hwndToolbarFlashcard = hwndToolbar;
 
+    // (rebar-side theming + subclasses were installed right after the toolbar
+    // was created, BEFORE TbAddButtons — see above)
+
+    // Create study timer controls (checkbox + label + minutes edit) inside the
+    // Study button — MUST come after the assignments above: the function
+    // reads win->flashcard.hwndToolbarFlashcard as its parent
+    FlashcardCreateStudyTimerControls(win);
+
     logf("[fc] FlashcardToolbarCreate - toolbar created with %d buttons\n", kFlashcardToolbarButtonsCount);
 
     // Update the card count label
@@ -177,6 +611,10 @@ void FlashcardToolbarDestroy(MainWindow* win) {
     win->flashcard.hwndToolbarFlashcard = nullptr;
     DestroyWindow(win->flashcard.hwndReBarFlashcard);
     win->flashcard.hwndReBarFlashcard = nullptr;
+    // Timer trio dies with the toolbar (children); drop the stale pointers
+    win->flashcard.hwndStudyTimerCheck = nullptr;
+    win->flashcard.hwndStudyTimerLabel = nullptr;
+    win->flashcard.hwndStudyTimerEdit = nullptr;
 
     logf("[fc] FlashcardToolbarDestroy - done\n");
     logf("[fc] FlashcardToolbarDestroy: destroyed secondary toolbar\n");
@@ -234,6 +672,9 @@ void FlashcardToolbarUpdateCount(MainWindow* win) {
     bi.dwMask = TBIF_TEXT;
     bi.pszText = (WCHAR*)CWStrTemp(ToWStrTemp(Str(text)));
     SendMessageW(win->flashcard.hwndToolbarFlashcard, TB_SETBUTTONINFOW, 0, (LPARAM)&bi);
+    // the count button's width change reflows the row: keep the trio inside
+    // the (moved) Study button
+    FlashcardPositionTimerTrio(win);
 }
 
 // Reflect study/reveal state on the toolbar buttons (checked = active).

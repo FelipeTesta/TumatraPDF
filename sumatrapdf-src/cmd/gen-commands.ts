@@ -333,6 +333,8 @@ export const commands = [
     "CmdEditImageApply", "Edit: Apply Image Edits",
     "CmdArchMeasureRadius", "Arch: Measure Radius (3 clicks)",
     "CmdArchRefLine", "Arch: Reference Line",
+    "CmdFlashcardStudyTimerToggle", "Toggle Flashcard Study Session Timer",
+    "CmdFlashcardStudyTimerEdit", "Edit Flashcard Study Session Timer Duration",
     "CmdNone", "Do nothing",
 ];
 

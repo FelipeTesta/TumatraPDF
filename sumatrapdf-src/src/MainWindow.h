@@ -451,14 +451,22 @@ struct MainWindow {
     // Window/session-level state. Per-document data (cards, study states,
     // page filter) lives in WindowTab::flashcard (FlashcardTabState).
     struct FlashcardState {
-        bool on = false;                  // flashcard mode active
-        bool studyMode = false;           // true when actively studying
-        bool revealMode = false;          // true when answer is revealed (Space/Enter)
-        int currentCardIdx = -1;          // index in studyOrder
-        // Accumulated study time for the current card (seconds, capped at maxPerCardSec)
-        int studyTimeSec = 0;
-        // Maximum study time per card (seconds) — after this, card is auto-advanced or paused
-        static constexpr int maxPerCardSec = 60;
+        bool on = false;         // flashcard mode active
+        bool studyMode = false;  // true when actively studying
+        bool revealMode = false; // true when answer is revealed (Space/Enter)
+        int currentCardIdx = -1; // index in studyOrder
+        // Per-card stats accumulator (seconds, float because ticks are 10ms).
+        // Capped at maxPerCardSec: each card contributes at most 60s to the
+        // flashcard study-time stats (prevents one hard card inflating stats).
+        float studyTimeSec = 0.0f;
+        static constexpr float maxPerCardSec = 60.0f;
+        // Session timer (like autoscroll's): user-configured minutes that
+        // limit the study SESSION duration. Independent from the per-card
+        // stats cap above.
+        bool studyTimerEnabled = false;      // checkbox state
+        DWORD studyTimerMinutesSetting = 30; // configured minutes from UI
+        DWORD studyTimerMinutes = 0;         // effective countdown (0 = off)
+        u64 studyTimerStartTick = 0;         // GetTickCount64() when session started
         // session queue: {tab, cardIdx} entries; single-doc sessions carry
         // only the current tab, cross-document sessions carry all this
         // window's PDF tabs
@@ -470,6 +478,11 @@ struct MainWindow {
         // Secondary toolbar
         HWND hwndReBarFlashcard = nullptr;
         HWND hwndToolbarFlashcard = nullptr;
+        // Session-timer controls (inside the flashcard secondary toolbar,
+        // same pattern as autoscroll's timer trio in the main toolbar)
+        HWND hwndStudyTimerCheck = nullptr;
+        HWND hwndStudyTimerLabel = nullptr;
+        HWND hwndStudyTimerEdit = nullptr;
         // Lista sidebar (docked right panel, AI-chat pattern)
         HWND hwndListaBox = nullptr;
         LabelWithCloseWnd* listaLabel = nullptr; // title strip (owned)
@@ -639,6 +652,7 @@ struct MainWindow {
             bool archToolsOn = false;
             bool flashcardOn = false;
             bool editToolsOn = false;
+            bool homeOverlay = false;
             bool fcListVisible = false;
             int fcListDx = 0;
         };

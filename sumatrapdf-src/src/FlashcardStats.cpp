@@ -4,8 +4,11 @@
 // Flashcard study-time statistics: seconds spent studying flashcards with
 // study mode active, per document (FileState.flashcardStudyTimeSec, persisted with
 // the normal file-history settings) and per calendar day (sidecar file
-// "flashcard-stats.txt" next to the settings file, one "YYYYMMDD <sec>" line
-// per day — deliberately plain text, no JSON dependency).
+// "flashcard-stats.txt" next to the settings file, one "YYYYMMDD <sec> <cards>"
+// line per day — deliberately plain text, no JSON dependency). Cards rated are
+// counted alongside the seconds (FileState.flashcardCardsDone per document,
+// third sidecar column per day; 2-column lines from before the count existed
+// parse with cards=0).
 
 #include "base/Base.h"
 #include "base/File.h"
@@ -21,12 +24,14 @@
 struct DailyEntry {
     int dateKey; // YYYYMMDD
     int sec;
+    int cards; // cards rated that day (0 for entries written before the count)
 };
 
 static struct {
     Vec<DailyEntry> daily; // kept sorted by dateKey
     float accumSec = 0.0f; // sub-second carry: ticks arrive ~64Hz with ~0.01s
     int dirtySec = 0;      // unsaved seconds (write threshold)
+    int dirtyCards = 0;    // unsaved rated cards (secondary write threshold)
     bool loaded = false;   // sidecar parsed
 } gFlashcardStats;
 
@@ -62,6 +67,7 @@ static void FlashcardStatsLoadIfNeeded() {
         char* p1 = nullptr;
         long dateKeyL = strtol(buf, &p1, 10);
         long secL = 0;
+        long cardsL = 0;
         int n = 0;
         if (p1 != buf) {
             n = 1;
@@ -69,10 +75,15 @@ static void FlashcardStatsLoadIfNeeded() {
             secL = strtol(p2, &p2, 10);
             if (p2 != p1) {
                 n = 2;
+                char* p3 = p2;
+                cardsL = strtol(p3, &p3, 10);
+                if (p3 != p2) {
+                    n = 3;
+                }
             }
         }
-        if (n == 2 && dateKeyL > 19000101 && secL >= 0) {
-            DailyEntry e{(int)dateKeyL, (int)secL};
+        if (n >= 2 && dateKeyL > 19000101 && secL >= 0) {
+            DailyEntry e{(int)dateKeyL, (int)secL, (int)(n == 3 ? cardsL : 0)};
             gFlashcardStats.daily.Append(e);
         }
     }
@@ -97,8 +108,46 @@ static void FlashcardStatsAddDaily(float sec) {
             return;
         }
     }
-    DailyEntry e{key, (int)sec};
+    DailyEntry e{key, (int)sec, 0};
     gFlashcardStats.daily.Append(e);
+}
+
+// count one rated (studied) card: +1 to the current document's
+// FileState.flashcardCardsDone and to today's sidecar bucket
+void FlashcardStatsAddCard(MainWindow* win) {
+    if (!win) {
+        return;
+    }
+    WindowTab* tab = win->CurrentTab();
+    if (tab && tab->filePath) {
+        FileState* fs = gFileHistory.FindByPath(tab->filePath);
+        if (fs) {
+            fs->flashcardCardsDone += 1;
+        }
+    }
+    FlashcardStatsLoadIfNeeded();
+    int key = DateKeyToday();
+    bool foundToday = false;
+    for (int i = 0; i < len(gFlashcardStats.daily); i++) {
+        if (gFlashcardStats.daily[i].dateKey == key) {
+            gFlashcardStats.daily[i].cards += 1;
+            foundToday = true;
+            break;
+        }
+    }
+    if (!foundToday) {
+        // fresh day: the seconds tick may not have credited a whole second
+        // yet, so the entry can legitimately not exist — create it with the
+        // card count only
+        DailyEntry e{key, 0, 1};
+        gFlashcardStats.daily.Append(e);
+    }
+    // the flush also persists the per-document FileState (settings write is
+    // driven by the normal save cadence)
+    gFlashcardStats.dirtyCards += 1;
+    if (gFlashcardStats.dirtyCards >= 20) {
+        FlashcardStatsFlush(true);
+    }
 }
 
 void FlashcardStatsAddSeconds(MainWindow* win, float sec) {
@@ -130,19 +179,20 @@ void FlashcardStatsAddSeconds(MainWindow* win, float sec) {
 }
 
 void FlashcardStatsFlush(bool force) {
-    if (!force && gFlashcardStats.dirtySec == 0) {
+    if (!force && gFlashcardStats.dirtySec == 0 && gFlashcardStats.dirtyCards == 0) {
         return;
     }
     FlashcardStatsLoadIfNeeded();
     str::Builder sb;
     for (int i = 0; i < len(gFlashcardStats.daily); i++) {
         DailyEntry& e = gFlashcardStats.daily[i];
-        sb.Append(fmt("%d %d\r\n", e.dateKey, e.sec));
+        sb.Append(fmt("%d %d %d\r\n", e.dateKey, e.sec, e.cards));
     }
     Str data = sb.TakeStr();
     file::WriteFile(FlashcardStatsPathTemp(), data);
     str::Free(data);
     gFlashcardStats.dirtySec = 0;
+    gFlashcardStats.dirtyCards = 0;
 }
 
 int FlashcardStatsGetDaySec(int dateKey) {
@@ -150,6 +200,17 @@ int FlashcardStatsGetDaySec(int dateKey) {
     for (int i = 0; i < len(gFlashcardStats.daily); i++) {
         if (gFlashcardStats.daily[i].dateKey == dateKey) {
             return gFlashcardStats.daily[i].sec;
+        }
+    }
+    return 0;
+}
+
+// cards rated on the given day (YYYYMMDD); 0 when none
+int FlashcardStatsGetDayCards(int dateKey) {
+    FlashcardStatsLoadIfNeeded();
+    for (int i = 0; i < len(gFlashcardStats.daily); i++) {
+        if (gFlashcardStats.daily[i].dateKey == dateKey) {
+            return gFlashcardStats.daily[i].cards;
         }
     }
     return 0;
@@ -163,6 +224,18 @@ int FlashcardStatsGetTotalSec() {
     int total = 0;
     for (int i = 0; i < len(gFlashcardStats.daily); i++) {
         total += gFlashcardStats.daily[i].sec;
+    }
+    return total;
+}
+
+// all-time count of rated cards (sum of every daily bucket — the master total,
+// independent of any document's FileState, so renamed/deleted/moved books
+// cannot lose the cards they contributed)
+int FlashcardStatsGetTotalCards() {
+    FlashcardStatsLoadIfNeeded();
+    int total = 0;
+    for (int i = 0; i < len(gFlashcardStats.daily); i++) {
+        total += gFlashcardStats.daily[i].cards;
     }
     return total;
 }

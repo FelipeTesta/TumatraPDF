@@ -340,6 +340,8 @@ static SeqStrings gCommandNames =
     "CmdEditImageApply\0"
     "CmdArchMeasureRadius\0"
     "CmdArchRefLine\0"
+    "CmdFlashcardStudyTimerToggle\0"
+    "CmdFlashcardStudyTimerEdit\0"
     "CmdNone\0"
     "\0";
 
@@ -668,6 +670,8 @@ static i32 gCommandIds[] = {
     CmdEditImageApply,
     CmdArchMeasureRadius,
     CmdArchRefLine,
+    CmdFlashcardStudyTimerToggle,
+    CmdFlashcardStudyTimerEdit,
     CmdNone,
 };
 
@@ -996,6 +1000,8 @@ SeqStrings gCommandDescriptions =
     "Edit: Apply Image Edits\0"
     "Arch: Measure Radius (3 clicks)\0"
     "Arch: Reference Line\0"
+    "Toggle Flashcard Study Session Timer\0"
+    "Edit Flashcard Study Session Timer Duration\0"
     "Do nothing\0"
     "\0";
 // clang-format on

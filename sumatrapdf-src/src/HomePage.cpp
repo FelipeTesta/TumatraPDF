@@ -1218,8 +1218,8 @@ struct HomeStatsWnd : VirtWnd {
     int rankCount = 0;  // total ranked books (recomputed in Paint)
     // Flashcards tab (user request): toggle between Reading and Flashcards stats
     bool flashcardMode = false; // false = Reading stats, true = Flashcards stats
-    Rect rcReadTab;     // Read tab hit rect
-    Rect rcFlashcardTab; // Flashcards tab hit rect
+    Rect rcReadTab;             // Read tab hit rect
+    Rect rcFlashcardTab;        // Flashcards tab hit rect
     // month-separated grid geometry (Paint refreshes; shared with handlers):
     // monthGapPx = extra x separation between month blocks; monthStartCol[m]
     // = first week column of month m (index 1..12)
@@ -1345,7 +1345,8 @@ void HomeStatsWnd::Paint(VirtWndPaintCtx& ctx) {
         g->FillRectangle(readBrush, rcReadTab.x, rcReadTab.y, rcReadTab.dx, rcReadTab.dy);
         g->DrawRectangle(&tabBorderPen, rcReadTab.x, rcReadTab.y, rcReadTab.dx, rcReadTab.dy);
         g->DrawString(ToWStrTemp(Str(readLabel)).s, -1, &fontLabel,
-                      Gdiplus::PointF((float)(rcReadTab.x + tabPad), (float)(rcReadTab.y + (rcReadTab.dy - (int)rRead.Height) / 2)),
+                      Gdiplus::PointF((float)(rcReadTab.x + tabPad),
+                                      (float)(rcReadTab.y + (rcReadTab.dy - (int)rRead.Height) / 2)),
                       readTextBrush);
         // Flashcards tab
         Gdiplus::SolidBrush* fcBrush = flashcardMode ? &tabActiveBrush : &tabInactiveBrush;
@@ -1353,7 +1354,8 @@ void HomeStatsWnd::Paint(VirtWndPaintCtx& ctx) {
         g->FillRectangle(fcBrush, rcFlashcardTab.x, rcFlashcardTab.y, rcFlashcardTab.dx, rcFlashcardTab.dy);
         g->DrawRectangle(&tabBorderPen, rcFlashcardTab.x, rcFlashcardTab.y, rcFlashcardTab.dx, rcFlashcardTab.dy);
         g->DrawString(ToWStrTemp(Str(fcLabel)).s, -1, &fontLabel,
-                      Gdiplus::PointF((float)(rcFlashcardTab.x + tabPad), (float)(rcFlashcardTab.y + (rcFlashcardTab.dy - (int)rFc.Height) / 2)),
+                      Gdiplus::PointF((float)(rcFlashcardTab.x + tabPad),
+                                      (float)(rcFlashcardTab.y + (rcFlashcardTab.dy - (int)rFc.Height) / 2)),
                       fcTextBrush);
 
         // build the ranked list (same for both tabs — we filter by time > 0 in the
@@ -1417,7 +1419,15 @@ void HomeStatsWnd::Paint(VirtWndPaintCtx& ctx) {
             FileState* fs = ranked[rankScroll + i];
             TempStr baseName = path::GetBaseNameTemp(fs->filePath);
             int sec = flashcardMode ? fs->flashcardStudyTimeSec : fs->readingTimeSec;
-            TempStr timeTxt = HomeStatsFormatMinTemp(sec);
+            // flashcard rows show the rated-card count next to the time
+            // (user 2026-10-25: "Flashcards: Today 13 cards / 10m"); rows with
+            // no count yet (stats pre-date the counter) show the time alone
+            TempStr timeTxt;
+            if (flashcardMode && fs->flashcardCardsDone > 0) {
+                timeTxt = fmt("%d cards / %s", fs->flashcardCardsDone, Str(HomeStatsFormatMinTemp(sec)));
+            } else {
+                timeTxt = HomeStatsFormatMinTemp(sec);
+            }
             int rowY = listTop + i * rowDy;
             // name column (approximate clip to ~55% of the ranking width)
             int nameW = (rankW * 55) / 100 - pad;
@@ -1450,8 +1460,9 @@ void HomeStatsWnd::Paint(VirtWndPaintCtx& ctx) {
             g->FillRectangle(&barBrush, barStartX, rowY + dpi(4), barW, rowDy - dpi(9));
         }
         if (rankCount == 0) {
-            g->DrawString(flashcardMode ? L"Study flashcards to collect stats" : L"Read with auto-scroll to collect stats", -1, &fontLabel,
-                          Gdiplus::PointF((float)(b.x + pad), (float)y), &txtBrush);
+            g->DrawString(
+                flashcardMode ? L"Study flashcards to collect stats" : L"Read with auto-scroll to collect stats", -1,
+                &fontLabel, Gdiplus::PointF((float)(b.x + pad), (float)y), &txtBrush);
         } else if (rankCount > rankRows) {
             // scroll hint
             TempStr more = fmt("%d books - scroll", rankCount);
@@ -1470,9 +1481,14 @@ void HomeStatsWnd::Paint(VirtWndPaintCtx& ctx) {
         int readTotalSec = ReadingStatsGetTotalSec();
         int fcTodaySec = FlashcardStatsGetDaySec(todayKey);
         int fcTotalSec = FlashcardStatsGetTotalSec();
-        TempStr totals = fmt("Read: Today %s | Total: %s    Flashcards: Today %s | Total: %s",
-                             Str(HomeStatsFormatMinTemp(readTodaySec)), Str(HomeStatsFormatMinTemp(readTotalSec)),
-                             Str(HomeStatsFormatMinTemp(fcTodaySec)), Str(HomeStatsFormatMinTemp(fcTotalSec)));
+        int fcTodayCards = FlashcardStatsGetDayCards(todayKey);
+        int fcTotalCards = FlashcardStatsGetTotalCards();
+        // user-specified format (2026-10-25):
+        // "Flashcards: Today 13 cards / 10m | Total: 100 cards / 8h 20m"
+        TempStr totals =
+            fmt("Read: Today %s | Total: %s    Flashcards: Today %d cards / %s | Total: %d cards / %s",
+                Str(HomeStatsFormatMinTemp(readTodaySec)), Str(HomeStatsFormatMinTemp(readTotalSec)), fcTodayCards,
+                Str(HomeStatsFormatMinTemp(fcTodaySec)), fcTotalCards, Str(HomeStatsFormatMinTemp(fcTotalSec)));
         g->DrawString(ToWStrTemp(Str(totals)).s, -1, &fontLabel,
                       Gdiplus::PointF((float)(b.x + pad), (float)(b.y + b.dy - pad - dpi(14))), &valBrush);
     }
@@ -1850,8 +1866,8 @@ bool HomeStatsWnd::OnMouseMove(VirtWndMouseEvent& e) {
 bool HomeStatsWnd::OnSetCursor(Point pt) {
     // pt arrives LOCAL to our bounds; rcPrev/rcNext/rcMode are in window coords
     Point ptAbs{pt.x + bounds.x, pt.y + bounds.y};
-    if (rcPrev.Contains(ptAbs) || rcNext.Contains(ptAbs) || rcMode.Contains(ptAbs)
-        || rcReadTab.Contains(ptAbs) || rcFlashcardTab.Contains(ptAbs)) {
+    if (rcPrev.Contains(ptAbs) || rcNext.Contains(ptAbs) || rcMode.Contains(ptAbs) || rcReadTab.Contains(ptAbs) ||
+        rcFlashcardTab.Contains(ptAbs)) {
         SetCursorCached(IDC_HAND);
     } else {
         SetCursorCached(IDC_ARROW);
