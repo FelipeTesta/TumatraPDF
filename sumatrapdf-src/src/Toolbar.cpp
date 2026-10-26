@@ -539,6 +539,50 @@ static void SetToolbarButtonToolTipByIdx(HWND hwnd, int idx, int cmdId, Str s) {
 // WndProcToolbar. WM_APP + 0x424 is unused (0x421 TTS, 0x422 DPI settled).
 static const UINT kMsgToolbarRelocateChildren = WM_APP + 0x424;
 
+// The comctl tooltip control keys one tool per button by command id and takes a
+// snapshot of each button's rect when the button is added; it never refreshes
+// those rects afterwards. Hiding a button (TBSTATE_HIDDEN), widening the
+// page-number slot or the wrap rebuild all shift live button rects while the
+// tools keep pointing where the buttons used to be — tooltips then pop up over
+// a neighbouring button or mid-air (the issue-5869 dump showed a uniform +85px
+// drift on every button after the page box). Re-sync each visible button's
+// tool rect with its live rect.
+static void UpdateToolbarTooltipRects(HWND hwndToolbar) {
+    HWND hwndTt = (HWND)SendMessageW(hwndToolbar, TB_GETTOOLTIPS, 0, 0);
+    if (!hwndTt) {
+        return;
+    }
+    int n = (int)SendMessageW(hwndToolbar, TB_BUTTONCOUNT, 0, 0);
+    for (int i = 0; i < n; i++) {
+        TBBUTTONINFOW bi{};
+        bi.cbSize = sizeof(bi);
+        bi.dwMask = TBIF_BYINDEX | TBIF_COMMAND | TBIF_STATE;
+        if (TbGetButtonInfo(hwndToolbar, i, &bi) < 0) {
+            continue;
+        }
+        if (bi.fsState & TBSTATE_HIDDEN) {
+            continue;
+        }
+        RECT rc{};
+        if (!SendMessageW(hwndToolbar, TB_GETITEMRECT, i, (LPARAM)&rc)) {
+            continue;
+        }
+        TTTOOLINFOW ti{};
+        ti.cbSize = sizeof(ti);
+        ti.hwnd = hwndToolbar;
+        ti.uId = (UINT_PTR)bi.idCommand;
+        if (!SendMessageW(hwndTt, TTM_GETTOOLINFOW, 0, (LPARAM)&ti)) {
+            continue; // no tool for this button (e.g. separators)
+        }
+        if (ti.rect.left == rc.left && ti.rect.top == rc.top && ti.rect.right == rc.right &&
+            ti.rect.bottom == rc.bottom) {
+            continue;
+        }
+        ti.rect = rc;
+        SendMessageW(hwndTt, TTM_NEWTOOLRECTW, 0, (LPARAM)&ti);
+    }
+}
+
 // TODO: this is called too often
 // TODO: also set checked state instead of calling SetToolbarButtonCheckedState() all over
 void ToolbarUpdateStateForWindow(MainWindow* win, bool setButtonsVisibility) {
@@ -1131,6 +1175,8 @@ static void AddAllToolbarButtons(MainWindow* win, HWND hwndToolbar, const bool* 
         }
     }
     TbAddButtons(hwndToolbar, gCustomButtonsCount, buttons);
+    // buttons were (re-)added: align the tooltip tools with the fresh layout
+    UpdateToolbarTooltipRects(hwndToolbar);
 }
 
 // Greedy GROUP packing for the wrap-on-narrow rebuild (user: "revisar os
@@ -1672,6 +1718,8 @@ static LRESULT CALLBACK WndProcToolbar(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp
             // page box owns its own width (UpdateToolbarPageText) and must not be
             // re-sized from here.
             PositionToolbarChildWindows(win);
+            // ... and the tooltip tools, which lag the same layout change
+            UpdateToolbarTooltipRects(hwnd);
         }
         return 0;
     }
@@ -1964,6 +2012,8 @@ void UpdateToolbarPageText(MainWindow* win, int pageCount, bool updateOnly) {
     }
     // (the timer trio no longer has a slot button to size — it lives inside the
     // widened Autoscroll button; see EnforceToolbarTextButtonWidths)
+    // the slot width change shifted the buttons after it — re-sync tooltip rects
+    UpdateToolbarTooltipRects(win->hwndToolbar);
     HwndInvalidate(win->hwndToolbar, true);
 }
 

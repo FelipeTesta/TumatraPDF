@@ -6,12 +6,35 @@ history in [LOG.md](LOG.md).
 
 ## Unreleased
 
+- **Flashcard study time.** While study mode is on (and no answer is
+  revealed), the time spent on each card is credited to the book and to a
+  global total — capped at 60 s per card so a forgotten open book does not
+  rack up hours. The main total lives in a `flashcard-stats.txt` file
+  (per-day lines, survives renaming, deleting or moving any book) and each
+  book keeps its own time in its file history. The Home screen shows it all:
+  a **Flashcards** tab next to the reading ranking, the calendar hover shows
+  read and flashcard minutes per day, and the daily graph gains a second
+  (peru) line for flashcard time.
+- **Flashcard study session timer.** The flashcard toolbar's Study button now
+  hosts a timer trio in the autoscroll format — `☐ Timer: [30]`. Checking it
+  and starting a study session runs a countdown of the configured minutes
+  (1-600): a 2 px silver line at the bottom of the screen shrinks toward the
+  centre as the session burns down, and when it expires the session ends with
+  a beep and the same "∴" overlay the autoscroll timer uses. Unchecking it
+  studies without a limit. The toolbar itself was rebuilt to match the main
+  one: theme-aware backgrounds in every theme, and every button label
+  centred vertically and horizontally.
 - **Save toolbar button.** A disk (save) icon right of Print saves annotations
   and edits into the open document — same as `Ctrl + Shift + S`. Greyed out
   while there is nothing unsaved; lights up as soon as a highlight, annotation
   or edit marks the document dirty. The page-number box used to anchor on
   Print's rect and now follows the nearest visible button to its left, so it
   no longer covers the new icon.
+- **Toolbar tooltips follow their buttons.** The tooltip control kept the
+  position each button had when it was created, so after buttons were hidden,
+  the page box widened or the toolbar re-wrapped, a button's tooltip popped up
+  over the wrong button (or over nothing at all). Every button's tooltip region
+  now tracks the live layout.
 
 ## v1.0.14 (2026-10-23)
 

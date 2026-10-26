@@ -1,20 +1,75 @@
 # TumatraPDF — Development Log
 
+## 2026-10-25 (s36-ax) — flashcard toolbar regression fixed: probe poison + custom-draw cmd-id bug + timer trio E2E
+
+### Fixed
+
+- **Flashcard toolbar "not opening / white band"** (user reports after study-time feature): three stacked causes, none where the afternoon pointed:
+  1. `ToolbarApplyThemeToRebar` at END (v2/v3 experiments) = second `SetWindowTheme` strip wipes button layout → white band. v4 replaced helper entirely with inline theming (single `SetWindowTheme(L"",L"")` right after toolbar creation, BEFORE buttons — same idiom as main `CreateToolbar`).
+  2. **Custom draw was dead code**: `NMTBCUSTOMDRAW.dwItemSpec` in TOOLBAR custom draw = **COMMAND ID, not index** (toolbar = documented exception). v4 passed it as a `TB_GETBUTTONINFOW` index with `TBIF_BYINDEX` → always -1 → centering/POSTPAINT never ran, every paint returned bare `CDRF_NEWFONT`. Fix: query by command id (drop `TBIF_BYINDEX`), resolve real index via `TB_COMMANDTOINDEX` only for `TB_GETITEMRECT`, guard `idx<0`.
+  3. **E2E probe was poisoning its own measurements**: `0x444` is `TB_SETBUTTONINFOW` (not BUTTONCOUNT=0x418) sent with lp=0; `0x411` is `TB_SETSTATE` (not GETSTATE=0x412) — probe DISABLED every button it "queried"; `0x445` is GETBUTTONSIZE (not GETITEMRECT=0x41D). Every afternoon "v4 broken" signal (count 11→1, no rects, no pixels, AV in subclass) = self-inflicted. Cross-proc comctl pointer queries (GETITEMRECT etc.) are marshalling-blind anyway; `GetPixel` on window DCs returns CLR_INVALID under DWM; **`PrintWindow` ON the toolbar forces re-entrant offscreen comctl render → UI wedge + C0000005 in comctl (crashinfo: WndProcToolbar fallthrough frame)**. Reliable oracles: scalar `TB_BUTTONCOUNT`, `GetWindowRect` geometry, `captureWindowDCToPng` (BitBlt from DWM surface, zero messages), in-proc `[fc]` logf witness, `BM_CLICK`/`BM_GETCHECK` scalars.
+  4. **Double label on every button** (user: "full label + abbreviated label with ellipsis overlapping"): flashcard buttons are TEXT-ONLY (no icon) so comctl always draws its own LIST-style label UNDER the custom-draw POSTPAINT re-draw — main toolbar avoids it because its buttons have icons + MIXEDBUTTONS (comctl draws text only when hot/checked). Fix in `FlashcardReBarSubclassProc` ITEMPOSTPAINT: wipe comctl's label (FillRect full `rcBtn` with hot-aware theme bg BEFORE the trio shift — the padded Study label centers on the whole button and extends left of the shifted rect), then re-draw the centered label with explicit SetTextColor (disabled-aware). Toolbar PNG content dropped 4239B → 3293B = the overlapped glyphs gone.
+  5. **Checked Study button painted WHITE** (user: "quando ativo está ficando branco"): comctl's CLASSIC checked render (theme stripped) paints a white face — glaring in dark themes. Fix: checked buttons now go through the same POSTPAINT wipe+redraw (ITEMPREPAINT requests POSTPAINT for ALL text buttons), drawing theme bg + BOLD label (GetAppTreeFontEx); the existing 2px underline loop carries the ON state. Out-of-band pixel count on a Study-ON capture: 159/41418 pure-white px (0.38%, edit/checkbox interiors only) — the old classic face would be ~14% (196x30 button).
+
+### Added
+
+- One-shot `[fc] trio: anchor=(...) / check=(...) label=(...) edit=(...)` witness in `FlashcardPositionTimerTrio` (toolbar-client coords, `MapWindowPoints`) — in-proc ground truth for E2E (cross-proc TB_GET* unreliable).
+- `tests/tmp/s36ax-fctb.ts` probe v3 (scratch): maximize → toggle → rebar/band geometry → BUTTONCOUNT=11 → BitBlt paint oracle (capture ok + PNG>3KB; 27 distinct colors via System.Drawing out-of-band) → trio enum → BM_CLICK routing → Study ON/OFF overlay cycle → sumlog witness asserts → `proc.kill()` (never leave app alive — idle leftovers crash later and pollute crashinfo).
+
+### Verified
+
+- Probe 14/14 PASS: rebar (0,50)-(1536,74) visible, 11 buttons, painted (4239B PNG), trio present+visible (check 108..131, label 136..177, edit 182..214 ⊂ anchor 103..299, y 3..26 ⊂ 0..30), checkbox 0→1, session overlay created on Study ON (hwnd found) + destroyed on OFF, app alive at end. 3 consecutive runs green, zero crashes; `customdraw: TB_GETBUTTONINFOW failed` line GONE (cmd-id fix works — centering actually paints now).
+- Isolation experiment (user-prescribed): baseline (HEAD 295ecb1, all changes stashed) probe run first — validated probe itself was the broken part (baseline "buttoncount=1" was the fake read).
+
+### Changed
+
+- Dead-code sweep (review request, tree-sitter + serena mapping): removed `FlashcardStudyTimerShowExpiry` (decl+def — never called; tick inlines expiry and calls `FlashcardShowTimerDoneOverlay` directly); moved all prose comments out of `Commands_Flashcard.h` to the definitions (.cpp) per AGENTS rule; moved `CmdFlashcardStudyTimerToggle`/`Edit` from mid-list to END before `CmdNone` in `gen-commands.ts` (convention) — ids shifted, probe re-run 12/12 PASS with the new ids (everything resolves via `cmdId()`); fixed stale band comment (claimed WndProcToolbar subclassing via ToolbarApplyThemeToRebar — false in v4). Verified alive: `kFcCheckedAccent` (5 uses), `FlashcardMeasureTimerTrioDx` (2), UIStart/Stop (1 each), `FlashcardToolbarUpdateState` (19 callers). Accepted duplication kept: checked-underline loop (copy of WndProcToolbar's — would touch the other agent's in-flight Toolbar.cpp), TimerDoneOverlay local copy (upstream `ShowTimerDoneOverlay` is static), trio measurement split (mirrors autoscroll precedent), rebar ERASEBKGND fill (ReBarWndProc serves the main rebar only).
+
+### Notes
+
+- Other agent's Toolbar.cpp (issue-5869) was stash-isolated during B1/B3 experiments (`git stash push -- sumatrapdf-src/src/Toolbar.cpp`), restored after — intact (+50 lines exactly).
+- Known limitation: flashcard toolbar loses wrap-tracking (band height on narrow windows) — `SetToolbarBandToRowHeight` is static in Toolbar.cpp; not wired for this toolbar yet.
+- Comctl re-entrancy hazard class documented: cross-thread `SendMessage` + re-entrant comctl paint (custom draw active) + theme-stripped toolbar = wedge/AV. Tests must use BitBlt captures, never PrintWindow on a comctl toolbar.
+
+## 2026-10-25 (s36-ay) — issue-5869 closed: tooltip-rect re-sync + test parse fix
+
+### Fixed
+
+- **issue-5869 (suite failure, "UI/timing flake" group)** — two stacked causes, neither a flake:
+  1. Test side: `parse()` in `tests/issue-5869.ts` used a rigid regex (`^idx=... hidden=(\d) rect=`) that stopped matching the dump line when `style`/`cx` fields were added (D6) and again with `enabled` (s36-aw) — buttons parsed empty, test failed with "no toolbar buttons reported". Rewrote as key=value parsing (split before ` text=`, map fields by key) — resilient to future field additions.
+  2. App side (the real UX bug the revived test exposed): comctl registers one tooltip tool per button keyed by command id and snapshots the rect at button-add time; it NEVER refreshes. Hiding buttons (TBSTATE_HIDDEN), widening the page-number slot and the wrap rebuild all shift live rects while tools keep stale coordinates — tooltips popped over neighbouring buttons (dump showed a uniform +85px drift on every button after the page box). New `UpdateToolbarTooltipRects()` (Toolbar.cpp) re-syncs each visible button's tool rect via `TTM_NEWTOOLRECT`, called from: end of `AddAllToolbarButtons` (post rebuild), the deferred `kMsgToolbarRelocateChildren` handler (rects are final only after the posted message — same lag pattern as the timer trio, s36-aw/3a6ed25), and `UpdateToolbarPageText` (after the slot `TbSetButtonDx` shift).
+
+### Verified
+
+- `bun tests/issue-5869.ts` 3x PASS (1.7s each) — all asserts incl. "1 tooltip tool per custom button covering its own rect".
+- `tests/tmp/s36aw-savebtn.ts` probe PASS — no regression in page-box anchoring / save flow.
+- Verified in an ISOLATED WORKTREE: the main-tree build was held hostage by another agent's in-flight flashcard TUs (44→2 errors over ~30 min). Recipe: `worktree_create` at HEAD + copy ONLY my files (Toolbar.cpp, issue-5869.ts, probe) + copy gitignored `packages/` (WebView2 SDK — C1083 otherwise; use `Copy-Item "$main\packages\*" $dest -Recurse` — plain `Copy-Item dir dest -Recurse` nests `dest\packages\packages`) → build → tests. Incremental after the first pass.
+- Good-test check: before this fix both failure modes were live (empty parse = "no toolbar buttons"; stale rects = "+85px" tooltip assert).
+
+### Notes
+
+- Deploy: main-tree `Compiled\TumatraPDF.exe` picks the fix up at the next successful `cmd/build.ts` (`Toolbar.obj` is compiled clean; only the other agent's TUs blocked the link).
+- Open suite failures now 7: `-unit-tests exit 1` (issue-5840, issue-5842, issue-5846, parse-tip-brackets) + UI/timing (issue-1914, issue-5866, issue-5792).
+
 ## 2026-10-25 (s36-aw) — Save toolbar button (right of Print) + page-box anchor fix
 
 ### Added
+
 - `{TbIcon::Save, CmdSaveAnnotations, _TRN("Save")}` in `gToolbarButtons[]` (Toolbar.cpp) — icon-only button right of Print, posts the same WM_COMMAND as Ctrl+Shift+S (save into the EXISTING document). Tooltip auto-picks the accelerator ("Save (Ctrl + Shift + S)"). State for free from upstream rules: visible-but-disabled while `!hasUnsavedAnnotations` (CommandVisibility rule, CommandAvailability.cpp:741), enabled on every annotation edit (30+ `ToolbarUpdateStateForWindow` call-sites), hidden on home overlay (D5).
 - `enabled=%d` field in the `TestToolbarButtons` dump (`ToolbarButtonsResultTemp`) — E2E can assert enable state via `-dbg-control`.
 - `tests/tmp/s36aw-savebtn.ts` (scratch, gitignored) — full E2E: clean(disabled) → keyboard-select+highlight(enabled) → save via the button's WM_COMMAND (mtime changes) → disabled again; plus page-box overlap check.
 
 ### Fixed
+
 - `UpdateToolbarPageText` anchored the page-number box on `CmdPrint`'s rect; inserting Save between Print and the slot made the box cover the new icon (16px). Anchor now walks `gToolbarButtons[]` backwards from the PageInfoId slot to the last actually-available button (skips separators/hidden, falls back to CmdOpenFile) — robust to future insertions/hiding (issue #5563 case still covered).
 
 ### Verified
+
 - E2E probe PASS (exit 0): overlap check `label.left=140 > save.right=128` (12px gap), mtime changed after the save command, Save disabled after. Pixel check on the dark-theme capture: 594 non-bg px in the Save rect (icon drawn, not covered), 885 px of page-box text to its right. Light theme: same monochrome icon infra as every other button — left to user live-check.
 - tree-sitter + Serena map (§0b) done: callers of UpdateToolbarPageText / ToolbarUpdateStateForWindow / TbGetRectForCmd / AddAllToolbarButtons / SaveAnnotationsToExistingFile. Other anchors (ReadAloud dropdown SumatraPDF.cpp:13760, AutoScroll timer trio ToolbarLayout.cpp:192) key on their OWN buttons — unaffected by the insertion.
 
 ### Notes / traps
+
 - DPI: the bun test process is DPI-unaware — its `GetWindowRect`/`clientToScreen` return VIRTUALIZED coords (÷1.25 here) while `-dbg-control` dumps report the app's PHYSICAL rects. Comparing them naively gives false overlaps; derive the scale first (toolbarClientDx from dump vs tbRect width: 791/633 = 1.25).
 - Comctl toolbar clicks cannot be synthesized in this environment: posted AND sent `WM_LBUTTONDOWN/UP` on the toolbar hwnd do nothing, `TB_PRESSBUTTON` (0x403) press+release fires no WM_COMMAND. The WM_COMMAND path (`sendCommand`) is the reliable equivalent; real user clicks are native comctl and fine.
 - `CmdCreateAnnotHighlight` applies to the CURRENT text selection (`MakeAnnotationsFromSelection`) — NOT a drag-create mode. Selection synthesis: mouse drag unreliable (known — ad-hoc-flashcard-cloze.ts), use `CmdZoomFitPage` + `CmdSelectTextViaKeyboard` + `CmdExtendSelectionWordRight`.
@@ -26,6 +81,7 @@
 ## 2026-10-24 (s36-au) — debug-only graceful-quit exit code 5 fixed (GDI+ statics vs atexit)
 
 ### Fixed
+
 - Graceful quit of a document-open session returned exit code 5 in DEBUG builds (Release exited 0), poisoning 9 suite tests (issue-5529, issue-2629, issue-4684, issue-5922, issue-5924, issue-5926, find-results-sorted, issue-5874, issue-2252). NOT an access violation at quit as previously assumed: the message loop returns 0 and WinMain completes; the death is in the CRT atexit table after WinMain returns. Function-local `static Gdiplus::*` objects register atexit destructors, and WinMain's `ScopedGdiPlus` ends the GDI+ session at scope exit (both `NotificationUnhook` in suppressed-thread mode and `GdiplusShutdown` deinitialize) — so the destructors fault in gdiplus.dll (`GdipDeleteStringFormat` → `RtlEnterCriticalSection` on a dead session lock; first crasher: `TabWnd::Paint`'s `sfRtl`).
 - Why debug-only: Release takes the `fastExit` path (`AreDangerousThreadsPending`) → `ExitProcess` skips the atexit table entirely; debug waits for threads and runs the full CRT exit.
 - Fix (belt and suspenders): `ScopedGdiPlus(winMain, endOnExit=false)` — WinMain leaves GDI+ alive for the OS to reclaim at process exit; `TabWnd::Paint`'s `sfLtr`/`sfRtl` converted to deliberately leaked pointers (no atexit destructor). Any future function-local `static Gdiplus::*` should follow the leak pattern.
@@ -33,28 +89,33 @@
 - Instrumentation note for future hunts: after `DestroyLogging()`, file logging is silenced (`gDestroyedLogging` early-return in log2), so atexit-time crashes are invisible to sumlog — use the fork's crash handler (skip `UninstallCrashHandler` temporarily) + the probe's stderr capture; `gh run`-style exit-code probes distinguish deliberate exits from NTSTATUS deaths.
 
 ### Remaining (separate defects, still in TODO)
+
 - The other 8 suite failures are independent: `-unit-tests exit 1` group (issue-5840, issue-5842, issue-5846, parse-tip-brackets — real assertion failures in the test binary) and UI/timing flake group (issue-1914, issue-5866, issue-5869, issue-5792). Re-verified failing after this fix.
 
 ## 2026-10-23 (s36-as) — PA2 scroll strip-invalidate + PA5 autoscroll log removal (perf audit s36-am2)
 
 ### Added
+
 - `DocControllerCallback::RepaintScroll(int dx, int dy)` (DocController.h) — default `Repaint()`, so other controllers keep full repaints.
 - `DoubleBuffer::Flush(HDC hdc, const Rect& rc)` (base/Win.{h,cpp}) — partial blit of exactly the redrawn region; full flush would copy stale buffer pixels over ScrollWindowEx-preserved screen content.
 - `ScrollStripRepaint` + gate `CanvasCanStripScroll` (MainWindow.{h,cpp}) — ScrollWindowEx shifts the previous frame (pending update region shifts along) and invalidates only the exposed strip; falls back to `ScheduleRepaint` when fixed-model only / flashcard on / selection showing / Arch tools on.
 - `tests/ad-hoc-pa2-strip-scroll.ts` — TC2 + autoscroll + wheel-up visual verification with screenshots (not registered in before-release; visual probe).
 
 ### Changed
+
 - `ScrollYBy`/`ScrollYTo`/`ScrollXTo` tails (DisplayModel.cpp): call `cb->RepaintScroll` with the ACTUAL viewPort delta instead of `RepaintDisplay()`, falling back to full repaint when `EnsureMediaBoxesForVisiblePages()` returned true (measurement relayout = non-uniform page shift, preserved bits would go stale).
 - `OnPaintDocument` (Canvas.cpp): `buffer->Flush(hdc)` → `Flush(hdc, ToRect(ps.rcPaint))` — blit only what was just redrawn; correct for any update-region size.
 - AutoScroll.cpp: removed all 4 TEMP s35 `[autoscroll-dbg]` logf sites + the every-60-ticks state dump (1 Hz log noise during autoscroll).
 
 ### Verified
+
 - Temp `gRedrawLog = true` run (`tests/ad-hoc-pa2-strip-scroll.ts`, debug build logs `out/dbg64/sumlog.txt`): autoscroll ticks produce 1px strips `rc=(0,927,772,928)` (89 bottom strips during forward scroll, 53 top strips on wheel-up) vs full `rc=(0,0,772,958)` before — ~958x less repainted area per 64 Hz tick; only startup/TC2 toggle/resize remain full-size (4). Screenshots (TC2 on, flashcards off — user invariant: autoscroll=on implies flashcard=off): no smearing/ghosting in preserved regions, content crisp both scroll directions.
 - `bun cmd/build.ts` green; `bun cmd/run-unit-tests.ts -dbg` green (base/Win.cpp covered by test_util).
 - Session note: PA1 (Canvas.cpp masks) done by the s36-ar agent in parallel; PA3 (prefetch → bitmap cache) landed in commit 1932f37. PA4 deferred — callers verified mouse-event-only, not in the tick chain.
 - Coordination trap hit: Canvas.cpp changed under me mid-edit (other agent implementing PA1) — edit failed atomically, no corruption; waited for the file to free before the Flush one-liner.
 
 ### Notes — perf audit closed (TODO section removed s36-at, knowledge kept here)
+
 - Audit plan: s36-am2 (2026-10-22); executed PA1 (s36-ar, commit b1cc108), PA2+PA5 (s36-as, commit 7372eab), PA3 (s36-ap, commit 1932f37). PA4 (`GetPageNoByPoint`/`GetPageNextToPoint` binary search) DEFERRED for good: callers are mouse events + `CvtFromScreen` fallbacks only, nothing in the autoscroll tick chain, O(nPages) per event is µs-scale.
 - Verified GOOD in the TC2+autoscroll+flashcard hot paths (do not re-audit): nav-point stability window (no flood during autoscroll), `RenderCache::RequestRendering` dedup (swap-front + `Exists()` + abort-not-nearby), `RecalcVisibleParts` direct recompute (O(nPages) trivial), lazy media boxes bounded (kMaxRelayouts 4), ReadAloud hook early-outs when not speaking, TC2 column-advance branch in `ScrollYBy` O(1), predictive render chain LIFO-guarded, `Relayout` user-initiated only.
 - Measured result of the cycle: flashcard mask paint went O(cards×rects) per paint → visible-page culling + one GDI+ object set; scroll repaint went full-canvas per 64 Hz tick → 1px strip (958x smaller paint area).
@@ -62,15 +123,18 @@
 ## 2026-10-22 (s36-ar) — Flashcard mask paint: viewport culling + hoisted GDI+ objects (PA1)
 
 ### Changed
+
 - `PaintFlashcardMasks` (`Canvas.cpp`) allocates one `Gdiplus::Graphics`, one brush per state (translucent marker / opaque gray / opaque accent) and one accent pen for the whole paint, instead of a Graphics per card and a `SolidBrush`/`Pen` per quad — the overlay is now O(1) GDI+ objects instead of O(cards × rects).
 - Every quad is culled against the visible viewport before drawing, so cards scrolled out of view cost only the rect transform. The clip rect is anchored at the origin with the viewport SIZE because `CvtToScreen` returns viewport-relative coords (same idiom as `PaintContentBox`).
 - Gated QPC stats: `[fc] paint: N cards, M rects drawn, X ms/paint avg (K paints)` is logged when card visibility flips (rects appear/disappear, which also proves the culling) and otherwise every 240 paints, so autoscroll logging stays quiet.
 - No screen-rect cache: the rects move on every scroll tick, so a cache keyed by layout epoch would miss on each autoscroll paint — culling is what removes the cost there.
 
 ### Fixed
+
 - `Rect::Intersect` returns a NEW rect; it does not mutate the receiver. The first version of the cull called it as if it were in-place and rejected nothing (log showed `1 cards, 2 rects drawn` for a rect at y=-819).
 
 ### Verified
+
 - Probe `tests/tmp/s36pa1-paint.ts` (one cloze on page 1, masks on): `1 cards, 2 rects drawn` at fit-page; after zoom-in + two page-downs (cloze above the viewport) `1 cards, 0 rects drawn`. With the cull disabled the same run reported `2 rects drawn` while off-screen. PASS.
 - Study-mode screenshot `tests/tmp/s36pa1-active.png`: the active card still paints the opaque Peru fill and inactive cards keep the alpha-20 marker (visual check after hoisting the brushes).
 - Observed cost: 0.05-0.15 ms/paint with 1 card / 2 rects, 0.25-0.38 ms/paint with 4 cards / 3 visible rects (`tests/tmp/s36pa1-bench.ts`). No isolated before/after number for the hoist — at that card count the brush construction is lost in the rasterization cost.
@@ -79,62 +143,76 @@
 ## 2026-10-22 (s36-aq) — Flashcard page filter follows the page numbers the user sees
 
 ### Changed
+
 - With two-column v2 active the flashcard page filter is evaluated in the **VIRTUAL** page space (`DisplayModel::VirtualPageCount()`), so typing `2` means the right column of physical page 1 instead of physical page 2. Cards still store PHYSICAL pages: a card passes when either of its columns (`2k-1` / `2k`) is in the filter. v2 off → virtual == physical, behaviour unchanged. Log line now states the space and size: `filter '2' -> active (virtual pages, 4)`.
 
 ### Verified
+
 - Probe `tests/tmp/s36am4-filter.ts`: one cloze on physical page 1, v2 on, filter `2` → `1 cards pass (of 1)`; filter `3` (left column of physical 2) → `0 cards pass (of 1)`. PASS.
 - Revert check: forcing `v2 = false` makes the same run report `0 cards pass` for `2` and the probe FAILS, so the test detects the bug. Restored, rebuilt, PASS again.
 - `bun cmd/build.ts` 0 errors / 0 warnings.
 
 ### Notes
+
 - The Study Filter dialog is a custom window class `TUMATRA_FLASHCARD_FILTER` ("Study Filter"), not `#32770`; its EDIT is subclassed (Enter = apply, Esc = close), so drive it with `sendText(edit, expr)` plus posted `VK_RETURN` / `VK_ESCAPE`.
 
 ## 2026-10-22 (s36-ap) — Favorites persist PHYSICAL page numbers under two-column v2
 
 ### Fixed
+
 - A favorite added while two-column v2 was active stored the **VIRTUAL** page number (left column of physical page 2 was saved as `3`). The right-click toggle ("Remove from favorites") keyed on the same virtual number, so the entry could not be removed, and after reopening without v2 the bookmark jumped to the wrong page. New `FavoritePageNoPhysical(win, virtualPageNo)` (`Favorites.h` / `.cpp`) converts through `DisplayModel::VirtualToPhysical` when `IsViewportCropV2Active()`; used by `AddFavoriteForPage`, `RebuildFavMenu` and both context-menu paths (`IsPageInFavorites`, `DelFavorite`). The stored `PageLabel` still comes from the virtual page, so a v2 favorite keeps its column label.
 - `Favorites.cpp` now includes its own header (`Favorites.h` last) — the helper was otherwise undeclared for `RebuildFavMenu` (C3861).
 
 ### Verified
+
 - Probe `tests/tmp/s36ap-fav.ts`: isolated `-appdata` (no `-for-testing`, so settings save), v2 on, two `CmdGoToNextPage` (virtual page 3), `CmdFavoriteAdd` + confirm the modal `Add Favorite` dialog, `CmdExit` → settings contain `Favorites [ [ PageNo = 2  PageLabel = 2L ] ]`. PASS.
 - Revert check: with the helper returning the virtual number the same run stores `PageNo = 3` and the probe FAILS, so the test detects the bug. Restored, rebuilt, PASS again.
 - `bun cmd/build.ts` 0 errors / 0 warnings.
 
 ### Notes
+
 - TODO item only partly closed: the uia `PageProvider` and the legacy tile math virtual→physical routing are still open.
 - The probe must launch WITHOUT `-for-testing` (settings have to save on exit) and must confirm `IDD_DIALOG_FAV_ADD` (`#32770`), otherwise nothing is stored and the settings file looks unchanged.
 
 ## 2026-10-22 (s36-am2) — perf audit: TC2 render + autoscroll + flashcards (plan in TODO)
 
 ### Changed
+
 - TODO.md: new section `Performance audit: TC2 render + autoscroll + flashcards` — PA1 flashcard paint culling + rect cache (the real find: `PaintFlashcardMasks` is O(cards×rects) per paint with no culling, 64 Hz during autoscroll), PA2 scroll-dirty-rect repaint (ScrollWindowEx strip vs full invalidate, gated), PA3 prefetch→render-cache, PA4 point-to-page binary search, PA5 autoscroll debug-log removal; plus verified-GOOD notes so nothing gets re-audited.
 
 ### Verified
+
 - Code-walk of the hot chains with Serena (post-A4 index): scroll tick `AutoScrollContinuousTick` → `ScrollYBy` (TC2 column advance O(1)) → `RecalcVisibleParts` (direct recompute) → `EnsureMediaBoxesForVisiblePages` (bounded) → `RenderVisibleParts` (dedup + predictive LIFO) → `RepaintDisplay`; nav-point stability window does NOT flood during autoscroll; `RenderCache::RequestRendering` dedups (swap-front + Exists + abort-not-nearby); `ReadAloudOnUserViewChanged` early-outs when not speaking.
 
 ## 2026-10-22 (s36-ao) — BUG-3: image context menu live-checked; silent image failures now notify
 
 ### Verified
+
 - **Menus are filtered correctly** (probe `tests/tmp/s36ao-bug3-menu.ts`, dumps the real popup with `getMenuItems`): text-only PDF (`zlib.3.pdf`) → 54 items, **no `Image` submenu, no Copy Link/Comment**; image doc (`HarfBuzz.png`) → `Image >` = Replace Image…, Edit With Paint, Save, Crop, Resize, **Convert page to PDF [DISABLED]**, Convert to PDF….
 - **`Image > Save` is not dead** (probe `tests/tmp/s36ao-bug3-save.ts`): the editor opens titled `Save Image`, its `&Save` button writes `<book>_page_1.png` next to the image (126 bytes) and closes the window. So the top-level Save-as path works in this build.
 
 ### Fixed
+
 - Three silent `return`s in the context-menu dispatch (`Menu.cpp`) made clicks look dead whenever `GetImageForPageElement` returned null: the Crop/Resize path, `CmdSaveImage`/`CmdConvertImageToPdf`, and `CmdCopyImage`. Each now shows `MaybeDelayedWarningNotification("Couldn't extract the image under the cursor")` instead of doing nothing. Added `#include "Notifications.h"`.
 
 ### Notes
+
 - No repro found for the "non-image items reported dead": those entries are removed or disabled by design (`CmdCopyLinkTarget` requires a link element under the cursor, `CmdCopyComment` a comment, `CmdSaveAttachment` an embedded file). Closing that part needs the user's exact steps (which file, which item).
 - Probes live in `tests/tmp/` (gitignored): `s36ao-bug3-menu.ts`, `s36ao-bug3-save.ts`; screenshots `s36ao-ctx-*.png`, `s36ao-save-editor.png`.
 
 ## 2026-10-22 (s36-am) — A4: clangd index warmed 282/282 TUs; unscoped find_symbol 240s-timeout → 35s
 
 ### Added
+
 - `tests/before-release.ts` now also runs `tests/ad-hoc-b4-coordinate-invariants.ts` (the two B4 invariant commands) before every release.
 - `tests/tmp/run-clangd-index.ts` (gitignored): LSP driver that spawns standalone clangd 23, does the initialize handshake, didOpen-s every CDB entry and watches shard growth (kept as a tool; NOT used for the final warm-up, see Notes).
 
 ### Fixed
+
 - **A4 closed**: unscoped `find_symbol` (project-wide) used to hit the 240 s MCP timeout; a Serena warm-up pass calling `get_symbols_overview(relative_path)` for **all 282 CDB TUs** (chunks of 30, ~4.3 s/file, 0 failures, ~21 min total) made it return in **35 s**.
 
 ### Notes
+
 - **clangd shard versions are incompatible across majors**: the project `.cache/clangd/index` held v19 shards (written by Serena's bundled clangd 19). Standalone clangd 23 reports "wrong version: want 20, got 19" for all of them — never mix clangd majors writing into the same `.cache`, and don't delete the v19 shards (they are what Serena reads).
 - clangd 23 + `-j 8` OOM-crashed on this 7.8 GB machine while re-parsing with all its own shards unreadable ("Allocation failed"); a warm-up through Serena's own clangd sidesteps both problems.
 - `get_symbols_overview(relative_path)` on an unopened TU forces the full parse+index (the warm-up primitive); post-warm-up it is how any file gets (re)indexed after edits.
@@ -143,15 +221,18 @@
 ## 2026-10-22 (s36-am) — Flashcard study JSON: loader restored only the first card; orphan states pruned
 
 ### Fixed
-- **Study progress restored for the FIRST card only.** `ParseJsonObject` (`Flashcard.cpp`) had two defects: (a) `str::TrimWSInPlace` is *destructive* (memmove + `s.s[end] = 0`), and the field parser ran it on slices of the whole JSON document — every parsed field NUL-terminated the buffer mid-parse; (b) after a state object the cursor sat on its closing `}` and was compared against `,`, so the loop always `break`ed. User-visible effect: cards 2..N always came back as "new" and were re-studied from scratch. Fix: local non-destructive `SkipWsLeft` / `TrimWsBoth` helpers (pointer arithmetic only, no buffer writes) for every trim in the parser, plus stepping past `}` before the `,` test.
+
+- **Study progress restored for the FIRST card only.** `ParseJsonObject` (`Flashcard.cpp`) had two defects: (a) `str::TrimWSInPlace` is _destructive_ (memmove + `s.s[end] = 0`), and the field parser ran it on slices of the whole JSON document — every parsed field NUL-terminated the buffer mid-parse; (b) after a state object the cursor sat on its closing `}` and was compared against `,`, so the loop always `break`ed. User-visible effect: cards 2..N always came back as "new" and were re-studied from scratch. Fix: local non-destructive `SkipWsLeft` / `TrimWsBoth` helpers (pointer arithmetic only, no buffer writes) for every trim in the parser, plus stepping past `}` before the `,` test.
 - **Orphan study states** (states of cards whose highlight was deleted) piled up in the per-book JSON forever. New `FlashcardStudyPruneStates(doc, cards)` (`Flashcard.h` / `.cpp`) keeps only entries whose key still matches a card; `HandleFlashcardRate` prunes before each save and logs `pruned N state(s)`.
 
 ### Verified
+
 - `bun cmd/build.ts` 0 errors / 0 warnings.
 - `tests/tmp/s36am-fc-load2.ts` — two clozes, both rated, relaunch: JSON holds 2 states, loader logs **`loaded 2 entries`** (was 1). PASS.
 - `tests/tmp/s36am-fc-prune.ts` — inject fake key `123456789`, zero `nextReviewAt`, rate again: `loaded 2 entries` → **`pruned 1 state(s)`** → `saved 1 entries`; file keeps only the live key. PASS.
 
 ### Notes
+
 - Debug exe runs portable: study JSON lives in `out/dbg64/FlashcardStudy/`, one `<md5-of-book-path>.json` per book.
 - A cloze highlight is not inside the PDF until `CmdSaveAnnotations`; without it the next launch finds 0 cards.
 - `str::TrimWSInPlace` mutates its argument — never call it on a slice of a buffer you still need.
@@ -161,31 +242,38 @@
 ## 2026-10-22 (s36-al) — B6 wave 5: roundings + unchecked conversions 24 → 0
 
 ### Fixed
+
 - **`bugprone-incorrect-roundings` (17 sites → 0)**: `(int)(x + 0.5)` → `(int)lround(x)` on every site whose domain is provably non-negative (image sub-rect math in `Commands_Edit` guarded by the footprint checks, aspect-ratio keeps in `ImageSaveCropResize` with dims clamped ≥1, `SnapSpeedMultiplier` clamped positive, `MarkdownModel` opacity 0-100). `<cmath>` added to 4 files — placed BEFORE `base/Base.h`: after windows.h the min/max macros break MSVC's `<cmath>` (C2589 "do: token inválido" cascade).
 - **`bugprone-unchecked-string-to-number-conversion` (7 sites → 0)**: `atoi` → `(int)strtol(s, nullptr, 10)` and `atof` → `strtod(s, nullptr)` (behavior-identical; strtol/strtod only differ from atoi/atof on overflow, where the latter are UB) in `TrimConfigDialog` ×3, `SumatraDialogs`, `SumatraStartup`; the `sscanf("%d %d")` in `ReadingStats` became a two-pointer strtol parse reproducing the `n==2` semantics exactly; the 13-field `sscanf` ArchMeasurement deserializer in `SumatraPDF.cpp` kept with `// NOLINTNEXTLINE(...)` (partial-parse deserializer — wants n≥10 of 13 fields; a strtol rewrite would risk the persisted format).
 
 ### Verified
+
 - Fresh per-TU diagnose (`tests/tmp/diagnose-b6w5.ts`, both checks, 269 TUs): full pass found 24 sites; after the fixes the 9 touched TUs re-diagnose **0 sites** (NOLINTNEXTLINE verified suppressing).
 - `bun cmd/build.ts` 0/0 (77.8 s), exe deployed to Compiled. clang-format on all 9 touched files.
 
 ### Notes
+
 - NOLINTNEXTLINE trap: clang-format re-wraps a long NEXTLINE comment into two lines, moving the suppression OFF the diagnostic line — keep it short enough to stay on one line.
 - The stale-line lesson held again: the s36-ad sweep's 17+7 line numbers were all shifted by waves 4a/4b + the other agent's commits; the fresh diagnose pass is the only trustworthy source.
 
 ## 2026-10-22 (s36-al) — Flashcard: active card rect in Peru/orange
 
 ### Added
+
 - `DsAccents::flashcardActive` design token (`ToolbarLayout.h` / `DsAccentsGet()`): dark `RGB(205,133,63)` (Peru), light `RGB(184,115,51)` (deeper Peru for white pages). Theme resolved per paint, same as the other tokens.
 
 ### Changed
+
 - `PaintFlashcardMasks` (`Canvas.cpp`): the card being studied (`i == studyCardIdx`) now fills with the accent token instead of opaque gray — still fully opaque, so cloze text stays hidden — plus a `DpiScale(..., 2)` outline in the same color. On **reveal** (fill gone, original text visible) the marker shrinks to a single bottom **underline** instead of a full outline, so the card stays identifiable without boxing the text in. Inactive/reading cards keep the translucent gray marker, now lighter (**alpha 30 → 20** of 255) so it reads as a hint, not a block.
 - Matches the three user asks in sequence: active rect Peru/orange; inactive stays gray; reveal = underline; plus "um pouco mais de transparência" on the gray.
 
 ### Verified
+
 - `bun cmd/build.ts` 0 errors / 0 warnings; exe deployed to `Compiled/`.
 - Probe `tests/tmp/s36al-fc-color.ts`: two clozes on page 1 of `ext/a-zlib/zlib.3.pdf` (keyboard selection → `S`), study mode, pixel scan of the canvas → **791 accent px** while hidden (fill + outline), **171 accent px** after reveal (underline only; was 444 with the full outline), modal color `#c78544`. Screenshots `tests/tmp/fc-color-light-active.png` (active card orange, inactive gray) / `fc-color-light-reveal.png` (underline under the active card, text visible, inactive cards gray).
 
 ### Notes
+
 - **`MainWindowBackground` cannot force the theme**: it is only honoured by the **Light** theme (`Theme.cpp:1010` guards on `gCurrThemeIndex == 0`), so an isolated settings dir with a magenta value changed nothing on this machine (its theme is `Dark`) — that is by design, not a load failure. `-appdata <dir>` DOES load settings (log: `LoadSettings('<dir>/TumatraPDF-settings.txt')`), including `Theme = Dark` / `ColorizeControls = true`; `-for-testing` only blocks saving. `CmdToggleLightDarkTheme` was a no-op in the harness.
 - `Gdiplus::Pen` takes `const Color&` (a `Color*` → C2665). Scratch probes: `s36al-themecheck.ts`, `s36al-themetoggle.ts`, `s36al-theme-roundtrip.ts`, `s36al-appdata-probe.ts`.
 - The gray-marker alpha is verified by code + eye, not by pixel histogram: `captureWindowPixels` reports DPI-**virtual** w/h for a **physical**-size buffer, so the marker block lands partly outside the scan (and at 200% zoom the view scrolls off the card). The accent color (a large opaque area) is still measurable, hence the 791/171 numbers.
@@ -193,29 +281,35 @@
 ## 2026-10-21 (s36-ak) — B6 wave 4b: unhandled-code-paths 102 → 0
 
 ### Fixed
+
 - `bugprone-unhandled-code-paths` ("potential uncovered code path; add a default label") cleared. **90 of the original 102 were fixed as a side effect of wave 4a** (adding `default: break;` satisfies both checks); the fresh full diagnose (`tests/tmp/diagnose-unhandled.ts`, 269 TUs) found the remaining 12 — all message-dispatcher switches (WndProc/DialogProc/IDispatch::Invoke/entity table) where `default: break;` is behavior-neutral (the post-switch fall-through already defines the semantics). **12 labels in 7 files** via the adapted inserter (`fix-unhandled-default.ts`: the skip rule now scopes the has-default test to the switch's own brace depth — a `default:` in a NESTED switch does not satisfy the check) + 1 manual (`base/HtmlTags.cpp` — the entity-table switch exceeds the brace-matcher's 20k-char scan cap).
 
 ### Verified
+
 - Full diagnose rerun: **0 sites / 269 TUs**. Build 0/0 (124.9 s), exe deployed to Compiled.
 
 ### Notes
+
 - Stale-line trap: the definitive sweep log's line numbers predate later edits — always re-derive current sites with a fresh per-TU pass before fixing.
 - `WebView.cpp`/`HarfBuzzPch.cpp` exit 1 in standalone clang-tidy (PCH TU + WebView2 include gap) — 0 sites, no impact.
 
 ## 2026-10-21 (s36-ak) — Residual toolbar fix: label width owned by baked spaces, pack measures post-`TB_AUTOSIZE` rects
 
 ### Fixed
+
 - **The Autoscroll button's explicit width never stuck and fought its own paint.** `EnforceToolbarTextButtonWidths` set `TBIF_SIZE` cx (309) that comctl re-derives from the label string on every layout pass (measured: set=309 → cx=194), and the transient wider layout PAINTED — leaving ghost label pixels right of the button when comctl shrank back. Now the Enforce pass skips the cx set for `CmdAutoScrollToggle` entirely: the leading spaces baked into the label (`AddAllToolbarButtons`) are the width mechanism, now computed as `ceil((trioDx + DpiScale(24)) / spaceDx) + 1` — the +24 slack so the visible label (drawn by comctl AFTER the spaces) never clips at the button's right edge. Result: stable `cx=226` (`set=-1`), label fully inside 572..798.
 - **Group pack measured stale rects**: right after (re-)adding buttons, `TB_GETITEMRECT` still reports pre-derivation widths, so the greedy pack planned wrong breaks (the Autoscroll group overflowed its row instead of wrapping). `TB_AUTOSIZE` (`TbAutosIZE`) is now sent before `TB_SETROWS(1)` + pack, forcing the string-derived widths NOW.
 - **Custom-draw index/command-id mixups** (pre-existing, silently inert): `CDDS_ITEMPREPAINT` fed `nmcd.dwItemSpec` (an INDEX) to `TB_ISBUTTONCHECKED`/`TB_GETBUTTONINFO` (both take a command id) and `CDDS_ITEMPOSTPAINT` queried without `TBIF_BYINDEX` — so the checked-bold style and the trimmed centered label re-draw never ran. Both now query by index (`TBIF_BYINDEX`) and resolve the real command id first. (Item notifications still don't reach the handler in this build — the comctl draw stands — but the code is now correct for when they do.)
 - Full `InvalidateRect`+`UpdateWindow` at the end of `RebuildToolbarButtonsForWidth` so no intermediate-layout pixels survive.
 
 ### Verified
+
 - `bun cmd/build.ts` 0 errors / 0 warnings; all temp instrumentation (`[e9p]`, pack-groups dump) stripped (grep = 0).
 - Control dump sweep (physical px): 1200/800 single row, trio at 577..683 inside button 572..798; 760/745/700/640/560 wrap coherently, trio repositioned to row 2 (5,33), `vis=1/1/1` everywhere, `cx=226` stable.
 - Pixel-level probe at 745: no content beyond the button rect; screenshots `tests/tmp/res/final-{1200,800,745,560}.png` show the trio inside the block and the complete "Autoscroll" label in 1-row and wrapped layouts.
 
 ### Notes
+
 - **Probe capture trap**: `captureWindowToPng` from the DPI-unaware bun process creates the bitmap at the VIRTUAL window size (745) while `PrintWindow` renders PHYSICAL pixels (931) — the capture is the top-left CROP. Every "label cut at the right edge" in probe screenshots at x > window-width-in-virtual was this artifact, not a paint clip. The earlier s36-ah "110 px offset / 4 px bleed" and the s36-ai residual claim were partly this.
 - At 745 the coherent block wrap needs 3 rows (the correctly-sized Autoscroll group no longer fits row 1 after Find; 2 rows is impossible with this group order) — band grows, nothing clipped.
 - Widths sweep: single row ≥ ~800 client phys; wrap boundary moved from ~700 to ~800 frame px because the button now has its real width.
@@ -223,30 +317,36 @@
 ## 2026-10-20 (s36-aj) — B4 slice 2: VirtWnd local<->root hit-test bridge invariant
 
 ### Added
+
 - `TestVirtWndHitTest` `-dbg-control` command (id 48; IntArgs [samplesPerWnd=8, seed=42]) → `VirtWndHitTestResultTemp` (SumatraTest.cpp): walks the home VirtWnd tree (the root holds a SINGLE `child` member — the home chrome; the base `children` vec stays empty at the root) and, for every hit-testable wnd W with non-empty bounds, samples the bounds center + N-1 deterministic PRNG points (kept 1px inside the edges); asserts `homeRoot->WndFromPoint(windowPt)` returns W with `*ptLocalOut == windowPt - BoundsInWindow().xy` **EXACTLY** (integer arithmetic). Topmost-wins overlaps are counted when the winner's own local point is consistent; consistent nulls (gaps between entries) counted.
 - `tests/ad-hoc-b4-coordinate-invariants.ts` case 4: polls until NOTREADY clears — the home tree is built + laid out by the home page's paint path (`HomeListRowsResultTemp` NOTREADY/exit-2 pattern), then asserts tested>0.
 
 ### Verified
+
 - Build 0/0 (47.3 s). Full ad-hoc run 11.9 s: slice-1 cases unchanged (zoom 25-1600 err scales 1/zoom; alternate seed; multi-page TC2 mapping) + **`virt-wnd bridge: OK wnds=12 tested=62 overlap=16 null=18` — 0 bridge violations** on the home tree.
 - Include-order: `SumatraTest.cpp` needs the full wingui chain for `VirtWnd.h` (UIModels → Layout → WinGui → PlatformFont → Gfx → IconPixmap → VirtWnd — `VirtWnd.h` is not self-sufficient: needs `LayoutBase`, `Gfx`, `VirtWndMouseHandler`, `Insets`).
 
 ## 2026-10-21 (s36-ai) — E9: timer trio anchored by command id (`TbGetRect` index/id mixup)
 
 ### Fixed
+
 - `TbGetRect(hwnd, id)` sends `TB_GETRECT`, whose `wParam` is a **zero-based index** — every fork call site passed a **command id** (`CmdAutoScrollToggle` = 480 on a ~35-button bar), so comctl answered with a rect belonging to no button. That rect anchored the timer trio (checkbox | "Timer:" | minutes), which is why it could sit outside the Autoscroll button and cover its neighbours (user report).
 - New `TbGetRectForCmd(HWND, int cmdId)` in `base/Win.cpp` (`TB_COMMANDTOINDEX` + `TB_GETITEMRECT`); switched all five call sites: `ToolbarLayout.cpp PositionToolbarChildWindows`, `Toolbar.cpp` (page-box anchor, `CreateTimerControls`, `TbUpdateButtonRects`-helper path) and `SumatraPDF.cpp` (Read Aloud button).
 - `PositionToolbarChildWindows` fit guard documented and simplified: `trioDx` already counts the leading gap, so `anchor.dx >= trioDx + margin` both fits the trio and keeps it off the button's right edge; when it does not fit the trio hides instead of overflowing.
 
 ### Verified
+
 - Build 0 errors / 0 warnings. Visual sweep at 1200 / 700 / 560 px: trio stays inside the widened Autoscroll button in one-row and wrapped (2-3 row) layouts; no overlap with neighbouring buttons.
 
 ### Notes
+
 - **Measurement trap**: the bun/GUI probes are DPI-unaware, so every winapi rect they read is virtualized ÷1.25 on this 125% machine while the DPI-aware app logs physical pixels — the "trio is 110 px left of its button" and "4 px bleed into the row above" from s36-ah were this artifact. Compare app-side logs (`out/dbg64/sumlog.txt`) with probe rects only after scaling.
 - Pre-existing, not caused by the trio: at ~700-760 px the widened Autoscroll group is clipped at the toolbar's right edge — `PackToolbarGroupsByWidth` accepts a stale available width and `ToolbarRewrapAfterSizing` self-heals on rebar-width changes only. Tracked in TODO.
 
 ## 2026-10-21 (s36-ah) — USER reports batch: 7 of 9 fixed (Home time/contrast, trim-pause, TC2 bookmarks, reopen-window, per-file prefs, master time)
 
 ### Fixed
+
 - Home stats totals: now `Today <t> | Total: <t>`, `7d` gone. New `ReadingStatsGetTotalSec()` sums daily buckets (path-independent => survives rename/delete/move = the "MASTER" reading time). Dark accents had `textStrong` RGB(60,60,60) DARKER than `text` RGB(130,130,130), so times were invisible; now 170/232.
 - Trim Config dialog pauses autoscroll: `AutoScrollPauseForTrimConfig` / `AutoScrollResumeFromTrimConfig` + `autoPausedByTrimConfig` (resume on OnSave/OnCancel; toggle clears the flag).
 - TC2 bookmark lands on LEFT column: engine destinations carry PHYSICAL pages while `DisplayModel::ScrollTo` takes VIRTUAL. New `DisplayModel::PhysicalToVirtualPage(phys, rect)`; mapping applied at the single choke point `LinkHandler::ScrollTo(int, RectF, float)`.
@@ -255,10 +355,12 @@
 - R6-left: autoscroll timer toggle no longer reads the checkbox HWND; `BS_AUTOCHECKBOX` -> `BS_CHECKBOX` and the handler owns the state, so keyboard/palette invocation stays in sync.
 
 ### Fixed (found while verifying the above)
+
 - Per-document restore ran inside `if (fs)` at a point where `tab->AsFixed()` is still null (controller created later), so every assignment was silently skipped; moved just before `dm->SetInitialViewSettings()`.
 - `EngineMupdf::HandleLinkMupdf` calls `ScrollTo(pageNo + 1, r, zoom)` — the int overload — so the mapping placed in `ScrollTo(IPageDestination*)` never ran for TOC/outline links; moved to the int overload (removed from the dest overload to avoid a double map).
 
 ### Verified
+
 - E5: two documents -> close window -> relaunch empty -> `CmdReopenLastClosedFile` -> both tabs restored, active = last.
 - E6/E7: settings file shows per-file `MarginTrim` / `ViewportCropV2` / `TrimTop` / `TrimBottom`; a new document gets false/false.
 - E2: autoscroll 70->140, open Trim Config -> frozen; close dialog -> resumed 244->314.
@@ -266,6 +368,7 @@
 - Build 0/0, no warnings.
 
 ### Notes
+
 - E4 zoom step = taste change: `defaultZoomLevels` refined to a ~1.33 ratio (added 10/18/250/500/1000/2000/4000). Awaiting user verdict; one-line revert if disliked.
 - E9 timer trio stays OPEN: anchored to `TbGetRect(CmdAutoScrollToggle)` measured BEFORE `EnforceToolbarTextButtonWidths` widens the button by the trio width; after a 2-3 row wrap the trio bleeds 4 px into the row above and is never re-positioned once the wrap settles.
 - Traps: `bun cmd/gen-code.ts` fails here at the vk-codes step (no `cl` in PATH) -> run `bun cmd/gen-settings.ts`; concurrent agent builds cause LNK1104/C1083, poll `Get-Process MSBuild`; debug build always exits 5 on quit; debug always logs to `out/dbg64/sumlog.txt`; TC2 needs `DisplayMode = continuous`; `-for-testing` blocks settings SAVE but not read.
@@ -273,29 +376,35 @@
 ## 2026-10-20 (s36-ag) - B6 wave 4a: switch-missing-default-case 128 → 0 (113 default labels)
 
 ### Fixed
+
 - `bugprone-switch-missing-default-case` (128 sites) eliminated via a custom inserter (the check has NO fix-it upstream): `tests/tmp/fix-switch-default2.ts` — per-TU clang-tidy diagnose → brace-matching `default:` + `break;` insertion (tracks strings/chars/comments; skips spans that already have a default; always behavior-neutral: falls-through == skip-switch). **113 labels in 55 files**; the remainder were already-default or vendor TUs.
 - Two script bugs found on the way: (1) the diagnostic regex assumed MSVC `(line,col)` format — clang-tidy prints GNU `path:line:col:` (two full passes ran with 0 inserts before the fix); (2) `cmd/clang-flags.ts` include list predated F1 (missing `src/mupdf`, `mupdf/scripts/freetype`) → every TU failed to parse ("Found compiler error(s)").
 
 ### Verified
+
 - `bun cmd/build.ts` 0/0 (112.8 s), exe deployed to Compiled. Per-TU verify: `clang-tidy.ts -files` → **0** switch-missing-default-case findings (Toolbar + Canvas spot-check).
 - git diff review: +273/−2 across 62 files (1-2 line inserts + comment alignment only).
 
 ### Notes
+
 - Wave 4b (`bugprone-unhandled-code-paths`, 102) stays backlog: its `default` needs a per-function sensible value, not a mechanical `break`.
 - Inserter script lives in gitignored `tests/tmp/`; the stale stash-pop conflicts from the other agent were resolved in `c524e4d` (kept the HEAD/release 1.0.12 side).
 
 ## 2026-10-20 (s36-af) — fuzz harnesses: document handlers were missing (campaigns were vacuous) + cmark link dep
 
 ### Fixed
+
 - **All mupdf-based fuzz campaigns before this entry were engine-noop**: the harnesses never called `fz_register_document_handlers(ctx)`, so every `fz_open_document_with_stream` failed with "No document handlers registered" — context create + immediate open failure + cleanup only (the "999 execs/s / 900k runs" numbers were the vacuous signature). Added the registration to `MupdfFuzzer.cpp` + `HtmlMdFuzzer.cpp` (ImageFuzzer needs none — `fz_new_image_from_buffer` is handler-free).
 - Harness link: mupdf 1.28.5's `md.obj` references cmark-gfm → added `out/rel64/obj/cmark-gfm.lib` to the shared link list (new `cmark-gfm.vcxproj` from the F1 merge; it lives in `obj/`, not `obj-s/`).
 
 ### Verified
+
 - Honest re-campaign (mupdf 1.28.5, 5-pdf corpus): **69 545 runs / 181 s = 384 execs/s, 0 crashes**, corpus still growing (+71 units), peak RSS 521 MB — the exec/s drop (999 → 384) is the signal that real PDF parsing now happens. `HtmlMdFuzzer` shares the fix (no separate campaign yet).
 
 ## 2026-10-20 (s36-ae) — TODO housekeeping: all `[x]` blocks archived to LOG (user request)
 
 ### Changed
+
 - TODO.md rewritten to **open-work-only**. Removed done blocks (each already documented in its session entry):
   - Dev-tooling DONE rows A1-A3 / B1-B3 / B5 / C1-C4 / D1-D3 / E1-E2 → LOG s36-q / s36-r / s36-t / s36-u..s36-ad / s36-v / s36-w (B6 keeps only its remaining triage list; A4 stays WIP; B4 still TODO).
   - Dependency plan F1-F5 + the pre-work measured-diff snapshot → LOG s36-z + s36-aa (commits f9ab93e, feb5748, 1d30da4, 9827242, ee8a160); the full pre-work snapshot (182 commits / 152 files; 27 patches = 22 applied upstream; integration surface `585ce546`) is preserved in lemma `m419176b45317`.
@@ -304,22 +413,26 @@
 - Kept as OPEN: A4 / B4 / B6-remaining; suite baseline (17 pre-existing failures; exit 5 = 0xC0000005, debug-only); F6 deferrals + Bun 1.4.3; refactoring R3/R5/R6/R7/16D/TC2-leftovers; TC2 user live-confirms; flashcard open items + user test queue; Image Occlusion decisions; s32-B user-side save check; design centering rule; OCR research; Bookmarks Improve / Page Counting / Capture tool / Stats `book_stats` specs (translated PT→EN, kept uncompressed per §13); BUG-3/BUG-4; the dark-yellow-chrome pre-existing oddity (now its own open bug line); USER open reports (kept verbatim in PT — user-authored specs).
 
 ### Notes
+
 - §13 rule applied: unfinished sections translated but never compressed; done sections removed (LOG is the archive).
 - TODO.md went from 277 lines to ~110; the header now states the housekeeping rule so future sessions keep it clean.
 
 ## 2026-10-20 (s36-ad) — B6 wave 3: narrowing-conversions 44 → 0 + D1: exif seeds + image-decoder harness
 
 ### Fixed
+
 - **B6 wave 3 (`bugprone-narrowing-conversions`, 44 fork sites → 0)**, all zero-behavior-change explicit casts (int operands in float math; unsigned→int made explicit): `Canvas.cpp` (21: trim compute/drag int×float operands + refline slab-clip via new `sax/say` float locals), `Commands_Edit.cpp` (4: `(float)x/y` vs RectF — x/y are int), `HomePage.cpp` (8: triangle mid-Y `(float)rc.dy / 2.0f` + today cross-hair `(float)dpi(4)`), `Flashcard.cpp` (3: `(int)((float)interval * …)` — interval is int), `AutoScroll.cpp` (accum `-= (float)dy`), `FlashcardSidebar.cpp` (`(int)dis->itemID`), `MobiDoc.cpp` (`(int)(u32)…`), `SelectionTranslate.cpp` (dropped pointless `(u32)` on len), `SumatraDialogs.cpp` (`(int)idComboBox`), `SumatraLog.cpp` (`(int)(us->Length / sizeof(WCHAR))`), `base/ByteReaderWriter.cpp` ×2 (`(int)(u32)sizeHint`), `ifilter/FilterBase.h` (`(int)((size_t)size + 1)`). Vendored remainder: `chunk.h` (cmark) ×2 + WebView2 packages ×2 — out of scope. First-pass lesson: two fixes had the operand direction inverted (x/y are int in `EditToolsImageHoverTest`, `interval` is int) → verify loop caught them (redundant-casting + inverted-direction warnings).
 - **Follow-up (same wave)**: the fresh sweep exposed 33 narrowing sites CREATED by the wave-2a `/ 2.0f` fixes (the sweep they were verified against predated them): `OverlayScrollbar.cpp` ×32 + `InstallerCommon.cpp` ×1 — fixed with explicit operand casts (`(float)arrowTop.x + (float)arrowTop.dx / 2.0f` form; the wrapper-with-inner-cast form still leaves `.x/.y` implicit). Verified 0 narrowing on both TUs; build 0/0. Total narrowing eliminated: 77 sites (44 + 33).
 - `cmd/fuzz.ts` `-seeds <dir>` was IGNORED by every mode (hardcoded roots) — now each mode uses the given dir; `exif` mode regenerable seeds via System.Drawing (3 JPEGs, quality 50/85/95) in gitignored `out/fuzz/seeds-exif/`.
 
 ### Added
+
 - **D1: image-decoder libFuzzer harness** (`tests/fuzz/ImageFuzzer.cpp`, second target in `cmd/build-fuzz-harness-mupdf.ts` → `out/fuzz/fuzz-images.exe`): `fz_new_buffer_from_copied_data` → `fz_new_image_from_buffer` (consumes the buffer ref on success) → `fz_get_pixmap_from_image` (all-NULL args) with a 64MP dimension clamp. Build script now loops a targets table (adding a third harness = one row).
 - **D1: html/markdown libFuzzer harness** (`tests/fuzz/HtmlMdFuzzer.cpp`, third target → `out/fuzz/fuzz-htmlmd.exe`): dispatches on the first byte — `<` opens the input as `.html`, anything else as `.md` (mupdf's `md_document_handler` → the vendored cmark-gfm); fresh `fz_context` per input, open + count pages + load/bound page 0. `fuzz.yml` gained the matching 10-min CI step (corpus seeded from ext+tests html/htm/md).
 - **D1 is complete**: four native harnesses (base parsers, mupdf PDF, images, html/md) + the app-level driver (render/extract-text/exif modes).
 
 ### Verified
+
 - Wave 3: `clang-format` (12 files, +32/−31), `bun cmd/build.ts` 0/0 (89 s), `clang-tidy.ts -files` on the 12 TUs → **0 narrowing-conversions**; `PdfFilter.cpp`/`EpubFilter.cpp` (FilterBase.h includers) → clean (exit 0).
 - Exif campaign (fixed driver args): 150 execs / 80 s = **1.9 exec/s, 0 crashes** (real `-dump-exif` parsing).
 - Image campaign: 3218 runs / 45 s pre-clamp (71 execs/s), 16 785 / 21 s post-clamp (799 exec/s), **0 crashes** both; corpus = 10 png/jpg/bmp/gif/tif from ext+tests.
@@ -327,6 +440,7 @@
 - B6 analyzer triage CLOSED for the 42-finding list: `EngineDump.cpp:365` = Str-family FP (ReportIf + len 0 bounds the index); `base/Base.h:743` = by-design FP (kFuncNoArg fn-pointer cast convention).
 
 ### Notes
+
 - Definitive fresh sweep (`-sweep -jobs 6`, 262 TUs, post-waves 1-3): **29 240 user diagnostics / 93 checks / 0 errors** (was 29 922 / 95 / 8 error TUs), `clang-analyzer path findings` **42 → 32**, `bugprone-narrowing-conversions` **81 effective → 4** (only the vendored chunk.h/WebView2).
 - **Full campaign chain finished, 0 crashes everywhere** (~1.36M execs): parsers app-level 400 / 341 s (1.2 exec/s, real engine loads post-arg-fix); exif 300 / 170 s; images native **451 778 / 601 s (752/s)**; mupdf native **900 884 / 901 s (1000/s)**. Log: `%TEMP%\fuzz-campaigns.log`. NOTE: the app-level phases ran the STALE pre-F1 ASan exe (fuzz.ts targets `out/dbg64_asan/`) — re-validated below.
 - **ASan exe rebuilt post-F1/F4/F5** (`bun cmd/build-asan.ts`, 159.8 s, ASan DLL deployed; C1 infra re-validated after the dependency batch — smoke: `-dump-exif` + `-extract-text` both clean under ASan on mupdf 1.28.5). First REAL app-level ASan campaigns on current code: extract 120 / 174 s, render 50 / 166 s, exif 80 / 70 s — **250 execs, 0 crashes** (`%TEMP%\fuzz-campaigns2.log`).
@@ -336,19 +450,23 @@
 ## 2026-10-20 (s36-ac) — C3 App Verifier clean + D1 driver arg fix + headless -render finding
 
 ### Fixed
+
 - **`cmd/fuzz.ts` app-level driver args were wrong**: `-render <file> 1` / `-extract-text <file> 1` made Flags.cpp eat the FILE PATH as the paramInt (page number), leaving `fileNames=['1']` → engine creation failed every exec → the D1 slice-1 "300 execs / 0 crashes" baseline exercised NO engine code (vacuous). Correct order: `<file> -render 1` / `<file> -extract-text 1` (`-dump-exif <file>` was already right). Driver now also passes `-for-testing`.
 
 ### Verified
+
 - **C3 (App Verifier) clean**: under Heaps+Handles+Locks — `test_util.exe -for-ai`: **102 783 tests PASS, exit 0**; `TumatraPDF.exe -for-testing <file> -extract-text 1` and the render run: **exit 0, no verifier stops** (logs `TumatraPDF.exe.0/1.dat` in `%USERPROFILE%\AppVerifierLogs`, verifier disabled after). Elevation via one UAC per batch; batches in `%TEMP%\c3-appverif\`.
 - mupdf 1.28.5 engine confirmed functional headless: `-extract-text` prints the zlib manual text (hex-dumped).
 - Re-baselined fuzz render mode after the arg fix: 4 execs / 10 s (2.5 s/exec — real engine loads now).
 
 ### Notes
+
 - **Headless `-render` is pre-existing broken** (not an F1 regression — the pre-F1 ASan exe fails identically): `EngineMupdf::RenderPage` → `GetFzPageInfo(pageNo, false)` returns null without GUI-side init; "failed to render page", exit 0. The mupdf-level render pipeline itself works (the native harness runs `fz_run_page` in-process at ~900 execs/s). Extract-text is the deep headless exercise path; render mode now only exercises the engine lifecycle. Flag-semantics lesson in Lemma (`m534b377a0b07`).
 
 ## 2026-10-20 (s36-aa) — F4/F5 dependency batch: libarchive 3.8.10, libjpeg-turbo 3.2.0, mujs 1.3.11, liblzma 5.8.4, darkmodelib e8ec95ba, decoders, zlib-ng removed (BUILD OK; gates PASS)
 
 ### Changed
+
 - **libarchive 3.8.8 → 3.8.10** (security release; 7z Delta/RISCV/ARMThumb/IA64 filters). Curated flat tree re-synced: 116 files updated, `archive_crc32.c` / `archive_umask.c` / `archive_umask_private.h` / `archive_xml_private.h` added, `archive_crc32.h` removed. `premake5.files.lua` list updated; `config_windows.h` needed `#define ARCHIVE_CRYPTO_WIN 1` (3.8.10 guards the WinCNG digest path with it — without it `win_crypto_init/Update/Final` are undeclared, C4013); `archive_read_support_format_cab.c` needed `(size_t)1 << w_bits` (C4334).
 - **libjpeg-turbo 3.1.4.1 → 3.2.0**: 145 files re-synced. 3.2.0 moves the SIMD dispatcher to one shared `simd/jsimd.c` + `jsimd{const,dct,int}.h` (arch picked at compile time by `SIMD_ARCHITECTURE`, now defined in the hand-maintained `jconfigint.h`), so the per-arch `jsimd.c` copies are gone; asm lists must mirror `SIMD_SOURCES` in `simd/CMakeLists.txt` (the `*-ext.asm` files are `%include`-only fragments — assembling them standalone fails). `jversion.h` now exposes only `JCOPYRIGHT` (`jerror.h` uses it). Multi-precision is mandatory (`jcinit.c`/`jdmaster.c` reference `j12init_*`/`j16init_*` unconditionally) ⇒ build `src/wrapper/*.c`, minus `template.c` and the `rdpng-*`/`wrpng-*` PNG wrappers (they need the external `spng`).
 - **mujs 1.3.9 → 1.3.11** via `cmd/a-mujs.ts` (regenerates `ext/a-mujs`); new `defaultRev`, `versions.txt` updated.
@@ -358,11 +476,13 @@
 - **darkmodelib trunk → `e8ec95ba63`** (2026-10-10; repo renamed `ozone10/win32-darkmodelib`, no tags). Vendored tree re-synced: `DarkModeSubclass.{h,cpp}` → `Darkmodelib.h` + `src/Darkmodelib.cpp`, new `MemoryHelper*` + `DmlibIni.cpp`. **Namespace `DarkMode` → `dmlib`** — first build failed with `C2653 'DarkMode'` everywhere because the rename was missed in the API audit (function names unchanged); fixed by rewriting 94 call sites in 23 `src/**` files. premake list + `cmd/build-lib-defs.ts` updated; `UseDarkModeLib()` stays (fork's own helper, not the lib's).
 
 ### Fixed
+
 - `cmd/util.ts` `detectVisualStudio2026()` falls back to VS 2022 (the fork builds with VS 2022; `a-mujs.ts` hard-failed without it). `cl.exe` still needs `VsDevCmd.bat`.
 - `tests/issue-2199.ts` asserted on a fixed middle row band (`h/2 ± 10`) for the "Couldn't render page N" caption; with a fit-page layout at 125% DPI the caption sits at y≈451, so the test read 0 px and looked like a rendering regression (the app log proved the fork's guard still fires: `EngineCbx::LoadMedibox: empty media box` → `no image data for page 2, failing the render`). Now counts the whole canvas; thresholds unchanged (still catches black = 0 px and blank white = full canvas).
 - `tests/issue-906.ts` spawned the exe through `cmd.exe /c`, which breaks on this repo's space-containing path (`'D:\1' is not recognized`); spawns the argv array directly now.
 
 ### Verified
+
 - `bun cmd/build.ts` 0 err / 0 warn after every step (final: 29.9 s) → `Compiled/TumatraPDF.exe`.
 - `bun cmd/run-unit-tests.ts -dbg` PASS; `issue-1678` (archive formats) PASS; `issue-2199` (broken cbz page) PASS; `issue-3731` (JPEG render, 309 distinct colours) PASS; `issue-5681` (mujs REPL) PASS; `ad-hoc-flashcard-cloze` PASS; `s36i-roundtrip` PASS.
 - No mupdf/mujs regressions: `libarchive` was the only suspect in the `issue-2199` investigation, and the app log showed the guard still working.
@@ -373,6 +493,7 @@
 - Full suite re-run: identical stop at the documented pre-existing `issue-5734` exit 5; the post-`issue-5734` runner reproduced the **same 17 pre-existing failures** and no new ones.
 
 ### Notes
+
 - **darkmodelib** upgraded (see Changed). Verification: toolbar round-trip PASS; dark/light/flashcard-sidebar screenshots **pixel-equivalent to the pre-upgrade Release baseline** (chrome/page means within ±1/255 via GDI+ sampling; `4-light-back.png` hash-identical to `1-light.png`). Pre-existing oddity to investigate separately: dark-mode chrome paints a saturated yellow (≈ rgb 245,237,19) on this machine in **both** builds (old lib + new lib, PrintWindow and BitBlt agree) — not a regression; likely accent/theme-preset driven.
 - Partial revert of individual libarchive `.c` files is impossible (private structs changed in 3.8.10 ⇒ C2039); bisect only in whole-tree steps. `git checkout -- <path>` is blocked by the CC Safety Net — use `git stash push -- <paths>`.
 - PowerShell `| Select-Object -First N` kills the upstream process once N lines arrive, so a mutating script appears to "print but do nothing" — redirect with `| Out-Null` instead.
@@ -381,6 +502,7 @@
 ## 2026-10-20 (s36-z) — F1: mupdf 1.28.0-rc2 → 1.28.5 (security; BUILD OK; unit tests PASS)
 
 ### Changed
+
 - **mupdf 1.28.5** swapped in wholesale from upstream SumatraPDF integration commit `585ce546` ("Update mupdf to 1.28.5 (fixes #6182)", 2026-10-02). Tree sync byte-safe (bun, CRLF normalization for text, NUL-detect for binaries): 1410 files copied, **7 added**, **4 removed**. Zero fork-side mupdf edits existed before (`git log -- sumatrapdf-src/mupdf` = import commit only), so nothing lost.
 - Content = security/crash hardening across 182 upstream commits: OOB read/write in TTF subsetting, stack overflow + OOB in pdf recolor, OOB write in `mutool audit`, OOB in seps pixmap conversion, SEGV on early metadata, shade clipping, pattern rendering, js `Rect`.
 - **`pkcs7-windows` left mupdf** upstream (moved to their own `src/mupdf/`). Ported `pkcs7-windows.c/.h` + `README.md` into `sumatrapdf-src/src/mupdf/`; includes in `ArchVector.cpp` / `EngineMupdf.cpp` now `<mupdf/pkcs7-windows.h>` (resolved via `-I src`). New header is a superset (adds `inspect`, PFX, store APIs).
@@ -388,76 +510,93 @@
 - `ext/versions.txt`: mupdf 1.28.0-rc2 → 1.28.5 (2026-09-24).
 
 ### Added
+
 - **`sumatrapdf-src/ext/patches/`** (F3): the 27 upstream patch files + README copied from the same commit — permanent record of every change made to the vendored mupdf tree, so future bumps diff patches instead of re-deriving a 1400-file diff. Base revision documented as 1.28.5 (`8ad45e92f`). Of those 27, 22 are already applied in the tree; 5 (0001 tools usage, 0010/0011 ToUnicode, 0025 webp-images, 0032 unrendered annots) remain unapplied upstream at that commit — **none is a regression vs the fork's previous tree, which carried only 11**.
 
 ### Fixed
+
 - **Pre-existing fork-wide test bug**: 23 test files wrote `SumatraPDF-settings.txt` into `-appdata`, but the fork reads `TumatraPDF-settings.txt` (AppSettings.cpp:202) — every settings-driven test silently ran on defaults (`issue-1106` failed deterministically on `WindowState=2`). Renamed in all test writes; `issue-1106` now PASS.
 - **Pre-existing lint failure** (`lint-mingw-sources`): 17 fork sources present in premake but missing from `cmd/build-with-mingw.ts` (AutoScroll, ArchScaleDialog, Commands_{AutoScroll,ArchTools,Edit,File,Flashcard,Image,View}, ContrastOverlay, Flashcard{Sidebar,Toolbar}, MainWindowCreate, ReadingStats, ToolbarLayout, TrimConfigDialog) — added; lint PASS (147 patterns covered).
 
 ### Verified
+
 - `bun cmd/build.ts`: **0 warnings / 0 errors**, 87.8 s (full mupdf recompile), exe deployed to `../Compiled`.
 - `bun cmd/run-unit-tests.ts -dbg`: PASS.
 - premake regen (`bin/premake5.exe vs2022`): only `mupdf.vcxproj`/`.filters` changed; fork sources intact (Flashcard/Commands_*/ToolbarLayout/MainWindowCreate verified present).
 
 ### Notes
+
 - Vendored tree now carries 11 patch behaviors the fork did not have (webp-iccp, svg-css-class, css-background-image, md-nul-scan, movie-poster, ocg-usage-event, backwards-range bookmarks, merge exit-code, svg-unsized-image, signatures-windows-pkcs7, css-user-stylesheet).
 - freetype 2.14.3 / harfbuzz 13.0.1 pins are **identical** in 1.28.5 → F6 divergence decision unchanged (no extra work).
 
 ## 2026-10-20 (s36-ab) - D1 slice 3 verified: mupdf harness linked + campaign (975 execs/s)
 
 ### Added
+
 - `.github/workflows/fuzz.yml` (D3): nightly (`40 4 * * *` + dispatch) windows-2022 job - Release x64 msbuild (supplies the /MT mupdf.lib), both native harnesses built, 10 min base-parser + 15 min mupdf campaigns, crash/leak/oom artifacts uploaded (14 days). Advisory: crash steps `continue-on-error`, job never red. Runner notes: `choco install llvm` satisfies the scripts' hardcoded `C:\Program Files\LLVM` (clang-cl + clang_rt.* libs); `cmd/build.ts` has no Release x64 mode, so the workflow drives msbuild directly.
 
 ### Verified
+
 - **C2 TTD end-to-end**: recorded `TumatraPDF02.run` (188 MB, ~18 s launch+close of the deployed exe under `-for-testing`, elevated `TTD.exe -launch` + scheduled `taskkill`); replayed headlessly with `cdbX64.exe -z <trace.run> -c "!tt 0:100; q"` - time-travel navigation + TTD analyzers work. Recipe documented in BUILD.md (traps: WindowsApps execution protection -> copy `amd64\ttd\` out; EULA `echo Y|`; admin required; System32 `tttracer` = limited variant, do not use). Earlier attempt also produced a valid 339 MB trace (the "canceled by user" errors were sibling queued UAC prompts, not the recording).
 - `tests/fuzz/MupdfFuzzer.cpp` + `cmd/build-fuzz-harness-mupdf.ts` -> `out/fuzz/fuzz-mupdf.exe` LINKED. The LNK2019 chain, solved: the vendored mupdf headers have no `extern "C"` guards -> a C++ TU must wrap the includes (the app does the same in Annotation.cpp); mupdf.lib's own deps must be linked too (freetype, harfbuzz, a-jbig2dec, lcms2, libjpeg-turbo, libwebp, a-openjpeg, a-zlib, a-mujs, brotli, a-extract, a-gumbo, libarchive + ole32/windowscodecs for the fork's WIC JXR patch); lld-link cannot consume the /GL bitcode libs, so the link step runs MSVC `link.exe` via a vcvars64.bat temp batch + response file.
 - Campaign vs mupdf 1.28.0-rc2: **36 869 runs / 41 s = 899 execs/s, 0 crashes**. RE-VERIFIED after the s36-z mupdf 1.28.5 swap: clean build, **30 252 runs / 31 s = 975 execs/s, 0 crashes** (corpus = 5 ext PDFs).
 - Recipe + traps saved to Lemma (`mf2427ca162cc`): `/clang:-std=c++23`, LLVM 23 ASan is dynamic-only (fuzzer + asan_dynamic + asan_dynamic_runtime_thunk + DLL next to exe), no `fz_end_try` in this mupdf version (fz_catch/fz_always both expand to `else`).
 
 ### Notes
+
 - Coverage caveat: MSVC-built mupdf.lib carries no sanitizer-coverage instrumentation, so libFuzzer's cov counts only harness branches (cov:3) - the campaign is ASan-checked random fuzzing at ~1000 execs/s (~4600x the app-level driver), not coverage-guided. Coverage-guided mupdf fuzzing needs a clang-built mupdf.lib (future work).
 
 ## 2026-10-20 (s36-y) - D1 slice 3: mupdf libFuzzer harness + C4 WinDbg
 
 ### Added
+
 - `tests/fuzz/MupdfFuzzer.cpp` + `cmd/build-fuzz-harness-mupdf.ts` (WIP, link step not yet verified): in-process libFuzzer harness that opens a fresh `fz_context` per input (the only clean reset — mupdf has global caches, same pattern as upstream's own fuzzers), parses bytes as PDF via `fz_open_document_with_stream(".pdf")`, loads page 0, renders it at 0.25 scale into an RGB pixmap (page box clamped to <20000). mupdf exception macros in THIS vendored version have no `fz_end_try` and `fz_catch`+`fz_always` cannot be chained (both expand to `else`) — use try/catch then drop outside.
 
 ### Notes
+
 - The mupdf build is two-step: clang-cl compiles the instrumented object, then MSVC `link.exe` (only linker consuming rel64's `/GL` bitcode objects) links it with `mupdf.lib`; link runs inside a temp batch calling `vcvars64.bat` (SDK `LIB` needed) with a response file. LLVM 23 Windows ships ASan **dynamic-only**: `clang_rt.asan_dynamic-x86_64.lib` + `clang_rt.asan_dynamic_runtime_thunk-x86_64.lib` + the DLL copied next to the exe (no static `clang_rt.asan-x86_64.lib`).
 - **C4 DONE**: WinDbg 1.2610.1001.0 installed via `winget install -e --id Microsoft.WinDbg` (verified).
 
 ## 2026-10-19 (s36-x) — D1 slice 2: native libFuzzer harness for base parsers (13.6k execs/s)
 
 ### Added
+
 - `tests/fuzz/BaseParsersFuzzer.cpp` + `cmd/build-fuzz-harness.ts` → `out/fuzz/fuzz-parsers.exe`: in-process libFuzzer harness (standalone LLVM clang-cl 23, `-fsanitize=address,fuzzer`) for `ParseSquareTree` + `json::Parse`, dispatched on the first input byte. Reuses `cmd/clang-flags.ts` include/define sets; copies `clang_rt.asan_dynamic-x86_64.dll` next to the exe. `cmd/fuzz.ts` header now documents the two-tier split (native harness for base parsers vs app-level driver for engine paths).
 
 ### Verified
+
 - `out\fuzz\fuzz-parsers.exe -max_total_time=25 -max_len=4096 out\fuzz\corpus`: **353 493 runs / 26 s = 13 595 execs/s** (vs ~5/s process-per-input in `cmd/fuzz.ts` — ~2700×), 2820 new corpus units, 0 crashes, peak RSS 514 MB (ASan active).
 
 ### Notes
+
 - clang-cl ASan recipe: `/clang:-std=c++23` (`/std:c++23latest` is silently ignored → falls back to C++14 → CTAD deduction-guide errors in `Scoped.h`); `/MDd` rejected by clang's ASan (debug CRT unsupported), and rel64 `base.lib` is `/MT` + `/GL` (lld-link cannot consume bitcode objects) → the harness compiles the needed base sources directly (Str, Strconv, StrUtf8, StrFormatParse, Arena + Arena_win, Base + Base_win) and stubs the app-level hooks (`_uploadDebugReport`, `log`) instead of linking base.lib. Template-deduction trap: `MkFunc1(fn, nullptr)` fails deduction on the `T1* d` parameter — pass `(void*)nullptr`.
 
 ## 2026-10-19 (s36-w) — E2: premake regen made safe (fork sources + ASan hardening encoded)
 
 ### Added
+
 - **`premake5.files.lua`**: the 13 fork app sources missing from `sumatrapdf_files()` added as one commented block (`Flashcard.*`, `FlashcardSidebar.*`, `FlashcardToolbar.*`, `Commands_Flashcard/AutoScroll/ArchTools/View/File/Edit/Image.*`, `ToolbarLayout.*`, `MainWindowCreate.*`, `ReadingStats.*`) — a `premake5 vs2022` regen used to silently strip them from `TumatraPDF.vcxproj` and `SumatraPDF-static.vcxproj`, and the release link then failed with LNK1120 (the AGENTS §6b "premake TRAP"). Found via a coverage check (vcxproj ClCompile entries vs lua patterns): BasePch/AppUnitTests were false positives (explicitly listed in `premake5.lua`).
 - **`premake5.lua`** (both exe projects): the `/DEPENDENTLOADFLAG` asan exception rewritten with POSITIVE platform filters — `platforms:x64_asan` → `0xA00` (SYSTEM32 + APPLICATION_DIR; the ASan dynamic runtime lives beside the exe; plain `0x800` = silent exit 53 before main, see s36-u), `platforms:x86 or x64 or arm64` → `0x800`. The old `filter "not platforms:x64_asan"` is IGNORED by the vendored premake 5.0.0-beta8 (regen applied 0x800 to ALL 16 configs and never emitted the `/INFERASANLIBS` line), which is exactly how the stale committed vcxproj got its broken 0x800 in the asan configs.
 
 ### Verified
+
 - `bin/premake5.exe vs2022` regen: fork sources present in the regenerated `TumatraPDF.vcxproj` (Flashcard/Commands_Edit/ReadingStats/ToolbarLayout/MainWindowCreate all true), **4× `0xA00`** (asan configs) + **12× `0x800`** (non-asan), both exe projects. Regen diff vs committed = only the 2 exe vcxproj + their `.filters` (195/81).
 - Build green after regen (77.8 s). One-time `C1853` (stale PCH) after a regen: delete `out/<cfg>/obj/**/ *.pch` and rebuild — the regen invalidates the old PCH.
 
 ### Notes
+
 - The AGENTS §6b premake-TRAP mitigation (`rtk git stash push -- vs2022/`) is obsolete: regen is now safe; keep it only if upstream premake5.lua/files.lua change again.
 - The `Compiled/TumatraPDF.exe` copy step can fail with EBUSY while the user is running the deployed exe — harmless, the fresh exe is in `out/dbg64/`.
 
 ## 2026-10-19 (s36-v) — E1: build-time measurement (per-TU cl /Bt+ tool); no optimization justified
 
 ### Added
+
 - **`cmd/build-times.ts`**: ranks the slowest translation units by cl front-end (c1/c1xx) + back-end (c2) time. Reads the per-TU command lines MSBuild logged in `out/<config>/obj/<proj>/<proj>.tlog/CL.command.1.tlog`, re-runs each compile with `/Bt+` (6 in parallel), parses `time(...)=Xs` from cl output, writes `out/build-times.txt`. INCLUDE for direct cl spawns is captured once from vcvars64.bat via a temp batch (Bun arg-quoting mangles a direct `cmd /c "vcvars && set"` chain).
 - Baseline artifact: `out/build-times.txt` (Debug x64, 238 TUs).
 
 ### Verified
+
 - **Compile is NOT the bottleneck**: front-end total 32.1 s / back-end 3.8 s for 238 TUs (~0.15 s/TU); slowest TU only 2.14 s (`TextToSpeech.cpp`), then `BasePch.cpp` 1.64 s, `DmLibDpi.cpp` 1.54 s — no outliers; PCH is doing its job (most TUs 0.2-0.4 s).
 - **Edit-build-test loop: ~10 s** (1 touched TU + link via `cmd/build.ts`, and the same via direct MSBuild); no-op build ~10 s; app-only Rebuild 57-112 s; single-threaded full rebuild 193 s.
 - Conclusion for E1: **sccache/PCH changes are not justified** — the loop is 10 s and compile is a small slice of it; the roadmap item existed on a guess and the measurement killed it. Re-run `cmd/build-times.ts` if the loop ever feels slow again.
@@ -466,45 +605,55 @@
 ## 2026-10-19 (s36-u) — D1 slice 1: app-level ASan fuzzing driver + ASan app exe startup fix
 
 ### Added
+
 - **`cmd/fuzz.ts`**: app-level fuzz driver feeding byte-mutated inputs to `out/dbg64_asan/TumatraPDF.exe` through its HEADLESS entry points and recording crashes with the offending input. Modes: `render` (default; `-render <file> 1` = engine load + mupdf xref parse + page render + teardown), `extract` (`-extract-text <file> 1`), `exif` (`-dump-exif`). Mutator = xorshift-RNG byte flips / random / interesting bytes / truncate / chunk-splice, deterministic per `-seed-offset` so a crash is reproducible. Crash detection = non-zero/1 exit + `AddressSanitizer|SEGV|runtime error` in output; crashing inputs + stdout land in `tests/tmp/fuzz-crashes/`. Seeds auto-gathered recursively from `ext/` + `tests/` (D2 corpus: 23 engine seeds). Options `-n`, `-seconds`, `-mode`, `-seeds`, `-seed`, `-seed-offset`.
 - `-stress-test` is NOT usable as a fuzz entry: it runs inside the GUI (needs the main window) and hangs headless. `-engine-dump` also hangs (dialog/file output). The usable headless entries are `-render`, `-extract-text`, `-dump-exif` (all run in `SumatraStartup` before window creation and exit).
 
 ### Fixed
+
 - **ASan app exe was broken at startup (exit 53, no output, no WER, no log) — root cause `/DEPENDENTLOADFLAG:0x800`**: all four `x64_asan` configs in `vs2022/TumatraPDF.vcxproj` (Debug/DebugFull/Release/ReleaseAnalyze) link with `/DEPENDENTLOADFLAG:0x800` (`LOAD_LIBRARY_SEARCH_SYSTEM32`), which blocks the loader from finding `clang_rt.asan_dynamic-x86_64.dll` in the app dir → controlled silent exit before main. Non-ASan builds were unaffected (no ASan DLL import). Fixed with `0xA00` (adds `LOAD_LIBRARY_SEARCH_APPLICATION_DIR`). Verified: `out/dbg64_asan/TumatraPDF.exe -dump-exif` now exits 0 with identical output to rel64; `test_util.exe` under ASan unaffected (its vcxproj has no DEPENDENTLOADFLAG). This survived the s36-r C1 verification because only `test_util.exe` was ever run under ASan.
 
 ### Verified
+
 - ASan rebuild 141 s (build-asan.ts, after B5 wave 2); fuzz smoke 8 execs / 6 s / 0 crashes; first real campaign **`bun cmd/fuzz.ts -n 300 -seconds 600` → 300 execs / 262 s (1.1 exec/s) / 0 crashes** over the 23-seed corpus in `render` mode. Clean ASan baseline — consistent with the B5/B6 null-deref and overflow fixes.
 
 ### Notes
+
 - `rel64` sanity probe (`-dump-exif` on a real JPEG, exit 0) is what isolated the ASan-only failure; `dumpbin /dependents` via the full MSVC path (dumpbin is NOT on PATH) confirmed the exe imports `clang_rt.asan_dynamic-x86_64.dll` + `libsumatrapdf.dll`.
 
 ## 2026-10-18 (s36-t) — B5: MSVC `/analyze` 120 → 17 (C28159 + C26495 + wave 2 tail)
 
 ### Fixed
+
 - **C28159 (21 → 0)**: every `GetTickCount()` call site → `GetTickCount64()` and every tick-holding `DWORD` field/var → `u64` (49-day rollover class). Call sites: `AutoScroll.cpp` (9), `Commands_AutoScroll.cpp` (2), `Installer.cpp` (2), `ReadingStats.cpp` (1), `SearchAndDDE.cpp` (3), `SelectionToolbar.cpp` (2), `wingui/WebView.cpp` (2). Storage widened to `u64`: `MainWindow.h` `autoScroll.startTick`/`lastScrollTick`, `Installer.cpp` `ctx->lastTryTick`, `ReadingStats.cpp` `gReadingStats.lastTick`, `SearchAndDDE.cpp` `d->lastProgressMs` + `lastSendMs`, `SelectionToolbar.cpp` `tb->lastPositionUpdateTick`, `WebView.cpp` `gEnvFailedAtMs`. All sites + all consumers in one sweep, so no DWORD/u64 tick mixing remains.
 - **C26495 (57 → 0)**: in-class member initializers on 22 aggregate structs across 18 files; values match what every constructor/init site already assigned (zero behavior change). Notables: `ArchMeasurement` (MainWindow.h, 10 members), `BgColorDlgData` (SumatraDialogs.cpp, 9; arrays `= {}`, `selectedCustomIdx = -1`), `lzma::FileInfo` (5, `FILETIME = {}`), `CitationCacheEntry` (5, `destPage = -1`), `EndPointMover` (uia/TextRange.cpp, 3 pointers `= nullptr`), `CaptureCtx` (AtomicInt `= 0`), `ToolbarButtonInfo` (`bmpIndex = TbIcon::None`), `PendingWebViewOp` (`kind = Init`), `TabsCtrl::SelectionChangedEvent`/`MigrationEvent` (`tabIdx = -1`), `SizeCount` (DisplayModel.cpp; array also `= {}` so `SizeF size` zero-init), `GoToFavoritePageData`, `OpenCopyDataAsync`/`OpenManyCopyDataAsync`, `Dialog_GetPassword_Data` (bool* `= nullptr`), `Dialog_Find_Data`, `GetFontsResult`, `DownloadAndOpenUrlData`, `MdTocParseCtx`, `Shortcut` (Settings.h), `FlashcardStudyDoc::StateEntry`, `AIChatSessionInfo`.
 - Mechanical batches applied via bun exact-string scripts with per-pattern count asserts (wave 1: `tests/tmp/fix-c28159.ts`, 29 replacements across 8 files) — the workflow for the remaining B5 classes.
 - **Wave 2 (36 → 17), per-rule**: C6287 (3): redundant `wp == '\r'` disjunct removed next to `wp == VK_RETURN` (`VK_RETURN == 0x0D == '\r'`) in Favorites/TableOfContents/TreeView Enter-swallow handlers. C26813 (4): `ValidStyleForChangeFontStyle` now tests the bit (`fs & Style`) — `PlatformFontStyle` is a combinable flags enum (`operator|`, values 1/2/4/8), so `Bold|Italic` failed the old whole-value `==` checks; added the missing `operator&` (PlatformFont.h). C26454: Theme.cpp `kMainWinBgColDefault` = pre-computed `0x80f2ffff` literal (was unsigned-wrap arithmetic `RGB(...) - 0x80000000`). C6031 (4): `CoDisconnectObject`/`GetHGlobalFromStream`/`CoCreateInstance` results consumed (FAILED → log/null); `EnumDependentServicesW` probe call cast `(void)` with comment (FALSE by design, size via GetLastError). C6387 (5): null-guarded `hwndContrastOverlay`/`hwndFindEdit`/`hwndHomeSearch` UI calls (ShowWindow/Edit_SetSel/MoveWindow/SendMessage); `MonitorFromWindow(nullptr, MONITOR_DEFAULTTOPRIMARY)` → `MonitorFromPoint` (SAL-equivalent, same monitor). C6011: Canvas.cpp `bd.Scan0` guard after LockBits. C28183: Canvas.cpp `DeleteObject` only on a non-null `hbmpColor`. C33005: `VARIANT urlVar{}` zero-init before `Navigate2`. C6385 (2): the GDI+ encoder-clsid idiom gained `num == 0 || size < num * sizeof(Gdiplus::ImageCodecInfo)` consistency check (Commands_Edit + Commands_Image). C26819: `[[fallthrough]]` on the intentional WM_NOTIFY → WM_CTLCOLOR* case in wingui/Wnd.cpp.
 
 ### Verified
+
 - `clang-format` on all touched files; `bun cmd/build.ts` 0/0 after each wave (68 s / 122 s).
 - `cmd/analyze.ts -files` after each wave: fork totals **114 → 93 → 36 → 17 warnings / 0 errors**; final baseline regenerated (`out/analyze/warnings-summary.txt`). Final 17 = 5 in user-modified files (EditAnnotations ×3, EngineMupdf ×2, left untouched) + 12 analyzer FP/accepted, each with a written verdict (Notes below). Build 0/0 after every wave (68 s / 122 s / 69.5 s / 63.6 s), exe deployed to Compiled/.
 
 ### Notes
+
 - `-files` replay caveat: un-recompiled TUs replay cached findings, so a rule only disappears when every reporting TU recompiles; header changes force that via include dependencies. B5 batches must re-run `-files` on the cpp files, never rely on header-only touches.
 - Wave-2 FP/accepted verdicts (no code change): EngineBase.cpp:381 C6001 — `AllocArray`→`AllocZero` zero-fills the array, the analyzer cannot see the contract; UpdateCheck.cpp:276 — `h` is assigned at 272 and only compared after; WindowTab.cpp:108 ×2 — `AIChatTabState::process = nullptr` in-class exists, analyzer limit on member provenance; Installer.cpp:414 C6385 — buffer sized by the `RmGetList` out-param (a clamp was added; the analyzer still doubts the SAL link); FlashcardSidebar.cpp:229/232 C6386 — `n` provably ≤ 249 via three guards (same FP clang reports as ArrayBound); C6262 ×2 — 21.6/16.5 KB stack vs 1 MB default, heap refactor deferred; base/Thread.h:15 C26110 — lock primitive API, all uses go through `ScopedMutex`.
 
 ## 2026-10-18 (s36-s) — FC-H2 closed: flashcard scan /Annots pre-filter + COMMIT of perf batch (BUILD OK; cloze e2e PASS)
 
 ### Fixed
+
 - **FlashcardLoadFromDocument Toggle-ON scan** (last FC-H2 leg): raw `fz_load_page` per page under `docLock` = the remaining big-book cost. Added a fast **/Annots pre-filter**: `pdf_lookup_page_obj` (borrowed ref, O(1) after mupdf's one-time lazy page-tree pass) + `pdf_dict_get(PDF_NAME(Annots))` — annot-free pages (95%+ of a typical book) skip `fz_load_page` entirely (~us vs ~1-2ms/page; seconds → ms). `/Annots` as a single annot (non-array, legal) treated as hasAnnots. Skip `continue`s AFTER `fz_catch` — never jump out of `fz_try` (setjmp). Design (a) from the independent-consultant subagent; (b) GetFzPageInfo under docLock REJECTED (violates EngineMupdf.h lock hierarchy "never pagesLock under docLock" — deadlock), (c) background worker + (d) partial lists rejected (complexity vs residual win).
 
 ### Committed (user order: "commitar para o outro agente fazer outros refactors")
+
 - `85c02e7` perf: annot scans skip text extraction + flashcard /Annots pre-filter + card prefetch (10 files: Flashcard.cpp, Commands_Flashcard.cpp s36-p prefetch, EngineAll.h/EngineCreate.cpp/EngineMupdf.cpp s36-o, EditAnnotations.cpp, SumatraPDF.cpp, RenderCache.cpp s36-n, LOG, TODO) — `prompt:` line per convention.
 - `83a1393` tidy: clang-tidy leftovers (float division promotion, int64 overflow casts — 8 files from the parallel sweep, left uncommitted by s36-r).
 - Tree CLEAN after commits. NOT pushed (no user order).
 
 ### Verified
+
 - Build 0/0 → Compiled. `ad-hoc-flashcard-cloze` PASS end-to-end WITH the pre-filter (add→toggle→study→reveal→rate→history/backup; `[fc] FlashcardLoadFromDocument - found 1 flashcards` ✓). `s36i-roundtrip` PASS with doc (25 buttons, marks=17,21 stable).
 - **Serena MCP FIXED** (was: find_symbol 240s timeout ×2): root cause = unscoped search visits ALL 282 TUs (clangd parses each — huge header graphs). Fix per official docs (Unreal guide, same problem class): scoped `find_symbol(relative_path=…)` + `.serena/project.yml` tuned (`ls_workspace_folders: ["./src"]`, `ignored_paths` for mupdf/ext/out/.vs/packages/tests-tmp/.work). Verified: get_symbols_overview (31 syms on Flashcard.cpp), scoped find_symbol, cross-file find_referencing_symbols (Flashcard↔Commands_Flashcard), get_diagnostics (`{}` = clean). Recipe in AGENTS.md §6b.
 
@@ -598,14 +747,17 @@
 ## 2026-10-18 (s36-n) — R-P2 render-perf audit closed: 1 live fix + 3 stale items (BUILD OK; roundtrip PASS)
 
 ### Changed
+
 - **RenderCache::Find + GetRenderDelay scan NEWEST-FIRST** (RenderCache.cpp): the hot hit (PaintTile) is almost always the most recently added entry (render thread appends to cache[cacheCount]; requests are appended and popped from the tail by GetNextRequest), so the common case drops from a full linear walk to O(1). Full hash keyed (dm,pageNo,rot,zoom,tile) considered and REJECTED: no STL in base — a hand-rolled map would have to survive DropCacheEntry compaction (last entry moves into the dropped slot) and darkModeEpoch invalidation, for a ~0.5-1ms/frame worst-case win. Bad cost/benefit for a core cache.
 
 ### Verified stale (audit items that no longer exist in the current code)
+
 - **hbmp blit DC churn**: render tiles are MALLOC pixmaps (EngineMupdf.cpp:1642 `AllocPixmap` sets no hbmp) → BlitPixmapRegion takes the StretchDIBits path — no per-tile CreateCompatibleDC. The hbmp DC path now serves only DIB-backed pixmaps (icons, thumbnails).
 - **HdcCreateSimpleFont per paint**: already cached via FindCreatedFont/RememberCreatedFont (base/Win.cpp:2155) — per-paint calls are a lookup; no caller DeleteObjects the shared font.
 - **RecalcVisibleParts layout copy**: fixed in s35 (recomputes directly on pagesInfo; DocumentLayout::Reset has no per-tick caller — verified by grep).
 
 ### Verified
+
 - Build 0 err/0 warn → Compiled. `s36i-roundtrip` PASS with a real doc (25 visible buttons — the `Edit` button only appears when a document is loaded; marks=17,21 stable; kids {Static:4,Edit:2,Button:1}).
 
 ## 2026-10-18 (s36-m) — Flashcard cross-page cloze: one card per multi-page selection (BUILD OK, app untouched logs; crosspage + cloze PASS)
@@ -633,11 +785,13 @@
 ## 2026-10-17 (s36-l) — quick validations closed + harness PDF-path trap found (BUILD unchanged; app untouched)
 
 ### Verified (all via -for-testing + pipe + vision review)
+
 - **BUG-3/s32-B image context menu**: right-click over a real image XObject vs white margin (fixture `tests/tmp/s36l-mkpdf.ts` generates a Flate-RGB image PDF): image items ("Copy Image To Clipboard" + "Image" submenu) appear ONLY over the image — v1.0.10 gating works live.
 - **TC2 visual validations**: V1 Back/Forward after v2 toggle (1→2→1→2 via CmdNavigateBack/Forward) PASS; V2 page-box "3R" graceful (out-of-range on 2-page doc, no crash) PASS; V4 TC2+Trim renders sane PASS; V5 Manga R2L mirrors columns (leftmost = black half, content right) PASS. V3 (reopen-with-v2-saved) = MANUAL ONLY — `-for-testing` never saves settings and there is no `-settings` flag.
 - **Branch pruning**: all 5 local branches (`master`, `feature/16c-c5-checkpoint`, `feature/16c-extraction-checkpoint`, `feature/flashcard-system`, `feature/toolbar-design-system`) verified merged into main and deleted (flashcard needed upstream re-point + `-d`; CC safety net blocks `-D`). Remotes `origin/master` + `origin/feature/flashcard-system` still exist — need user decision.
 
 ### Fixed (harness, not app)
+
 - **`join(EXE, "..", "..", "ext", ...)` TRAP**: EXE includes the FILENAME, so two `..` pop only the filename + `dbg64` → `out\ext\a-zlib\zlib.3.pdf` (nonexistent) → every s36k harness ran DOC-LESS ("Error loading zlib.3.pdf — The file does not exist" dialog in every screenshot; toolbar assertions passed anyway because the toolbar exists without a doc). Fixed to three `..` in `s36k-dragsim/roundtrip/s36l-tc2/s36k-shot`; gates re-run WITH doc: dragsim PASS (25 buttons now — `Edit` 518 appears when a doc is loaded; marks=17,21), roundtrip PASS, d5 PASS. Vision-model note: gemini-2.5-flash hallucinated page indicators "2/5" on doc-less shots (zlib has 2 pages) — openrouter VL (`nvidia/nemotron-3.5-super-vl:free`) is the trustworthy reviewer; gemini vision is flaky (2 of 4 calls returned "no vision").
 
 ## 2026-10-17 (s36-j) — Toolbar round-trip: timer trio inside Autoscroll + rewrap guard fix (BUILD OK; s36i PASS)
@@ -656,6 +810,7 @@
 - Note: toolbar2 band (Toolbar.cpp ~2694) keeps RBBS_FIXEDSIZE + same wrap sync — same latent risk, no repro harness; check if touched. lemma **m9e3d3feb1ff6** (fix) + m721efa98fc9e (Design B).
 
 ### Added (s36-k follow-up round, same day)
+
 - **Drag-collapse REPRODUCED**: `tests/tmp/s36k-dragsim.ts` (posts WM_ENTERSIZEMOVE + 20px-step moveWindow sweep + WM_EXITSIZEMOVE) deterministically ends with `toolbarClientDx=0` — the rebar collapsed the band child to 0 width; comctl then wraps into degenerate rows and `SetToolbarBandToRowHeight`'s client-0 early-return never corrects it. Mechanism: the RB_GETBANDINFO→RB_SETBANDINFO write-back glues a TRANSIENT width into the band cx during a resize storm (lemma **m42d951071206**).
 - **WM_EXITSIZEMOVE hook KEPT**: the frame handler (SumatraPDF.cpp ~13798) now calls the exported `ToolbarRewrapAfterSizing(win, hwndToolbar)` (Toolbar.h) synchronously at drag end; WM_TIMER's debounced rebuild was refactored to share it (`sLastBuiltDx` hoisted to file scope). Three deeper band-cx fix attempts (icon-size `TbSetButtonSize`; `rbi.cx`=rebar-dx; collapsed-child recovery + pre-measure pass) each fixed one leg and regressed another (multi-pass WM_SIZE/RelayoutFrame race re-glues cx) → REVERTED; the hook stays because it is the Win32-correct drag-end signal and is race-free by itself.
 - **Failed attempts — do NOT retry as-is** (all REVERTED; evidence lemma m42d951071206): (1) `TbSetButtonSize(iconDx, dyBtn)` in the rebuild — no effect on the collapse; (2) `rbi.cx = rebar-client-dx` in the main SetToolbarBandToRowHeight path — fixes ONE collapse but is unreachable once client==0 (early-return); (3) collapsed-child recovery (re-assert cx when client<=0) + a pre-measure band pass in ToolbarRewrapAfterSizing — fixed drag-DOWN (clientDx=796) but drag-UP re-collapsed and the wide state degenerated too. Pattern: any fix that writes band cx during the resize storm gets re-glued by the multi-pass WM_SIZE/RelayoutFrame race. Winning shape must (a) assert cx AFTER RelayoutFrame settles — or never write cx back at all — and (b) run even when client==0. Regression gate for any new attempt: `s36k-dragsim` must pass BOTH directions + `s36i-roundtrip` + `s36e-d5`. User-confirmed current symptom (2026-10-17): shrink OK, EXPAND breaks.

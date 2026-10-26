@@ -1,4 +1,5 @@
 # TODO
+
 1. Open work ONLY.
 2. Completed features/fixes live in [LOG.md](LOG.md) (per-session) + [CHANGELOG.md](CHANGELOG.md) (per-release).
 3. User manual-test items = items only the user can validate.
@@ -10,7 +11,7 @@
 
 ## Dependency updates — open items
 
-- [ ] **Suite baseline (pre-existing, NOT caused by the dependency batch)** — 17 of the entries after `issue-5734` fail on this fork: `exit 5` shutdown crash (issue-5529, issue-2629, issue-4684, issue-5922, issue-5924, issue-5926, find-results-sorted, issue-5874, issue-2252), `-unit-tests exit 1` (issue-5840, issue-5842, issue-5846, parse-tip-brackets), UI/timing (issue-1914, issue-5866, issue-5869, issue-5792). Exit code **5 == 0xC0000005 access violation**, not "graceful quit" as `cmd/control.ts` claims. Reproduces only in the **debug** build (Release x64 exits 0) ⇒ debug-only shutdown defect, triage separately.
+- [ ] **Suite baseline (pre-existing, NOT caused by the dependency batch)** — 7 entries after `issue-5734` still fail on this fork: `-unit-tests exit 1` (issue-5840, issue-5842, issue-5846, parse-tip-brackets — real assertion failures in the test binary), UI/timing (issue-1914, issue-5866, issue-5792). Already fixed: the `exit 5` shutdown group (9 tests, s36-au — deliberate debug-build exit after atexit-time GDI+ statics crash, NOT an access violation; see LOG) and issue-5869 (s36-ay — stale test parse + toolbar tooltip-rect re-sync; see LOG).
 - [ ] If a real dependency regression appears: bisect by patch group (the 27 patches in `ext/patches/` are the only local delta over pristine mupdf 1.28.5; reverse-apply state: 22 applied / 19 absent / 6 conflict).
 - [ ] Bun `1.3.14 → 1.4.3` (build/test scripts only) after re-running the suite.
 - [ ] **F6 — explicitly deferred**: harfbuzz/freetype only when mupdf bumps its pins (mupdf 1.28.5 pins exactly our versions — upgrading independently diverges from the combination Artifex tests). UnRAR metadata drift: `ext/versions.txt` says 7.1.6 but `ext/unrar/version.hpp` reports RARVER 7.11.0 — verify against rarlab before any change.
@@ -28,6 +29,7 @@
 - [ ] User confirm on a real book: autoscroll acceptance over TC2 (1L→1R→2L→2R, no jump), drag speed, OCR text selection per column. The three s35 fixes (stall-on-hover, drag-slow, per-column selection) are code-verified + E2E PASS — see LOG s35/s36-l.
 
 ## Flashcards
+
 - [x] Timer capture core (shipped):
   - Study timer (100Hz tick) starts when study mode is ON, stops when OFF
   - Per-card cap: 60 seconds — stops counting time for that card (user advances manually, NO auto-advance)
@@ -39,9 +41,11 @@
 - [x] Home page: "Flashcards" tab under "Most Read" space (same structure as Read, showing book list + flashcard times)
 - [x] Calendar hover label: show "Read: Xh Ym / Flashcards: Xh Ym" for each day
 - [x] Graph: add peru-colored line for flashcard study time (separate from reading time)
-- [x] Study timer UI: horizontal progress bar at bottom (symmetrical shrink to center), 2px silver line, beep + timer glyph on expiry (like autoscroll)
+- [x] Study time capture (STATS, no visual feedback): while study mode is ON and the answer is NOT revealed, credit time to the stats. Each card contributes at most 60s (per-card cap; the accumulator resets on card advance). Main total (flashcard-stats.txt sidecar, keyed by date) survives rename/delete/move; per-book reference: FileState.flashcardStudyTimeSec.
+- [x] Study SESSION timer (like autoscroll's, user-configured): checkbox + "Timer:" + minutes edit (default 30) in the flashcard secondary toolbar (CmdFlashcardStudyTimerToggle / CmdFlashcardStudyTimerEdit). When enabled at Study start, a 2px silver progress line at the bottom of the screen shrinks symmetrically toward the center over the session duration (fullscreen: bottom of screen; windowed: ~48px above the taskbar). On expiry: study session ends, beep + "∴" overlay (3s, same as autoscroll). The session timer is INDEPENDENT of the 60s/card stats cap.
 
 ### Tests
+
 - [ ] **FC-X1 live test** (shipped s36-m): cross-page cloze — user test on a real book (2-page passage).
 - [ ] **FC-M1** tests: SM-2 (intervals/ease cap/relearn), study-JSON roundtrip, due filter — after Image Occlusion lands.
 - [ ] **FC-M5** rate keys 1-4 have no visual hint (no rate buttons/tooltips on toolbar).
@@ -61,7 +65,7 @@ Replace / Edit With Paint / top-level Copy Image shipped s31; s34 E2E covers the
 
 ## Design rules — implementation pending
 
-- [ ] Buttons/inputs must center content (text/icons) horizontally AND vertically (ToolbarLayout controls, timer/speed inputs, new UI elements). Rule defined 2026-09-08.
+- [ ] Buttons/inputs must center content (text/icons) horizontally AND vertically (ToolbarLayout controls, timer/speed inputs, new UI elements). Rule defined 2026-09-08. Flashcard toolbar done (s36-ax, custom-draw POSTPAINT centering); main toolbar autoscroll button label done; rest pending.
 
 ## Test harnesses (tests/tmp/ — scratch, E2E-class until promoted to ad-hoc)
 
@@ -71,16 +75,19 @@ Scratch E2E harnesses live in `tests/tmp/` (gitignored): s34-replace/paint/crop/
 
 - [ ] **OCR image** (right-click on image → OCR text): upstream vendors tesseract 5.5.2 (Artifex fork) for `mutool draw -F ocr.*` — cheapest path for the fork; decide separately (binary size cost). Lightweight near-zero-dependency alternatives also acceptable.
 
-## Bookmarks Improve
+## Edit/
+- [ ] Crop
+- [ ] Align: Similar ao draw line do measure (archtools), vamos desenhar uma linha com dois pontos, e a partir dessa linha, realinhar a página removendo a distorção para que o alinhamento referente a linha que acabamos de desenhar fique 100% vertical ou horizontal; vamos recortar o excesso de página mantendo a mesma proporção original da página; após recortar, o usuário precisa salvar a alteração no documento para aplicar;
 
-1. 'Reorder' on/off: allows click:hold and repositioning bookmark order.
+## Bookmarks Improve
+1. Button 'Reorder' on/off: allows click:hold and repositioning bookmark order.
    - Dropping a bookmark onto another includes it as 1 indent level; dropping at the far left removes it from the level;
    - Show a dynamic horizontal line representing where the bookmark will land on drop, depending on cursor position.
-2. 'Rename': Right-Click → Rename.
-3. 'Delete': Right-Click.
-4. 'Add': creates a bookmark at the end of the list for the CURRENT page.
-5. 'Update': Right-Click → changes the clicked bookmark to the current page.
-All changes must be saved into the document to persist.
+2. Right-Click →'Rename'
+3. Right-Click →'Delete'
+4. Button 'Add': creates a bookmark at the end of the list for the CURRENT page.
+5. Right-Click →'Update': changes the clicked bookmark to the current page.
+   All changes must be saved into the document to persist.
 
 ## Page Counting Format
 
@@ -108,6 +115,7 @@ Shift+S: draw a rectangle that captures the image inside it at the document's DP
     |⬜⬜⬜⬜⬛|
     |⬜⬜⬛⬛⬛|
   ```
+
 # Bugs open
 
 - [x] ~~**s36-au** debug-build graceful-quit exit code 5~~ — FIXED s36-au (details in LOG): GDI+ function statics destructed at atexit after `ScopedGdiPlus` ended the session; WinMain now passes `endOnExit=false` + `TabWnd::Paint` string formats leaked. All 9 affected tests PASS. The other 8 suite failures (unit-tests exit 1 + UI/timing groups) are separate defects and stay open below.
