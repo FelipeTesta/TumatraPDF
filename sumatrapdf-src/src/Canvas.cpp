@@ -2173,7 +2173,13 @@ static bool IsTripleClick(int x, int y) {
 
 // a full-page image (e.g. a scanned page) shouldn't start an image drag-out:
 // there click-and-drag is expected to pan the page (issue #5754). detect it by
-// comparing the image's area to the page's.
+// comparing the image's area to the page's, and — more robustly — by the page
+// having no extractable text at all: a text-less PDF page is a scan/poster,
+// so every image on it is page background, whatever its exact size (scans
+// often have margins or tiles that defeat the area ratio; user 2026-10-25:
+// "clicar no fundo e arrastar deveria arrastar a página, mesmo que eu clique
+// em cima de alguma imagem"). HasTextForPage caches in the engine, so this
+// is cheap after the first click on a page.
 static bool IsFullPageImage(DisplayModel* dm, IPageElement* el, int pageNo) {
     // in image documents every page is a full-page image and dragging
     // it out to another app is the expected behavior
@@ -2184,14 +2190,29 @@ static bool IsFullPageImage(DisplayModel* dm, IPageElement* el, int pageNo) {
     if (!dm->ValidPageNo(pageNo)) {
         return false;
     }
-    RectF pageRc = dm->GetEngine()->PageMediabox(dm->VirtualToPhysical(pageNo));
-    float pageArea = pageRc.dx * pageRc.dy;
-    if (pageArea <= 0) {
-        return false;
+    bool hasText;
+    int physPage = dm->VirtualToPhysical(pageNo);
+    EngineBase* engine = dm->GetEngine();
+    if (TextExtractionState::Finished == engine->GetTextExtractionState(physPage)) {
+        hasText = engine->HasTextForPage(physPage);
+    } else {
+        // text not extracted yet (the mouse-move primer hasn't run for this
+        // page — e.g. a touch tap): request it async and let the AREA rule
+        // alone decide this click; the next click gets the cached truth.
+        // Treating unknown as "scan" would pan on every first click on a
+        // text page's figure.
+        engine->RequestTextExtraction(physPage);
+        hasText = true;
     }
+    RectF pageRc = engine->PageMediabox(physPage);
+    float pageArea = pageRc.dx * pageRc.dy;
     RectF imgRc = el->GetRect();
     float imgArea = imgRc.dx * imgRc.dy;
-    return imgArea >= 0.8f * pageArea;
+    bool areaRule = pageArea > 0 && imgArea >= 0.8f * pageArea;
+    bool res = !hasText || areaRule;
+    logf("[drag] IsFullPageImage(page %d): hasText=%d imgArea=%.0f pageArea=%.0f areaRule=%d -> %d\n", pageNo,
+         hasText ? 1 : 0, imgArea, pageArea, areaRule ? 1 : 0, res ? 1 : 0);
+    return res;
 }
 
 // Helper: distance from point to line segment (page coords)
@@ -2618,13 +2639,17 @@ static void OnMouseLeftButtonDown(MainWindow* win, int x, int y, WPARAM key) {
     if (canCopy && !isShift && !isCtrl && !isOverText) {
         int elPageNo = -1;
         IPageElement* pageEl = dm->GetElementAtPos(pt, &elPageNo);
-        if (pageEl && pageEl->Is(kindPageElementImage) && !IsFullPageImage(dm, pageEl, elPageNo)) {
-            win->imageDragPending = true;
-            win->imageDragElement = pageEl;
-            win->imageDragPageNo = elPageNo;
-            win->linkOnLastButtonDown = nullptr;
-            SetCapture(win->hwndCanvas);
-            return;
+        if (pageEl && pageEl->Is(kindPageElementImage)) {
+            if (!IsFullPageImage(dm, pageEl, elPageNo)) {
+                logf("[drag] image drag-out prepared (page %d)\n", elPageNo);
+                win->imageDragPending = true;
+                win->imageDragElement = pageEl;
+                win->imageDragPageNo = elPageNo;
+                win->linkOnLastButtonDown = nullptr;
+                SetCapture(win->hwndCanvas);
+                return;
+            }
+            logf("[drag] image at pos skipped as full-page (page %d)\n", elPageNo);
         }
     }
 
