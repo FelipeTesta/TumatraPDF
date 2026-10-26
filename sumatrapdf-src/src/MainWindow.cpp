@@ -446,16 +446,16 @@ void MainWindow::MoveDocBy(int dx, int dy) const {
 // marks, trim separators) scroll correctly with the preserved bits; overlays
 // that float (refHover card, autoscroll timer overlay) are separate popup
 // windows and are untouched by ScrollWindowEx. What remains unsafe:
-//  - flashcard masks: audit gate (s36-am2) — keep the plan's conservative
-//    exclusion even though the masks are document-anchored
 //  - text selection: transient screen feedback while dragging
 //  - Arch tools: in-progress drag line / erase crosshair are screen-anchored
+// Flashcard masks are document-anchored (page rects) and scroll WITH the
+// preserved bits; card advance / reveal change the masks through their own
+// full invalidations, never through a scroll delta — so flashcard mode no
+// longer forces the full-repaint path (user 2026-10-25: "scroll estranho com
+// study on" was this gate making every scroll tick repaint the whole canvas).
 // Also fixed-model only: webview/home paint paths manage their own invalidation.
 static bool CanvasCanStripScroll(MainWindow* win) {
     if (!win || !win->AsFixed()) {
-        return false;
-    }
-    if (win->flashcard.on) {
         return false;
     }
     if (win->selection.showSelection) {
