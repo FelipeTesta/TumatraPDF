@@ -1,5 +1,32 @@
 # TumatraPDF — Development Log
 
+## 2026-10-26 (s36-az) — batch: save-reload state loss, arch band 90px, study-scroll jank, flashcard card counts
+
+### Fixed
+
+- **Save-reload state loss** (user: "salvar o arquivo está desabilitando o trim... resetando a velocidade do autoscroll"): `SaveAnnotationsToExistingFile` → `ReloadDocument` built a fresh `FileState` = pure defaults, so per-doc extras outside the document silently reset on every save. Extracted `FillFileStateExtrasFromWindow(tab, fs)` from `UpdateTabFileDisplayStateForTab` (SumatraPDF.cpp) and now both callers use it — GetDisplayState, window rect, sidebar, autoScrollSpeedMultiplier, invert/contrast(+opacity), trim trio, viewportCropV2, arch scale/measures all survive a save. Witness: `[reload] preserving extras: invert=0 contrast=1 speed=0.060 trim=1` (probe sumlog).
+- **Arch rebar2 stacked 90px band**: `CreateToolbar2` sized the rebar 0x0 after RB_INSERTBAND → WRAPABLE toolbar stacked one button per row at width 0 and comctl never re-wraps (widths seen at ADD time). Same width-0 disease class as the s36-ax flashcard saga. Fix = FlashcardToolbarCreate recipe: size the rebar to frame width right after the band insert. Edit toolbar already had the recipe. Probe assert: arch rebar h=24px (was 90). Also removes the deterministic comctl-AV trigger seen in crash runs ([d6] relayout bandDy=90 followed by TestToolbarButtons cross-thread TB_* → AV in comctl).
+- **Study-scroll jank** (user: "quando study on, o scroll está meio estranho"): `CanvasCanStripScroll` (MainWindow.cpp) excluded `flashcard.on` — masks are document-anchored and scroll WITH the preserved bits, so every tick fell back to full-canvas repaint. Gate removed (selection + arch drag gates kept). Probe s36az-scroll.ts: `[scroll] paint path -> strip` under fc+autoscroll; revert-check → `full` → restored → PASS.
+- **FlashcardStatsAddCard fresh-day trap (self-inflicted, caught by probe)**: the count loop only incremented an existing day entry — a fresh day with <1 whole credited second has NO entry yet, so the first card of the day was silently dropped (empty sidecar). Fix: create `DailyEntry{key, 0, 1}` when today is missing.
+- **Scanned-PDF background drag started an image drag-out** (user: "clicar no fundo e arrastar deveria arrastar a página, mesmo que clique em cima de alguma imagem"): `IsFullPageImage` (Canvas.cpp) gained the scan rule — a page with no extractable text is a scan/poster, so its images are page background whatever their exact size (the 0.8 area ratio alone misses scans with margins/tiles). Text cache is LAZY: `HasTextForPage` only reads it; mouse-move primes it via `RequestTextExtraction` (async thread). Gate consults `GetTextExtractionState`: Finished → cached answer; NotExtracted/Pending (touch tap, no hover) → request extraction and let the AREA rule alone decide that click (treating unknown as scan would pan on a text page's first figure click). Witnesses kept for E2E: `[drag] IsFullPageImage(page N): hasText/areaRule ->`, `[drag] image drag-out prepared`, `[drag] image at pos skipped as full-page`.
+
+### Added
+
+- **Flashcard cards-rated counts** (user: "capturar a quantidade de cards estudados (avaliados)... exibir na home, no ranking e no total"): sidecar line is now `YYYYMMDD <sec> <cards>` (2-column legacy lines parse with cards=0); `FlashcardStatsAddCard` (per-doc `FileState.flashcardCardsDone` + today's bucket) hooked at the end of `HandleFlashcardRate`; `FlashcardStatsGetDayCards/GetTotalCards`. Home: flashcards-tab rows show `N cards / time`, totals line reads `Flashcards: Today N cards / T | Total: N cards / T` (user-specified format).
+- `FileState.flashcardCardsDone` (Settings.h): struct field + gFileStateFields entry **appended at the END** + count 43→44 + name/description appended at the END of both StructInfo blobs.
+
+### Verified
+
+- `tests/tmp/s36az-cards.ts` (scratch): fresh `-appdata` → LittleCMS copy → keyboard-select → CmdFlashcardAdd → study → rate Good → session end → sidecar `20261026 0 1` PASS. **Revert-check**: AddCard call removed → rebuild → probe FAILS (no day line) → restored → PASS. s36ax-fctb.ts re-run: zero FAIL lines (no regression from the Settings.h change).
+- `tests/tmp/s36az-imagedrag.ts` (scratch): synthetic PDFs (issue-3731 template, ASCIIHexDecode 16×16 RGB scaled by cm; scan = image at 70% centered, NO text; figure = text + full-width top image band). Probe posts WM_MOUSEMOVE (hover primes the text cache — the real-user flow) then clicks. 3/3 PASS: scan → NOT armed + skipped-as-full-page (non-vacuous assert); figure → armed (s31 drag-out preserved). **Revert-check**: scan rule removed → scan armed=1, both scan asserts FAIL → restored → 3/3 + s36ax-fctb zero FAIL. Trap hit while building it: a synthetic text PDF needs `/Encoding /WinAnsiEncoding` on the base-14 font or mupdf extracts nothing (hasText=0 → gate log told the truth).
+- Speed floor note: autoscroll multiplier floor = 0.03 (SpeedDown ×3 is a no-op at the floor — probes use SpeedUp).
+
+### Notes
+
+- **DISCOVERED DEBT (documented, deliberately NOT fixed)**: the `gFileStateInfo` fieldNames blob is missing `FlashcardStudyTimeSec` (s36-at omission) — since then the settings FILE writes field i under the name blob[i], so every FileState field ≥24 is serialized under the NEXT field's name (`InvertColors = 714` is really flashcard seconds). Round-trip is index-paired on both write and read, so data survives restarts intact (user's real file verified: 714s fc time present+reloaded); only the names in the file/AdvancedSettingsDialog are wrong. Inserting the missing name NOW would shift every read by one and corrupt existing settings — requires a settings-file migration to fix properly. Rule added in Settings.h: new FileState fields MUST append at the END of the table AND both blobs.
+- Comctl-AV root cause documented: `SumatraControlThread` is a background thread; `TestToolbarButtons`/`ToolbarButtonsResultTemp` send TB_* cross-thread into UI-owned toolbars. Delivered to an idle pump it's safe; delivered mid-reband/custom-draw = reentrancy AV. Proper fix (marshal Test* to the UI thread) remains open harness debt.
+- Files: SumatraPDF.cpp (extras helper + reload), Toolbar.cpp (CreateToolbar2 sizing — other agent's file, additive area), MainWindow.cpp (strip gate), Canvas.cpp (IsFullPageImage scan rule + drag witnesses), Settings.h, FlashcardStats.h/.cpp, Commands_Flashcard.cpp (AddCard hook), HomePage.cpp (row + totals), tests/tmp/s36az-cards.ts + s36az-scroll.ts + s36az-imagedrag.ts (scratch).
+
 ## 2026-10-25 (s36-ax) — flashcard toolbar regression fixed: probe poison + custom-draw cmd-id bug + timer trio E2E
 
 ### Fixed
@@ -13,11 +40,14 @@
 
 ### Added
 
+- **Home overlay hides secondary toolbars** (user request 2026-10-25: "ativar a home deve desabilitar temporariamente as toolbars secundárias"): `RelayoutFrame` now computes `hideSecondaryToolbars = win->showHomeOverlay || IsCurrentDocMarkdown(win)` and the fc/arch/edit rebar blocks apply visibility every pass (SW_HIDE while hidden — no space reserved; else position + reserve + SW_SHOW). The fold REPLACES the old markdown-only pre-hide (SumatraPDF.cpp 6361-64) which never re-showed the rebars after switching back to a PDF — pre-existing bug fixed. `UILayout.homeOverlay` field added (MainWindow.h Layout struct + IsUiLayoutEq + snapshot) so toggling home always re-layouts (no skip); `CmdOpenHome` now calls `RelayoutFrame(win, true, -1)`. Modes keep their state — rebars hide/show only; arch ON→hidden→restored verified. Discovery: conflict gates block `CmdArchToolsToggle` while flashcards are on (SumatraPDF.cpp ~9921, "[fc] blocked cmd") — fc+arch are never both on, so the probe tests them in SEPARATE cycles.
 - One-shot `[fc] trio: anchor=(...) / check=(...) label=(...) edit=(...)` witness in `FlashcardPositionTimerTrio` (toolbar-client coords, `MapWindowPoints`) — in-proc ground truth for E2E (cross-proc TB_GET* unreliable).
 - `tests/tmp/s36ax-fctb.ts` probe v3 (scratch): maximize → toggle → rebar/band geometry → BUTTONCOUNT=11 → BitBlt paint oracle (capture ok + PNG>3KB; 27 distinct colors via System.Drawing out-of-band) → trio enum → BM_CLICK routing → Study ON/OFF overlay cycle → sumlog witness asserts → `proc.kill()` (never leave app alive — idle leftovers crash later and pollute crashinfo).
 
 ### Verified
 
+- Probe 17/17 PASS (home cycle added): fc rebar (0,50)-(1536,74) → home ON → `fc vis=0` → home OFF → `fc vis=1`; arch cycle isolated (fc OFF first — conflict gate): arch rebar visible → home ON → `arch vis=0` → home OFF → `arch vis=1`; frame alive at end (`SUMATRA_PDF_FRAME`).
+- **Revert check**: home clause removed from `hideSecondaryToolbars` → rebuild → probe FAILS exactly the two "home=ON hides" asserts (`fc vis=1`, `arch vis=1`) → restored → 17/17 green again.
 - Probe 14/14 PASS: rebar (0,50)-(1536,74) visible, 11 buttons, painted (4239B PNG), trio present+visible (check 108..131, label 136..177, edit 182..214 ⊂ anchor 103..299, y 3..26 ⊂ 0..30), checkbox 0→1, session overlay created on Study ON (hwnd found) + destroyed on OFF, app alive at end. 3 consecutive runs green, zero crashes; `customdraw: TB_GETBUTTONINFOW failed` line GONE (cmd-id fix works — centering actually paints now).
 - Isolation experiment (user-prescribed): baseline (HEAD 295ecb1, all changes stashed) probe run first — validated probe itself was the broken part (baseline "buttoncount=1" was the fake read).
 

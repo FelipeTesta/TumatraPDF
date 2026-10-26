@@ -23,6 +23,7 @@
 - [ ] **R7 / 16C-next**: continue god-file extraction — SumatraPDF.cpp (~14.2k lines, target ~10k), then Canvas.cpp (~5.7k; needs a dependency MAP first — mouse/keyboard interleaved with rendering, no established pattern), EngineMupdf.cpp (~6.7k, decouple rendering helpers per format).
 - [ ] **16D**: typed `gGlobalPrefs` accessors (152 accesses in SumatraPDF.cpp) — only when tests exist.
 - [ ] **TC2 leftovers**: uia `PageProvider` + legacy tile math not routed virtual→physical (non-cache path diverts; MVP-acceptable).
+- [ ] **Settings migration (names-blob off-by-one)**: the `gFileStateInfo` names blob is missing `FlashcardStudyTimeSec` (s36-at omission) → every FileState field ≥ 24 serializes under the NEXT field's name. Round-trip is index-consistent (data survives restarts intact — user's file proven), but the names in the settings file + AdvancedSettingsDialog lie, and pre-s36-at settings files read one-off (upgrade path corrupted). Inserting the missing name NOW would shift every read by one → needs a one-time migration. Rule (noted in Settings.h): new FileState fields MUST append at the END of the table AND both blobs (s36-az followed it for `flashcardCardsDone`).
 
 ## Two Columns v2 — pending USER live-confirmations (code complete, all E2E-verified)
 
@@ -43,6 +44,7 @@
 - [x] Graph: add peru-colored line for flashcard study time (separate from reading time)
 - [x] Study time capture (STATS, no visual feedback): while study mode is ON and the answer is NOT revealed, credit time to the stats. Each card contributes at most 60s (per-card cap; the accumulator resets on card advance). Main total (flashcard-stats.txt sidecar, keyed by date) survives rename/delete/move; per-book reference: FileState.flashcardStudyTimeSec.
 - [x] Study SESSION timer (like autoscroll's, user-configured): checkbox + "Timer:" + minutes edit (default 30) in the flashcard secondary toolbar (CmdFlashcardStudyTimerToggle / CmdFlashcardStudyTimerEdit). When enabled at Study start, a 2px silver progress line at the bottom of the screen shrinks symmetrically toward the center over the session duration (fullscreen: bottom of screen; windowed: ~48px above the taskbar). On expiry: study session ends, beep + "∴" overlay (3s, same as autoscroll). The session timer is INDEPENDENT of the 60s/card stats cap.
+- [x] Cards-rated counts (s36-az): every rating (incl. Again) counts 1 card; sidecar gains a cards column (`flashcard-stats.txt`: `date sec cards`, 2-col legacy reads as 0), per-book `FileState.flashcardCardsDone`; Home flashcards ranking shows "N cards / time" and the totals line uses the user format `Flashcards: Today N cards / Xh Ym | Total: N cards / Xh Ym`.
 
 ### Tests
 
@@ -50,6 +52,7 @@
 - [ ] **FC-M1** tests: SM-2 (intervals/ease cap/relearn), study-JSON roundtrip, due filter — after Image Occlusion lands.
 - [ ] **FC-M5** rate keys 1-4 have no visual hint (no rate buttons/tooltips on toolbar).
 - [ ] User live tests (queue): Filter window + global session (cross-tab jumping, per-book saves); List panel visual on real books; Settings window (folder picker + Drive backup, clear-selected, dark theme); bookmark-mirror on real TOC books (test PDF has none — automated test skipped the mirror).
+- [ ] User live tests (s36-az batch): study-time + cards totals format on a real book; session-timer trio (checkbox/minutes edit/progress line/expiry beep+overlay) visual on light+dark; flashcard toolbar single centered labels + checked=bold+underline (no white face); home hides fc/arch toolbars and restores them.
 
 ## Image Occlusion cards — PLANNED (awaiting user decisions)
 
@@ -69,17 +72,21 @@ Replace / Edit With Paint / top-level Copy Image shipped s31; s34 E2E covers the
 
 ## Test harnesses (tests/tmp/ — scratch, E2E-class until promoted to ad-hoc)
 
-Scratch E2E harnesses live in `tests/tmp/` (gitignored): s34-replace/paint/crop/edit-e2e, s34-reload-colors, s34c-inpage-e2e, s34e-doubletoggle, s34g-findcrash, s34c-tb-probe, s35-tc2-auto, s35-tc2-sel, s33-arch-repro, s36pa1-paint (PA1 mask paint cost), ad-hoc-pa2-strip-scroll (promoted to tests/). Reusable helpers: `tests/winapi.ts`, `tests/win-automation.ts`; DPI + postMessage traps documented in lemma (m9fa780f3cf0b, m5317f7f3eb3d).
+Scratch E2E harnesses live in `tests/tmp/` (gitignored): s34-replace/paint/crop/edit-e2e, s34-reload-colors, s34c-inpage-e2e, s34e-doubletoggle, s34g-findcrash, s34c-tb-probe, s35-tc2-auto, s35-tc2-sel, s33-arch-repro, s36pa1-paint (PA1 mask paint cost), ad-hoc-pa2-strip-scroll (promoted to tests/), s36ax-fctb (fc toolbar + trio + home cycle, 17/17), s36az-scroll (strip-under-fc), s36az-cards (cards sidecar), s36az-imagedrag (scan-vs-figure drag), s36ay-batch (contrast/save-reload/trim/speed — D-stage arch/edit asserts still unproven: the old comctl crash hit before them; re-run now that band-90 is fixed). Reusable helpers: `tests/winapi.ts`, `tests/win-automation.ts`; DPI + postMessage traps documented in lemma (m9fa780f3cf0b, m5317f7f3eb3d). Probe-writing rules: tumatrapdf-e2e guide (lemma id 34) — in-proc oracles only (sumlog witnesses, TestToolbarButtons dump, window-class enum); NEVER cross-proc TB_* scalars (wrong WM_USER offsets poison the toolbar) or PrintWindow on a comctl toolbar (re-entrant render → wedge/AV).
+
+- [ ] **Control-server UI marshalling**: Test* handlers (TestToolbarButtons etc.) run TB__/TTM__ queries on the BACKGROUND control thread against UI-owned toolbars — inter-thread sends delivered mid-pump; combined with comctl rebanding/custom draw this reproducibly AVs (two s36-az crash runs, stack: WndProcToolbar fallthrough → comctl write to a dangling ptr). Proper fix = marshal Test* execution to the UI thread (SendMessage to a UI-owned window). The deterministic trigger (toolbar2 stacked band) is fixed; remaining risk documented in LOG s36-az.
 
 ## Research (low priority)
 
 - [ ] **OCR image** (right-click on image → OCR text): upstream vendors tesseract 5.5.2 (Artifex fork) for `mutool draw -F ocr.*` — cheapest path for the fork; decide separately (binary size cost). Lightweight near-zero-dependency alternatives also acceptable.
 
 ## Edit/
+
 - [ ] Crop
 - [ ] Align: Similar ao draw line do measure (archtools), vamos desenhar uma linha com dois pontos, e a partir dessa linha, realinhar a página removendo a distorção para que o alinhamento referente a linha que acabamos de desenhar fique 100% vertical ou horizontal; vamos recortar o excesso de página mantendo a mesma proporção original da página; após recortar, o usuário precisa salvar a alteração no documento para aplicar;
 
 ## Bookmarks Improve
+
 1. Button 'Reorder' on/off: allows click:hold and repositioning bookmark order.
    - Dropping a bookmark onto another includes it as 1 indent level; dropping at the far left removes it from the level;
    - Show a dynamic horizontal line representing where the bookmark will land on drop, depending on cursor position.
@@ -118,7 +125,10 @@ Shift+S: draw a rectangle that captures the image inside it at the document's DP
 
 # Bugs open
 
-- [x] ~~**s36-au** debug-build graceful-quit exit code 5~~ — FIXED s36-au (details in LOG): GDI+ function statics destructed at atexit after `ScopedGdiPlus` ended the session; WinMain now passes `endOnExit=false` + `TabWnd::Paint` string formats leaked. All 9 affected tests PASS. The other 8 suite failures (unit-tests exit 1 + UI/timing groups) are separate defects and stay open below.
+- [ ] **BUG-3** right-click image context menu: s34 E2E confirmed Replace/Paint/Crop work + submenu visibility fixed; s36-ao live-checked the rest — `Image > Save` works (editor → `<book>_page_1.png`), menus filter correctly, and the silent null-bitmap returns now show a notification (fdcafde). No repro for the "non-image items dead" claim: those items are removed by design (link/comment/attachment). REMAINING: user's exact steps (file + item) to reproduce anything still dead.
+- [ ] **BUG-4** Contrast × Trim Config ONE-SHOT vanish (first trim-config open after launch). Fix v2 (`EnsureContrastOverlayState` invariant + self-healing) deployed 2026-09-22 — awaiting user confirmation of the exact flow; `[contrast]` breadcrumbs in debug build. NOTE (s36-az): the "contrast parou de funcionar" report of 2026-10-25 was root-caused to the save-reload state wipe (FIXED — ReloadDocument now preserves extras; LOG s36-az); if BUG-4's one-shot vanish still reproduces after that fix, it is a separate flow.
+- [ ] **Ctrl+click flashcard highlight opens List** — implemented s34-b (Canvas ctrl+click detects /T author TumatraPDF-Flashcard → FlashcardSidebarShow; turns flashcard mode on if off). USER live-test pending (needs a book with flashcard highlights).
+- [ ] **s34-g user validation pending**: Arch Measure Radius + Ref Line UX, resize-enlarge on a real book, flicker-free drag confirm (shipped + E2E 2026-10-11).
 - [ ] **BUG-3** right-click image context menu: s34 E2E confirmed Replace/Paint/Crop work + submenu visibility fixed; s36-ao live-checked the rest — `Image > Save` works (editor → `<book>_page_1.png`), menus filter correctly, and the silent null-bitmap returns now show a notification (fdcafde). No repro for the "non-image items dead" claim: those items are removed by design (link/comment/attachment). REMAINING: user's exact steps (file + item) to reproduce anything still dead.
 - [ ] **BUG-4** Contrast × Trim Config ONE-SHOT vanish (first trim-config open after launch). Fix v2 (`EnsureContrastOverlayState` invariant + self-healing) deployed 2026-09-22 — awaiting user confirmation of the exact flow; `[contrast]` breadcrumbs in debug build.
 - [ ] **Ctrl+click flashcard highlight opens List** — implemented s34-b (Canvas ctrl+click detects /T author TumatraPDF-Flashcard → FlashcardSidebarShow; turns flashcard mode on if off). USER live-test pending (needs a book with flashcard highlights).

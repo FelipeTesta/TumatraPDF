@@ -6,15 +6,46 @@ history in [LOG.md](LOG.md).
 
 ## Unreleased
 
-- **Flashcard study time.** While study mode is on (and no answer is
-  revealed), the time spent on each card is credited to the book and to a
-  global total — capped at 60 s per card so a forgotten open book does not
-  rack up hours. The main total lives in a `flashcard-stats.txt` file
-  (per-day lines, survives renaming, deleting or moving any book) and each
-  book keeps its own time in its file history. The Home screen shows it all:
-  a **Flashcards** tab next to the reading ranking, the calendar hover shows
-  read and flashcard minutes per day, and the daily graph gains a second
-  (peru) line for flashcard time.
+- **Saving keeps your tools exactly as they are.** Saving annotations into the
+  open document reloads it behind the scenes, and that reload used to reset
+  per-book state that lives outside the document: the auto-scroll speed, the
+  trim margins, Arch Tools scale and measurements, and the contrast/invert
+  settings all fell back to defaults on every save. The reload now packages
+  the full current state, so a save is transparent to every view setting.
+- **Arch Tools toolbar opens at the right height.** The Arch Tools bar used to
+  open as a ~90 px tall stacked band (it was laid out at zero width before the
+  window was sized, so every button wrapped onto its own row) and stayed that
+  way; it now sizes to the window first, like the flashcard toolbar, and opens
+  as a single 24 px row.
+- **Home hides the secondary toolbars.** While the Home overlay is up (focused
+  mode), the Flashcards, Arch Tools and Edit toolbars hide so the home screen
+  owns the whole window; they come back exactly as they were the moment Home
+  is closed. Previously they stayed on screen below the main toolbar, cutting
+  into the Home content. (The same pass now also restores the toolbars when
+  switching a markdown document back to a PDF, which the old code missed.)
+- **Scanned pages drag like pages.** Clicking the background of a scanned
+  PDF and dragging no longer starts an image drag-out (as if pulling the
+  page's photo somewhere) — it pans the page like any other drag. The old
+  full-page detection (image covering 80% of the page) missed scans with
+  margins or tiles; a page with no extractable text is now treated as a
+  scan, so its images count as background whatever their exact size. Figures
+  in text documents keep their drag-out behavior.
+- **Smoother scrolling while studying flashcards.** With flashcard mode on,
+  every scroll used to repaint the whole canvas (the fast strip-scroll path
+  was conservatively disabled for it); the flashcard masks are
+  document-anchored, so the strip path now stays on and scrolling while
+  studying feels like normal reading again.
+- **Flashcard study time and card counts.** While study mode is on (and no
+  answer is revealed), the time spent on each card is credited to the book and
+  to a global total — capped at 60 s per card so a forgotten open book does not
+  rack up hours. Cards rated are counted too. The main totals live in
+  `flashcard-stats.txt` (per-day lines with seconds and cards, survives
+  renaming, deleting or moving any book) and each book keeps its own time and
+  card count in its file history. The Home screen shows it all: a
+  **Flashcards** tab next to the reading ranking (each row: cards rated and
+  time), the combined `Flashcards: Today 13 cards / 10m | Total: 100 cards /
+8h 20m` line, the calendar hover shows read and flashcard minutes per day,
+  and the daily graph gains a second (peru) line for flashcard time.
 - **Flashcard study session timer.** The flashcard toolbar's Study button now
   hosts a timer trio in the autoscroll format — `☐ Timer: [30]`. Checking it
   and starting a study session runs a countdown of the configured minutes
