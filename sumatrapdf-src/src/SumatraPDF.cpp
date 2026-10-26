@@ -862,18 +862,17 @@ static Vec<ArchMeasurement> DeserializeMeasurements(const char* s) {
     return result;
 }
 
-void UpdateTabFileDisplayStateForTab(WindowTab* tab) {
-    if (!tab || !tab->ctrl) {
-        return;
-    }
+// Fill a FileState with the per-document extras that live OUTSIDE the
+// controller's own GetDisplayState: autoscroll speed, invert/contrast,
+// margin trim + two-column v2, arch tools state. Called from BOTH
+// UpdateTabFileDisplayStateForTab (persist into file history) and
+// ReloadDocument (preserve across the reload the save path triggers) —
+// keep the two callers in sync: anything filled here but skipped in one
+// path resets when that path runs (user report 2026-10-25: saving a
+// document reset the autoscroll speed; arch scale/measurements and trim
+// had the same hole).
+static void FillFileStateExtrasFromWindow(WindowTab* tab, FileState* fs) {
     MainWindow* win = tab->win;
-    // TODO: this is called multiple times for each tab
-    RememberDefaultWindowPosition(win);
-    Str fp = tab->filePath;
-    FileState* fs = gFileHistory.FindByPath(fp);
-    if (!fs) {
-        return;
-    }
     tab->ctrl->GetDisplayState(fs);
     UpdateDisplayStateWindowRect(win, fs, false);
     UpdateSidebarDisplayState(tab, fs);
@@ -924,6 +923,18 @@ void UpdateTabFileDisplayStateForTab(WindowTab* tab) {
         fs->archScaleSet = ps0.scaleSet;
         fs->archMeasurements = SerializeMeasurements(win->archTools.measurements);
     }
+}
+
+void UpdateTabFileDisplayStateForTab(WindowTab* tab) {
+    if (!tab || !tab->ctrl) {
+        return;
+    }
+    RememberDefaultWindowPosition(tab->win);
+    FileState* fs = gFileHistory.FindByPath(tab->filePath);
+    if (!fs) {
+        return;
+    }
+    FillFileStateExtrasFromWindow(tab, fs);
 }
 
 static bool gForceRtl = false;
@@ -2655,20 +2666,20 @@ void ReloadDocument(MainWindow* win, bool autoRefresh, bool canAskForPassword) {
     }
     logfa("ReloadDocument: %s, auto refresh: %d\n", path, (int)autoRefresh);
 
-    // Save display state before potentially destroying the old controller
+    // Save display state before potentially destroying the old controller.
+    // NewFileState() yields pure defaults, so EVERYTHING outside the
+    // controller's GetDisplayState must be re-filled here or the reload the
+    // save path triggers resets it (autoscroll speed was lost this way —
+    // user 2026-10-25; the helper also covers contrast/invert, trim/v2 and
+    // arch state).
     FileState* fs = NewFileState(path);
-    tab->ctrl->GetDisplayState(fs);
-    UpdateDisplayStateWindowRect(win, fs);
-    UpdateSidebarDisplayState(tab, fs);
-    // Preserve the per-document color state across the reload (same fields
-    // UpdateFileState persists). NewFileState defaults them to off, so without
-    // this the restore path reset invert + contrast to defaults — saving
-    // annotations visibly turned both off (TODO 2026-10-10).
-    fs->invertColors = GetInvertPageColors();
-    fs->contrastEnabled = win->contrastEnabled;
-    fs->contrastOpacity = win->contrastOpacity;
-    logf("[reload] preserving invert=%d contrast=%d opacity=%d\n", fs->invertColors ? 1 : 0,
-         fs->contrastEnabled ? 1 : 0, (int)win->contrastOpacity);
+    // the history path calls this via UpdateDisplayStateWindowRect's
+    // updateGlobal=true default; the helper hardcodes false, so keep the old
+    // reload behavior explicit here
+    RememberDefaultWindowPosition(win);
+    FillFileStateExtrasFromWindow(tab, fs);
+    logf("[reload] preserving extras: invert=%d contrast=%d speed=%.3f trim=%d\n", fs->invertColors ? 1 : 0,
+         fs->contrastEnabled ? 1 : 0, (double)fs->autoScrollSpeedMultiplier, fs->marginTrim ? 1 : 0);
 
     DocController* ctrl = CreateControllerForEngineOrFile(nullptr, path, &pwdUI, win);
     // We don't allow PDF-repair if it is an autorefresh because
@@ -6325,7 +6336,8 @@ static bool IsUiLayoutEq(UILayout* s1, UILayout* s2) {
            s1->showFavorites == s2->showFavorites && s1->favoritesAsTab == s2->favoritesAsTab &&
            s1->showMenuBarRebar == s2->showMenuBarRebar && s1->aiChatVisible == s2->aiChatVisible &&
            s1->aiChatDx == s2->aiChatDx && s1->archToolsOn == s2->archToolsOn && s1->flashcardOn == s2->flashcardOn &&
-           s1->editToolsOn == s2->editToolsOn && s1->fcListVisible == s2->fcListVisible && s1->fcListDx == s2->fcListDx;
+           s1->editToolsOn == s2->editToolsOn && s1->homeOverlay == s2->homeOverlay &&
+           s1->fcListVisible == s2->fcListVisible && s1->fcListDx == s2->fcListDx;
 }
 
 bool RelayoutFrame(MainWindow* win, bool updateToolbars, int sidebarDx) {
@@ -6355,13 +6367,17 @@ bool RelayoutFrame(MainWindow* win, bool updateToolbars, int sidebarDx) {
     curState.archToolsOn = win->archTools.on;
     curState.flashcardOn = win->flashcard.on;
     curState.editToolsOn = win->editTools.on;
+    curState.homeOverlay = win->showHomeOverlay;
     curState.fcListVisible = win->uiState.fcListVisible;
     curState.fcListDx = win->flashcard.listaDx;
 
-    if (IsCurrentDocMarkdown(win) && win->archTools.hwndReBar2) ShowWindow(win->archTools.hwndReBar2, SW_HIDE);
-    if (IsCurrentDocMarkdown(win) && win->flashcard.hwndReBarFlashcard)
-        ShowWindow(win->flashcard.hwndReBarFlashcard, SW_HIDE);
-    if (IsCurrentDocMarkdown(win) && win->editTools.hwndReBarEdit) ShowWindow(win->editTools.hwndReBarEdit, SW_HIDE);
+    // Secondary toolbars (Arch / Flashcards / Edit) hide while the home
+    // overlay is up (focused mode, user 2026-10-25) and for markdown docs
+    // (no fixed-page canvas features). The rebars stay created; visibility
+    // is re-applied here every pass, so lifting the blocker restores them
+    // (the old markdown-only hide never re-showed them on the switch back
+    // to a PDF).
+    bool hideSecondaryToolbars = win->showHomeOverlay || IsCurrentDocMarkdown(win);
 
     // skip redundant relayouts when all layout-affecting state is unchanged
     if (IsUiLayoutEq(&curState, &win->uiState.layout) && updateToolbars && sidebarDx == -1) {
@@ -6543,47 +6559,63 @@ bool RelayoutFrame(MainWindow* win, bool updateToolbars, int sidebarDx) {
     }
     // Second toolbar (Arch Tools) - positioned below main toolbar when visible
     if (win->archTools.on && win->archTools.hwndReBar2) {
-        Rect rcRebar2 = HwndWindowRect(win->archTools.hwndReBar2);
-        int rebar2Dy = rcRebar2.dy;
-        bool atBottom = ToolbarAtBottom();
-        int rebar2Y = atBottom ? (rc.y + rc.dy - rebar2Dy) : rc.y;
-        if (updateToolbars) {
-            dh.SetWindowPos(win->archTools.hwndReBar2, nullptr, rc.x, rebar2Y, rc.dx, rebar2Dy, SWP_NOZORDER);
-        }
-        // reserve the second toolbar's space
-        rc.dy -= rebar2Dy;
-        if (!atBottom) {
-            rc.y += rebar2Dy;
+        if (hideSecondaryToolbars) {
+            ShowWindow(win->archTools.hwndReBar2, SW_HIDE);
+        } else {
+            Rect rcRebar2 = HwndWindowRect(win->archTools.hwndReBar2);
+            int rebar2Dy = rcRebar2.dy;
+            bool atBottom = ToolbarAtBottom();
+            int rebar2Y = atBottom ? (rc.y + rc.dy - rebar2Dy) : rc.y;
+            if (updateToolbars) {
+                dh.SetWindowPos(win->archTools.hwndReBar2, nullptr, rc.x, rebar2Y, rc.dx, rebar2Dy, SWP_NOZORDER);
+            }
+            ShowWindow(win->archTools.hwndReBar2, SW_SHOW);
+            // reserve the second toolbar's space
+            rc.dy -= rebar2Dy;
+            if (!atBottom) {
+                rc.y += rebar2Dy;
+            }
         }
     }
     // Flashcard toolbar - positioned below arch tools when visible
     if (win->flashcard.on && win->flashcard.hwndReBarFlashcard) {
-        Rect rcRebarFC = HwndWindowRect(win->flashcard.hwndReBarFlashcard);
-        int rebarFCDy = rcRebarFC.dy;
-        bool atBottom = ToolbarAtBottom();
-        int rebarFCY = atBottom ? (rc.y + rc.dy - rebarFCDy) : rc.y;
-        if (updateToolbars) {
-            dh.SetWindowPos(win->flashcard.hwndReBarFlashcard, nullptr, rc.x, rebarFCY, rc.dx, rebarFCDy, SWP_NOZORDER);
-        }
-        // reserve the flashcard toolbar's space
-        rc.dy -= rebarFCDy;
-        if (!atBottom) {
-            rc.y += rebarFCDy;
+        if (hideSecondaryToolbars) {
+            ShowWindow(win->flashcard.hwndReBarFlashcard, SW_HIDE);
+        } else {
+            Rect rcRebarFC = HwndWindowRect(win->flashcard.hwndReBarFlashcard);
+            int rebarFCDy = rcRebarFC.dy;
+            bool atBottom = ToolbarAtBottom();
+            int rebarFCY = atBottom ? (rc.y + rc.dy - rebarFCDy) : rc.y;
+            if (updateToolbars) {
+                dh.SetWindowPos(win->flashcard.hwndReBarFlashcard, nullptr, rc.x, rebarFCY, rc.dx, rebarFCDy,
+                                SWP_NOZORDER);
+            }
+            ShowWindow(win->flashcard.hwndReBarFlashcard, SW_SHOW);
+            // reserve the flashcard toolbar's space
+            rc.dy -= rebarFCDy;
+            if (!atBottom) {
+                rc.y += rebarFCDy;
+            }
         }
     }
     // Edit toolbar - positioned below the flashcard toolbar when visible
     if (win->editTools.on && win->editTools.hwndReBarEdit) {
-        Rect rcRebarED = HwndWindowRect(win->editTools.hwndReBarEdit);
-        int rebarEDDy = rcRebarED.dy;
-        bool atBottom = ToolbarAtBottom();
-        int rebarEDY = atBottom ? (rc.y + rc.dy - rebarEDDy) : rc.y;
-        if (updateToolbars) {
-            dh.SetWindowPos(win->editTools.hwndReBarEdit, nullptr, rc.x, rebarEDY, rc.dx, rebarEDDy, SWP_NOZORDER);
-        }
-        // reserve the edit toolbar's space
-        rc.dy -= rebarEDDy;
-        if (!atBottom) {
-            rc.y += rebarEDDy;
+        if (hideSecondaryToolbars) {
+            ShowWindow(win->editTools.hwndReBarEdit, SW_HIDE);
+        } else {
+            Rect rcRebarED = HwndWindowRect(win->editTools.hwndReBarEdit);
+            int rebarEDDy = rcRebarED.dy;
+            bool atBottom = ToolbarAtBottom();
+            int rebarEDY = atBottom ? (rc.y + rc.dy - rebarEDDy) : rc.y;
+            if (updateToolbars) {
+                dh.SetWindowPos(win->editTools.hwndReBarEdit, nullptr, rc.x, rebarEDY, rc.dx, rebarEDDy, SWP_NOZORDER);
+            }
+            ShowWindow(win->editTools.hwndReBarEdit, SW_SHOW);
+            // reserve the edit toolbar's space
+            rc.dy -= rebarEDDy;
+            if (!atBottom) {
+                rc.y += rebarEDDy;
+            }
         }
     }
     // in overlay mode the toolbar floats over the canvas and is positioned
@@ -11391,6 +11423,10 @@ static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, L
             // resumed on home=off
             LayoutToolbarChildWindows(win);
             EnsureContrastOverlayState(win);
+            // secondary toolbars (fc/arch/edit) hide while home=on and come
+            // back on home=off (RelayoutFrame applies it; the snapshot's
+            // homeOverlay field makes the toggle always re-layout)
+            RelayoutFrame(win, true, -1);
             return true;
 
         case CmdToggleFavoritesSort:
