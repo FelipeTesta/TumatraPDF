@@ -2707,9 +2707,10 @@ TempStr ToolbarButtonsResultTemp(int* exitCodeOut) {
         SendMessageW(hwnd, TB_GETITEMRECT, (WPARAM)i, (LPARAM)&r);
         bool hidden = (bi.fsState & TBSTATE_HIDDEN) != 0;
         bool enabled = (bi.fsState & TBSTATE_ENABLED) != 0;
-        out.Append(fmt("idx=%d cmd=%d hidden=%d enabled=%d rect=%d,%d,%d,%d style=0x%02X cx=%d text=%s\n", i,
-                       (int)bi.idCommand, hidden ? 1 : 0, enabled ? 1 : 0, (int)r.left, (int)r.top, (int)r.right,
-                       (int)r.bottom, (int)bi.fsStyle, (int)bi.cx, ToUtf8Temp(buf)));
+        bool checked = (bi.fsState & TBSTATE_CHECKED) != 0;
+        out.Append(fmt("idx=%d cmd=%d hidden=%d enabled=%d checked=%d rect=%d,%d,%d,%d style=0x%02X cx=%d text=%s\n", i,
+                       (int)bi.idCommand, hidden ? 1 : 0, enabled ? 1 : 0, checked ? 1 : 0, (int)r.left, (int)r.top,
+                       (int)r.right, (int)r.bottom, (int)bi.fsStyle, (int)bi.cx, ToUtf8Temp(buf)));
     }
     for (int i = 0; i < nTools; i++) {
         TTTOOLINFOW ti{};
@@ -3003,7 +3004,17 @@ void CreateToolbar2(MainWindow* win) {
     rbBand.cx = 0;
     SendMessageW(win->archTools.hwndReBar2, RB_INSERTBAND, (WPARAM)-1, (LPARAM)&rbBand);
 
-    SetWindowPos(win->archTools.hwndReBar2, nullptr, 0, 0, 0, 0, SWP_NOZORDER);
+    // size the rebar to the frame width right away (FlashcardToolbarCreate /
+    // EditToolbarCreate recipe): at width 0 a WRAPABLE toolbar stacks every
+    // button on its own row and the band adopts that stacked height (90px+),
+    // which RelayoutFrame then reserves; comctl only re-wraps for widths it
+    // saw when the buttons were added, so give the band the real width before
+    // any relayout measures us
+    {
+        Rect rcFrame = HwndClientRect(hwndParent);
+        SetWindowPos(win->archTools.hwndReBar2, nullptr, 0, 0, rcFrame.dx, rc.dy + (2 * rc.y),
+                     SWP_NOZORDER | SWP_NOMOVE);
+    }
 
     // Initially hidden
     ShowWindow(win->archTools.hwndReBar2, SW_HIDE);
