@@ -419,12 +419,16 @@ struct MainWindow {
         bool snap = true; // default true
         Vec<ArchMeasurement> measurements;
         // Per-document measurements store (not persisted to disk, discarded on close)
+        // NOTE: POD by design — the project's Vec<T> copies elements BITWISE
+        // (Append/swap-remove), so this struct MUST NOT own anything through
+        // ctor/dtor: a dtor on the caller-side local freed the dup'd path
+        // right after Append bit-copied it, leaving every entry's path
+        // dangling (startup AV in str::Eq, user crash 2026-10-26). Ownership
+        // is manual: ArchSaveMeasurementsForCurrentTab dups, nothing frees
+        // (strings leak on remove/teardown — negligible, per-doc state).
         struct ArchMeasurementsByDoc {
             Str path;
             Vec<ArchMeasurement> measurements;
-            ArchMeasurementsByDoc() = default;
-            ArchMeasurementsByDoc(Str p) : path(str::Dup(p)) {}
-            ~ArchMeasurementsByDoc() { str::Free(path); }
         };
         Vec<ArchMeasurementsByDoc> measurementsByDoc;
         // Persistent scale line endpoints in PAGE coordinates (legacy, for current page)

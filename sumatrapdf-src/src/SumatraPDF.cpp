@@ -14392,9 +14392,9 @@ void ShowCrashHandlerMessage() {
         log("ShowCrashHandlerMessage: !gCrashFilePath\n");
         return;
     }
+    // local report only — never open anything in the browser on crash
+    // (user 2026-10-26); the report file stays on disk either way
     LaunchFileIfExists(gCrashFilePath);
-    const auto* url = "https://github.com/FelipeTesta/TumatraPDF/issues/new";
-    LaunchFileShell(url, nullptr, "open");
 }
 
 TempStr PageInfoOverlayResultTemp(Str pathTwoPages, Str pathOnePage, int* exitCodeOut) {
@@ -14592,8 +14592,12 @@ void MainWindow::ArchSaveMeasurementsForCurrentTab() {
             return;
         }
     }
-    // Create new entry
-    ArchToolsState::ArchMeasurementsByDoc entry(path);
+    // Create new entry. POD (see the struct note): dup the path MANUALLY —
+    // the local must not own it (a dtor freed the bit-copied pointer and
+    // dangled every entry's path; startup AV in the str::Eq loop below)
+    ArchToolsState::ArchMeasurementsByDoc entry; // no {}: Vec's default ctor is explicit
+    entry.path = {};                             // plain declaration leaves Str indeterminate
+    entry.path = str::Dup(path);
     for (int j = 0; j < archTools.measurements.len; ++j) {
         entry.measurements.Append(archTools.measurements[j]);
     }
