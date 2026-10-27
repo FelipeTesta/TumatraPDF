@@ -66,6 +66,31 @@ function sampleChrome(hwnd: number): number[] {
   return px;
 }
 
+// Sample the chrome strip once its first paint has settled. At startup the
+// strip is the flat caption background for a few hundred ms (this fork builds
+// extra chrome before the first paint); sampling that pre-paint state would
+// race the before/after compare and fail an otherwise-repainting window.
+// Phase 1 waits for the strip to change from its initial state, phase 2 for
+// two consecutive near-identical samples (DWM noise floor, not exact equality).
+async function sampleChromeWhenStable(hwnd: number, maxMs = 4000): Promise<number[]> {
+  const initial = sampleChrome(hwnd);
+  let cur = initial;
+  const deadline = Date.now() + maxMs;
+  while (Date.now() < deadline && countDifferingPixels(cur, initial) < 200) {
+    await sleep(150);
+    cur = sampleChrome(hwnd);
+  }
+  while (Date.now() < deadline) {
+    await sleep(150);
+    const next = sampleChrome(hwnd);
+    if (next.length === cur.length && countDifferingPixels(next, cur) < 25) {
+      return next;
+    }
+    cur = next;
+  }
+  return cur;
+}
+
 export async function testit(): Promise<void> {
   // window rects and window-DC pixel coordinates must agree; no-op at 100% DPI
   setProcessDpiAware();
@@ -90,10 +115,9 @@ export async function testit(): Promise<void> {
     if (!frame) {
       throw new Error("SumatraPDF frame window not found");
     }
-    // Short settle for first paint / maximized layout (not full-page render)
-    await sleep(250);
-
-    const before = sampleChrome(frame);
+    // First paint / maximized layout settle (bounded poll, not a fixed sleep:
+    // see sampleChromeWhenStable)
+    const before = await sampleChromeWhenStable(frame);
 
     sendCommand(frame, cmdId("CmdToggleFullscreen"));
     await sleep(120);

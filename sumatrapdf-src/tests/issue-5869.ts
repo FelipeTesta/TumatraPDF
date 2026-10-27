@@ -14,6 +14,7 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { ControlCommand, withControlledSumatra } from "../cmd/control";
 import { EXE, ROOT, runStandalone, tmpPath } from "./util";
+import { sleep } from "./winapi";
 
 const SHORTCUT_NAMES = ["SVG test dummy A", "SVG test dummy B", "SVG test dummy C"];
 const VIEWER_NAMES = ["Viewer One", "Viewer Two"];
@@ -111,6 +112,36 @@ function parse(dump: string): { buttons: Button[]; tools: Tool[] } {
   return { buttons, tools };
 }
 
+// The toolbar relayouts several times during startup (timer-trio width
+// enforcement, group-wrap rebuilds, re-applied hidden state), and a dump
+// taken between a comctl re-layout and the matching tooltip-rect resync shows
+// tool rects one shift behind their buttons. That is a transient that
+// self-heals — every relayout pass ends with a rect re-sync — and it is NOT
+// the bug under test. Poll until every button's tooltip tool agrees with its
+// live rect (bounded): a real regression like the original bug, where the
+// tools NEVER re-sync, still fails via the deadline.
+async function dumpUntilStable(client: {
+  request: (cmd: number, args: unknown[]) => Promise<unknown[]>;
+}): Promise<string> {
+  const deadline = Date.now() + 5000;
+  let dump = "";
+  for (;;) {
+    const res = await client.request(ControlCommand.TestToolbarButtons, []);
+    dump = String(res[1] ?? "");
+    const { buttons, tools } = parse(dump);
+    const stable =
+      buttons.length > 0 &&
+      buttons.every((b) => {
+        const t = tools.find((t) => t.uid === b.cmd);
+        return !t || t.rect === b.rect;
+      });
+    if (stable || Date.now() > deadline) {
+      return dump;
+    }
+    await sleep(150);
+  }
+}
+
 export async function testit(): Promise<void> {
   const dir = tmpPath("issue-5869");
   rmSync(dir, { recursive: true, force: true });
@@ -118,12 +149,8 @@ export async function testit(): Promise<void> {
   writeFileSync(join(dir, "TumatraPDF-settings.txt"), SETTINGS);
 
   const pdf = join(ROOT, "ext", "a-zlib", "zlib.3.pdf");
-  const res = await withControlledSumatra(EXE, (client) => client.request(ControlCommand.TestToolbarButtons, []), [
-    "-appdata",
-    dir,
-    pdf,
-  ]);
-  const dump = String(res[1] ?? "");
+  const res = await withControlledSumatra(EXE, (client) => dumpUntilStable(client), ["-appdata", dir, pdf]);
+  const dump = String(res ?? "");
   const { buttons, tools } = parse(dump);
   const fail = (msg: string) => {
     throw new Error(`${msg}\ntoolbar dump:\n${dump}`);

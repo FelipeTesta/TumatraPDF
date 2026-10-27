@@ -1428,6 +1428,13 @@ static void RebuildToolbarButtonsForWidth(MainWindow* win, HWND hwndToolbar) {
 
     UpdateToolbarPageText(win, win->ctrl ? win->ctrl->PageCount() : -1);
     LayoutToolbarChildWindows(win);
+    // re-apply everything that shifted rects after AddAllToolbarButtons' own
+    // resync: the two EnforceToolbarTextButtonWidths passes, the re-applied
+    // hidden/enabled states and the page-box width from UpdateToolbarPageText.
+    // TB_AUTOSIZE first: comctl re-derives the enforced text widths lazily, so
+    // without it TB_GETITEMRECT still reports the pre-shift layout
+    TbAutosIZE(hwndToolbar);
+    UpdateToolbarTooltipRects(hwndToolbar);
 
     // The Enforce pass above sets an explicit cx that comctl re-derives from
     // the label string on its next layout pass (measured: set=309 -> cx=194)
@@ -2808,6 +2815,14 @@ void CreateToolbar(MainWindow* win) {
     AddAllToolbarButtons(win, hwndToolbar);
     TbSetButtonSize(hwndToolbar, Size(iconSize, iconSize));
     EnforceToolbarTextButtonWidths(win, hwndToolbar);
+    // comctl re-derives text-button widths lazily: right after Enforce the
+    // widened Autoscroll (timer trio) / page box still report their OLD
+    // TB_GETITEMRECT, so the resync below would snapshot pre-shift rects
+    // (racy: sometimes comctl's own layout pass wins, sometimes not). Force
+    // the derivation now (TB_AUTOSIZE), then sync tooltip tool rects to the
+    // final layout (same pattern as the relocate handler)
+    TbAutosIZE(hwndToolbar);
+    UpdateToolbarTooltipRects(hwndToolbar);
 
     Rect rc = TbGetItemRect(hwndToolbar, 0);
 

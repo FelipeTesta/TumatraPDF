@@ -1,5 +1,26 @@
 # TumatraPDF — Development Log
 
+## 2026-10-27 (s36-bb) — UI/timing suite group cleared (3/3, all test-side) + issue-5869 startup relayout race re-fixed
+
+### Fixed
+
+- **issue-1914 (test)**: clicked pushbutton never navigated — the test's `clickAt` posts raw coords from a DPI-unaware bun process, which Windows virtualizes ×1.25, so the click landed 36-50px off the small button rect (`[1914] down: pageEl=none` probe: app saw (222,232) for a sent (178,185); button rect 152..219). App click path is correct (pushbutton links load via `MakePushButtonWidgetLinks`, down captures `linkOnLastButtonDown`, up follows it). Fix: `setProcessDpiAware()` at test start (same pattern as issue-5866), so sent coords are physical.
+- **issue-5866 (test)**: sampled the chrome strip at a fixed 250ms after launch, but this fork's first chrome paint lands later (~400-600ms: caption strip is still the flat background at 250ms — `0x1b1a19x717` vs settled `0x0x7724`+content in the probe). The F11-pair repaint itself works. Fix: `sampleChromeWhenStable()` — bounded poll (phase 1: strip changed from initial state; phase 2: two consecutive near-identical samples, DWM noise floor 25px).
+- **issue-5869 (app + test)**: v1.0.15's timer-trio-in-Autoscroll re-introduced the tooltip drift at STARTUP — `CreateToolbar` runs `AddAllToolbarButtons` (which resyncs tooltip rects) and THEN `TbSetButtonSize` + `EnforceToolbarTextButtonWidths`, which widen 13 text buttons and shift everything right of them; comctl re-derives text widths lazily, so even a resync right after reads pre-shift rects. Startup oscillates (probe: Autoscroll rect walked 539→665→568→604→568 across wrap-rebuild passes; each pass ends re-synced). App fix: `TbAutosIZE` + `UpdateToolbarTooltipRects` after `EnforceToolbarTextButtonWidths` in `CreateToolbar` and at the end of `RebuildToolbarButtonsForWidth` (after page-text + layout, before invalidate). Test fix: `dumpUntilStable()` — poll the `TestToolbarButtons` dump (150ms cadence, 5s bound) until every button's tooltip tool matches its live rect; the real #5869 regression (tools never re-sync) still fails via the deadline.
+- **issue-5792**: passes as-is on the current exe (3/3) — stale baseline entry, no defect found.
+
+### Verified
+
+- issue-1914: PASS ×4 (1 in instrumented worktree, 3 main tree); issue-5866: PASS ×6; issue-5792: PASS ×3; issue-5869: PASS ×8 consecutive (was 2/5 fails before the fix); issue-5840 + parse-tip-brackets re-run PASS on the final exe (no cross-regression from the Toolbar.cpp change).
+- Full suite baseline: **7 → 0 open failures** (exit-5 group s36-au, 5869 s36-ay/bb, unit-tests group s36-ba, UI/timing s36-bb).
+- Methodology kept: instrument-in-isolated-worktree (Canvas.cpp `[1914]` logf probes), then minimal fixes; DPI probe via `-console` + `[ttsync]` logs in the main tree (removed after diagnosis).
+
+### Notes
+
+- DPI coordinate spaces (recurring trap family): control dumps report app-PHYSICAL rects; bun-posted/sent window-message coords from a DPI-unaware process get virtualized ×1.25 — `setProcessDpiAware()` makes raw sent coords physical again. Pixel reads via window DC need it too (issue-5866 precedent).
+- Startup relayout storm: toolbar width enforcement + group-wrap rebuilds continue past 600ms after launch; any single-shot UI state check must poll for stability, not sample once.
+- Other agent's context: his in-flight files landed as v1.0.15 (ae938ad + aecd3b4 + 597e719) mid-session; main-tree build is green again and the fresh exe embeds everything.
+
 ## 2026-10-26 (s36-bb) — `-unit-tests` group cleared: one stale Help/-URL expectation (4 suite failures)
 
 ### Fixed

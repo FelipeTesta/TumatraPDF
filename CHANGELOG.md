@@ -4,6 +4,15 @@ Per-version changelog for TumatraPDF — new functions + bug fixes, newest first
 Feature details live in [README.md](README.md); full per-session development
 history in [LOG.md](LOG.md).
 
+## Unreleased
+
+- **Toolbar tooltips follow the buttons from launch.** The startup width
+  enforcement that makes room for the timer trio and the page-number box
+  shifted buttons after their tooltip rectangles had been snapshotted, so
+  for the first moments a tooltip could pop up over a neighbouring button
+  until the next layout pass re-synced it. Tooltip rectangles are now
+  re-synced after each width-enforcement and toolbar-rebuild pass.
+
 ## v1.0.15 (2026-10-26)
 
 - **No more crashes when opening the app.** The Arch Tools measurement

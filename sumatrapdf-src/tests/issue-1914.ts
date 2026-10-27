@@ -9,7 +9,7 @@ import { writeFileSync } from "node:fs";
 import { ControlClient, ControlCommand, withControlledSumatra } from "../cmd/control";
 import { EXE, cmdId, runStandalone, tmpPath } from "./util";
 import { FRAME_CLASS, clickAt, findCanvas, sendCommand } from "./win-automation";
-import { sleep, waitForTopWindow } from "./winapi";
+import { setProcessDpiAware, sleep, waitForTopWindow } from "./winapi";
 
 // 2 pages. Page 1 carries a pushbutton widget (/FT /Btn with the pushbutton
 // flag) whose action jumps to page 2; there is no /Link annotation anywhere.
@@ -75,6 +75,11 @@ async function getLinkState(client: ControlClient): Promise<{ st: LinkState; dum
 }
 
 export async function testit(): Promise<void> {
+  // the click must arrive at the EXACT physical canvas coords the control dump
+  // reported: bun's DPI-unaware coords are virtualized (x1.25 on a 125% display,
+  // missing the small pushbutton rect), like issue-5866's physical-pixel reads
+  setProcessDpiAware();
+
   const pdf = tmpPath("issue-1914.pdf");
   writeFileSync(pdf, makePushButtonPdf());
 
