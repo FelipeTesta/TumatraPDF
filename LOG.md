@@ -35,6 +35,7 @@
 
 - The `Vec<T>`×dtor trap is now a documented repo-wide rule-candidate: any struct stored in a `Vec` must be POD (no owning ctor/dtor) — ownership managed manually at append/remove sites. Persisted to lemma + AGENTS-style note in MainWindow.h.
 - s36-az commits landed earlier today: `62b11fc` (flashcards), `011eef5` (arch band), `c4c70ea` (save-reload + home), `dab2dfe` (study scroll), `ad27561` (scan drag), `63dbc69` (docs). The other agent's `9b5047b` (tooltips) landed in between.
+- Released as **v1.0.15** (2026-10-26): this entry's crash fix + no-browser + highlight opacity 0.1 (`597e719`, `aecd3b4`) on top of the s36-az batch (save-reload, arch band, study scroll, scan drag, card counts, session timer, home-hides-toolbars, save button, tooltips, unit-tests URL fix). `CURR_VERSION` bumped to 1.0.15 in the same commit as the tag (the v1.0.12/13 trap — verified in the built exe pre-tag); release.yml publishes portable + installer and auto-bumps update.txt on origin/main.
 
 ## 2026-10-26 (s36-az) — batch: save-reload state loss, arch band 90px, study-scroll jank, flashcard card counts
 

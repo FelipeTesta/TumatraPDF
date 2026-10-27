@@ -4,8 +4,18 @@ Per-version changelog for TumatraPDF — new functions + bug fixes, newest first
 Feature details live in [README.md](README.md); full per-session development
 history in [LOG.md](LOG.md).
 
-## Unreleased
+## v1.0.15 (2026-10-26)
 
+- **No more crashes when opening the app.** The Arch Tools measurement
+  bookkeeping freed its file-path strings while the list still held them,
+  so restoring a session could hit an access violation during startup —
+  bookkeeping now keeps its strings alive, and the crash report dialog no
+  longer opens anything in the browser: on a crash the local report file is
+  offered, nothing else.
+- **Subtler flashcard highlights.** New cloze cards save into the PDF with
+  a 10% highlight opacity instead of 40% — a quiet card marker rather than
+  reading emphasis, since the study overlay paints its own per-state colors
+  on top. Import follows the same rule.
 - **Saving keeps your tools exactly as they are.** Saving annotations into the
   open document reloads it behind the scenes, and that reload used to reset
   per-book state that lives outside the document: the auto-scroll speed, the
