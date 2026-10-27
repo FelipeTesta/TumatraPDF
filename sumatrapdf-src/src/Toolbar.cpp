@@ -949,6 +949,49 @@ static int MeasureTimerTrioDx(MainWindow* win, HWND hwndToolbar) {
     return gap + ctrlH + gap + lbl.dx + gap + editW;
 }
 
+// The v6 comctl runtime ignores TB_SETDISABLEDIMAGELIST even with visual
+// styles stripped, and the icon is drawn AFTER CDDS_ITEMPOSTPAINT, so an
+// item-level overlay gets repainted over. Dim in a whole-control
+// CDDS_POSTPAINT pass instead, when every item is already on screen.
+// (~55% theme background over whatever was drawn)
+static void DrawToolbarDisabledOverlay(HDC hdc, const RECT& rc) {
+    if (rc.right <= rc.left || rc.bottom <= rc.top) {
+        return;
+    }
+    COLORREF bgCol = ThemeControlBackgroundColor();
+    u8 r, g, b;
+    UnpackColor(bgCol, r, g, b);
+    Gdiplus::Graphics gs(hdc);
+    // ~55% background over whatever comctl drew
+    Gdiplus::SolidBrush br(Gdiplus::Color(140, r, g, b));
+    gs.FillRectangle(&br, (INT)rc.left, (INT)rc.top, (INT)(rc.right - rc.left), (INT)(rc.bottom - rc.top));
+}
+
+// dim every visible-but-disabled button on the toolbar (e.g. Save with no
+// unsaved annotations); called from the whole-control CDDS_POSTPAINT pass
+static void DimDisabledToolbarButtons(HWND hwndToolbar) {
+    int n = (int)SendMessageW(hwndToolbar, TB_BUTTONCOUNT, 0, 0);
+    for (int i = 0; i < n; i++) {
+        TBBUTTONINFOW bi{};
+        bi.cbSize = sizeof(bi);
+        bi.dwMask = TBIF_BYINDEX | TBIF_COMMAND | TBIF_STATE;
+        if (TbGetButtonInfo(hwndToolbar, i, &bi) < 0) {
+            continue;
+        }
+        // a button is disabled when its TBSTATE_ENABLED bit is clear
+        if ((bi.fsState & TBSTATE_ENABLED) || (bi.fsState & TBSTATE_HIDDEN)) {
+            continue;
+        }
+        RECT rc{};
+        if (!SendMessageW(hwndToolbar, TB_GETITEMRECT, i, (LPARAM)&rc)) {
+            continue;
+        }
+        HDC hdc = GetDC(hwndToolbar);
+        DrawToolbarDisabledOverlay(hdc, rc);
+        ReleaseDC(hwndToolbar, hdc);
+    }
+}
+
 static LRESULT CALLBACK ReBarWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam, UINT_PTR uIdSubclass,
                                      DWORD_PTR /*dwRefData*/) {
     if (WM_ERASEBKGND == uMsg && ThemeColorizeControls()) {
@@ -971,6 +1014,17 @@ static LRESULT CALLBACK ReBarWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM
                 switch (custDraw->nmcd.dwDrawStage) {
                     case CDDS_PREPAINT:
                         return CDRF_NOTIFYITEMDRAW;
+
+                    case CDDS_POSTPAINT:
+                        // whole-control pass: runs after every item has been
+                        // drawn (the icon paints AFTER CDDS_ITEMPOSTPAINT, so
+                        // item-level dimming gets overdrawn). This is the only
+                        // stage our subclass sees in dark mode, where the dmlib
+                        // subclass owns the item-level ones. Keep the subclass
+                        // chain alive: dmlib and the rebar's own proc still
+                        // expect this notification.
+                        DimDisabledToolbarButtons(chwnd);
+                        return DefSubclassProc(hWnd, uMsg, wParam, lParam);
 
                     case CDDS_ITEMPREPAINT: {
                         auto col = ThemeWindowTextColor();
@@ -2488,7 +2542,10 @@ static void ClearIconSlot(u8* dstSamples, ptrdiff_t dstStride, int dx, int dy, i
     }
 }
 
+// body of BuildIconsBitmap; the icon color is a parameter so variants (e.g. a
+// disabled-color strip) can render the same SVGs without duplicating the logic
 static HBITMAP BuildIconsBitmap(int dx, int dy, Str* customSvgs, int customCount) {
+    COLORREF fgCol = ThemeWindowTextColor();
     fz_context* ctx = fz_new_context_windows();
     int nBuiltIn = (int)TbIcon::kMax;
     int nIcons = nBuiltIn + customCount;
@@ -2523,7 +2580,6 @@ static HBITMAP BuildIconsBitmap(int dx, int dy, Str* customSvgs, int customCount
         hbmp = CreateDIBSection(nullptr, bmi, usage, (void**)&hbmpData, nullptr, 0);
     }
 
-    COLORREF fgCol = ThemeWindowTextColor();
     COLORREF bgCol = ThemeControlBackgroundColor();
     for (int i = 0; i < nBuiltIn; i++) {
         Str svgData = GetSvgIcon((TbIcon)i);

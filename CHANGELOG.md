@@ -6,6 +6,11 @@ history in [LOG.md](LOG.md).
 
 ## Unreleased
 
+- **Disabled toolbar buttons now look disabled.** A button that is visible
+  but inactive (e.g. Save when there is nothing unsaved to write) used to
+  show its icon at full color. It is now dimmed toward the theme background,
+  matching the muted text of other disabled controls.
+
 - **Toolbar tooltips follow the buttons from launch.** The startup width
   enforcement that makes room for the timer trio and the page-number box
   shifted buttons after their tooltip rectangles had been snapshotted, so

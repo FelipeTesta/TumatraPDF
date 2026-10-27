@@ -1,5 +1,25 @@
 # TumatraPDF — Development Log
 
+## 2026-10-27 (s36-bb) — live-check fix: disabled toolbar buttons now read as inactive (Save)
+
+### Fixed
+
+- **User live-check finding: the Save button didn't look disabled** without unsaved annotations. State was correct (`enabled=0` in the `TestToolbarButtons` dump); the icon just painted at full color. Two stacked causes: (1) the v6 comctl runtime ignores `TB_SETDISABLEDIMAGELIST` even with visual styles stripped (verified empirically — a disabled-color strip changed nothing); (2) the toolbar's real custom draw is the **dmlib subclass** (`setWindowNotifyCustomDrawSubclass` on the rebar, always active on x64 — `gUseDarkModeLib` is unconditional), which never handled `CDIS_DISABLED`; the fork's own `ReBarWndProc` custom-draw switch only ever sees `CDDS_POSTPAINT` (0x2) — dmlib consumes PREPAINT/ITEMPREPAINT/ITEMPOSTPAINT first and returns directly.
+- Fix: a whole-control `CDDS_POSTPAINT` pass in `ReBarWndProc` — `DimDisabledToolbarButtons()` walks the buttons, and for every visible-but-disabled one (no `TBSTATE_ENABLED` — that flag has no DISABLED counterpart) dims its rect with a Gdiplus overlay (~55% theme background) AFTER comctl has drawn everything. An item-level overlay gets repainted over: the icon draws AFTER `CDDS_ITEMPOSTPAINT` (verified with a dmlib-side probe). The case returns via `DefSubclassProc` so dmlib and the rebar's own proc still see the notification.
+
+### Verified
+
+- Pixel probe (window-DC sampling of the toolbar): disabled Save max-lum 113 vs enabled Print 160; the diagnostic log proved the dim touches exactly the disabled set (Save, the page-slot placeholder, Previous Page) and no enabled button.
+- No regressions: issue-5869 ×2, issue-5866, issue-1914 all PASS on the final build (toolbar layout paths untouched).
+- Probe scripts and the temporary dmlib instrumentation (printf/gdiplus in vendored `DmlibSubclassWindow.cpp`) were fully reverted; the vendored file has NO diff.
+
+### Notes
+
+- The dead end matters: `TB_SETDISABLEDIMAGELIST` is ignored by the v6 runtime in this configuration; an item-level dim is overdrawn by comctl's own icon draw. The only reliable stage is whole-control `CDDS_POSTPAINT`, and only because dmlib's PREPAINT requests it.
+- User side effects during the live-check: `ext/a-zlib/zlib.3.pdf` grew ~2.2KB (the user successfully SAVED an annotation while testing the Save button — the flow works end to end) and TODO.md gained the user's new "Profile Memory" section. Both left untouched.
+- `LNK1201` build flake (PDB "error writing"): stale PDBs + mspdbsrv sessions after several link attempts; fixed by killing mspdbsrv and renaming/deleting ALL `out/dbg64/*.pdb`, then one clean build. Rename trick works when delete is access-denied (handle held with sharing).
+- Build server residue: idle msbuild node pool (7 procs) and two clangd processes are leftover from my own session tooling (user confirmed no other agent active).
+
 ## 2026-10-27 (s36-bb) — UI/timing suite group cleared (3/3, all test-side) + issue-5869 startup relayout race re-fixed
 
 ### Fixed
