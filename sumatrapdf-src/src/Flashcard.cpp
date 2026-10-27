@@ -306,7 +306,10 @@ Annotation* FlashcardCreateHighlightAnnot(EngineBase* engine, int pageNo, Vec<Re
         }
         float gray[3] = {0.5f, 0.5f, 0.5f};
         pdf_set_annot_color(ctx, annot->pdfannot, 3, gray);
-        pdf_set_annot_opacity(ctx, annot->pdfannot, 0.4f);
+        // base opacity 0.1 (user 2026-10-26): the highlight that saves into the
+        // PDF must stay subtle — it is a card marker, not reading emphasis;
+        // the study overlay paints its own per-state mask colors on top
+        pdf_set_annot_opacity(ctx, annot->pdfannot, 0.1f);
     }
     fz_catch(ctx) {
         fz_report_error(ctx);
