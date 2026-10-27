@@ -1,5 +1,41 @@
 # TumatraPDF — Development Log
 
+## 2026-10-26 (s36-bb) — `-unit-tests` group cleared: one stale Help/-URL expectation (4 suite failures)
+
+### Fixed
+
+- All four `-unit-tests exit 1` suite failures (issue-5840, issue-5842, issue-5846, parse-tip-brackets) shared ONE root cause: each test spawns the app exe with `-unit-tests` (AppUnitTests.cpp, debug builds) and threw because the binary exited 1 on a single failing assert — `str::Eq(tip->links.next->cmd, expCmd)` (AppUnitTests.cpp:48). The expected URL still pointed at upstream docs (`sumatrapdfreader.org/docs/Tool-...`) while `ResolveLinkCmdTemp` (TipText.cpp:302) was switched to the fork's GitHub docs + `.md` suffix in 22dc208 (public-repo prep, 2026-10-01) — the test had been red since. Fix: update the expectation to `https://github.com/FelipeTesta/TumatraPDF/blob/main/sumatrapdf-src/docs/md/Tool-x-extract-text-from-pdf.md` (comment updated). No app-code change.
+- Both `ParseTipExpectLinkCmd` cases analyzed (not just the failing one): the URL-with-balanced-parens case (line 61) is unaffected and correct; the Help/ trailing-`")."` case (line 67) was the failing one — its core assertion (link cmd must stop at the link's `)`, non-NUL-terminated view) is unchanged and still covered.
+
+### Verified
+
+- `-unit-tests` on the rebuilt exe: "Passed all 108 tests" (was: Failed 1 of 108).
+- `bun tests/parse-tip-brackets.ts` PASS (0.7s), `issue-5840.ts --no-build` PASS (5.4s), `issue-5842.ts --no-build` PASS (4.7s), `issue-5846.ts` PASS (1.6s). Suite baseline: 7 → 3 (UI/timing: issue-1914, issue-5866, issue-5792).
+
+### Notes
+
+- Lesson (s36-ay family, again): "real assertion failures in the test binary" can still be TEST-side staleness — check git history of the expected constant BEFORE hunting an app defect.
+- Methodology: a raw `-unit-tests` run (exe + log redirect) prints the failing assert + pass count in ~2s with zero build — cheapest triage for this group. cmd `& echo %ERRORLEVEL%` LIES (parse-time expansion); get real exit via bun `proc.exited` or PS `$LASTEXITCODE`.
+- Transient: the other agent's in-flight ArchMeasurement POD refactor breaks the SumatraPDF.cpp compile (C2512) mid-session — builds hostage again; used the existing fresh exe + `--no-build` for verification.
+
+## 2026-10-26 (s36-ba) — startup AV fixed: ArchMeasurementsByDoc dangling path (Vec×dtor trap) + no browser on crash
+
+### Fixed
+
+- **Startup crash C0000005 in `str::Eq`** (user crash 2026-10-26 19:57, `ArchSaveMeasurementsForCurrentTab` during session restore): `archTools.measurementsByDoc[i].path` read FREED heap. Root cause: `ArchMeasurementsByDoc` (MainWindow.h) had a dtor (`str::Free(path)`) but the project's `Vec<T>` copies elements **bitwise** (POD-only contract) — `Append(entry)` bit-copied the local's `str::Dup`'d path, then the local's dtor ran and freed it → **every entry's path dangled from the moment of creation**. The read only faults when the freed block is decommitted/reused — heavy heap churn at session restore (10 G:\ tabs) triggered it; the bug was live (and silent) since the arch per-doc measurements feature shipped. Fix: struct is now POD by design — ctor/dtor removed, ownership manual (`entry.path = {}; entry.path = str::Dup(path);` at the single creation site; explicit Vec-bitwise note in MainWindow.h; strings leak on remove/teardown = negligible). Code-proof: without the dtor nothing can free what the vec holds.
+- **Crash dialog no longer opens anything in the browser** (user 2026-10-26): `ShowCrashHandlerMessage` used to `LaunchFileShell("https://github.com/FelipeTesta/TumatraPDF/issues/new")` after Cancel. Removed — Cancel now only offers the LOCAL crash report file (`LaunchFileIfExists(gCrashFilePath)`); the .txt always stays on disk.
+
+### Verified
+
+- Scratch portable repro (exe + real-settings copy in `tests/tmp/crash-repro`, no -for-testing so the full session-restore path runs): alive 18s with the fixed build. Honest note: the old build also survived the repro — the AV is heap-timing dependent, so "alive" is not the proof; the structural fix is (no free of vec-held memory exists anymore).
+- `tests/tmp/s36ax-fctb.ts` 18/18 PASS (full regression: toolbar trio, session overlay, home cycles fc+arch, arch single-row 24px).
+- User's `FileStates` are INTACT (259KB in TumatraPDF-settings.txt) — the crash dump's embedded "Settings file" section just truncates them; no data loss from the crash.
+
+### Notes
+
+- The `Vec<T>`×dtor trap is now a documented repo-wide rule-candidate: any struct stored in a `Vec` must be POD (no owning ctor/dtor) — ownership managed manually at append/remove sites. Persisted to lemma + AGENTS-style note in MainWindow.h.
+- s36-az commits landed earlier today: `62b11fc` (flashcards), `011eef5` (arch band), `c4c70ea` (save-reload + home), `dab2dfe` (study scroll), `ad27561` (scan drag), `63dbc69` (docs). The other agent's `9b5047b` (tooltips) landed in between.
+
 ## 2026-10-26 (s36-az) — batch: save-reload state loss, arch band 90px, study-scroll jank, flashcard card counts
 
 ### Fixed

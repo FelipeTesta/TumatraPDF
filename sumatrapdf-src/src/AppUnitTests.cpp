@@ -63,9 +63,11 @@ static void ParseTip_UnitTests() {
 
     // Help/ link followed by trailing punctuation: the resolved URL must stop at
     // the link's ')' and not pull in the following ")." (the link cmd is a
-    // non-NUL-terminated view into the tip line)
-    ParseTipExpectLinkCmd("You can [extract text from PDF file](Help/Tool-x-extract-text-from-pdf).",
-                          "https://www.sumatrapdfreader.org/docs/Tool-x-extract-text-from-pdf");
+    // non-NUL-terminated view into the tip line). Resolves to the fork's docs
+    // on GitHub (22dc208, public-repo prep), with the .md suffix.
+    ParseTipExpectLinkCmd(
+        "You can [extract text from PDF file](Help/Tool-x-extract-text-from-pdf).",
+        "https://github.com/FelipeTesta/TumatraPDF/blob/main/sumatrapdf-src/docs/md/Tool-x-extract-text-from-pdf.md");
 
     // nested brackets in link text
     ParseTipExpectWordsLinks("[foo [bar]](CmdFoo)", 2, 1);
