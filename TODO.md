@@ -134,6 +134,25 @@ Shift+S: draw a rectangle that captures the image inside it at the document's DP
 - [ ] **Ctrl+click flashcard highlight opens List** — implemented s34-b (Canvas ctrl+click detects /T author TumatraPDF-Flashcard → FlashcardSidebarShow; turns flashcard mode on if off). USER live-test pending (needs a book with flashcard highlights).
 - [ ] **s34-g user validation pending**: Arch Measure Radius + Ref Line UX, resize-enlarge on a real book, flicker-free drag confirm (shipped + E2E 2026-10-11).
 
+## Profile Memory
+Precisamos armazenar toda a informação de leitura e flashcards do usuário em um mesmo arquivo, esse arquivo precisa ser exportável, sincronizável e importável de outros lugares para caso o usuário transfira para outro computador.
+
+Vamos explorar as possibilidades de compatibilização com o sync do Google Drive, ou seja, eu salvo a minha base de dados de perfil `profile_data` em uma basta synced pelo google drive, e quero sincronizar essa mesma base de dados em outro PC que usa a mesma conta do google drive, precisamos explorar como o google drive trabalha o arquivo quando chegam atualizações desde a nuvem ou quando envia, e mapear um processamento para não corromper os arquivos e funcionar corretamente;
+
+Outro elemento, calcular a possibilidade e etapas para importar o `profile_data` desde o `TumatraPDF_Portable`→`TumatraPDF_Install`;
+
+Arquivo json de memória pode ter um prefixo indetificador: "tumatraPDF-data_"[numero]
+
+Quando aconteça de falhar a internet e o google drive ficar indisponível temporariamente, precisamos armazenar as novas informações localmente até que volte a conexão e o app substitua o arquivo antigo do drive pela versão mais recente. O sistema do backup também será importante por isso. Vamos criar um backup local a cada +-8 horas e armazenar localmente 9 backups, o botão de recuperar sessão (backup recover) deve dar uma lista de sessões de backup com data e hora para permitir recuperar. Botão 'import' obviamente deve substituir o data local.
+
+Caso eu selecione uma pasta destino para a 'data' e já exista um 'data' anterior nessa pasta, queremos que apareça uma opção: 'sobrescrever' ou 'usar data existente', ou algum mecanismo que fique claro essa distinção.
+
+## Tab system
+Vamos incluir do lado direito do botão principal no topo da janela, antes de iniciar as abas (a esquerda das abas dos documentos), um botão "Tab Group", a ideia é melhorar e deixar mais dinâmico o Tab group que já existe; Ao clicar, deve exibir como dropdown a lista dos 'Tab groups' já existentes, ao clicar em algum deles, fecha todas os documentos atuais e reabre todos os documentos do tab group selecionado; ao abrir outro documento dentro de um tab group aberto, deve sincronizar automaticamente (salvar) para proximas sessões;
+abrir o app sempre restaura o último tab group usado pelo usuário; se não houver, abrir `new`;
+
+'Ctrl+n' abre uma janela com um tab group `New`, ou seja, não sincronizado; nesse caso, se o usuário quiser salvar essa sessão como uma tab group, vamos incluir um botão na lista dropdown `Save`, ao clicar abre um editor/input de texto para nomear o grupo, imediatamente depois disso, o grupo deve sincronizar automaticamente ao fechar ou incluir documentos na sessão; arrastar um documento para fora de uma sessão automaticamente o exclui desse group aberto e inclui em um tab group `new` não sincronizado;
+
 ## Vertical_Toolbar (PARKED — DO NOT DO)
 
 Idea frozen by the user ("NAO FAZER") — kept for reference only: when the window is narrower than 1/3 of the screen, adapt the toolbar to a left vertical bar (buttons top-to-bottom, converted to symbols with name on hover), keeping a top horizontal bar only for numeric inputs (page, timer) and remaining buttons; when home=on keep hiding all buttons.
