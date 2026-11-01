@@ -348,6 +348,12 @@
     <ClInclude Include="..\src\Print.h">
       <Filter>src</Filter>
     </ClInclude>
+    <ClInclude Include="..\src\ProfileBackupWnd.h">
+      <Filter>src</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\ProfileData.h">
+      <Filter>src</Filter>
+    </ClInclude>
     <ClInclude Include="..\src\ProgressUpdateUI.h">
       <Filter>src</Filter>
     </ClInclude>
@@ -942,6 +948,12 @@
       <Filter>src</Filter>
     </ClCompile>
     <ClCompile Include="..\src\Print.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\ProfileBackupWnd.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\ProfileData.cpp">
       <Filter>src</Filter>
     </ClCompile>
     <ClCompile Include="..\src\ReadAloudHighlight.cpp">

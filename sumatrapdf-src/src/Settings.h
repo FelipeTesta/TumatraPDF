@@ -705,6 +705,11 @@ struct GlobalPrefs {
     // Point it at a cloud-synced folder (e.g. Google Drive) to keep the
     // histories backed up
     Str flashcardStudyDir;
+    // directory for the single-file Profile Memory store
+    // (tumatraPDF-data_1.json). Empty = default app-data dir. Point it at a
+    // cloud-synced folder (e.g. Google Drive) so the study histories, reading
+    // stats and per-doc info sync between machines in ONE file
+    Str profileDataDir;
     // how pages are laid out by default. The string is the persisted form
     // of DefaultDisplayModeEnum, so it's parsed after deserialization and
     // written back before serialization
@@ -1813,6 +1818,7 @@ static const FieldInfo gGlobalPrefsFields[] = {
      (intptr_t)"For documentation, see https://www.sumatrapdfreader.org/settings/settings3-7.html"},
     {(size_t)-1, SettingType::Comment, 0},
     {offsetof(GlobalPrefs, flashcardStudyDir), SettingType::String, (intptr_t)""},
+    {offsetof(GlobalPrefs, profileDataDir), SettingType::String, (intptr_t)""},
     {offsetof(GlobalPrefs, defaultDisplayMode), SettingType::String, (intptr_t)"automatic"},
     {offsetof(GlobalPrefs, defaultZoom), SettingType::String, (intptr_t)"fit page"},
     {offsetof(GlobalPrefs, disableJavaScript), SettingType::Bool, false},
@@ -1960,9 +1966,10 @@ static const FieldInfo gGlobalPrefsFields[] = {
 };
 static const StructInfo gGlobalPrefsInfo = {
     sizeof(GlobalPrefs),
-    147,
+    148,
     gGlobalPrefsFields,
-    "\0\0FlashcardStudyDir\0DefaultDisplayMode\0DefaultZoom\0DisableJavaScript\0AllowExternalImages\0EnableTeXEnhanceme"
+    "\0\0FlashcardStudyDir\0ProfileDataDir\0DefaultDisplayMode\0DefaultZoom\0DisableJavaScript\0AllowExternalImages\0En"
+    "ableTeXEnhanceme"
     "nts\0EscToExit\0FullPathInTitle\0InverseSearchCmdLine\0LazyLoading\0MainWindowBackground\0NoHomeTab\0HomePageSortB"
     "yFrequentlyRead\0HomePageViewMode\0FilePicker\0ReloadModifiedDocuments\0RememberOpenedFiles\0RememberStatePerDocum"
     "ent\0RestoreSession\0ReuseInstance\0ShowMenubar\0ShowMenubarWithTabs\0ShowTips\0CustomColors\0ShowToolbar\0Toolbar"

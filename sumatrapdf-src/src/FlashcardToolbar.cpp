@@ -33,6 +33,10 @@ extern "C" {
 #include "AppSettings.h"
 #include "Flashcard.h"
 
+// Forward declarations — these are defined in other translation units
+bool SetToolbarBandToRowHeight(HWND hwndToolbar);
+void ToolbarRewrapAfterSizing(MainWindow* win, HWND hwndToolbar, bool force);
+
 // Flashcard secondary toolbar (study controls).
 // Created when flashcard mode is toggled on.
 // Pattern follows Arch Tools secondary toolbar (Toolbar2).
@@ -570,15 +574,13 @@ void FlashcardToolbarCreate(MainWindow* win) {
     rbBand.cx = 0;
     SendMessageW(hwndRebar, RB_INSERTBAND, (WPARAM)-1, (LPARAM)&rbBand);
 
-    // size the rebar to the frame width right away: at width 0 the wrapable
-    // toolbar stacks every button on its own row and the rebar adopts that
-    // huge stacked height, which the first RelayoutFrame then reserves as
-    // toolbar space. With the real width the toolbar wraps correctly and the
-    // band height settles (SetToolbarBandToRowHeight via WndProcToolbar)
-    // before RelayoutFrame measures us.
+    // Size rebar to frame width but only toolbar height initially (v1.0.12 pattern).
+    // This ensures WRAPABLE toolbar sees correct width at button-add time.
     {
         Rect rcFrame = HwndClientRect(hwndParent);
         SetWindowPos(hwndRebar, nullptr, 0, 0, rcFrame.dx, rc.dy + (2 * rc.y), SWP_NOZORDER | SWP_NOMOVE);
+        // Toolbar receives WM_SIZE and wraps naturally; band height updated in RelayoutFrame
+        // via SetToolbarBandToRowHeight when rebar receives WM_SIZE.
     }
 
     ShowWindow(hwndRebar, SW_SHOW);

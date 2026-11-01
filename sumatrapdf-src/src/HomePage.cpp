@@ -22,6 +22,7 @@
 #include "FileHistory.h"
 #include "GlobalPrefs.h"
 #include "ReadingStats.h"
+#include "ProfileData.h"
 #include "SumatraPDF.h"
 #include "MainWindow.h"
 #include "Commands.h"
@@ -1477,12 +1478,12 @@ void HomeStatsWnd::Paint(VirtWndPaintCtx& ctx) {
         SYSTEMTIME st{};
         GetLocalTime(&st);
         int todayKey = (int)st.wYear * 10000 + (int)st.wMonth * 100 + (int)st.wDay;
-        int readTodaySec = ReadingStatsGetDaySec(todayKey);
-        int readTotalSec = ReadingStatsGetTotalSec();
-        int fcTodaySec = FlashcardStatsGetDaySec(todayKey);
-        int fcTotalSec = FlashcardStatsGetTotalSec();
-        int fcTodayCards = FlashcardStatsGetDayCards(todayKey);
-        int fcTotalCards = FlashcardStatsGetTotalCards();
+        int readTodaySec = ProfileDataReadingDaySec(todayKey);
+        int readTotalSec = ProfileDataReadingTotalSec();
+        int fcTodaySec = ProfileDataStudyDaySec(todayKey);
+        int fcTotalSec = ProfileDataStudyTotalSec();
+        int fcTodayCards = ProfileDataStudyDayCards(todayKey);
+        int fcTotalCards = ProfileDataStudyTotalCards();
         // user-specified format (2026-10-25):
         // "Flashcards: Today 13 cards / 10m | Total: 100 cards / 8h 20m"
         TempStr totals =
@@ -1613,7 +1614,7 @@ void HomeStatsWnd::Paint(VirtWndPaintCtx& ctx) {
     for (int doy = 1; doy <= daysInYear; doy++) {
         int mm = 0, dd = 0;
         HomeStatsDateFromDayOfYear(year, doy, &mm, &dd, nullptr);
-        int sec = ReadingStatsGetDaySec(year * 10000 + mm * 100 + dd);
+        int sec = ProfileDataReadingDaySec(year * 10000 + mm * 100 + dd);
         int idx = firstCol + doy - 1;
         int row = idx % 7;
         int col = idx / 7;
@@ -1683,8 +1684,8 @@ void HomeStatsWnd::PaintGraph(Gdiplus::Graphics* g, Rect b, int heatX0, int heat
         int mm = 0, dd = 0;
         HomeStatsDateFromDayOfYear(year, doy, &mm, &dd, nullptr);
         int dateKey = year * 10000 + mm * 100 + dd;
-        int readSec = ReadingStatsGetDaySec(dateKey);
-        int fcSec = FlashcardStatsGetDaySec(dateKey);
+        int readSec = ProfileDataReadingDaySec(dateKey);
+        int fcSec = ProfileDataStudyDaySec(dateKey);
         if (readSec > maxSec) maxSec = readSec;
         if (fcSec > maxSec) maxSec = fcSec;
     }
@@ -1712,8 +1713,8 @@ void HomeStatsWnd::PaintGraph(Gdiplus::Graphics* g, Rect b, int heatX0, int heat
         int mm = 0, dd = 0;
         HomeStatsDateFromDayOfYear(year, doy, &mm, &dd, nullptr);
         int dateKey = year * 10000 + mm * 100 + dd;
-        int readSec = ReadingStatsGetDaySec(dateKey);
-        int fcSec = FlashcardStatsGetDaySec(dateKey);
+        int readSec = ProfileDataReadingDaySec(dateKey);
+        int fcSec = ProfileDataStudyDaySec(dateKey);
         float x = (float)rcGrid.x + ((float)(doy - 1) / (float)(daysInYear - 1)) * (float)rcGrid.dx;
         if (readSec > 0) {
             float y = (float)chartBottom - ((float)readSec / (float)maxSec) * (float)chartH;
@@ -1725,7 +1726,8 @@ void HomeStatsWnd::PaintGraph(Gdiplus::Graphics* g, Rect b, int heatX0, int heat
         }
         if (doy == todayDoy) {
             // TODAY marker: small orange cross-hair on the point
-            float yRead = (float)chartBottom - ((float)ReadingStatsGetDaySec(dateKey) / (float)maxSec) * (float)chartH;
+            float yRead =
+                (float)chartBottom - ((float)ProfileDataReadingDaySec(dateKey) / (float)maxSec) * (float)chartH;
             g->DrawLine(&todayPen, x - (float)dpi(4), yRead, x + (float)dpi(4), yRead);
             g->DrawLine(&todayPen, x, yRead - (float)dpi(4), x, yRead + (float)dpi(4));
         }
@@ -1911,8 +1913,8 @@ TempStr HomeStatsWnd::GetTooltipTemp(Point pt) {
         return {};
     }
     int dateKey = year * 10000 + mm * 100 + dd;
-    int readSec = ReadingStatsGetDaySec(dateKey);
-    int fcSec = FlashcardStatsGetDaySec(dateKey);
+    int readSec = ProfileDataReadingDaySec(dateKey);
+    int fcSec = ProfileDataStudyDaySec(dateKey);
     TempStr readT = HomeStatsFormatMinTemp(readSec);
     TempStr fcT = HomeStatsFormatMinTemp(fcSec);
     return fmt("%d-%02d-%02d: Read: %s | Flashcards: %s", year, mm, dd, Str(readT), Str(fcT));

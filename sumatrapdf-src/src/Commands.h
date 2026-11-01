@@ -335,7 +335,8 @@ enum {
     CmdArchRefLine = 524,
     CmdFlashcardStudyTimerToggle = 525,
     CmdFlashcardStudyTimerEdit = 526,
-    CmdNone = 527,
+    CmdProfileBackups = 527,
+    CmdNone = 528,
 
     /* range for file history */
     CmdFileHistoryFirst,

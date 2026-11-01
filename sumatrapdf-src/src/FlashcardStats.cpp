@@ -19,6 +19,7 @@
 #include "FileHistory.h"
 #include "WindowTab.h"
 #include "MainWindow.h"
+#include "ProfileData.h"
 #include "FlashcardStats.h"
 
 struct DailyEntry {
@@ -193,6 +194,12 @@ void FlashcardStatsFlush(bool force) {
     str::Free(data);
     gFlashcardStats.dirtySec = 0;
     gFlashcardStats.dirtyCards = 0;
+    // stream the day rows into the profile store too (own-machine rows)
+    for (int i = 0; i < len(gFlashcardStats.daily); i++) {
+        ProfileDataUpsertStudyDay(gFlashcardStats.daily[i].dateKey, gFlashcardStats.daily[i].sec,
+                                  gFlashcardStats.daily[i].cards);
+    }
+    ProfileDataSaveNow();
 }
 
 int FlashcardStatsGetDaySec(int dateKey) {

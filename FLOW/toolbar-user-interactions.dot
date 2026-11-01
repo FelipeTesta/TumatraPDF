@@ -1,0 +1,166 @@
+digraph ToolbarUserInteractions {
+    rankdir=TB;
+    node [shape=box, style=rounded, fontname="Consolas", fontsize=10];
+    edge [fontname="Consolas", fontsize=9];
+    compound=true;
+
+    // ============================================================
+    // SCENARIO 1: User clicks Arch Tools button (first time)
+    // ============================================================
+    subgraph cluster_scenario1 {
+        label="Scenario 1: User clicks Arch Tools button (FIRST TIME)";
+        color="#4caf50";
+        
+        u1_click [label="User clicks Arch Tools button\n(CmdArchToolsToggle)", fillcolor="#c8e6c9", style=filled];
+        u1_cmd [label="FrameOnCommand →\nHandleCmdArchToolsToggle(win)\nCommands_ArchTools.cpp:134", fillcolor="#bbdefb", style=filled];
+        u1_check [label="if (!gGlobalPrefs->archToolsEnabled) return;\nif (IsCurrentDocMarkdown) return;", fillcolor="#fff9c4", style=filled];
+        u1_toggle_on [label="win->archTools.on = true", fillcolor="#c8e6c9", style=filled];
+        u1_create [label="if (!win->archTools.hwndReBar2)\n  CreateToolbar2(win)\nToolbar.cpp:2963", fillcolor="#bbdefb", style=filled];
+        u1_show [label="ShowWindow(hwndReBar2, SW_SHOW)", fillcolor="#c8e6c9", style=filled];
+        u1_update_state [label="UpdateToolbar2State(win)\nToolbar.cpp:3148\nSet TBSTATE_CHECKED for toggle btns", fillcolor="#bbdefb", style=filled];
+        u1_relayout [label="RelayoutFrame(win, true, -1)\nSumatraPDF.cpp:6300+", fillcolor="#e1bee7", style=filled];
+        u1_repaint [label="ScheduleRepaint(win, 0)\n// Canvas redraw for overlay lines", fillcolor="#e1bee7", style=filled];
+        
+        u1_click -> u1_cmd -> u1_check -> u1_toggle_on -> u1_create -> u1_show -> u1_update_state -> u1_relayout -> u1_repaint;
+    }
+
+    // ============================================================
+    // SCENARIO 2: User clicks Arch Tools button (ALREADY CREATED)
+    // ============================================================
+    subgraph cluster_scenario2 {
+        label="Scenario 2: User clicks Arch Tools button (ALREADY CREATED)";
+        color="#2196f3";
+        
+        u2_click [label="User clicks Arch Tools button\n(CmdArchToolsToggle)", fillcolor="#c8e6c9", style=filled];
+        u2_cmd [label="FrameOnCommand →\nHandleCmdArchToolsToggle(win)", fillcolor="#bbdefb", style=filled];
+        u2_toggle_on [label="win->archTools.on = true", fillcolor="#c8e6c9", style=filled];
+        u2_show [label="ShowWindow(hwndReBar2, SW_SHOW)\n// Already exists, just show", fillcolor="#c8e6c9", style=filled];
+        u2_update_state [label="UpdateToolbar2State(win)", fillcolor="#bbdefb", style=filled];
+        u2_relayout [label="RelayoutFrame(win, true, -1)", fillcolor="#e1bee7", style=filled];
+        u2_repaint [label="ScheduleRepaint(win, 0)", fillcolor="#e1bee7", style=filled];
+        
+        u2_click -> u2_cmd -> u2_toggle_on -> u2_show -> u2_update_state -> u2_relayout -> u2_repaint;
+    }
+
+    // ============================================================
+    // SCENARIO 3: User resizes window (WM_SIZE)
+    // ============================================================
+    subgraph cluster_scenario3 {
+        label="Scenario 3: User resizes window (WM_SIZE → Rewrap)";
+        color="#ff9800";
+        
+        u3_resize [label="User drags window edge\nWM_SIZE sent to hwndToolbar", fillcolor="#c8e6c9", style=filled];
+        u3_wndproc [label="WndProcToolbar(hwnd, WM_SIZE, ...)\nToolbar.cpp:1746", fillcolor="#bbdefb", style=filled];
+        u3_defproc [label="CallWindowProc(DefWndProcToolbar,...)\n// comctl does wrap-aware layout", fillcolor="#bbdefb", style=filled];
+        u3_main_only [label="if (hwnd == win->hwndToolbar)\n// ONLY main toolbar!", fillcolor="#ffcdd2", style=filled];
+        u3_page_text [label="UpdateToolbarPageText(win, nPages)", fillcolor="#bbdefb", style=filled];
+        u3_layout_child [label="LayoutToolbarChildWindows(win)\n// Page box follows anchor btn", fillcolor="#bbdefb", style=filled];
+        u3_timer [label="SetTimer(hwnd, kRewrapToolbarTimerId, 200)\n// Debounce continuous WM_SIZE", fillcolor="#ffcdd2", style=filled];
+        u3_band_height [label="SetToolbarBandToRowHeight(hwndToolbar)\nToolbar.cpp:1502", fillcolor="#bbdefb", style=filled];
+        u3_band_changed [label="if (band height changed) {\n  win->uiState.layout = {}\n  ScheduleUiUpdate(kUiRelayout)\n}", fillcolor="#c8e6c9", style=filled];
+        u3_timer_fire [label="~200ms later: WM_TIMER\nKillTimer → ToolbarRewrapAfterSizing", fillcolor="#ffcdd2", style=filled];
+        u3_rewrap [label="ToolbarRewrapAfterSizing(win, hwnd, false)\nToolbar.cpp:1570\nif (width same as last) return\nTbDeleteButton(all) → TbAddButtons(all)\n// Rebuild at CURRENT width", fillcolor="#bbdefb", style=filled];
+        
+        u3_resize -> u3_wndproc -> u3_defproc -> u3_main_only;
+        u3_main_only -> u3_page_text -> u3_layout_child -> u3_timer;
+        u3_main_only -> u3_band_height -> u3_band_changed -> u3_timer_fire -> u3_rewrap;
+    }
+
+    // ============================================================
+    // SCENARIO 4: User clicks Edit Tools button (first time)
+    // ============================================================
+    subgraph cluster_scenario4 {
+        label="Scenario 4: User clicks Edit Tools button (FIRST TIME)";
+        color="#e91e63";
+        
+        u4_click [label="User clicks Edit Tools button\n(CmdEditToolsToggle)", fillcolor="#c8e6c9", style=filled];
+        u4_cmd [label="FrameOnCommand →\nHandleCmdEditToolsToggle(win)\nCommands_Edit.cpp:969", fillcolor="#bbdefb", style=filled];
+        u4_toggle_on [label="win->editTools.on = true", fillcolor="#c8e6c9", style=filled];
+        u4_create [label="EditToolbarCreate(win)\nCommands_Edit.cpp:74", fillcolor="#e1bee7", style=filled];
+        u4_setup_rebar [label="ToolbarSetupSecondaryRebar(hwndRebar)\n// subclass + RB_SETBARINFO + bkcolor", fillcolor="#e1bee7", style=filled];
+        u4_create_tb [label="CreateWindowEx(TOOLBARCLASSNAME)\nTBSTYLE_WRAPABLE + BTNS_SHOWTEXT", fillcolor="#e1bee7", style=filled];
+        u4_theme_strip [label="SetWindowTheme(hwndToolbar, L\"\", L\"\")\n// BEFORE TbAddButtons!", fillcolor="#ffcdd2", style=filled];
+        u4_add_btns [label="TbAddButtons(4 btns: +Text, +Img, Crop, Apply)\niBitmap = TbIcon::Text (-2)\nBTNS_BUTTON | BTNS_SHOWTEXT | BTNS_AUTOSIZE\nCrop: +BTNS_CHECK", fillcolor="#e1bee7", style=filled];
+        u4_subclass [label="ToolbarSubclassSecondaryToolbar(win, hwndToolbar)\n// AFTER buttons added", fillcolor="#ffcdd2", style=filled];
+        u4_show_rebar [label="ShowWindow(hwndRebar, SW_SHOW)", fillcolor="#c8e6c9", style=filled];
+        u4_mutual_excl [label="Mutual exclusion:\nif (archTools.on) Post CmdArchToolsToggle\nif (flashcard.on) Post CmdFlashcardToggle", fillcolor="#fff9c4", style=filled];
+        u4_relayout [label="RelayoutFrame(win, true, -1)", fillcolor="#e1bee7", style=filled];
+        
+        u4_click -> u4_cmd -> u4_toggle_on -> u4_create -> u4_setup_rebar -> u4_create_tb -> u4_theme_strip -> u4_add_btns -> u4_subclass -> u4_show_rebar -> u4_mutual_excl -> u4_relayout;
+    }
+
+    // ============================================================
+    // SCENARIO 5: Home overlay activates (hides secondary toolbars)
+    // ============================================================
+    subgraph cluster_scenario5 {
+        label="Scenario 5: Home overlay activates (hides secondary toolbars)";
+        color="#9c27b0";
+        
+        u5_home [label="User opens Home page\nwin->showHomeOverlay = true", fillcolor="#c8e6c9", style=filled];
+        u5_relayout [label="RelayoutFrame(win, true, -1)\nSumatraPDF.cpp:6381", fillcolor="#e1bee7", style=filled];
+        u5_hide_flag [label="hideSecondaryToolbars = win->showHomeOverlay ||\nIsCurrentDocMarkdown(win)\n// = true", fillcolor="#ffcdd2", style=filled];
+        u5_arch_hide [label="if (archTools.hwndReBar2)\n  if (!on || hideSecondary) SW_HIDE", fillcolor="#ffcdd2", style=filled];
+        u5_fc_hide [label="if (flashcard.hwndReBarFlashcard)\n  if (!on || hideSecondary) SW_HIDE", fillcolor="#ffcdd2", style=filled];
+        u5_edit_hide [label="if (editTools.hwndReBarEdit)\n  if (!on || hideSecondary) SW_HIDE", fillcolor="#ffcdd2", style=filled];
+        u5_main_show [label="if (updateToolbars && !isOverlay)\n  ShowWindow(hwndReBar, isVisible ? SW_SHOW : SW_HIDE)", fillcolor="#c8e6c9", style=filled];
+        
+        u5_home -> u5_relayout -> u5_hide_flag;
+        u5_hide_flag -> u5_arch_hide;
+        u5_hide_flag -> u5_fc_hide;
+        u5_hide_flag -> u5_edit_hide;
+        u5_hide_flag -> u5_main_show;
+    }
+
+    // ============================================================
+    // SCENARIO 6: User clicks a toolbar button (e.g., Scale)
+    // ============================================================
+    subgraph cluster_scenario6 {
+        label="Scenario 6: User clicks Arch Scale button";
+        color="#795548";
+        
+        u6_click [label="User clicks 'Scale' button\nTBN_DROPDOWN / WM_COMMAND", fillcolor="#c8e6c9", style=filled];
+        u6_cmd [label="FrameOnCommand →\nHandleCmdArchScale(win)\nCommands_ArchTools.cpp:29", fillcolor="#bbdefb", style=filled);
+        u6_mode [label="if (!ps.scaleLineDefined) {\n  toolMode = 1 (Scale mode)\n  SetCursor(IDC_CROSS)\n}\nShowArchScaleDialog(win)", fillcolor="#bbdefb", style=filled];
+        u6_dialog [label="ArchScaleDialog opens\nUser enters scale, clicks OK", fillcolor="#fff9c4", style=filled];
+        u6_save [label="Scale saved to win->archTools.scaleStates[pageNo]\nUpdateToolbar2State(win)\n// Refresh button checked states", fillcolor="#e1bee7", style=filled);
+        u6_repaint [label="ScheduleRepaint(win, 0)\n// Draw green scale line on canvas", fillcolor="#e1bee7", style=filled);
+        
+        u6_click -> u6_cmd -> u6_mode -> u6_dialog -> u6_save -> u6_repaint;
+    }
+
+    // ============================================================
+    // CROSS-SCENARIO LINKS
+    // ============================================================
+    u1_relayout -> u3_resize [style=dashed, label="same RelayoutFrame"];
+    u2_relayout -> u3_resize [style=dashed];
+    u4_relayout -> u3_resize [style=dashed];
+    u5_relayout -> u3_resize [style=dashed];
+    
+    u1_create ..> u4_create [style=dashed, color="#ff9800", label="same pattern (CreateToolbar2)"];
+    u4_create ..> u1_create [style=dashed, color="#ff9800"];
+    
+    u1_update_state ..> u6_save [style=dashed, color="#795548", label="same UpdateToolbar2State"];
+    
+    // ============================================================
+    // DEBUG CHECKPOINTS
+    // ============================================================
+    subgraph cluster_debug {
+        label="Debug Checkpoints (logf points)";
+        color="#000000";
+        style=dotted;
+        
+        dbg1 [label="[arch] CmdArchToolsToggle: archToolsOn=1\nSumatraLog.txt", fillcolor="#bbdefb", style=filled, shape=note];
+        dbg2 [label="[d6] relayout bandDy=XX rebarDy=XX\nSumatraLog.txt", fillcolor="#e1bee7", style=filled, shape=note];
+        dbg3 [label="[arch] relayout rc.y=XX rebar2Y=XX rebar2Dy=XX\n(tbDy=XX chrome=XX) atBottom=0\nSumatraLog.txt", fillcolor="#bbdefb", style=filled, shape=note];
+        dbg4 [label="[edit] relayout rc.y=XX rebarEDY=XX rebarEDDy=XX\n(tbDy=XX chrome=XX) atBottom=0\nSumatraLog.txt", fillcolor="#e1bee7", style=filled, shape=note];
+        dbg5 [label="[edit] CmdEditToolsToggle: editMode=1\nSumatraLog.txt", fillcolor="#e1bee7", style=filled, shape=note];
+        dbg6 [label="[d6] contentDy=XX cyChild(old)=XX childDy=XX\nToolbar.cpp SetToolbarBandToRowHeight", fillcolor="#fff9c4", style=filled, shape=note];
+    }
+    
+    u1_toggle_on -> dbg1 [style=dotted];
+    u1_relayout -> dbg2 [style=dotted];
+    u1_relayout -> dbg3 [style=dotted];
+    u4_relayout -> dbg4 [style=dotted];
+    u4_toggle_on -> dbg5 [style=dotted];
+    u3_band_height -> dbg6 [style=dotted];
+}

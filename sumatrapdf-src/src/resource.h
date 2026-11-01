@@ -85,6 +85,9 @@
 #define IDC_TOC_LABEL_WITH_CLOSE 1101
 #define IDC_FAV_LABEL_WITH_CLOSE 1106
 #define IDC_ARCH_LABEL_WITH_CLOSE 1107
+// arch tools UI (dedicated IDs - don't reuse the main toolbar's)
+#define IDC_ARCH_REBAR 1115
+#define IDC_ARCH_TOOLBAR 1116
 // flashcard UI (dedicated IDs - don't reuse the main toolbar's)
 #define IDC_FLASHCARD_REBAR 1108
 #define IDC_FLASHCARD_TOOLBAR 1109

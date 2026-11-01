@@ -125,6 +125,8 @@ Shift+S: draw a rectangle that captures the image inside it at the document's DP
 
 # Bugs open
 
+[ ] Toolbars Flickering: quando janela está diminuida os toolbars ficam piscando sem parar;
+
 - [ ] **BUG-3** right-click image context menu: s34 E2E confirmed Replace/Paint/Crop work + submenu visibility fixed; s36-ao live-checked the rest — `Image > Save` works (editor → `<book>_page_1.png`), menus filter correctly, and the silent null-bitmap returns now show a notification (fdcafde). No repro for the "non-image items dead" claim: those items are removed by design (link/comment/attachment). REMAINING: user's exact steps (file + item) to reproduce anything still dead.
 - [ ] **BUG-4** Contrast × Trim Config ONE-SHOT vanish (first trim-config open after launch). Fix v2 (`EnsureContrastOverlayState` invariant + self-healing) deployed 2026-09-22 — awaiting user confirmation of the exact flow; `[contrast]` breadcrumbs in debug build. NOTE (s36-az): the "contrast parou de funcionar" report of 2026-10-25 was root-caused to the save-reload state wipe (FIXED — ReloadDocument now preserves extras; LOG s36-az); if BUG-4's one-shot vanish still reproduces after that fix, it is a separate flow.
 - [ ] **Ctrl+click flashcard highlight opens List** — implemented s34-b (Canvas ctrl+click detects /T author TumatraPDF-Flashcard → FlashcardSidebarShow; turns flashcard mode on if off). USER live-test pending (needs a book with flashcard highlights).
@@ -133,6 +135,31 @@ Shift+S: draw a rectangle that captures the image inside it at the document's DP
 - [ ] **BUG-4** Contrast × Trim Config ONE-SHOT vanish (first trim-config open after launch). Fix v2 (`EnsureContrastOverlayState` invariant + self-healing) deployed 2026-09-22 — awaiting user confirmation of the exact flow; `[contrast]` breadcrumbs in debug build.
 - [ ] **Ctrl+click flashcard highlight opens List** — implemented s34-b (Canvas ctrl+click detects /T author TumatraPDF-Flashcard → FlashcardSidebarShow; turns flashcard mode on if off). USER live-test pending (needs a book with flashcard highlights).
 - [ ] **s34-g user validation pending**: Arch Measure Radius + Ref Line UX, resize-enlarge on a real book, flicker-free drag confirm (shipped + E2E 2026-10-11).
+- [ ] **ARCH/EDIT secondary toolbars white/blank buttons** (user: "continua branco sem botões"):
+  ### Root cause
+  - dmlib (gUseDarkModeLib=true on x64) intercepts NM_CUSTOMDRAW at window-proc level before subclass chain sees it (LOG s36-bb: only CDDS_POSTPAINT reaches ReBarWndProc)
+  - Missing TBSTYLE_EX_MIXEDBUTTONs so comctl doesn't center button text under button rect
+  - Flashcard toolbar works because FlashcardReBarSubclassProc installed after dmlib (LIFO→first) handles NM_CUSTOMDRAW directly + has TBSTYLE_EX_MIXEDBUTTONs
+  ### Fix implemented (replicate flashcard pattern)
+  - [x] Add TBSTYLE_EX_MIXEDBUTTONs to both toolbars (comctl centers text under button rect)
+  - [x] Install dedicated rebar subclass (ToolbarArchEditRebarSubclassProc, unique ID 42) handling NM_CUSTOMDRAW with wipe+redraw in ITEMPOSTPAINT, installed AFTER dmlib (LIFO→first)
+  - [x] Keep ToolbarSubclassPaint on toolbar HWND for WM_PAINT bypass (dmlib intercepts WM_NOTIFY but not WM_PAINT on toolbar HWND)
+  - [x] Remove conflicting SetWindowSubclass(ReBarWndProc, ID 0) from Arch rebar (our ID-42 subclass runs first via LIFO)
+  - [x] Build: 0 errors, 0 warnings
+  ### Verification
+  - [x] Internal TB_BUTTONCOUNT=7 confirms Arch toolbar buttons exist internally
+  - [x] Code matches proven flashcard pattern (LOG s36-ax: 14/14 and 17/17 probe PASS)
+  - [x] Automated pixel scan: INCONCLUSIVE — DWM makes GetPixel return CLR_INVALID under DWM (LOG s36-bb); captureWindowDCRegionToPng fails after sleep; cross-process TB_BUTTONCOUNT returns 0 (DPI virtualization)
+  - [x] Manual visual confirmation: launch app, toggle Arch Tools + Edit Tools, verify buttons render with dark theme colors and visible text
+  ### Files changed
+  - src/Toolbar.cpp: ToolbarArchEditRebarSubclassProc, ToolbarSubclassSecondaryRebar, TBSTYLE_EX_MIXEDBUTTONs in CreateToolbar2, removed SetWindowSubclass(ReBarWndProc) ID 0
+  - src/Toolbar.h: declarations for ToolbarSubclassSecondaryRebar, ToolbarSubclassPaint
+  - src/Commands_Edit.cpp: ToolbarSubclassSecondaryRebar, TBSTYLE_EX_MIXEDBUTTONs, SetWindowTheme before buttons, ToolbarSubclassPaint
+  ### Dot file
+  - FLOW/toolbar-system.dot: complete system map (Flashcard working, Arch/Edit fixed, dmlib interception, shared infrastructure)
+
+  ### Status
+  - All done: crashes fixed (heap + stack overflow), labels full (PostAddTextButtonSizing helper), user-verified dark theme + full labels.
 
 ## Profile Memory
 Precisamos armazenar toda a informação de leitura e flashcards do usuário em um mesmo arquivo, esse arquivo precisa ser exportável, sincronizável e importável de outros lugares para caso o usuário transfira para outro computador.
@@ -141,7 +168,8 @@ Vamos explorar as possibilidades de compatibilização com o sync do Google Driv
 
 Outro elemento, calcular a possibilidade e etapas para importar o `profile_data` desde o `TumatraPDF_Portable`→`TumatraPDF_Install`;
 
-Arquivo json de memória pode ter um prefixo indetificador: "tumatraPDF-data_"[numero]
+Arquivo json de memória pode ter um prefixo indetificador: "tumatraPDF-data_"[numero de referencia, se necessario]
+- Gap s36-bf: ProfImportLegacy first-run-only — reconciliation of reading-stats.txt/flashcard-stats.txt day rows at startup pending (32reading days from legacy sidecars can go missing; recovery done manually 2026-10-31: added 20261017/20261019 rows to tumatraPDF-data_1.json).
 
 Quando aconteça de falhar a internet e o google drive ficar indisponível temporariamente, precisamos armazenar as novas informações localmente até que volte a conexão e o app substitua o arquivo antigo do drive pela versão mais recente. O sistema do backup também será importante por isso. Vamos criar um backup local a cada +-8 horas e armazenar localmente 9 backups, o botão de recuperar sessão (backup recover) deve dar uma lista de sessões de backup com data e hora para permitir recuperar. Botão 'import' obviamente deve substituir o data local.
 

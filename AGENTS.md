@@ -9,8 +9,7 @@
 - NEVER commit automatically — wait for explicit command.
 - NEVER include `base/Base.h` in `.h` files — causes 300+ redefinition errors.
 - NEVER put prose comments in `.h` files — put them on the definition in `.cpp`.
-- Keep the opencode `TODO` lateral panel updated while working for the user to follow the process.
-- ALWAYS use `Tree-Sitter` tools for mapping.
+- ALWAYS use `Tree-Sitter` and `serena` tools for mapping.
 - ALWAYS use `#ifndef`/`#define` guards, NOT `#pragma once`.
 - ALWAYS run `clang-format` on `.cpp`/`.c`/`.h` files after edits (before build).
 - ALWAYS pass `-for-testing` when launching for ad-hoc testing.
@@ -51,6 +50,7 @@ TumatraPDF is a fork of SumatraPDF (upstream baseline ~912ecf2, Aug 2026) — Wi
 | `LICENSE` / `SECURITY.md` / `CONTRIBUTING.md` (root) | GitHub community-health files: GPL-3.0 (verbatim text), vuln reporting, contributor ground rules | users |
 | `update.txt` (root) | update metadata served to running apps (`Latest:` + download URLs) — bumped by the release workflow, do NOT hand-edit except the URL keys | agents |
 | `Design_Guidelines.md` (root) | conventions + known traps distilled from sessions. **§6 / §6.1 = UI rules for Win32 dialogs, panels, toolbar, overlays — read before ANY visible UI change; §6.1 ends with the mandatory screenshot verification loop (dark + light)** | agents |
+| `DEBUG.md` (root) | Win32 toolbar/UI debugging toolchain — win-automation + control pipe pattern for secondary toolbars (Arch Tools, Edit, Flashcard) | agents |
 | `FLOW/*.dot` | process maps only (never code architecture — §0b) | agents |
 | `TEMP/` | deprecated informativos (gitignored) | — |
 | `sumatrapdf-src/agents.md`, `sumatrapdf-src/docs/**` | upstream SumatraPDF reference, verbatim | upstream |

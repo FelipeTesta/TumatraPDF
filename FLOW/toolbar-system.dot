@@ -1,0 +1,126 @@
+digraph ToolbarSystem {
+    rankdir=TB;
+    fontname="Consolas";
+    fontsize=10;
+    node [fontname="Consolas", fontsize=9, shape=box];
+    edge [fontname="Consolas", fontsize=8];
+
+    // === FLASHCARD TOOLBAR (WORKING) ===
+    subgraph cluster_flashcard {
+        label="Flashcard Toolbar (WORKING - s36-ax)";
+        style=filled;
+        color=lightgreen;
+        fillcolor=palegreen;
+
+        FcCreate [label="FlashcardToolbarCreate()\nCommands_Flashcard.cpp:552\nFlashcardToolbar.cpp:415"];
+        FcRebarSubclass [label="FlashcardReBarSubclassProc()\nFlashcardToolbar.cpp:145\nHandles NM_CUSTOMDRAW"];
+        FcToolbarSubclass [label="FlashcardToolbarSubclassProc()\nFlashcardToolbar.cpp:310\nWM_PAINT + WM_CTLCOLOR"];
+        FcCreateTrio [label="FlashcardCreateStudyTimerControls()"];
+        FcUpdateState [label="FlashcardToolbarUpdateState()\nTB_SETSTATE for checked buttons"];
+
+        FcCreate -> FcRebarSubclass [label="installs on rebar\n(kFcRebarSubclassId)"];
+        FcCreate -> FcToolbarSubclass [label="installs on toolbar\n(kFcToolbarSubclassId)"];
+        FcRebarSubclass -> FcUpdateState [label="NM_CUSTOMDRAW\nITEMPREPAINT+ITEMPOSTPAINT"];
+    }
+
+    // === ARCH TOOLS TOOLBAR (FIXED) ===
+    subgraph cluster_arch {
+        label="Arch Tools Toolbar (FIXED - crash resolved, dark theme buttons)";
+        style=filled;
+        color=lightgreen;
+        fillcolor=palegreen;
+
+        ArchCreate [label="CreateToolbar2()\nToolbar.cpp:2990"];
+        ArchRebarSubclass [label="ToolbarArchEditRebarSubclassProc()\nToolbar.cpp:3191\nNM_CUSTOMDRAW wipe+redraw (ID 42)"];
+        ArchSubclassPaint [label="ToolbarSubclassPaint()\nToolbar.cpp:3302\nWM_PAINT bypass only"];
+        ArchTbAddButtons [label="TbAddButtons()\nbase/Win.cpp:3682"];
+        ArchUpdateState [label="UpdateToolbar2State()\nTB_SETSTATE"];
+
+        ArchCreate -> ArchRebarSubclass [label="installs after dmlib\n(kArchEditRebarSubclassId=42)"];
+        ArchCreate -> ArchSubclassPaint [label="installs on toolbar HWND (ONLY subclass)"];
+        ArchCreate -> ArchTbAddButtons [label="adds 7 text buttons"];
+        ArchRebarSubclass -> ArchUpdateState [label="NM_CUSTOMDRAW\nwipe+redraw in ITEMPOSTPAINT"];
+    }
+
+    // === EDIT TOOLBAR (FIXED) ===
+    subgraph cluster_edit {
+        label="Edit Tools Toolbar (FIXED - crash resolved, dark theme buttons)";
+        style=filled;
+        color=lightgreen;
+        fillcolor=palegreen;
+
+        EditCreate [label="EditToolbarCreate()\nCommands_Edit.cpp:74"];
+        EditRebarSubclass [label="ToolbarArchEditRebarSubclassProc()\nToolbar.cpp:3191\nShared NM_CUSTOMDRAW handler (ID 42)"];
+        EditSubclassPaint [label="ToolbarSubclassPaint()\nToolbar.cpp:3302\nWM_PAINT bypass only"];
+        EditTbAddButtons [label="TbAddButtons()\nbase/Win.cpp:3682"];
+
+        EditCreate -> EditRebarSubclass [label="installs after dmlib\n(kArchEditRebarSubclassId=42)"];
+        EditCreate -> EditSubclassPaint [label="installs on toolbar HWND (ONLY subclass)"];
+        EditCreate -> EditTbAddButtons [label="adds 4 text buttons (+Text,+Img,Crop,Apply)"];
+    }
+
+    // === DMLIB (blocks custom draw) ===
+    subgraph cluster_dmlib {
+        label="dmlib (gUseDarkModeLib=true on x64)";
+        style=filled;
+        color=lightyellow;
+        fillcolor=lemonchiffon;
+
+        DmlibStrip [label="dmlib::setWindowNotifyCustomDrawSubclass()\nTheme.cpp:54\nIntercepts NM_CUSTOMDRAW\nat window-proc level"];
+        DmlibOwns [label="dmlib owns ITEMPREPAINT/\nITEMPOSTPAINT on rebar\nLOG s36-bb"];
+    }
+
+    // === SHARED INFRASTRUCTURE ===
+    subgraph cluster_shared {
+        label="Shared Infrastructure";
+        style=filled;
+        color=lightblue;
+        fillcolor=aliceblue;
+
+        MainWin [label="MainWindow::archTools / editTools\nMainWindow.h"];
+        Theme [label="ThemeControlBackgroundColor()\nThemeWindowTextColor()"];
+        TBStyles [label="TBSTYLE_LIST | TBSTYLE_WRAPABLE |\nTBSTYLE_EX_MIXEDBUTTONs (our fix)"];
+        Comctl [label="comctl32 ToolbarWindow32\nDraws button faces + labels"];
+    }
+
+    // === CROSS-CUTTING EDGES ===
+    DmlibStrip -> FcRebarSubclass [label="installed AFTER dmlib\n(LIFO -> first)"];
+    DmlibStrip -> ArchRebarSubclass [label="installed AFTER dmlib\n(LIFO -> first)"];
+    DmlibStrip -> EditRebarSubclass [label="installed AFTER dmlib\n(LIFO -> first)"];
+
+    FcRebarSubclass -> Theme [label="uses theme colors"];
+    ArchRebarSubclass -> Theme [label="uses theme colors"];
+    EditRebarSubclass -> Theme [label="uses theme colors"];
+
+    FcRebarSubclass -> Comctl [label="wipes comctl face,\nre-draws centered text"];
+    ArchRebarSubclass -> Comctl [label="wipes comctl face,\nre-draws centered text"];
+    EditRebarSubclass -> Comctl [label="wipes comctl face,\nre-draws centered text"];
+
+    MainWin -> ArchCreate [label="win->archTools.hwndReBar2"];
+    MainWin -> EditCreate [label="win->editTools.hwndReBarEdit"];
+    MainWin -> FcCreate [label="win->flashcard.hwndToolbarFlashcard"];
+
+    TBStyles -> ArchCreate [label="TBSetExtendedStyle\n(TBSTYLE_EX_MIXEDBUTTONs)"];
+    TBStyles -> EditCreate [label="TBSetExtendedStyle\n(TBSTYLE_EX_MIXEDBUTTONs)"];
+    TBStyles -> FcCreate [label="already had it"];
+
+    Comctl -> FcRebarSubclass [label="NM_CUSTOMDRAW notifications"];
+    Comctl -> ArchRebarSubclass [label="NM_CUSTOMDRAW notifications"];
+    Comctl -> EditRebarSubclass [label="NM_CUSTOMDRAW notifications"];
+
+    // === TROUBLESHOOTING NOTES ===
+    Note1 [label="ROOT CAUSE: dmlib intercepts NM_CUSTOMDRAW\nbefore subclass chain sees it\n(LOG s36-bb: only CDDS_POSTPAINT reaches ReBarWndProc)", shape=note, color=red];
+    Note2 [label="FLASHCARD WORKS: FlashcardReBarSubclassProc\ninstalled after dmlib (LIFO -> first)\nhandles NM_CUSTOMDRAW directly\n+ TBSTYLE_EX_MIXEDBUTTONs", shape=note, color=green];
+    Note3 [label="OUR FIX: Replicate flashcard pattern for Arch/Edit:\n1. TBSTYLE_EX_MIXEDBUTTONs on both toolbars\n2. Dedicated rebar subclass (ID 42) handling NM_CUSTOMDRAW\n3. Paint subclass on toolbar HWND for WM_PAINT bypass\n4. Removed conflicting ReBarWndProc (ID 0) from Arch rebar", shape=note, color=blue];
+
+    Note1 -> ArchCreate [style=dashed];
+    Note1 -> EditCreate [style=dashed];
+    Note2 -> FcCreate [style=dashed];
+    Note3 -> ArchRebarSubclass [style=dashed];
+    Note3 -> EditRebarSubclass [style=dashed];
+
+    // === LAZY-WIDTH TRAP (s36-bf) ===
+    NoteLazyWidth [label="comctl lazy BTNS_SHOWTEXT width\n-> ellipsis truncation\nFix: TbAutosIZE + EnforceToolbarTextButtonWidths (=PostAddTextButtonSizing)\nafter TbAddButtons AND after rebar re-wrap", shape=note, color=orange];
+    NoteLazyWidth -> ArchTbAddButtons [style=dashed];
+    NoteLazyWidth -> EditTbAddButtons [style=dashed];
+}

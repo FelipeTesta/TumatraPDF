@@ -1,0 +1,172 @@
+digraph ToolbarCriticalOrdering {
+    rankdir=TB;
+    node [shape=box, style=rounded, fontname="Consolas", fontsize=10];
+    edge [fontname="Consolas", fontsize=9];
+    compound=true;
+    nodesep=0.5;
+    ranksep=0.5;
+
+    // ============================================================
+    // CRITICAL ORDERING RULE #1: Theme strip BEFORE TbAddButtons
+    // ============================================================
+    subgraph cluster_rule1 {
+        label="RULE #1: SetWindowTheme MUST run BEFORE TbAddButtons";
+        color="#ff0000";
+        style=bold;
+        penwidth=2.0;
+        
+        r1_start [label="Create toolbar window\nCreateWindowEx(TOOLBARCLASSNAME)", fillcolor="#bbdefb", style=filled];
+        r1_tbset [label="TbSetButtonStructSize(hwnd, sizeof(TBBUTTON))", fillcolor="#bbdefb", style=filled];
+        r1_theme [label="SetWindowTheme(hwndToolbar, L\"\", L\"\")\n✅ CORRECT: Strip theme HERE\n// Unconditionally strip comctl32 v6 themes\n// so NM_CUSTOMDRAW clrText/font are honored", fillcolor="#c8e6c9", style=filled, penwidth=2.0, color="#2e7d32"];
+        r1_add_btns [label="TbAddButtons(hwndToolbar, count, buttons)\niBitmap = TbIcon::Text (-2) for text-only\nBTNS_BUTTON | BTNS_SHOWTEXT | BTNS_AUTOSIZE", fillcolor="#bbdefb", style=filled];
+        r1_subclass [label="SetWindowLongPtr(hwndToolbar,\nGWLP_WNDPROC, WndProcToolbar)\n✅ CORRECT: Subclass AFTER buttons", fillcolor="#c8e6c9", style=filled, penwidth=2.0, color="#2e7d32"];
+        r1_show [label="ShowWindow(hwndToolbar, SW_SHOW)", fillcolor="#c8e6c9", style=filled];
+        
+        r1_wrong_theme [label="❌ WRONG: SetWindowTheme AFTER TbAddButtons\nToolbarApplyThemeToRebar() does this!\n→ Invalidates comctl per-button layout\n→ TB_GETITEMRECT returns 0\n→ ReportIf → TerminateProcess (exitCode=105)\n→ Band paints BLANK (white toolbar)", fillcolor="#ffcdd2", style=filled, shape=note, color="#ff0000", penwidth=2.0];
+        r1_wrong_subclass [label="❌ WRONG: Subclass BEFORE TbAddButtons\n→ WndProcToolbar WM_SIZE interferes\n→ TbAddButtons fails", fillcolor="#ffcdd2", style=filled, shape=note, color="#ff0000", penwidth=2.0];
+        
+        r1_start -> r1_tbset -> r1_theme -> r1_add_btns -> r1_subclass -> r1_show;
+        r1_theme -> r1_wrong_theme [style=dashed, color="#ff0000", label="vs"];
+        r1_subclass -> r1_wrong_subclass [style=dashed, color="#ff0000", label="vs"];
+    }
+
+    // ============================================================
+    // CRITICAL ORDERING RULE #2: Rebar setup BEFORE band insert
+    // ============================================================
+    subgraph cluster_rule2 {
+        label="RULE #2: Rebar setup (subclass + RB_SETBARINFO) MUST run BEFORE RB_INSERTBAND";
+        color="#ff9800";
+        style=bold;
+        penwidth=2.0;
+        
+        r2_rebar_create [label="CreateWindowEx(REBARCLASSNAME)\nhwndRebar", fillcolor="#bbdefb", style=filled];
+        r2_setup [label="ToolbarSetupSecondaryRebar(hwndRebar)\n✅ CORRECT: Setup HERE\nSetWindowSubclass(ReBarWndProc)\nRB_SETBARINFO + RB_SETBKCOLOR\ndmlib::setWindowNotifyCustomDrawSubclass", fillcolor="#c8e6c9", style=filled, penwidth=2.0, color="#2e7d32"];
+        r2_toolbar [label="Create toolbar + add buttons + subclass", fillcolor="#bbdefb", style=filled];
+        r2_band [label="REBARBANDINFOW rbBand\nRB_INSERTBAND", fillcolor="#bbdefb", style=filled];
+        r2_size [label="SetWindowPos(hwndRebar, 0,0,frameDx,height)", fillcolor="#bbdefb", style=filled];
+        
+        r2_rebar_create -> r2_setup -> r2_toolbar -> r2_band -> r2_size;
+    }
+
+    // ============================================================
+    // CRITICAL ORDERING RULE #3: iBitmap = TbIcon::Text (-2) for text-only
+    // ============================================================
+    subgraph cluster_rule3 {
+        label="RULE #3: Text-only buttons MUST use iBitmap = TbIcon::Text (-2 = I_IMAGENONE)";
+        color="#9c27b0";
+        style=bold;
+        penwidth=2.0;
+        
+        r3_correct [label="✅ CORRECT:\nb.iBitmap = (int)TbIcon::Text;  // -2\nb.fsStyle = BTNS_BUTTON | BTNS_SHOWTEXT | BTNS_AUTOSIZE;\n// comctl knows: no image list, text only", fillcolor="#c8e6c9", style=filled, penwidth=2.0, color="#2e7d32"];
+        
+        r3_wrong [label="❌ WRONG:\nb.iBitmap = 0;\n// comctl thinks: use image list index 0\n// But no image list set → blank/white buttons\n// Even WITH theme strip before, buttons invisible", fillcolor="#ffcdd2", style=filled, shape=note, color="#ff0000", penwidth=2.0];
+        
+        r3_correct -> r3_wrong [style=dashed, color="#ff0000", label="vs"];
+    }
+
+    // ============================================================
+    // COMPARISON: Three working implementations
+    // ============================================================
+    subgraph cluster_comparison {
+        label="COMPARISON: Three Secondary Toolbar Implementations (must match pattern)";
+        color="#607d8b";
+        
+        // Arch Tools
+        arch_box [label="Arch Tools (CreateToolbar2)\nToolbar.cpp:2963\n1. Create rebar + subclass ReBarWndProc\n2. RB_SETBARINFO + RB_SETBKCOLOR\n3. Create toolbar\n4. SetWindowTheme(hwndToolbar, L\"\", L\"\") ← BEFORE buttons\n5. TbAddButtons (iBitmap=TbIcon::Text)\n6. TbSetBitmapSize + TbSetButtonSize\n7. TbGetItemRect\n8. ShowWindow(hwndToolbar, SW_SHOW)\n9. RB_INSERTBAND\n10. SetWindowPos(rebar, frameWidth)\n11. SetWindowLongPtr(WndProcToolbar) ← AFTER buttons\n12. ShowWindow(hwndReBar, SW_HIDE) initially", fillcolor="#bbdefb", style=filled];
+        
+        // Flashcard
+        fc_box [label="Flashcard (FlashcardToolbarCreate)\nFlashcardToolbar.cpp\n1. ToolbarSetupSecondaryRebar(hwndRebar)\n   (subclass + RB_SETBARINFO + bkcolor + darkmode)\n2. Create toolbar\n3. SetWindowTheme(hwndToolbar, L\"\", L\"\") ← BEFORE buttons\n4. TbAddButtons (iBitmap=TbIcon::Text)\n5. TbSetBitmapSize + TbSetButtonSize\n6. TbGetItemRect\n7. ShowWindow(hwndToolbar, SW_SHOW)\n8. RB_INSERTBAND\n9. SetWindowPos(rebar, frameWidth)\n10. ToolbarSubclassSecondaryToolbar(win, hwnd) ← AFTER buttons\n11. ShowWindow(hwndRebar, SW_HIDE) initially", fillcolor="#fff9c4", style=filled];
+        
+        // Edit
+        edit_box [label="Edit (EditToolbarCreate)\nCommands_Edit.cpp:74\n1. ToolbarSetupSecondaryRebar(hwndRebar)\n   (subclass + RB_SETBARINFO + bkcolor + darkmode)\n2. Create toolbar\n3. SetWindowTheme(hwndToolbar, L\"\", L\"\") ← BEFORE buttons\n4. TbAddButtons (iBitmap=TbIcon::Text, 4 btns)\n5. TbSetBitmapSize + TbSetButtonSize\n6. TbGetItemRect\n7. ShowWindow(hwndToolbar, SW_SHOW)\n8. RB_INSERTBAND (cxMinChild=rc.dx, cyMinChild=rc.dy+2*rc.y)\n9. SetWindowPos(rebar, frameWidth)\n10. ToolbarSubclassSecondaryToolbar(win, hwnd) ← AFTER buttons\n11. ShowWindow(hwndRebar, SW_SHOW)", fillcolor="#e1bee7", style=filled];
+        
+        arch_box -> fc_box [style=dashed, label="same pattern"];
+        fc_box -> edit_box [style=dashed, label="same pattern"];
+    }
+
+    // ============================================================
+    // RELAYOUTFRAME SECONDARY TOOLBAR POSITIONING
+    // ============================================================
+    subgraph cluster_relayout_order {
+        label="RelayoutFrame: Secondary Toolbar Positioning Order (top to bottom)";
+        color="#795548";
+        
+        ro_start [label="rc = frame client rect", fillcolor="#bbdefb", style=filled];
+        ro_main [label="1. MAIN TOOLBAR BLOCK\nif (isToolbarVisible) {\n  ToolbarRewrapAfterSizing(force=true)\n  SetToolbarBandToRowHeight(hwndToolbar)\n  bandDy = sum(RB_GETBANDINFO cyChild)\n  rebarDy = bandDy + chrome\n  SetWindowPos(hwndReBar, rc.x, rebarY, rc.dx, rebarDy)\n  rc.dy -= rebarDy; if (!atBottom) rc.y += rebarDy;\n}", fillcolor="#c8e6c9", style=filled];
+        
+        ro_arch [label="2. ARCH TOOLS BLOCK\nif (archTools.hwndReBar2) {\n  if (!on || hideSecondary) SW_HIDE\n  else {\n    SetWindowPos(hwndReBar2, rc.x, rc.y, rc.dx, 200)  // temp height\n    tbDy = HwndClientRect(hwndToolbar2).dy\n    chrome = rebar2.dy - rebar2Client.dy\n    rebar2Dy = tbDy + chrome\n    SetWindowPos(hwndReBar2, rc.x, rebar2Y, rc.dx, rebar2Dy)\n    SW_SHOW\n    rc.dy -= rebar2Dy; if (!atBottom) rc.y += rebar2Dy;\n  }\n}", fillcolor="#bbdefb", style=filled];
+        
+        ro_fc [label="3. FLASHCARD BLOCK\nif (flashcard.hwndReBarFlashcard) {\n  // Same as Arch\n  rc.y already accounts for main + arch\n  SetWindowPos(hwndReBar, rc.x, rc.y, rc.dx, 200)\n  tbDy = toolbarClient.dy + chrome\n  SetWindowPos(...) + SW_SHOW\n  rc.dy -= rebarFCDy; rc.y += rebarFCDy;\n}", fillcolor="#fff9c4", style=filled];
+        
+        ro_edit [label="4. EDIT BLOCK\nif (editTools.hwndReBarEdit) {\n  // Same as Arch\n  rc.y already accounts for main + arch + fc\n  SetWindowPos(hwndReBarEdit, rc.x, rc.y, rc.dx, 200)\n  tbDy = toolbarClient.dy + chrome\n  SetWindowPos(...) + SW_SHOW\n  rc.dy -= rebarEDDy; rc.y += rebarEDDy;\n}", fillcolor="#e1bee7", style=filled];
+        
+        ro_main_show [label="5. MAIN TOOLBAR VISIBILITY\nShowWindow(hwndReBar,\n  isToolbarVisible ? SW_SHOW : SW_HIDE)", fillcolor="#c8e6c9", style=filled];
+        
+        ro_start -> ro_main -> ro_arch -> ro_fc -> ro_edit -> ro_main_show;
+    }
+
+    // ============================================================
+    // HIDESECONDARYTOOLBARS FLAG
+    // ============================================================
+    subgraph cluster_hide_flag {
+        label="hideSecondaryToolbars Flag (s36-ax feature)";
+        color="#e91e63";
+        
+        hide_def [label="hideSecondaryToolbars =\nwin->showHomeOverlay ||\nIsCurrentDocMarkdown(win)\nSumatraPDF.cpp:6381", fillcolor="#ffcdd2", style=filled];
+        
+        hide_arch [label="if (!win->archTools.on || hideSecondaryToolbars)\n  ShowWindow(hwndReBar2, SW_HIDE)", fillcolor="#ffcdd2", style=filled];
+        hide_fc [label="if (!win->flashcard.on || hideSecondaryToolbars)\n  ShowWindow(hwndReBarFlashcard, SW_HIDE)", fillcolor="#ffcdd2", style=filled];
+        hide_edit [label="if (!win->editTools.on || hideSecondaryToolbars)\n  ShowWindow(hwndReBarEdit, SW_HIDE)", fillcolor="#ffcdd2", style=filled];
+        
+        hide_def -> hide_arch;
+        hide_def -> hide_fc;
+        hide_def -> hide_edit;
+    }
+
+    // ============================================================
+    // WM_SIZE REWRAP - MAIN TOOLBAR ONLY
+    // ============================================================
+    subgraph cluster_wm_size_only {
+        label="WM_SIZE Rewrap: MAIN TOOLBAR ONLY (by design)";
+        color="#3f51b5";
+        
+        wm_size_main [label="WndProcToolbar WM_SIZE\nif (hwnd == win->hwndToolbar) {\n  // ONLY main toolbar gets rewrap timer\n  SetTimer(kRewrapToolbarTimerId, 200)\n  SetToolbarBandToRowHeight(hwndToolbar)\n  if (band changed) ScheduleUiUpdate\n}", fillcolor="#bbdefb", style=filled];
+        
+        wm_size_secondary [label="Secondary toolbars (Arch/FC/Edit):\n• TBSTYLE_WRAPABLE is set\n• But NO WM_SIZE handler for them\n• WndProcToolbar checks: hwnd == win->hwndToolbar\n• Secondary toolbars share WndProcToolbar\n  but the rewrap logic is MAIN-ONLY\n• Single-row enforced by RelayoutFrame\n  (band cyChild = toolbar client height)", fillcolor="#fff9c4", style=filled];
+        
+        wm_size_main -> wm_size_secondary [style=dashed, label="vs"];
+    }
+
+    // ============================================================
+    // DEBUG: LOG POINTS TO VERIFY
+    // ============================================================
+    subgraph cluster_log_points {
+        label="Log Points to Verify (SumatraLog.txt)";
+        color="#000000";
+        style=dotted;
+        
+        log1 [label="[arch] CmdArchToolsToggle: archToolsOn=1\n→ Toggle triggered", fillcolor="#bbdefb", style=filled, shape=note];
+        log2 [label="[d6] relayout bandDy=90 rebarDy=90\n→ Main toolbar band height", fillcolor="#c8e6c9", style=filled, shape=note];
+        log3 [label="[arch] relayout rc.y=130 rebar2Y=130 rebar2Dy=30\n(tbDy=24 chrome=6) atBottom=0\n→ Arch toolbar positioned at y=130, height=30", fillcolor="#bbdefb", style=filled, shape=note];
+        log4 [label="[edit] relayout rc.y=160 rebarEDY=160 rebarEDDy=30\n(tbDy=24 chrome=6) atBottom=0\n→ Edit toolbar positioned at y=160, height=30", fillcolor="#e1bee7", style=filled, shape=note];
+        log5 [label="[edit] CmdEditToolsToggle: editMode=1\n→ Edit toggle triggered", fillcolor="#e1bee7", style=filled, shape=note];
+        log6 [label="[d6] contentDy=24 cyChild(old)=30 childDy=28\n→ SetToolbarBandToRowHeight measured 1 row", fillcolor="#fff9c4", style=filled, shape=note];
+    }
+}
+
+    // ============================================================
+    // CRITICAL FIX: NM_CUSTOMDRAW for Secondary Toolbars
+    // ============================================================
+    subgraph cluster_rule4 {
+        label="RULE #4: NM_CUSTOMDRAW MUST handle ALL toolbars (Toolbar.cpp:972)";
+        color="#ff0000";
+        style=bold;
+        penwidth=2.0;
+        
+        r4_before [label="BEFORE (BUG):\nReBarWndProc NM_CUSTOMDRAW only checks:\nif (win->hwndToolbar == chwnd)\n→ Secondary toolbars (Arch, Edit) get NO custom draw\n→ Default comctl32 rendering = WHITE/BLANK buttons", fillcolor="#ffcdd2", style=filled, shape=note, color="#ff0000", penwidth=2.0];
+        
+        r4_fix [label="AFTER (FIXED):\nbool isToolbarCustomDraw = (win->hwndToolbar == chwnd) ||\n  (win->archTools.hwndToolbar2 == chwnd) ||\n  (win->flashcard.hwndToolbarFlashcard == chwnd) ||\n  (win->editTools.hwndToolbarEdit == chwnd);\nif (isToolbarCustomDraw) { ... }\n→ All toolbars get themed text/background colors", fillcolor="#c8e6c9", style=filled, penwidth=2.0, color="#2e7d32"];
+        
+        r4_before -> r4_fix [color="#ff0000", penwidth=2.0, label="FIXED"];
+    }
+}

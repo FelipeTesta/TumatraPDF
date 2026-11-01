@@ -138,6 +138,7 @@ extern "C" {
 #include "ReadAloudHighlight.h"
 #include "ReadAloudPlaybackBar.h"
 #include "SumatraLog.h"
+#include "ProfileBackupWnd.h"
 
 using Gdiplus::Color;
 using Gdiplus::Graphics;
@@ -6341,6 +6342,19 @@ static bool IsUiLayoutEq(UILayout* s1, UILayout* s2) {
 }
 
 bool RelayoutFrame(MainWindow* win, bool updateToolbars, int sidebarDx) {
+    // Loop guard: RelayoutFrame called via WM_UPDATE_UI (sequential, not
+    // reentrant) can loop forever: SetWindowPos on rebar → WM_SIZE toolbar →
+    // ScheduleUiUpdate → PostMessage(WM_UPDATE_UI) → RelayoutFrame again.
+    // Track depth and bail if we're being called back-to-back.
+    static int gRelayoutDepth = 0;
+    gRelayoutDepth++;
+    struct RelayoutDepthGuard {
+        ~RelayoutDepthGuard() { gRelayoutDepth--; }
+    };
+    RelayoutDepthGuard _depthGuard;
+    if (gRelayoutDepth > 1) {
+        return false; // loop detected — break it
+    }
     Rect rc = HwndClientRect(win->hwndFrame);
     // don't relayout while the window is minimized
     if (rc.IsEmpty()) {
@@ -6520,13 +6534,11 @@ bool RelayoutFrame(MainWindow* win, bool updateToolbars, int sidebarDx) {
     }
     if (win->isToolbarVisible) {
         // D6: the rebar WINDOW must follow its BAND height (which follows the
-        // wrapped toolbar rows). The old code re-measured the rebar's own
-        // current height and re-applied it, so after a wrap the band grew but
-        // the rebar window kept its stale height and clipped the taller band
-        // — the user-visible "bottom sliver" of the toolbar eaten on narrow
-        // windows. Sum the bands' cyChild and add the window's non-client
-        // chrome instead; fall back to the measured height when there is no
-        // readable band info.
+        // wrapped toolbar rows). The band height is maintained by WndProcToolbar's
+        // WM_SIZE handler (SetToolbarBandToRowHeight) — don't call it here or
+        // RB_SETBANDINFO will fire notifications that trigger another RelayoutFrame
+        // → infinite loop → flashing/freeze. Just read the current band heights.
+        SetInRelayoutFrame(true);
         int bandDy = 0;
         int nBands = (int)SendMessageW(win->hwndReBar, RB_GETBANDCOUNT, 0, 0);
         for (int bi = 0; bi < nBands; bi++) {
@@ -6550,6 +6562,7 @@ bool RelayoutFrame(MainWindow* win, bool updateToolbars, int sidebarDx) {
         if (updateToolbars) {
             dh.SetWindowPos(win->hwndReBar, nullptr, rc.x, rebarY, rc.dx, rebarDy, SWP_NOZORDER);
         }
+        SetInRelayoutFrame(false);
         // reserve the toolbar's space; from the bottom of the content area when
         // placed at the bottom, otherwise from the top
         rc.dy -= rebarDy;
@@ -6558,14 +6571,26 @@ bool RelayoutFrame(MainWindow* win, bool updateToolbars, int sidebarDx) {
         }
     }
     // Second toolbar (Arch Tools) - positioned below main toolbar when visible
-    if (win->archTools.on && win->archTools.hwndReBar2) {
-        if (hideSecondaryToolbars) {
+    // Always run if rebar exists to ensure proper show/hide state sync
+    if (win->archTools.hwndReBar2) {
+        if (!win->archTools.on || hideSecondaryToolbars) {
             ShowWindow(win->archTools.hwndReBar2, SW_HIDE);
         } else {
+            // Size rebar to frame width at correct Y (rc.y already accounts for main toolbar);
+            // toolbar's WM_SIZE will handle wrapping naturally
+            if (updateToolbars) {
+                dh.SetWindowPos(win->archTools.hwndReBar2, nullptr, rc.x, rc.y, rc.dx, 200, SWP_NOZORDER);
+            }
+            // Band height: secondary toolbars are single-row. Use toolbar client height + rebar chrome.
+            Rect rcTbClient = HwndClientRect(win->archTools.hwndToolbar2);
+            int tbDy = rcTbClient.dy > 0 ? rcTbClient.dy : 24;
             Rect rcRebar2 = HwndWindowRect(win->archTools.hwndReBar2);
-            int rebar2Dy = rcRebar2.dy;
+            int chrome = rcRebar2.dy > 0 ? (rcRebar2.dy - HwndClientRect(win->archTools.hwndReBar2).dy) : 6;
+            int rebar2Dy = tbDy + chrome;
             bool atBottom = ToolbarAtBottom();
             int rebar2Y = atBottom ? (rc.y + rc.dy - rebar2Dy) : rc.y;
+            logf("[arch] relayout rc.y=%d rebar2Y=%d rebar2Dy=%d (tbDy=%d chrome=%d) atBottom=%d\n",
+                 rc.y, rebar2Y, rebar2Dy, tbDy, chrome, (int)atBottom);
             if (updateToolbars) {
                 dh.SetWindowPos(win->archTools.hwndReBar2, nullptr, rc.x, rebar2Y, rc.dx, rebar2Dy, SWP_NOZORDER);
             }
@@ -6575,17 +6600,30 @@ bool RelayoutFrame(MainWindow* win, bool updateToolbars, int sidebarDx) {
             if (!atBottom) {
                 rc.y += rebar2Dy;
             }
+            logf("[arch] after reserve rc.y=%d rc.dy=%d\n", rc.y, rc.dy);
         }
     }
     // Flashcard toolbar - positioned below arch tools when visible
-    if (win->flashcard.on && win->flashcard.hwndReBarFlashcard) {
-        if (hideSecondaryToolbars) {
+    // Always run if rebar exists to ensure proper show/hide state sync
+    if (win->flashcard.hwndReBarFlashcard) {
+        if (!win->flashcard.on || hideSecondaryToolbars) {
             ShowWindow(win->flashcard.hwndReBarFlashcard, SW_HIDE);
         } else {
+            // Size rebar to frame width at correct Y (rc.y already accounts for toolbars above);
+            // toolbar's WM_SIZE will handle wrapping naturally
+            if (updateToolbars) {
+                dh.SetWindowPos(win->flashcard.hwndReBarFlashcard, nullptr, rc.x, rc.y, rc.dx, 200, SWP_NOZORDER);
+            }
+            // Band height: secondary toolbars are single-row. Use toolbar client height + rebar chrome.
+            Rect rcTbClient = HwndClientRect(win->flashcard.hwndToolbarFlashcard);
+            int tbDy = rcTbClient.dy > 0 ? rcTbClient.dy : 24;
             Rect rcRebarFC = HwndWindowRect(win->flashcard.hwndReBarFlashcard);
-            int rebarFCDy = rcRebarFC.dy;
+            int chrome = rcRebarFC.dy > 0 ? (rcRebarFC.dy - HwndClientRect(win->flashcard.hwndReBarFlashcard).dy) : 6;
+            int rebarFCDy = tbDy + chrome;
             bool atBottom = ToolbarAtBottom();
             int rebarFCY = atBottom ? (rc.y + rc.dy - rebarFCDy) : rc.y;
+            logf("[fc] relayout rc.y=%d rebarFCY=%d rebarFCDy=%d (tbDy=%d chrome=%d) atBottom=%d\n",
+                 rc.y, rebarFCY, rebarFCDy, tbDy, chrome, (int)atBottom);
             if (updateToolbars) {
                 dh.SetWindowPos(win->flashcard.hwndReBarFlashcard, nullptr, rc.x, rebarFCY, rc.dx, rebarFCDy,
                                 SWP_NOZORDER);
@@ -6596,17 +6634,30 @@ bool RelayoutFrame(MainWindow* win, bool updateToolbars, int sidebarDx) {
             if (!atBottom) {
                 rc.y += rebarFCDy;
             }
+            logf("[fc] after reserve rc.y=%d rc.dy=%d\n", rc.y, rc.dy);
         }
     }
     // Edit toolbar - positioned below the flashcard toolbar when visible
-    if (win->editTools.on && win->editTools.hwndReBarEdit) {
-        if (hideSecondaryToolbars) {
+    // Always run if rebar exists to ensure proper show/hide state sync
+    if (win->editTools.hwndReBarEdit) {
+        if (!win->editTools.on || hideSecondaryToolbars) {
             ShowWindow(win->editTools.hwndReBarEdit, SW_HIDE);
         } else {
+            // Size rebar to frame width at correct Y (rc.y already accounts for toolbars above);
+            // toolbar's WM_SIZE will handle wrapping naturally
+            if (updateToolbars) {
+                dh.SetWindowPos(win->editTools.hwndReBarEdit, nullptr, rc.x, rc.y, rc.dx, 200, SWP_NOZORDER);
+            }
+            // Band height: secondary toolbars are single-row. Use toolbar client height + rebar chrome.
+            Rect rcTbClient = HwndClientRect(win->editTools.hwndToolbarEdit);
+            int tbDy = rcTbClient.dy > 0 ? rcTbClient.dy : 24;
             Rect rcRebarED = HwndWindowRect(win->editTools.hwndReBarEdit);
-            int rebarEDDy = rcRebarED.dy;
+            int chrome = rcRebarED.dy > 0 ? (rcRebarED.dy - HwndClientRect(win->editTools.hwndReBarEdit).dy) : 6;
+            int rebarEDDy = tbDy + chrome;
             bool atBottom = ToolbarAtBottom();
             int rebarEDY = atBottom ? (rc.y + rc.dy - rebarEDDy) : rc.y;
+            logf("[edit] relayout rc.y=%d rebarEDY=%d rebarEDDy=%d (tbDy=%d chrome=%d) atBottom=%d\n",
+                 rc.y, rebarEDY, rebarEDDy, tbDy, chrome, (int)atBottom);
             if (updateToolbars) {
                 dh.SetWindowPos(win->editTools.hwndReBarEdit, nullptr, rc.x, rebarEDY, rc.dx, rebarEDDy, SWP_NOZORDER);
             }
@@ -6616,6 +6667,7 @@ bool RelayoutFrame(MainWindow* win, bool updateToolbars, int sidebarDx) {
             if (!atBottom) {
                 rc.y += rebarEDDy;
             }
+            logf("[edit] after reserve rc.y=%d rc.dy=%d\n", rc.y, rc.dy);
         }
     }
     // in overlay mode the toolbar floats over the canvas and is positioned
@@ -10156,6 +10208,10 @@ static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, L
 
         case CmdToggleFilePicker:
             HandleCmdToggleFilePicker(win);
+            break;
+
+        case CmdProfileBackups:
+            ShowProfileBackupsDialog(win);
             break;
 
         case CmdToggleBoolSetting: {

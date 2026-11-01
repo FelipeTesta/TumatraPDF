@@ -1,0 +1,208 @@
+digraph ToolbarDebugLogAnalysis {
+    rankdir=TB;
+    node [shape=box, style=rounded, fontname="Consolas", fontsize=10];
+    edge [fontname="Consolas", fontsize=9];
+    compound=true;
+
+    // ============================================================
+    // LOG FILE LOCATION
+    // ============================================================
+    subgraph cluster_log_location {
+        label="Log File Location";
+        color="#4285f4";
+        
+        log_path [label="%LOCALAPPDATA%\\SumatraPDF-data\\<hash>\\sumatra-log.txt\n\nSumatraLog.h/.cpp auto-log\nRotation >5MB\nTags: [fc] [arch] [autoscroll] [md] [webview] [d6]", fillcolor="#c8e6c9", style=filled];
+    }
+
+    // ============================================================
+    // KEY LOG PATTERNS TO SEARCH
+    // ============================================================
+    subgraph cluster_log_patterns {
+        label="Key Log Patterns (grep these)";
+        color="#ff9800";
+        
+        pattern_toggle [label="[arch] CmdArchToolsToggle: archToolsOn=1/0\n[edit] CmdEditToolsToggle: editMode=1/0\n[fc] CmdFlashcardToggle\n→ Toggle triggered, check ON/OFF sequence", fillcolor="#bbdefb", style=filled];
+        
+        pattern_relayout [label="[d6] relayout bandDy=XX rebarDy=XX\n→ Main toolbar band height calc\n[d6] contentDy=XX cyChild(old)=XX childDy=XX\n→ SetToolbarBandToRowHeight detail", fillcolor="#c8e6c9", style=filled];
+        
+        pattern_arch_layout [label="[arch] relayout rc.y=XX rebar2Y=XX rebar2Dy=XX\n(tbDy=XX chrome=XX) atBottom=0/1\n→ Arch toolbar positioning\n[arch] after reserve rc.y=XX rc.dy=XX\n→ Space reserved after arch", fillcolor="#bbdefb", style=filled];
+        
+        pattern_fc_layout [label="[fc] relayout rc.y=XX rebarFCY=XX rebarFCDy=XX\n(tbDy=XX chrome=XX) atBottom=0/1\n→ Flashcard toolbar positioning", fillcolor="#fff9c4", style=filled];
+        
+        pattern_edit_layout [label="[edit] relayout rc.y=XX rebarEDY=XX rebarEDDy=XX\n(tbDy=XX chrome=XX) atBottom=0/1\n→ Edit toolbar positioning\n[edit] after reserve rc.y=XX rc.dy=XX", fillcolor="#e1bee7", style=filled];
+        
+        pattern_chrome [label="chrome=0 in logs\n→ HwndClientRect called before window has\n  non-client area (fallback to 6)\n→ Band height = tbDy + 6", fillcolor="#ffcdd2", style=filled, shape=note];
+        
+        pattern_wrap [label="[d6] contentDy=90 cyChild(old)=30 childDy=94\n→ Toolbar WRAPPED (2+ rows)\ncontentDy > old cyChild = wrap detected\nShould ONLY happen for MAIN toolbar", fillcolor="#ffcdd2", style=filled, shape=note, color="#ff0000", penwidth=2.0];
+        
+        pattern_create [label="[edit] EditToolbarCreate - creating secondary toolbar\n[edit] EditToolbarCreate - toolbar created with 4 buttons\n[arch] CreateToolbar2\n→ Toolbar creation confirmed", fillcolor="#c8e6c9", style=filled];
+        
+        pattern_showhide [label="ShowWindow(hwndReBar*, SW_SHOW/HIDE)\n→ Search for ShowWindow in log\nor add logf in RelayoutFrame blocks", fillcolor="#fff9c4", style=filled];
+    }
+
+    // ============================================================
+    // DEBUG FLOW: White Toolbar / No Buttons
+    // ============================================================
+    subgraph cluster_debug_white {
+        label="DEBUG FLOW: White Toolbar / No Buttons";
+        color="#ff0000";
+        style=bold;
+        penwidth=2.0;
+        
+        dw_symptom [label="SYMPTOM:\n• Toolbar band visible (white rect)\n• NO buttons visible\n• TB_GETITEMRECT returns 0\n• ReportIf triggers → exitCode=105 (crash)", fillcolor="#ffcdd2", style=filled, shape=note, color="#ff0000", penwidth=2.0];
+        
+        dw_check1 [label="CHECK 1: Creation order\nlogf in EditToolbarCreate/CreateToolbar2:\n1. SetWindowTheme BEFORE TbAddButtons?\n2. iBitmap = TbIcon::Text (-2)?\n3. TbAddButtons succeeded?\n4. ToolbarSubclassSecondaryToolbar AFTER buttons?", fillcolor="#bbdefb", style=filled];
+        
+        dw_check2 [label="CHECK 2: Theme strip timing\nIf ToolbarApplyThemeToRebar used → BUG\nIt calls SetWindowTheme AFTER buttons!\nMust use ToolbarSetupSecondaryRebar +\nToolbarSubclassSecondaryToolbar instead", fillcolor="#bbdefb", style=filled];
+        
+        dw_check3 [label="CHECK 3: Rebar setup\nToolbarSetupSecondaryRebar called?\nRB_SETBARINFO + RB_SETBKCOLOR done?\nDark mode subclass attached?", fillcolor="#bbdefb", style=filled];
+        
+        dw_check4 [label="CHECK 4: Band insert\nRB_INSERTBAND with correct cxMinChild\ncyMinChild = rc.dy + 2*rc.y (from TbGetItemRect)\nRebar sized to frame width AFTER insert?", fillcolor="#bbdefb", style=filled];
+        
+        dw_fix [label="FIX: Match CreateToolbar2 pattern exactly\n1. ToolbarSetupSecondaryRebar(hwndRebar)\n2. Create toolbar\n3. SetWindowTheme(hwndToolbar, L\"\", L\"\") ← HERE\n4. TbAddButtons(iBitmap=TbIcon::Text)\n5. TbSetBitmapSize + TbSetButtonSize\n6. TbGetItemRect\n7. ShowWindow(hwndToolbar, SW_SHOW)\n8. RB_INSERTBAND\n9. SetWindowPos(rebar, frameWidth)\n10. ToolbarSubclassSecondaryToolbar(win, hwnd) ← HERE", fillcolor="#c8e6c9", style=filled, penwidth=2.0, color="#2e7d32"];
+        
+        dw_symptom -> dw_check1 -> dw_check2 -> dw_check3 -> dw_check4 -> dw_fix;
+    }
+
+    // ============================================================
+    // DEBUG FLOW: Wrong Position (Y Offset)
+    // ============================================================
+    subgraph cluster_debug_pos {
+        label="DEBUG FLOW: Wrong Y Position";
+        color="#ff9800";
+        style=bold;
+        penwidth=2.0;
+        
+        dp_symptom [label="SYMPTOM:\n• Toolbar appears at wrong Y\n• Overlaps main toolbar or gap between\n• rc.y not accumulating correctly", fillcolor="#ffcdd2", style=filled, shape=note, color="#ff0000", penwidth=2.0];
+        
+        dp_check1 [label="CHECK 1: RelayoutFrame order\nMain → Arch → Flashcard → Edit\nEach block MUST update rc.y/rc.dy\nfor the NEXT block", fillcolor="#bbdefb", style=filled];
+        
+        dp_check2 [label="CHECK 2: hideSecondaryToolbars\nif (hideSecondaryToolbars) SW_HIDE\nelse SW_SHOW + position\nCheck flag computed correctly:\nshowHomeOverlay || IsCurrentDocMarkdown", fillcolor="#bbdefb", style=filled];
+        
+        dp_check3 [label="CHECK 3: Log values\n[arch] relayout rc.y=130 rebar2Y=130\n[edit] relayout rc.y=160 rebarEDY=160\nrc.y should INCREASE by previous toolbar height", fillcolor="#bbdefb", style=filled];
+        
+        dp_check4 [label="CHECK 4: atBottom logic\nbool atBottom = ToolbarAtBottom()\nrebarY = atBottom ? (rc.y + rc.dy - rebarDy) : rc.y\nAll toolbars must use SAME atBottom", fillcolor="#bbdefb", style=filled];
+        
+        dp_fix [label="FIX: Ensure sequential rc.y update\nrc.dy -= rebarDy; if (!atBottom) rc.y += rebarDy;\nLog each block's rc.y before/after", fillcolor="#c8e6c9", style=filled, penwidth=2.0, color="#2e7d32"];
+        
+        dp_symptom -> dp_check1 -> dp_check2 -> dp_check3 -> dp_check4 -> dp_fix;
+    }
+
+    // ============================================================
+    // DEBUG FLOW: Toolbar Wraps to 2 Rows (Secondary)
+    // ============================================================
+    subgraph cluster_debug_wrap {
+        label="DEBUG FLOW: Secondary Toolbar Wraps (Should Be Single Row)";
+        color="#9c27b0";
+        style=bold;
+        penwidth=2.0;
+        
+        dwr_symptom [label="SYMPTOM:\n• Arch/Flashcard/Edit toolbar shows 2 rows\n• Buttons stacked vertically\n• Should be single row only", fillcolor="#ffcdd2", style=filled, shape=note, color="#ff0000", penwidth=2.0];
+        
+        dwr_check1 [label="CHECK 1: WM_SIZE handler\nWndProcToolbar ONLY processes rewrap for:\nif (hwnd == win->hwndToolbar)  // MAIN ONLY\nSecondary toolbars share WndProcToolbar\nbut rewrap logic is guarded", fillcolor="#bbdefb", style=filled];
+        
+        dwr_check2 [label="CHECK 2: Band height in RelayoutFrame\ntbDy = HwndClientRect(hwndToolbar).dy\nrebarDy = tbDy + chrome\nSetWindowPos(hwndReBar, ..., rebarDy)\nRebar height FORCED to single row", fillcolor="#bbdefb", style=filled];
+        
+        dwr_check3 [label="CHECK 3: TBSTYLE_WRAPABLE set but\nNo rewrap timer for secondary\nToolbarRewrapAfterSizing NOT called\nBand cyChild set to single row height", fillcolor="#bbdefb", style=filled];
+        
+        dwr_fix [label="DESIGN: Secondary toolbars are SINGLE ROW\nby design (RelayoutFrame forces height)\nIf wrapping needed → use main toolbar\nMain toolbar: TBSTYLE_WRAPABLE + rewrap timer", fillcolor="#c8e6c9", style=filled, penwidth=2.0, color="#2e7d32"];
+        
+        dwr_symptom -> dwr_check1 -> dwr_check2 -> dwr_check3 -> dwr_fix;
+    }
+
+    // ============================================================
+    // DEBUG FLOW: Visibility Flicker / Not Showing
+    // ============================================================
+    subgraph cluster_debug_vis {
+        label="DEBUG FLOW: Visibility Flicker / Not Showing";
+        color="#e91e63";
+        style=bold;
+        penwidth=2.0;
+        
+        dv_symptom [label="SYMPTOM:\n• Toolbar flashes on/off\n• Or never appears after toggle ON\n• Home overlay hides it unexpectedly", fillcolor="#ffcdd2", style=filled, shape=note, color="#ff0000", penwidth=2.0];
+        
+        dv_check1 [label="CHECK 1: ShowWindow order in RelayoutFrame\nSetWindowPos FIRST (position + size)\nTHEN ShowWindow(SW_SHOW)\nNOT the reverse", fillcolor="#bbdefb", style=filled];
+        
+        dv_check2 [label="CHECK 2: hideSecondaryToolbars flag\nComputed EVERY RelayoutFrame pass:\nhideSecondaryToolbars = showHomeOverlay || IsMarkdown\nIf TRUE → ALL secondary toolbars SW_HIDE\nCheck log: [arch] relayout ... on=1 hide=1", fillcolor="#bbdefb", style=filled];
+        
+        dv_check3 [label="CHECK 3: Mutual exclusion\nEdit ON → Posts Arch OFF + FC OFF\nArch ON → Posts AutoScroll/Trim OFF\nCheck toggle handlers for PostMessage", fillcolor="#bbdefb", style=filled];
+        
+        dv_check4 [label="CHECK 4: Deferred relayout\nScheduleUiUpdate(kUiRelayout) posts message\nRelayoutFrame runs ASYNC\nToggle → RelayoutFrame → ShowWindow\nMay need immediate RelayoutFrame(true)", fillcolor="#bbdefb", style=filled];
+        
+        dv_fix [label="FIX: In toggle handlers:\n1. Create toolbar if needed\n2. ShowWindow(rebar, SW_SHOW) immediately\n3. RelayoutFrame(win, true, -1) FORCE update\n4. Log entry/exit of each block", fillcolor="#c8e6c9", style=filled, penwidth=2.0, color="#2e7d32"];
+        
+        dv_symptom -> dv_check1 -> dv_check2 -> dv_check3 -> dv_check4 -> dv_fix;
+    }
+
+    // ============================================================
+    // POWERSHELL COMMANDS FOR LOG ANALYSIS
+    // ============================================================
+    subgraph cluster_ps_commands {
+        label="PowerShell Commands for Log Analysis";
+        color="#607d8b";
+        
+        ps1 [label="# Find latest log\ngci $env:LOCALAPPDATA\\SumatraPDF-data\\*\\sumatra-log.txt | sort LastWriteTime -Desc | select -First 1", fillcolor="#bbdefb", style=filled];
+        
+        ps2 [label="# Tail log with toolbar patterns\nSelect-String -Path <log> -Pattern '\\[arch\\]|\\[edit\\]|\\[fc\\]|\\[d6\\]' | Select-Object -Last 50", fillcolor="#bbdefb", style=filled];
+        
+        ps3 [label="# Filter relayout entries\nSelect-String -Path <log> -Pattern 'relayout|after reserve|bandDy|rebarDy|chrome' | Select-Object -Last 30", fillcolor="#bbdefb", style=filled];
+        
+        ps4 [label="# Check toggle sequence\nSelect-String -Path <log> -Pattern 'CmdArchToolsToggle|CmdEditToolsToggle|CmdFlashcardToggle' | Select-Object -Last 20", fillcolor="#bbdefb", style=filled];
+        
+        ps5 [label="# Check for crashes (exitCode=105 = ReportIf)\nSelect-String -Path <log> -Pattern 'ReportIf|TerminateProcess|exitCode' | Select-Object -Last 20", fillcolor="#ffcdd2", style=filled];
+        
+        ps6 [label="# Compare two runs\ndiff (gc run1.log | sls pattern) (gc run2.log | sls pattern)", fillcolor="#fff9c4", style=filled];
+    }
+
+    // ============================================================
+    // AD-HOC TEST PROBE OUTPUT
+    // ============================================================
+    subgraph cluster_probe {
+        label="Ad-Hoc Probe Test Output (tests/ad-hoc-probe.ts)";
+        color="#795548";
+        
+        probe_baseline [label="=== baseline ===\n[1] ReBarWindow32 vis=false win=(450,33,1084,105) client=634x72\n[2] ToolbarWindow32 vis=false win=(452,33,1085,108) client=632x75\n[3] ReBarWindow32 vis=false win=(450,1,1072,25) client=621x24\n[4] ToolbarWindow32 vis=false win=(451,1,1071,28) client=620x27\ntoolbars/rebars=4\nexitCode=null", fillcolor="#c8e6c9", style=filled];
+        
+        probe_arch_on [label="=== arch ON ===\n[1] Main ReBar 72px (wrapped)\n[2] Main Toolbar 75px\n[3] Arch ReBar 24px at y=105  ← CORRECT\n[4] Arch Toolbar 24px at y=105  ← CORRECT\ntoolbars/rebars=4\nexitCode=null", fillcolor="#bbdefb", style=filled];
+        
+        probe_edit_on [label="=== edit ON ===\n[1] Main ReBar 24px (collapsed?)\n[2] Main Toolbar 27px\n[3] Flashcard ReBar 24px at y=105\n[4] Flashcard Toolbar 24px\n[5] Edit ReBar 24px at y=105  ← CORRECT\n[6] Edit Toolbar 24px at y=105  ← CORRECT\ntoolbars/rebars=6\nexitCode=null", fillcolor="#e1bee7", style=filled];
+        
+        probe_note [label="NOTE: vis=false in probe = test harness issue\n(SetForegroundWindow fails in background test)\nGeometry (win rect, client size) is CORRECT\nButtons visible = geometry correct", fillcolor="#fff9c4", style=filled, shape=note];
+        
+        probe_baseline -> probe_arch_on -> probe_edit_on -> probe_note;
+    }
+
+    // ============================================================
+    // CROSS-REFERENCES
+    // ============================================================
+    log_path -> pattern_toggle;
+    log_path -> pattern_relayout;
+    log_path -> pattern_arch_layout;
+    log_path -> pattern_fc_layout;
+    log_path -> pattern_edit_layout;
+    
+    pattern_relayout -> pattern_chrome [style=dashed];
+    pattern_arch_layout -> pattern_wrap [style=dashed, color="#ff0000"];
+    pattern_create -> dw_check1 [style=dashed];
+    pattern_showhide -> dv_check1 [style=dashed];
+
+    // ============================================================
+    // DEBUG FLOW: White Toolbar / No Buttons (NM_CUSTOMDRAW Fix)
+    // ============================================================
+    subgraph cluster_debug_nmcd {
+        label="DEBUG FLOW: White Toolbar / No Buttons (NM_CUSTOMDRAW)";
+        color="#ff0000";
+        style=bold;
+        penwidth=2.0;
+        
+        dn_symptom [label="SYMPTOM:\n• Toolbar band visible but WHITE/BLANK\n• No button text visible\n• TB_GETITEMRECT works but rendering fails\n• Main toolbar OK, only secondary toolbars affected", fillcolor="#ffcdd2", style=filled, shape=note, color="#ff0000", penwidth=2.0];
+        
+        dn_check1 [label="CHECK 1: NM_CUSTOMDRAW handling\nReBarWndProc (Toolbar.cpp:972)\nOnly checked: win->hwndToolbar == chwnd\nSecondary toolbars NOT handled!", fillcolor="#bbdefb", style=filled];
+        
+        dn_check2 [label="CHECK 2: Theme strip done correctly\nSetWindowTheme(hwnd, L\"\", L\"\") BEFORE buttons\niBitmap = TbIcon::Text (-2)\nBut no custom draw = default rendering = WHITE", fillcolor="#bbdefb", style=filled];
+        
+        dn_fix [label="FIX: Extend NM_CUSTOMDRAW check to ALL toolbars\nbool isToolbarCustomDraw =\n  (win->hwndToolbar == chwnd) ||\n  (win->archTools.hwndToolbar2 == chwnd) ||\n  (win->flashcard.hwndToolbarFlashcard == chwnd) ||\n  (win->editTools.hwndToolbarEdit == chwnd);\nif (isToolbarCustomDraw) { handle custom draw }\nToolbar.cpp:972", fillcolor="#c8e6c9", style=filled, penwidth=2.0, color="#2e7d32"];
+        
+        dn_symptom -> dn_check1 -> dn_check2 -> dn_fix;
+    }
+}

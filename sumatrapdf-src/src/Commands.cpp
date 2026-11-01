@@ -342,6 +342,7 @@ static SeqStrings gCommandNames =
     "CmdArchRefLine\0"
     "CmdFlashcardStudyTimerToggle\0"
     "CmdFlashcardStudyTimerEdit\0"
+    "CmdProfileBackups\0"
     "CmdNone\0"
     "\0";
 
@@ -672,6 +673,7 @@ static i32 gCommandIds[] = {
     CmdArchRefLine,
     CmdFlashcardStudyTimerToggle,
     CmdFlashcardStudyTimerEdit,
+    CmdProfileBackups,
     CmdNone,
 };
 
@@ -1002,6 +1004,7 @@ SeqStrings gCommandDescriptions =
     "Arch: Reference Line\0"
     "Toggle Flashcard Study Session Timer\0"
     "Edit Flashcard Study Session Timer Duration\0"
+    "Profile: Backups...\0"
     "Do nothing\0"
     "\0";
 // clang-format on

@@ -16,6 +16,7 @@
 #include "FileHistory.h"
 #include "WindowTab.h"
 #include "MainWindow.h"
+#include "ProfileData.h"
 #include "ReadingStats.h"
 
 struct DailyEntry {
@@ -163,6 +164,12 @@ void ReadingStatsFlush(bool force) {
     file::WriteFile(ReadingStatsPathTemp(), data);
     str::Free(data);
     gReadingStats.dirtySec = 0;
+    // stream the day rows into the profile store too (own-machine rows); the
+    // profile save flushes AFTER, in the same cadence
+    for (int i = 0; i < len(gReadingStats.daily); i++) {
+        ProfileDataUpsertReadingDay(gReadingStats.daily[i].dateKey, gReadingStats.daily[i].sec);
+    }
+    ProfileDataSaveNow();
 }
 
 int ReadingStatsGetDaySec(int dateKey) {

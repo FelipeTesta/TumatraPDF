@@ -22,6 +22,7 @@ extern "C" {
 #include "EngineAll.h"
 #include "WindowTab.h"
 #include "AppTools.h"
+#include "ProfileData.h"
 #include "Flashcard.h"
 
 // Stable card key: FNV-1a hash of page + quantized bounds. MuPDF can renumber
@@ -478,7 +479,7 @@ TempStr FlashcardStudyPath(const char* filePath) {
     return path::JoinTemp(dir, fmt("%s.json", md5Hex));
 }
 
-static void WriteJsonValue(FILE* f, const FlashcardStudyState& state) {
+void FlashcardStudyWriteJsonValue(FILE* f, const FlashcardStudyState& state) {
     fprintf(f,
             "      {\n"
             "        \"rating\": %d,\n"
@@ -494,7 +495,7 @@ static void WriteJsonValue(FILE* f, const FlashcardStudyState& state) {
 
 // Write s as a JSON string literal (escape backslash, quote and control
 // chars) so a book name with quotes round-trips safely
-static void WriteJsonStringLiteral(FILE* f, Str s) {
+void FlashcardStudyWriteJsonStringLit(FILE* f, Str s) {
     fputc('"', f);
     for (int i = 0; i < len(s); i++) {
         char c = s.s[i];
@@ -609,6 +610,8 @@ int FlashcardStudyRecoverBackup() {
         FindClose(h);
         if (restored > 0) {
             logf("[fc] Backup - recovered %d file(s) from slot '%s'\n", restored, Str(s.slot));
+            // rebuild the profile's book rows from the recovered disk state
+            ProfileDataReimportStudyFiles();
             return restored;
         }
     }
@@ -683,9 +686,9 @@ void FlashcardStudySave(const char* filePath, const FlashcardStudyDoc& doc) {
     // name; docPath (full path) powers the sync markers (moved/renamed
     // detection) and is re-validated by Re-check in that window
     fprintf(f, "{\n  \"version\": %d,\n  \"docName\": ", doc.version);
-    WriteJsonStringLiteral(f, path::GetBaseNameTemp(Str(filePath)));
+    FlashcardStudyWriteJsonStringLit(f, path::GetBaseNameTemp(Str(filePath)));
     fprintf(f, ",\n  \"docPath\": ");
-    WriteJsonStringLiteral(f, filePath);
+    FlashcardStudyWriteJsonStringLit(f, filePath);
     fprintf(f, ",\n  \"states\": {\n");
 
     bool first = true;
@@ -696,7 +699,7 @@ void FlashcardStudySave(const char* filePath, const FlashcardStudyDoc& doc) {
         }
         first = false;
         fprintf(f, "    \"%llu\": ", (unsigned long long)entry.key);
-        WriteJsonValue(f, entry.state);
+        FlashcardStudyWriteJsonValue(f, entry.state);
     }
 
     fprintf(f,
@@ -723,6 +726,9 @@ void FlashcardStudySave(const char* filePath, const FlashcardStudyDoc& doc) {
 
     // rolling local backups (1d / 3d / 7d slots) — cheap stamp guard inside
     FlashcardStudyMaybeBackup();
+
+    // stream the fresh states into the single-file profile store too
+    ProfileDataUpdateStudyDoc(filePath, doc);
 }
 
 // Delete every study-history JSON in the study dir — the review histories
@@ -750,6 +756,8 @@ int FlashcardDeleteAllStudyFiles() {
     } while (FindNextFileW(h, &fd));
     FindClose(h);
     logf("[fc] FlashcardDeleteAllStudyFiles - deleted %d study file(s)\n", deleted);
+    // the profile's book rows go too (they mirror the legacy files)
+    ProfileDataClearStudyDocs();
     return deleted;
 }
 
@@ -1068,7 +1076,7 @@ static Str FlashcardStudyAdoptByName(const char* filePath, Str dstPath);
 
 // parse a study JSON (version + states) into doc; shared by StudyLoad and the
 // manual resync
-static void FlashcardStudyParseJson(Str json, FlashcardStudyDoc& doc) {
+void FlashcardStudyParseJsonInto(Str json, FlashcardStudyDoc& doc) {
     auto findAnyChar = [](Str s, Str chars) -> int {
         for (int i = 0; i < len(s); i++) {
             if (str::IndexOfChar(chars, s.s[i]) >= 0) {
@@ -1119,11 +1127,19 @@ FlashcardStudyDoc FlashcardStudyLoad(const char* filePath) {
         // under the old path that carries this book's base name
         json = FlashcardStudyAdoptByName(filePath, Str(studyPath));
         if (!json) {
+            // still nothing: no legacy file (may have been deleted or never
+            // existed on a new machine) — adopt from the profile store which
+            // can hold the states synced from another machine
+            ProfileDataGetStudyDoc(filePath, doc);
+            logf("[fc] FlashcardStudyLoad - profile-only adopt: %d entries\n", len(doc.states));
             return doc;
         }
     }
 
-    FlashcardStudyParseJson(json, doc);
+    FlashcardStudyParseJsonInto(json, doc);
+    // merge into the profile ALWAYS (not only on save): two machines converge
+    // on the newest state per card key as soon as they load a book
+    ProfileDataMergeStudyDoc(filePath, doc);
 
     logf("[fc] FlashcardStudyLoad - loaded %d entries\n", len(doc.states));
     return doc;
@@ -1132,7 +1148,7 @@ FlashcardStudyDoc FlashcardStudyLoad(const char* filePath) {
 // Extract a "field": "..." string value from a study JSON (unescape \" and
 // \\). Returns nullptr when the field is missing (legacy files written before
 // the field existed).
-static char* ParseJsonStringFieldDup(Str json, Str fieldName) {
+char* FlashcardStudyParseJsonStringFieldDup(Str json, Str fieldName) {
     TempStr quotedT = fmt("\"%s\"", fieldName);
     Str quoted = Str(quotedT);
     int idx = str::IndexOf(json, quoted);
@@ -1173,7 +1189,7 @@ static char* ParseJsonStringFieldDup(Str json, Str fieldName) {
 }
 
 static char* ParseJsonDocNameDup(Str json) {
-    return ParseJsonStringFieldDup(json, StrL("docName"));
+    return FlashcardStudyParseJsonStringFieldDup(json, StrL("docName"));
 }
 
 // RESYNC (automatic): no study JSON exists under filePath's md5, so the book
@@ -1241,7 +1257,7 @@ static Str FlashcardStudyAdoptByName(const char* filePath, Str dstPath) {
         Str adoptedJson = file::ReadFile(dstPath);
         if (adoptedJson) {
             FlashcardStudyDoc adopted;
-            FlashcardStudyParseJson(adoptedJson, adopted);
+            FlashcardStudyParseJsonInto(adoptedJson, adopted);
             FlashcardStudySave(filePath, adopted);
         }
     }
@@ -1263,7 +1279,7 @@ bool FlashcardStudyResync(const char* jsonPath, const char* newPdfPath) {
         return false;
     }
     FlashcardStudyDoc doc;
-    FlashcardStudyParseJson(json, doc);
+    FlashcardStudyParseJsonInto(json, doc);
     FlashcardStudySave(newPdfPath, doc);
     // delete the old file unless Save() already replaced it in place
     TempStr newPath = FlashcardStudyPath(newPdfPath);
@@ -1301,7 +1317,7 @@ int FlashcardStudyListDocs(Vec<FlashcardStudyDocInfo>& out) {
         FlashcardStudyDocInfo info{};
         info.fileName = str::Dup(ToUtf8Temp(WStr(fd.cFileName))).s;
         info.docName = ParseJsonDocNameDup(json);
-        info.docPath = ParseJsonStringFieldDup(json, StrL("docPath"));
+        info.docPath = FlashcardStudyParseJsonStringFieldDup(json, StrL("docPath"));
         Vec<FlashcardStudyDoc::StateEntry> states;
         ParseJsonObject(json, &states);
         info.totalCards = len(states);
