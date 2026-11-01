@@ -175,6 +175,47 @@ Quando aconteça de falhar a internet e o google drive ficar indisponível tempo
 
 Caso eu selecione uma pasta destino para a 'data' e já exista um 'data' anterior nessa pasta, queremos que apareça uma opção: 'sobrescrever' ou 'usar data existente', ou algum mecanismo que fique claro essa distinção.
 
+### Plan (s36 detail — F3/F4/F5)
+
+#### F3 — Drive-safe file handling (pre-sync hardening)
+
+Preconditions (verified):
+- profile_data file already carries version + lastWriteTs header fields — verify before use (ProfileData.h/.cpp).
+- Atomic local write via temp + MoveFileExW already exists — keep; never write directly to the synced path.
+- Local 9 × 8h rolling backups under <profileDir>/backup/ + ProfileBackupWnd (9-slot dialog, 5s hold + progress) already exist via F2.
+- legacy sidecar import (ProfImportLegacy) runs first-run only — gap fixed by startup reconcile pass below.
+
+[ ] Verify version + lastWriteTs exist in file header.
+[ ] Startup load: treat {empty file, partial-JSON, stale lock, Drive placeholder stub} as corrupt → fall back to newest backup under backup/ instead of overwriting the synced path.
+[ ] Startup reconcile pass: compare sidecars (reading-stats.txt, flashcard-stats.txt) + profile, adopt missing day rows (fixes s36-bf gap too).
+[ ] On detected cloud-side revert (lastWriteTs older than newest local backup × N), offer restore prompt using F2 ProfileBackupWnd dialog.
+[ ] Keep atomic write-via-temp+MoveFileExW for local saves; Drive-for-desktop streams/placeholders never receive direct writes.
+
+Trap/risk: two PCs writing simultaneously → Drive creates "conflicted copy" duplicates, never merges. Plan: never delete conflicted copies; on next load merge by newer lastWriteTs + per-machine day rows already sum-safe ({"DESKTOP-…": sec} attribution). Offline tolerance: keep working locally, push changes when Drive reconnects; local backups remain source of truth for restore.
+
+Verify: kill-restore test with real instance (-appdata does NOT load settings for -for-testing instance), then manual file swap test (simulate cloud revert + corrupt placeholder).
+
+#### F4 — profileDataDir setter (the actual switch)
+
+[ ] gen-settings already auto-added profileDataDir — no gen-code change needed.
+[ ] Add cmd-line path or UI to point profileDataDir at a Drive-synced folder.
+[ ] On change: migrate current profile + its backup/ dir, adopt tumatraPDF-data_<numero> naming.
+[ ] Initial-load conflict UX: if a profile already exists in dest dir → dialog "sobrescrever" (overwrite) vs "usar data existente" (use existing), per user desiderata.
+
+Trap/risk: pointing at an existing dir with stale data can silently clobber user data — overwrite must be explicit opt-in, not default.
+
+Verify: two -appdata-like profiles, alternating dirs; confirm backup/ migrates with the profile.
+
+#### F5 — Portable→Install import
+
+[ ] Locate legacy dirs: Portable install dir pattern vs installed %AppData% layout — verify actual layout first (do not assume paths).
+[ ] One-time import wizard or auto-detect on first run of Install build; reuse ProfImport path (books merge newest-wins proven — 2026-10-31 manual merge of 3 legacy json, zero loss).
+[ ] Import replaces local data (user desiderata).
+
+Trap/risk: Portable path assumptions wrong → import reads empty/missing dirs; must verify layout before shipping.
+
+Verify: copy real Portable data to temp, run import, diff state counts.
+
 ## Tab system
 Vamos incluir do lado direito do botão principal no topo da janela, antes de iniciar as abas (a esquerda das abas dos documentos), um botão "Tab Group", a ideia é melhorar e deixar mais dinâmico o Tab group que já existe; Ao clicar, deve exibir como dropdown a lista dos 'Tab groups' já existentes, ao clicar em algum deles, fecha todas os documentos atuais e reabre todos os documentos do tab group selecionado; ao abrir outro documento dentro de um tab group aberto, deve sincronizar automaticamente (salvar) para proximas sessões;
 abrir o app sempre restaura o último tab group usado pelo usuário; se não houver, abrir `new`;

@@ -1,4 +1,18 @@
-﻿## 2026-10-31 (s36-bf) — PostAddTextButtonSizing consolidation + profile merge audit
+﻿## 2026-11-01 (s36-bg) — Profile Memory F3 slices 1+2: reconcile, corrupt fallback, conflicted-copy merge
+
+### Added
+- ProfReconcileSidecars (ProfileData.cpp): startup adopts sidecar day rows (reading-stats.txt / flashcard-stats.txt) whose (dateKey, machine) pair is absent from profile sections; idempotent; books deliberately excluded (ProfImportBooksFromDir appends w/o dedup — books merge via ProfileDataMergeStudyDoc on contact).
+- ProfileDataEnsureLoaded corrupt gate: empty/unparseable main profile → restore newest valid backup slot → else legacy import; reconcile runs after every successful load path.
+- ProfMergeConflictedCopies: scans profileDataDir top-level for tumatraPDF-data_*.json Drive conflicted copies (not primary, not backup slots); adopts absent book keys + absent (dateKey, machine) day rows; marks dirty so next save flushes merged lastWriteTs; copies never deleted/renamed; idempotent.
+
+### Verified
+- SaveNow write path re-confirmed atomic (temp + MoveFileExW) — unchanged, no rewrite.
+- bun cmd/build.ts 0 err/0 warn; launch -for-testing ALIVE_OK ≥12s, no sumatrapdfcrash.txt.
+
+### Notes
+No bulk merge fixture test (needs real Drive conflicted-copy fixture). F3 remainder: cloud-revert restore prompt via F2 dialog. F4 (profileDataDir setter → Drive folder) and F5 (Portable→Install import) pending — plan in TODO.md ## Profile Memory.
+
+## 2026-10-31 (s36-bf) — PostAddTextButtonSizing consolidation + profile merge audit
 
 ### Fixed
 - Secondary toolbar labels truncated ("Measu…") — comctl derives BTNS_SHOWTEXT widths lazily. Consolidated PostAddTextButtonSizing(win, hwndToolbar) (Toolbar.cpp f.1396, Toolbar.h:66): TbAutosIZE + explicit cx enforcement (label + DpiScale(12) pad) after TbAddButtons AND after rebar re-wrap. CreateToolbar2 (Arch) + EditToolbarCreate call it, 2 passes. Paint draws DT_CENTER|DT_VCENTER over full rect — safe once sized; no DT_END_ELLIPSIS. Precedent EnforceToolbarTextButtonWidths (Toolbar.cpp f.1324) + relayout-storm trap m205d3d458df8.

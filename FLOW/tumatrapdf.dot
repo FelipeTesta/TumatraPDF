@@ -26,21 +26,21 @@ digraph TumatraPDF {
     fase6 -> update [label="release"];
     update -> fase6 [label="new version\navailable", style=dashed];
 
-    // ===================== REAL ARCHITECTURE (audit 2026-08-24) =====================
+    // ===================== REAL ARCHITECTURE (audit 2026-11-01) =====================
     subgraph cluster_modular {
         label="Code Reality (≠ aspirational README)";
         style=dashed;
         color="#666";
 
         upstream [label="sumatrapdf-src/\n(upstream 3.7.20958 preserved)", shape=folder, fillcolor="#ffcdd2", style=filled];
-        patches [label="DIRECT PATCHES in sumatrapdf-src/src/\n~810 insertions in 34 files\n+ TrimConfigDialog.{h,cpp} (new)\n+ AutoScroll.{h,cpp} (new)\nDOES NOT EXIST src/features/ nor src/hooks/", shape=folder, fillcolor="#ffecb3", style=filled];
+        patches [label="DIRECT PATCHES in sumatrapdf-src/src/\n~810 insertions in 34 files\n+ TrimConfigDialog.{h,cpp} (new)\n+ AutoScroll.{h,cpp} (new)\n+ ArchVector.{h,cpp} (new)\n+ ArchScaleDialog.{h,cpp} (new)\nDOES NOT EXIST src/features/ nor src/hooks/", shape=folder, fillcolor="#ffecb3", style=filled];
 
         upstream -> patches [label="modified by\ndirect patch"];
     }
 
-    // ===================== TOOLBAR — REAL ORDER =====================
+    // ===================== TOOLBAR — REAL ORDER (Toolbar.cpp:2845-3014) =====================
     subgraph cluster_toolbar {
-        label="Toolbar — gToolbarButtons[] (Toolbar.cpp:69-97)";
+        label="Toolbar — gToolbarButtons[] (Toolbar.cpp:2845-3014)";
         style=dashed;
         color="#666";
 
@@ -103,7 +103,7 @@ digraph TumatraPDF {
         style=dashed;
         color="#1565c0";
 
-        feat_scroll [label="AutoScroll\n· continuous F9: timer tick -> AutoScrollContinuousTick\n  (AutoScroll.cpp) -> MoveDocBy -> ScrollYBy -> WM_PAINT\n· ETA: page-based (timePerPage x remaining, resync per page)\n  pause (Shift-hold/Ctrl) excluded; canvas overlay label\n  (WS_EX_LAYERED + colorkey, Toolbar.cpp WndProcEtaOverlay)\n· md-webview: wv->Eval(window.scrollBy(0,dy)) branch;\n  JS autoscrollBottom -> OnAutoScrollBottom -> stop timer\n· see FLOW/autoscroll.dot (full pipeline)"];
+        feat_scroll [label="AutoScroll\n· continuous F9: timer tick -> AutoScrollContinuousTick\n  (AutoScroll.cpp:338) -> MoveDocBy -> ScrollYBy -> WM_PAINT\n· ETA: page-based (timePerPage x remaining, resync per page)\n  pause (Shift-hold/Ctrl) excluded; canvas overlay label\n  (WS_EX_LAYERED + colorkey, Toolbar.cpp WndProcEtaOverlay)\n· md-webview: wv->Eval(window.scrollBy(0,dy)) branch;\n  JS autoscrollBottom -> OnAutoScrollBottom -> stop timer\n· see FLOW/autoscroll.dot (full pipeline)"];
         feat_contrast [label="Contrast (overlay)\n· layered child window over canvas:\n  ContrastOverlay.cpp:34-104\n  alpha via AlphaFromOpacity static helper :10\n  call sites L77 + L107\n· handlers SumatraPDF.cpp:10923-10987 (steps ±10)\n· per-document persistence\n· md-webview: div#__sumatra_contrast CSS overlay via Eval\n  (pointer-events:none, z-index max,\n  opacity=contrastOpacity*255/100/255.0f);\n  CreateContrastOverlay no-op for md;\n  RestoreContrastOverlay on OnDocumentComplete"];
         feat_crop [label="ViewportCrop v1 (legacy, candidates to remove)\n+ TC2 (Two Columns v2): 2N virtual pages, colGap overlap,\n  Shift-hold quick view - see FLOW/two-columns-v2.dot\n· DisplayModel VirtualToPhysical/ColumnOfVirtual\n· render cache re-enabled (cached tc2 ~1ms blit)"];
         feat_trim [label="MarginTrim (clip top/bottom)\n· tile clip via pageRect:\n  RenderCache.cpp:360/745/1170\n· toggle relayout + frees cache\n  SumatraPDF.cpp:10961-10974\n· draggable red guide lines:\n  Canvas.cpp:1624/2019/3179"];
@@ -154,7 +154,7 @@ digraph TumatraPDF {
     mupdf -> render;
 
     // ===================== NOTES / FINDINGS =====================
-    notes [label="AUDIT 2026-09-21 (tree-sitter + agent, TODO.md):\ndup: colX math x4, trim rect x3, contrast JS x3 divergent,\ntrim-drag lines x3. Bug: TrimConfigDialog no VirtualToPhysical.\nGod files: SumatraPDF.cpp 14.2k lines (16C continues).\nRefactor phases R1-R7 in TODO.md.", shape=note, fillcolor="#fff9c4", style=filled];
+    notes [label="AUDIT 2026-11-01 (tree-sitter + serena):\ndup: colX math x4, trim rect x3, contrast JS x3 divergent,\ntrim-drag lines x3. Bug: TrimConfigDialog no VirtualToPhysical.\nGod files: SumatraPDF.cpp 14.2k lines (16C continues).\nRefactor phases R1-R7 in TODO.md.", shape=note, fillcolor="#fff9c4", style=filled];
     audit [label="AUDIT 2026-08-24:\ndiagram rewritten from real code\n(gToolbarButtons, menuDefNewTools, Accelerators,\ngen-settings.ts, explore agent).\nBottlenecks logged in lemma memory.\n\nBATCHES 1-3 (2026-08-24):\n· dead close-icon code removed (TabsCtrl)\n· AutoScroll module extracted (src/AutoScroll.{h,cpp})\n· perf guards: gAnyToggleChecked early-out,\n  width-gated ETA reposition, StringFormat statics\n  in TabWnd::Paint\n· lint: RenderCache unused param, static\n  SafeDeleteTrimConfigDialog, comment moved .h→.cpp\n· MERGE.md corrected (factual, fork point ~912ecf2)"];
 
     // ===================== LEGEND =====================

@@ -77,6 +77,17 @@ static void ProfSaveInner();
 static void ProfMaybeBackup();
 static void ProfPullHistory();
 
+// forward: used by ProfMergeConflictedCopies before their definitions
+static ProfileBook* ProfFindBook(Str keyHex);
+static void ProfParseDaySection(Str json, const char* section, Vec<ProfDayMachine>& out);
+static bool ProfDayPairPresent(Vec<ProfDayMachine>& v, int dateKey, Str machine);
+static void ProfMergeConflictedCopies();
+
+// forward: backup constants/slot dir are defined later (rolling-backups section)
+static const int kProfBackupSlots = 9;
+static const i64 kProfBackupSlotSec = 8 * 3600;
+static TempStr ProfBackupDirTemp();
+
 // ---- small helpers ----
 
 static TempStr ProfileDataPathTemp() {
@@ -438,6 +449,208 @@ static void ProfImportLegacy() {
          len(gProfile.readingDaily), len(gProfile.studyDaily));
 }
 
+// Startup reconcile: adopt day keys from the legacy sidecars that are absent
+// from the profile. Never overwrites existing rows — zero double-counting.
+// Running twice admits 0/0/0 the second time (idempotent).
+//
+// Books are deliberately NOT imported here: ProfImportBooksFromDir appends
+// without key dedup, so calling it again would double already-present books.
+// Books merge on first contact via ProfileDataMergeStudyDoc instead.
+static void ProfReconcileSidecars() {
+    TempStr settingsPath = GetSettingsPathTemp();
+    TempStr sideDir = path::GetDirTemp(Str(settingsPath));
+    int addedBooks = 0;
+    int addedReadingDays = 0;
+    int addedStudyDays = 0;
+
+    // reading sidecar: "YYYYMMDD <sec>"
+    TempStr rcPath = path::JoinTemp(Str(sideDir), StrL("reading-stats.txt"));
+    Str rcText = file::ReadFile(Str(rcPath));
+    if (rcText) {
+        StrVec lines;
+        Split(&lines, rcText, StrL("\n"), true);
+        char* machine = ProfMachineNameDup();
+        Str machineStr = Str(machine);
+        for (Str line : lines) {
+            if (len(line) < 9) {
+                continue;
+            }
+            char buf[64]{};
+            int n = std::min(len(line), (int)(dimof(buf) - 1));
+            memcpy(buf, line.s, (size_t)n);
+            char* p1 = nullptr;
+            long dateKeyL = strtol(buf, &p1, 10);
+            long secL = 0;
+            if (p1 != buf) {
+                char* p2 = p1;
+                secL = strtol(p2, &p2, 10);
+            }
+            if (dateKeyL > 19000101 && secL >= 0) {
+                int dateKey = (int)dateKeyL;
+                bool have = false;
+                for (int i = 0; i < len(gProfile.readingDaily); i++) {
+                    if (gProfile.readingDaily[i].dateKey == dateKey &&
+                        str::EqI(Str(gProfile.readingDaily[i].machine), machineStr)) {
+                        have = true;
+                        break;
+                    }
+                }
+                if (!have) {
+                    ProfDayMachine e;
+                    e.dateKey = dateKey;
+                    e.sec = (int)secL;
+                    e.cards = 0;
+                    e.machine = str::Dup(machineStr).s;
+                    gProfile.readingDaily.Append(e);
+                    addedReadingDays++;
+                    gProfile.dirty = true;
+                }
+            }
+        }
+        ::free(machine);
+    }
+
+    // study sidecar: "YYYYMMDD <sec> <cards>"
+    TempStr fcPath = path::JoinTemp(Str(sideDir), StrL("flashcard-stats.txt"));
+    Str fcText = file::ReadFile(Str(fcPath));
+    if (fcText) {
+        StrVec lines;
+        Split(&lines, fcText, StrL("\n"), true);
+        char* machine = ProfMachineNameDup();
+        Str machineStr = Str(machine);
+        for (Str line : lines) {
+            if (len(line) < 9) {
+                continue;
+            }
+            char buf[64]{};
+            int n = std::min(len(line), (int)(dimof(buf) - 1));
+            memcpy(buf, line.s, (size_t)n);
+            char* p1 = nullptr;
+            long dateKeyL = strtol(buf, &p1, 10);
+            long secL = 0;
+            long cardsL = 0;
+            if (p1 != buf) {
+                char* p2 = p1;
+                secL = strtol(p2, &p2, 10);
+                if (p2 != p1) {
+                    char* p3 = p2;
+                    cardsL = strtol(p3, &p3, 10);
+                }
+            }
+            if (dateKeyL > 19000101 && secL >= 0) {
+                int dateKey = (int)dateKeyL;
+                bool have = false;
+                for (int i = 0; i < len(gProfile.studyDaily); i++) {
+                    if (gProfile.studyDaily[i].dateKey == dateKey &&
+                        str::EqI(Str(gProfile.studyDaily[i].machine), machineStr)) {
+                        have = true;
+                        break;
+                    }
+                }
+                if (!have) {
+                    ProfDayMachine e;
+                    e.dateKey = dateKey;
+                    e.sec = (int)secL;
+                    e.cards = (int)cardsL;
+                    e.machine = str::Dup(machineStr).s;
+                    gProfile.studyDaily.Append(e);
+                    addedStudyDays++;
+                    gProfile.dirty = true;
+                }
+            }
+        }
+        ::free(machine);
+    }
+
+    logf("[profile] reconcile: +%d book(s), +%d reading day(s), +%d study day(s)\n", addedBooks, addedReadingDays,
+         addedStudyDays);
+}
+
+// Google Drive may drop conflicted copies next to the primary:
+// tumatraPDF-data_1 (1).json, tumatraPDF-data_1 (2).json, ... (pattern:
+// <base> (N).json). Merge them into the primary without ever overwriting:
+// adopt only book keys and (dateKey, machine) day rows absent from primary.
+// Conflicted copies are never deleted / renamed / moved. Idempotent (2nd run
+// adopts 0).
+static bool ProfDayPairPresent(Vec<ProfDayMachine>& v, int dateKey, Str machine) {
+    for (int i = 0; i < len(v); i++) {
+        if (v[i].dateKey == dateKey && str::EqI(Str(v[i].machine), machine)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void ProfMergeConflictedCopies() {
+    TempStr path = ProfileDataPathTemp();
+    TempStr dir = path::GetDirTemp(Str(path));
+    TempStr pattern = path::JoinTemp(Str(dir), StrL("tumatraPDF-data_*.json"));
+    WIN32_FIND_DATAW fd{};
+    HANDLE h = FindFirstFileW(CWStrTemp(ToWStrTemp(Str(pattern))), &fd);
+    if (h == INVALID_HANDLE_VALUE) {
+        return;
+    }
+    int addedBooks = 0;
+    int addedDayRows = 0;
+    int copies = 0;
+    do {
+        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+            continue;
+        }
+        TempStr fileName = path::GetBaseNameTemp(ToUtf8Temp(WStr(fd.cFileName)));
+        if (!fileName || str::Eq(fileName, kProfileDataFileName)) {
+            continue; // primary itself
+        }
+        copies++;
+        TempStr filePath = path::JoinTemp(Str(dir), ToUtf8Temp(WStr(fd.cFileName)));
+        Str copyJson = file::ReadFile(Str(filePath));
+        if (!copyJson || !ProfBlockInterior(copyJson)) {
+            logf("[profile] conflicted-copy %s unparseable, skipped\n", Str(fileName));
+            continue;
+        }
+        // books: adopt keys absent from primary (never overwrite existing rows)
+        Str booksSec = ProfSectionInterior(copyJson, "books");
+        if (booksSec) {
+            ProfForEachMember(booksSec, [&](Str rawKey, Str valueTok, Str interior, bool isObj) {
+                if (!isObj) {
+                    return;
+                }
+                if (ProfFindBook(rawKey)) {
+                    return;
+                }
+                ProfileBook b;
+                b.streamKey = ProfUnescapeKeyDup(rawKey);
+                b.docName = FlashcardStudyParseJsonStringFieldDup(interior, StrL("docName"));
+                b.docPath = FlashcardStudyParseJsonStringFieldDup(interior, StrL("docPath"));
+                FlashcardStudyParseJsonInto(interior, b.study);
+                gProfile.books.Append(b);
+                addedBooks++;
+                gProfile.dirty = true;
+            });
+        }
+        // day rows: adopt (dateKey, machine) pairs absent from primary sections
+        for (const char* secName : {"readingStats", "fcStats"}) {
+            Vec<ProfDayMachine> tempDays;
+            ProfParseDaySection(copyJson, secName, tempDays);
+            Vec<ProfDayMachine>& target = (secName[0] == 'r') ? gProfile.readingDaily : gProfile.studyDaily;
+            for (int i = 0; i < len(tempDays); i++) {
+                ProfDayMachine& e = tempDays[i];
+                if (!ProfDayPairPresent(target, e.dateKey, Str(e.machine))) {
+                    target.Append(e);
+                    e.machine = nullptr; // ownership transferred to primary
+                    addedDayRows++;
+                    gProfile.dirty = true;
+                }
+            }
+            ProfFreeDays(tempDays);
+        }
+    } while (FindNextFileW(h, &fd));
+    FindClose(h);
+
+    logf("[profile] conflicted-copy merge: +%d book(s), +%d day row(s) from %d copy/copies\n", addedBooks, addedDayRows,
+         copies);
+}
+
 static void ProfParseDaySection(Str json, const char* section, Vec<ProfDayMachine>& out) {
     Str sec = ProfSectionInterior(json, section);
     if (!sec) {
@@ -502,16 +715,34 @@ static void ProfileDataEnsureLoaded() {
     TempStr path = ProfileDataPathTemp();
     logf("[profile] loading %s\n", Str(path));
     Str json = file::ReadFile(Str(path));
-    if (!json) {
-        ProfImportLegacy();
-        gProfile.dirty = true;
-        // materialize immediately: the import IS the profile's birth; waiting
-        // for the next save cadence would lose it on a crash
-        ProfPullHistory();
-        ProfSaveInner();
-        ProfMaybeBackup();
-        gProfile.dirty = false;
-        return;
+    if (!json || !ProfBlockInterior(json)) {
+        // file missing or corrupt: try newest valid backup slot before legacy import
+        bool recovered = false;
+        for (int i = 0; i < kProfBackupSlots; i++) {
+            TempStr slotDir = path::JoinTemp(ProfBackupDirTemp(), fmt("%02d", i));
+            TempStr srcPath = path::JoinTemp(Str(slotDir), kProfileDataFileName);
+            if (!file::Exists(Str(srcPath))) {
+                continue;
+            }
+            Str slotJson = file::ReadFile(Str(srcPath));
+            if (slotJson && ProfBlockInterior(slotJson)) {
+                logf("[profile] main file corrupt — recovered from backup slot %d\n", i);
+                json = slotJson;
+                recovered = true;
+                break;
+            }
+        }
+        if (!recovered) {
+            ProfImportLegacy();
+            gProfile.dirty = true;
+            ProfPullHistory();
+            ProfSaveInner();
+            ProfMaybeBackup();
+            gProfile.dirty = false;
+            ProfReconcileSidecars();
+            ProfMergeConflictedCopies();
+            return;
+        }
     }
     ProfParseBooks(json, gProfile.books);
     ProfParseDaySection(json, "readingStats", gProfile.readingDaily);
@@ -519,6 +750,8 @@ static void ProfileDataEnsureLoaded() {
     ProfParseInfoSection(json, gProfile.perDoc);
     logf("[profile] loaded: %d book(s), %d reading day(s), %d study day(s)\n", len(gProfile.books),
          len(gProfile.readingDaily), len(gProfile.studyDaily));
+    ProfReconcileSidecars();
+    ProfMergeConflictedCopies();
 }
 
 // ---- merge / update books ----
@@ -893,9 +1126,6 @@ void ProfileDataSaveNow() {
 }
 
 // ---- rolling backups: 9 slots x 8h (generalized from the flashcards' 3x1d) ----
-
-static const int kProfBackupSlots = 9;
-static const i64 kProfBackupSlotSec = 8 * 3600;
 
 static TempStr ProfBackupDirTemp() {
     TempStr path = ProfileDataPathTemp();
