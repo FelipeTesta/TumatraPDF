@@ -1,4 +1,106 @@
-﻿## 2026-11-01 (s36-bg) — Profile Memory F3 slices 1+2: reconcile, corrupt fallback, conflicted-copy merge
+﻿## 2026-11-01 (s36-bq) — Profile Memory F7 slice B: Export + Import (merge/replace)
+
+### Added
+- ProfileData.cpp: `ProfileDataExportToDir(const char* destDir)` — copies primary + backup/ subtree to destDir; fails if primary missing or dest primary exists; create dest recursively; logf counts.
+- ProfileData.cpp: `ProfileDataImportFromJson(const char* srcJsonPath, bool replace)` — replace=true moves primary to .pre-import, copies src → primary, reloads; replace=false merges (newest-wins-adopt-absent) book keys + (dateKey,machine) day rows, dirty+SaveNow.
+- ProfileSyncWnd.cpp: Export (folder pick, IFileDialog FOS_PICKFOLDERS) + Import (file pick, *.json filter) buttons; dest-exists confirmation MB_OKCANCEL; two-choice Replace/Merge/Cancel prompt; gForTesting skips pickers with logf.
+- ProfileSyncWnd.cpp: button row expanded to 6 (two rows of 3): Save Now/Open Folder/Backups + Export/Import/Close.
+
+### Changed
+- ProfileData.h: two terse decls `ProfileDataExportToDir` / `ProfileDataImportFromJson`.
+- ProfileSyncWnd.cpp: two-button-row layout anchored bottom-up; picker precedent reused from FlashcardToolbar::FcPickFolder.
+
+### Verified
+- bun cmd/build.ts 0 err/0 warn; copied to Compiled\TumatraPDF.exe.
+- launch -for-testing ext\a-zlib\zlib.3.pdf ALIVE_OK 12s, no sumatrapdfcrash.txt.
+- E2E closure: ad-hoc-profile-sync-visual.ts 13/13 (Export/Import clicks asserted no-hang via gForTesting skip); build 0/0; checksum test ad-hoc-profile-checksum.ts 3 launches PASS. Committed this turn (user-ordered).
+
+### Notes
+- s36-bq chosen (s36-bp at top, bq unused).
+- No commit (awaiting explicit command).
+
+## 2026-11-01 (s36-bp) — Profile Memory F7 slice A: integrity checksum
+
+### Added
+- ProfileData.cpp: ProfReadChecksumTemp / ProfBlankChecksumTemp / ProfComputeChecksumTemp / ProfSubstChecksumTemp helpers (static, file-local).
+- ProfileData.cpp: ProfSaveInner writes `"checksum": ""` placeholder, computes MD5 over body-with-empty-checksum, substitutes real hex hash before atomic MoveFileExW swap.
+- ProfileData.cpp: ProfileDataEnsureLoaded verifies checksum after successful primary parse; mismatch → logf "[profile] checksum mismatch — primary corrupt (ts=%lld)" → routes to existing corrupt path (backup-slot recovery loop, then legacy import). Absent/empty checksum token (old-format files) → skip verify, log once.
+
+### Changed
+- ProfileData.cpp: header gains `"checksum"` token after `"machine"` in version/lastWriteTs/machine block. Format version stays _1 (checksum is additive, optional; no migration needed).
+
+### Verified
+- bun cmd/build.ts 0 err/0 warn; copied to Compiled\TumatraPDF.exe.
+- ad-hoc-profile-checksum.ts: Launch 1 ALIVE_OK (profile created with checksum); Launch 2 ALIVE_OK (checksum round-trip); corrupt 1 byte mid-file; Launch 3 ALIVE_OK (recovery via backup/legacy), no sumatrapdfcrash.txt.
+
+### Notes
+- s36-bp chosen (s36-bn at top, bp unused).
+- No commit (awaiting explicit command).
+
+## 2026-11-01 (s36-bn) — Profile Memory F6 slice 1: Home Sync button + ProfileSyncWnd
+
+### Added
+- HomePage.cpp: HomeChromeWnd gains `syncBtn` member (HomeSyncBtnWnd : VirtWndText, clears vwfNoHitTest so it is a hit target). Renders "⟳ Sync" next to "Stats" header at rcSync(rcHdr.x + rcHdr.dx + DpiScale(8), centered vertically), always shown; RTL mirrors to left of header. Hover = ThemeWindowTextColor, idle = ThemeWindowDarkerTextColor, hand cursor. Click → ShowProfileSyncDialog(win) via WndFromPoint/BubbleMouse hit-test bridge (ev.pt local to target bounds; root-space = pt + bounds.{x,y}). Created in EnsureHomeChrome, bounds re-applied in HomePageSyncChrome.
+- src/ProfileSyncWnd.h / .cpp (NEW): ProfileSyncWnd modal dialog mirroring ShowProfileBackupsDialog mold. Readout rows: Destination dir (gGlobalPrefs->profileDataDir or default app-data dir via ProfileDataPathTemp), File (tumatraPDF-data_1.json), Format version (hand-rolled scan of "version" token, IntToStr), Size (%d KB), Last save (file LastWriteTime), Machine ("machine" key or GetComputerNameW), Counts (books / readingStats / fcStats via lite JSON object member count), Backups (ProfileDataBackupCount() — previously zero callers), Drive hint label "Place this folder in Google Drive to sync across devices". Buttons: Save Now (BS_DEFPUSHBUTTON → ProfileDataSaveNow() + refresh rows), Open Folder (ShellExecuteW on resolved dir), Backups → ShowProfileBackupsDialog(win), Close (Esc too).
+- premake5.files.lua: added ProfileSyncWnd.* next to ProfileBackupWnd.*.
+
+### Verified
+- (pending build)
+
+### Notes
+- s36-bn chosen because top entry was s36-bl (confirmed unused).
+- Export/Import deferred to F7 slice.
+- No commit (awaiting explicit command).
+
+### Fixed
+- Root cause: split arrays (?)sToolbarPackStates [1302] / sToolbarRewrapStates [1632] — RebuildToolbarButtonsForWidth wrote lastPackedAvailDx only to pack table; ToolbarRewrapAfterSizing guard (1683) read rewrap table copy = -1 forever → 200ms rewrap loop when wraps change (narrow) → RelayoutFrame feedback = non-stop flicker.
+- Fix: synchronized write sToolbarRewrapStates[stateIdx].lastPackedAvailDx = availDx after pack write (Toolbar.cpp ~1446), fwd decl before use + duplicate def removed at ~1642; guard logic unchanged; comment added.
+
+### Verified
+- build 0 err/0 warn (Compiled\ updated); launch ALIVE_OK 12s, no sumatrapdfcrash.txt.
+- Quantitative: MoveWindow 700x500→500x400, settle, 2 PNG captures 400ms apart byte-identical → no repaint loop while static.
+
+### Notes
+- Wider lesson (lemma m…): array/state struct splits must re-partition all writer/reader pairs; stale comments citing cross-references go bad silently.
+
+## 2026-11-01 (s36-bi) — Profile Memory F4: profileDataDir setter + migration
+
+### Added
+- ProfileData.cpp: ProfEnsureProfileDirAndMigrate + ProfCopyDirTree helpers; ProfileDataEnsureLoaded calls ProfEnsureProfileDirAndMigrate before reading primary file; mkdir (dir::CreateAll) on load, logf when created; on dir change copies tumatraPDF-data_*.json + backup/ subtree from old app-data dir to new dir, never deletes source, conflict-copies included, logf counts; skips migrate when new dir already has primary (keeps new dir, logf).
+
+### Changed
+- ProfileData.cpp: profileDataDir resolution EMPTY => default app-data dir (GetPathInAppDataDirTemp), NON-empty => used verbatim (path::Join); setting already registered String default "" in Settings.h (no gen-code change); advanced-settings JSON settable. ProfileDataPathTemp hardcodes nothing to AppData; kProfileDataFileName = tumatraPDF-data_1.json primary in any dir.
+- SumatraStartup.cpp: startup cloud-revert prompt wrapped: Consume always (clears flag), Prompt only when !gForTesting (-for-testing), comment "skip startup prompt in automated testing runs". Prevents modal hang of -for-testing automation.
+
+### Verified
+- bun cmd/build.ts 0 err/0 warn; copied to Compiled\TumatraPDF.exe.
+- launch -for-testing ext\a-zlib\zlib.3.pdf ALIVE=True ≥12s; out\dbg64\sumatrapdfcrash.txt absent; taskkill clean.
+- Rebuild unblocked by killing stale TumatraPDF.exe (PID 11104) holding libsumatrapdf.dll (LNK1104 sharing violation).
+
+### Notes
+- Migration old dir = default app-data dir (GetAppDataDirTemp); Drive use case: user sets profileDataDir to synced folder, profile (+ backup/) migrates on first load.
+- Overwrite-vs-use-existing dialog deferred (TODO F4 initial-load conflict UX).
+- gen-settings.ts does NOT list profileDataDir but Settings.h member + table entry (default "") already make it settable; no gen-code change (per instructions).
+- No commit (awaiting explicit command).
+
+## 2026-11-01 (s36-bh) — Profile Memory F3 slice 3: cloud-revert restore prompt
+
+### Added
+- ProfileData.cpp: file-local flag `gCloudRevertPending`; `ProfileDataEnsureLoaded` compares primary `lastWriteTs` vs max backup slot `lastWriteTs` (new static `ProfSlotLastWriteTs` helper reusing slot-read loop); sets flag + logs "[profile] cloud revert detected..." only when newest backup strictly newer than primary.
+- ProfileData.h: `ProfileDataConsumeCloudRevertPending()` (returns+clears flag), `ProfileDataCloudRevertPrimaryTs()`, `ProfileDataCloudRevertNewestBackupTs()`, `ProfileDataCloudRevertNewestBackupSlot()` declared near `ProfileDataRecoverBackupSlot`; no prose comments.
+- ProfileBackupWnd.cpp/.h: `ProfileDataPromptCloudRevert(MainWindow*, HWND)` small themed modal dialog showing primary vs newest backup stamp, Restore (default) / Keep buttons, Esc = Keep; Restore → `ProfileDataRecoverBackupSlot(newestSlot)`, mirrors F2 dialog restore + logf.
+- SumatraStartup.cpp: startup call site after win/frame exist, before stress test — `if (ProfileDataConsumeCloudRevertPending()) ProfileDataPromptCloudRevert(win, win->hwndFrame);`. Guarded: prompt skipped when no backups (consume returns false unless detection fired).
+- SumatraStartup.cpp include: ProfileData.h + ProfileBackupWnd.h added.
+
+### Verified
+- bun cmd/build.ts 0 err/0 warn; auto-copied to Compiled\TumatraPDF.exe.
+- launch -for-testing ALIVE_OK PID 11104 ≥12s; out\dbg64\sumatrapdfcrash.txt absent; taskkill clean.
+- detection only fires when backup strictly newer (equal/older → flag never set, prompt skipped).
+- prompt skipped when no backups exist (no slots → consume false).
+
+### Notes
+- Stamp formatted via localtime_s ("YYYY-MM-DD HH:MM"), not the ProfileDataBackupStampTemp string path, to keep dialog self-contained.
+- No commit (awaiting explicit command).
 
 ### Added
 - ProfReconcileSidecars (ProfileData.cpp): startup adopts sidecar day rows (reading-stats.txt / flashcard-stats.txt) whose (dateKey, machine) pair is absent from profile sections; idempotent; books deliberately excluded (ProfImportBooksFromDir appends w/o dedup — books merge via ProfileDataMergeStudyDoc on contact).
