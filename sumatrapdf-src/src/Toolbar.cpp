@@ -1404,6 +1404,9 @@ void PostAddTextButtonSizing(MainWindow* win, HWND hwndToolbar) {
 // TBBUTTON defaults, so every piece of per-button state is re-applied right
 // after: hidden/enabled (ToolbarUpdateStateForWindow), the checked toggles
 // and the zoom-layout checks, the page box, and the floating timer controls.
+// sToolbarRewrapStates is defined later (~1632) but written from here; forward
+// declared so RebuildToolbarButtonsForWidth can sync the rewrap guard.
+static struct ToolbarPackState sToolbarRewrapStates[4];
 static void RebuildToolbarButtonsForWidth(MainWindow* win, HWND hwndToolbar) {
     DWORD sz = (DWORD)SendMessageW(hwndToolbar, TB_GETBUTTONSIZE, 0, 0);
     int dxBtn = LOWORD(sz);
@@ -1444,6 +1447,13 @@ static void RebuildToolbarButtonsForWidth(MainWindow* win, HWND hwndToolbar) {
         int availDx = hwndRebarP ? HwndClientRect(hwndRebarP).dx : rcClient.right;
         int stateIdx = FindToolbarStateIndex(hwndToolbar);
         sToolbarPackStates[stateIdx].lastPackedAvailDx = availDx;
+        // rewrap-guard sync: ToolbarRewrapAfterSizing compares its hysteresis
+        // against THIS array's lastPackedAvailDx — the pack table was split
+        // from the rewrap table (1302/1632) and this write used to land only
+        // in sToolbarPackStates, leaving the rewrap guard orphaned at -1 and
+        // re-wrapping (flicker) forever while wraps keep changing on narrow
+        // frames. See TODO Toolbars Flickering.
+        sToolbarRewrapStates[stateIdx].lastPackedAvailDx = availDx;
         sDbgPackRebarDx = hwndRebarP ? HwndClientRect(hwndRebarP).dx : -1;
         bool wrapAfter[kButtonsCount + 8];
         sDbgPackRows = 1;
@@ -1629,7 +1639,7 @@ bool SetToolbarBandToRowHeight(HWND hwndToolbar) {
 static const int kRewrapToolbarTimerId = 0x4242;
 
 // Per-toolbar last built width for the width guard in ToolbarRewrapAfterSizing
-static struct ToolbarPackState sToolbarRewrapStates[4];
+// (forward-declared near RebuildToolbarButtonsForWidth; written from there).
 
 // Reentrancy guard: set while RelayoutFrame is resizing the rebar, so the
 // WM_SIZE handler doesn't call ScheduleUiUpdate(kUiRelayout) which would
@@ -1680,6 +1690,9 @@ void ToolbarRewrapAfterSizing(MainWindow* win, HWND hwndToolbar, bool force) {
     // bypasses the width guard: a drag can end in a degenerate state (client
     // collapsed / rows glued) that a width-gated rebuild would skip
     int stateIdx = FindRewrapStateIndex(hwndToolbar);
+    // NB: availDx must be written to BOTH tables (see
+    // RebuildToolbarButtonsForWidth) — this guard reads only this table's
+    // copy.
     if (dx <= 0 || (dx == sToolbarRewrapStates[stateIdx].lastBuiltDx &&
                     rebarDx == sToolbarRewrapStates[stateIdx].lastPackedAvailDx && !force)) {
         return;
