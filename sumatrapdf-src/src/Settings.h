@@ -67,8 +67,9 @@ struct FlashcardSettings {
     // study queue: 0 = new first, 1 = new last, 2 = mixed (interleaved
     // proportionally)
     int newCardsPosition;
-    // alpha (0-255) for the flashcard translucent gray marker. Lower values
-    // make the marker more subtle. Default 10 for very subtle highlighting.
+    // alpha (0-255) for the flashcard translucent gray marker. Lower
+    // values make the marker more subtle. Default 10 for very subtle
+    // highlighting.
     int flashcardMarkerAlpha;
 };
 
@@ -611,10 +612,6 @@ struct FileState {
     float autoScrollSpeedMultiplier;
     // total seconds of reading time (auto-scroll active) for this document
     int readingTimeSec;
-    // total seconds of flashcard study time for this document
-    int flashcardStudyTimeSec;
-    // total flashcard cards rated (studied) for this document
-    int flashcardCardsDone;
     // invert page colors for this document
     bool invertColors;
     // contrast overlay enabled for this document
@@ -653,6 +650,10 @@ struct FileState {
     Str archMeasurements;
     // per-page scale states serialized for this document
     Str archScaleStates;
+    // total flashcard cards rated (studied) for this document
+    int flashcardCardsDone;
+    // total seconds of flashcard study for this document
+    int flashcardStudyTimeSec;
 };
 
 // a subset of FileState required for restoring the state of a single
@@ -706,9 +707,9 @@ struct GlobalPrefs {
     // histories backed up
     Str flashcardStudyDir;
     // directory for the single-file Profile Memory store
-    // (tumatraPDF-data_1.json). Empty = default app-data dir. Point it at a
-    // cloud-synced folder (e.g. Google Drive) so the study histories, reading
-    // stats and per-doc info sync between machines in ONE file
+    // (tumatraPDF-data_1.json). Empty = default app-data dir. Point it at
+    // a cloud-synced folder (e.g. Google Drive) so the study histories,
+    // reading stats and per-doc info sync between machines in ONE file
     Str profileDataDir;
     // how pages are laid out by default. The string is the persisted form
     // of DefaultDisplayModeEnum, so it's parsed after deserialization and
@@ -1116,7 +1117,8 @@ static const StructInfo gFlashcardSettingsInfo = {
     "RandomOrder\0NewCardsPosition\0FlashcardMarkerAlpha",
     "if true, flashcard study presents cards in random order instead of document order\0where new (never rated) cards "
     "go relative to due reviews in the study queue: 0 = new first, 1 = new last, 2 = mixed (interleaved "
-    "proportionally)\0flashcard marker alpha (0-255, lower = more subtle, default 10)",
+    "proportionally)\0alpha (0-255) for the flashcard translucent gray marker. Lower values make the marker more "
+    "subtle. Default 10 for very subtle highlighting.",
     false};
 
 static const FieldInfo gWindowMarginFields[] = {
@@ -1665,7 +1667,6 @@ static const FieldInfo gFileStateFields[] = {
     {offsetof(FileState, tocState), SettingType::IntArray, 0},
     {offsetof(FileState, autoScrollSpeedMultiplier), SettingType::Float, (intptr_t)"0.008"},
     {offsetof(FileState, readingTimeSec), SettingType::Int, 0},
-    {offsetof(FileState, flashcardStudyTimeSec), SettingType::Int, 0},
     {offsetof(FileState, invertColors), SettingType::Bool, false},
     {offsetof(FileState, contrastEnabled), SettingType::Bool, false},
     {offsetof(FileState, contrastOpacity), SettingType::Int, 50},
@@ -1685,13 +1686,8 @@ static const FieldInfo gFileStateFields[] = {
     {offsetof(FileState, archScaleSet), SettingType::Bool, false},
     {offsetof(FileState, archMeasurements), SettingType::String, (intptr_t)""},
     {offsetof(FileState, archScaleStates), SettingType::String, (intptr_t)""},
-    // NOTE (s36-az debt): the fieldNames blob below is deliberately missing
-    // "FlashcardStudyTimeSec" — inserted after "ReadingTimeSec" it would shift
-    // every name >= field 24 on READ and corrupt all existing settings files
-    // (serialize pairs name[i] with field[i]; the one-off "wrong" names in the
-    // file round-trip consistently). New FileState fields MUST be appended at
-    // the END of this table AND of both blobs, never in the middle.
     {offsetof(FileState, flashcardCardsDone), SettingType::Int, 0},
+    {offsetof(FileState, flashcardStudyTimeSec), SettingType::Int, 0},
 };
 static StructInfo gFileStateInfo = {
     sizeof(FileState),
@@ -1701,8 +1697,8 @@ static StructInfo gFileStateInfo = {
     "o\0Zoom\0Rotation\0WindowState\0WindowPos\0ShowToc\0SidebarDx\0DisplayR2L\0BgCol\0TabCol\0ReparseIdx\0TocState\0Au"
     "toScrollSpeedMultiplier\0ReadingTimeSec\0InvertColors\0ContrastEnabled\0ContrastOpacity\0MarginTrim\0TrimTop\0Trim"
     "Bottom\0ViewportCropV2\0ArchScaleFactor\0ArchScaleAnchorX\0ArchScaleAnchorY\0ArchScaleLineP2x\0ArchScaleLineP2y\0A"
-    "rchScaleLineDefined\0ArchScaleLineP1x\0ArchScaleLineP1y\0ArchUnit\0ArchScaleSet\0ArchMeasurements\0ArchScaleState"
-    "s\0FlashcardCardsDone",
+    "rchScaleLineDefined\0ArchScaleLineP1x\0ArchScaleLineP1y\0ArchUnit\0ArchScaleSet\0ArchMeasurements\0ArchScaleStates"
+    "\0FlashcardCardsDone\0FlashcardStudyTimeSec",
     "path of the document\0pages of this document bookmarked in the Favorites menu\0if true, the document is "
     "\"pinned\" to the Frequently Read list, so that recently opened documents don't displace it\0if true, the file is "
     "considered missing and won't be shown in any list\0number of times this document has been opened recently\0data "
@@ -1726,7 +1722,8 @@ static StructInfo gFileStateInfo = {
     "coords\0arch scale line point 2 Y in page coords\0whether arch scale line endpoints are defined\0arch scale line "
     "point 1 X in page coords\0arch scale line point 1 Y in page coords\0arch unit: 0=mm,1=cm,2=m,3=in,4=ft\0whether "
     "arch scale is defined for this doc\0arch tools measurements serialized for this document\0per-page scale states "
-    "serialized for this document\0total flashcard cards rated (studied) for this document",
+    "serialized for this document\0total flashcard cards rated (studied) for this document\0total seconds of flashcard "
+    "study for this document",
     false};
 
 static const FieldInfo gPointF_1_Fields[] = {
@@ -1969,114 +1966,117 @@ static const StructInfo gGlobalPrefsInfo = {
     148,
     gGlobalPrefsFields,
     "\0\0FlashcardStudyDir\0ProfileDataDir\0DefaultDisplayMode\0DefaultZoom\0DisableJavaScript\0AllowExternalImages\0En"
-    "ableTeXEnhanceme"
-    "nts\0EscToExit\0FullPathInTitle\0InverseSearchCmdLine\0LazyLoading\0MainWindowBackground\0NoHomeTab\0HomePageSortB"
-    "yFrequentlyRead\0HomePageViewMode\0FilePicker\0ReloadModifiedDocuments\0RememberOpenedFiles\0RememberStatePerDocum"
-    "ent\0RestoreSession\0ReuseInstance\0ShowMenubar\0ShowMenubarWithTabs\0ShowTips\0CustomColors\0ShowToolbar\0Toolbar"
-    "\0ToolbarPosition\0SearchUIFloating\0ShowFavorites\0SortFavoritesByName\0ShowToc\0ShowLinks\0AutoScrollShowEta\0Au"
-    "toScrollTimerMinutes\0AutoScrollTimerEnabled\0AutoScrollSpeedMultiplier\0ShowDocumentFocusIndicator\0ShowAnnotatio"
-    "nNotification\0ShowTocPageNumbers\0ShowStartPage\0SidebarDx\0Scrollbars\0ScrollbarInSinglePage\0SmoothScroll\0Padd"
-    "ingAfterLastPage\0CitationHoverDelay\0ReadAloudVoiceId\0ReadAloudSpeed\0DisableReadAloud\0DisableAIChat\0ArchTools"
-    "Enabled\0ArchUnit\0ArchDecimalSeparator\0FastScrollOverScrollbar\0PreventSleepInFullscreen\0TabWidth\0Theme\0LastL"
-    "ightTheme\0LastDarkTheme\0DocumentColorsFollowTheme\0TocDy\0ToolbarShowReadAloud\0ToolbarSize\0TreeFontName\0TreeF"
-    "ontSize\0UIFontSize\0DisableAntiAlias\0EngineeringDrawingEnhance\0DisableAutoLinks\0UseSysColors\0UseTabs\0Selecti"
-    "onToolbar\0TabsMru\0CtrlTabPre36Behavior\0ZoomLevels\0ZoomIncrement\0\0ViewportCrop\0Trim\0FlashcardSettings\0\0Fi"
-    "xedPageUI\0\0EBookUI\0\0ComicBookUI\0\0ImageUI\0\0ChmUI\0\0MarkdownUI\0\0HtmlUI\0\0ClaudeCode\0\0GrokBuild\0\0Code"
-    "xBuild\0\0AntiGravity\0\0AIChatSidebarDx\0\0TranslateToLang\0TranslateFromLang\0TranslateEngine\0\0Annotations\0\0"
-    "ExternalViewers\0\0ForwardSearch\0\0PrinterDefaults\0\0Fullscreen\0\0SelectionHandlers\0\0Shortcuts\0\0Themes\0\0T"
-    "abGroups\0\0CustomScreenDPI\0\0\0DefaultPasswords\0UiLanguage\0VersionToSkip\0WindowState\0WindowPos\0SearchUIWind"
-    "owPos\0FileStates\0SessionData\0ReopenOnce\0TimeOfLastUpdateCheck\0OpenCountWeek\0PropWinPos\0CheckForUpdates\0\0",
+    "ableTeXEnhancements\0EscToExit\0FullPathInTitle\0InverseSearchCmdLine\0LazyLoading\0MainWindowBackground\0NoHomeTa"
+    "b\0HomePageSortByFrequentlyRead\0HomePageViewMode\0FilePicker\0ReloadModifiedDocuments\0RememberOpenedFiles\0Remem"
+    "berStatePerDocument\0RestoreSession\0ReuseInstance\0ShowMenubar\0ShowMenubarWithTabs\0ShowTips\0CustomColors\0Show"
+    "Toolbar\0Toolbar\0ToolbarPosition\0SearchUIFloating\0ShowFavorites\0SortFavoritesByName\0ShowToc\0ShowLinks\0AutoS"
+    "crollShowEta\0AutoScrollTimerMinutes\0AutoScrollTimerEnabled\0AutoScrollSpeedMultiplier\0ShowDocumentFocusIndicato"
+    "r\0ShowAnnotationNotification\0ShowTocPageNumbers\0ShowStartPage\0SidebarDx\0Scrollbars\0ScrollbarInSinglePage\0Sm"
+    "oothScroll\0PaddingAfterLastPage\0CitationHoverDelay\0ReadAloudVoiceId\0ReadAloudSpeed\0DisableReadAloud\0DisableA"
+    "IChat\0ArchToolsEnabled\0ArchUnit\0ArchDecimalSeparator\0FastScrollOverScrollbar\0PreventSleepInFullscreen\0TabWid"
+    "th\0Theme\0LastLightTheme\0LastDarkTheme\0DocumentColorsFollowTheme\0TocDy\0ToolbarShowReadAloud\0ToolbarSize\0Tre"
+    "eFontName\0TreeFontSize\0UIFontSize\0DisableAntiAlias\0EngineeringDrawingEnhance\0DisableAutoLinks\0UseSysColors\0"
+    "UseTabs\0SelectionToolbar\0TabsMru\0CtrlTabPre36Behavior\0ZoomLevels\0ZoomIncrement\0\0ViewportCrop\0Trim\0Flashca"
+    "rdSettings\0\0FixedPageUI\0\0EBookUI\0\0ComicBookUI\0\0ImageUI\0\0ChmUI\0\0MarkdownUI\0\0HtmlUI\0\0ClaudeCode\0\0G"
+    "rokBuild\0\0CodexBuild\0\0AntiGravity\0\0AIChatSidebarDx\0\0TranslateToLang\0TranslateFromLang\0TranslateEngine\0"
+    "\0Annotations\0\0ExternalViewers\0\0ForwardSearch\0\0PrinterDefaults\0\0Fullscreen\0\0SelectionHandlers\0\0Shortcu"
+    "ts\0\0Themes\0\0TabGroups\0\0CustomScreenDPI\0\0\0DefaultPasswords\0UiLanguage\0VersionToSkip\0WindowState\0Window"
+    "Pos\0SearchUIWindowPos\0FileStates\0SessionData\0ReopenOnce\0TimeOfLastUpdateCheck\0OpenCountWeek\0PropWinPos\0Che"
+    "ckForUpdates\0\0",
     "\0\0directory where flashcard study history JSONs are stored (per-book files, MD5-named). Empty = default "
     "app-data dir (FlashcardStudy). Point it at a cloud-synced folder (e.g. Google Drive) to keep the histories backed "
-    "up\0default layout of pages. valid values: automatic, single page, facing, book view, continuous, continuous "
-    "facing, continuous book view\0default zoom. valid values: fit page, fit width, fit height, fit content or percent "
-    "like 100%\0if true, JavaScript in PDF documents is disabled (e.g. form-field calculations won't run)\0if true, a "
-    "PDF may load an image stored in a separate file referenced by name (an external image stream); the file must sit "
-    "next to the PDF. Off by default for security (matches Acrobat)\0if true, show the SyncTeX inverse search command "
-    "line in Settings -> Options, so a double-click in the document can jump to the matching line in a LaTeX "
-    "editor\0if true, Esc key closes SumatraPDF\0if true, show the full path to the document in the title bar\0pattern "
-    "used to launch the LaTeX editor when doing inverse search\0if true, restoring a session delays loading each "
-    "document until its tab is selected\0background color of the area around the document, traditionally yellow. Only "
-    "applies to the Light theme; the default #80fff200 is a marker meaning \"use the theme's color\", so setting any "
-    "other value also colorizes the toolbar and sidebars\0if true, doesn't open Home tab\0if true, the home page lists "
-    "documents by how often they've been opened (the pre-3.6 behavior); if false, the most recently opened come "
-    "first\0valid values: thumbnails, list\0valid values: (empty), os, sumatrapdf\0if true, a document will be "
-    "reloaded automatically whenever it's changed (currently doesn't work for documents shown in the ebook UI)\0if "
-    "true, remember which documents were opened and their display settings\0if true, store display settings for each "
-    "document separately (i.e. everything after UseDefaultState in FileStates)\0if true and SessionData isn't empty, "
-    "that session will be restored at startup\0if true, open documents in the already running SumatraPDF instead of "
-    "starting a new one\0if true, show the menu bar (F9 toggles it; the choice is remembered across sessions)\0if "
-    "true, show the menu bar when using tabs (useTabs = true)\0if true, show tips on the home page\0up to 13 custom "
-    "colors for the background color picker, separated by space (e.g. '#ff0000 #00ff00 #0000ff')\0legacy bool for "
-    "toolbar; if Toolbar is empty, derived as show/hide (internal; use Toolbar instead)\0toolbar mode: show (pinned), "
-    "hide (no toolbar), overlay (toolbar floats over the page, sized to its natural width and centered, only shown "
-    "when the mouse is near it). if empty, derived from ShowToolbar\0where the toolbar is placed: top or bottom "
-    "(applies to both show and overlay modes)\0if true, the find UI is a floating, movable window with a results list "
-    "instead of the compact toolbar overlay\0if true, show the Favorites sidebar\0if true, favorites within each file "
-    "are sorted alphabetically by name (or page label); if false (the default), they are sorted by page number\0if "
-    "true, show the table of contents (Bookmarks) sidebar when the document has one\0if true, draw a blue border "
-    "around links in the document\0Show ETA label during auto-scroll\0Autoscroll timer duration in minutes (1-600, 0 = "
-    "no timer)\0Enable autoscroll auto-stop timer\0default autoscroll speed multiplier for new documents (last used "
-    "speed is saved here)\0if true, draw a focus ring around the document when it has keyboard focus (Tab to the page "
-    "area)\0if true, show a tip when hovering an annotation (e.g. \"Highlight annotation. Ctrl+click to edit.\")\0if "
-    "true, show page numbers (labels) right-aligned on bookmark / table-of-contents entries\0if true, show a list of "
-    "frequently read documents when no document is loaded\0width of the favorites / bookmarks sidebar in screen "
-    "pixels, as last resized (0 means the default)\0scrollbar mode: windows (standard Windows scrollbar), smart "
-    "(overlay scrollbar with auto-hide), overlay (always visible overlay scrollbar), hidden (no scrollbars)\0if true, "
-    "show a scrollbar in single page mode as well\0if true, smooth mouse-wheel scrolling (exponential chase of the "
-    "target; continuous wheel input stays fluid)\0if true, continuous view has extra scroll room after the last page "
-    "so you can scroll the end of the document to the top of the window\0how long an internal-document link has to be "
-    "hovered, in milliseconds, before a popup rendering the destination region (citation entry, figure, footnote) "
-    "appears. -1 (the default) disables the popup; set a positive value like 300 to enable it\0voice id for Read Aloud "
-    "text-to-speech; empty or unset means system default. Voice ids match those used internally by the Read Aloud "
-    "Voice menu (WinRT voice id or SAPI token id)\0playback speed multiplier for Read Aloud text-to-speech (0.5 .. "
-    "3.0), 1 is normal speed; can also be changed from the Read Aloud playback bar\0if true, disables Read Aloud "
-    "(text-to-speech) feature completely: hides menu entries, toolbar button, and commands\0if true, disables AI Chat "
-    "sidebar feature completely: hides menu entries, toolbar buttons, and commands for all AI providers\0if true, "
-    "enables Arch Tools (scale and measure) feature: shows sidebar tab, toolbar buttons, and commands\0default unit "
-    "for Arch Tools scale/measure: 0=mm,1=cm,2=m,3=in,4=ft\0decimal separator for Arch Tools numeric input/display: "
-    "0=dot (.), 1=comma (,)\0if true, mouse wheel scrolling is faster when mouse is over a scrollbar\0if true, "
-    "prevents the screen from turning off when in fullscreen or presentation mode\0maximum width of a single tab, in "
-    "pixels at 100% display scaling (at least 60)\0valid themes: Light, Dark, Light Warm, Dark from 3.5, Charcoal, "
-    "Solarized Light, Solarized Dark, Dracula, Nebula, Greeny, Choco, Purpy, One Dark, Monokai, Nord, GitHub Dark, "
-    "Catppuccin Mocha, Tokyo Night, Gruvbox, Night Owl, Ayu, Palenight, System\0the light theme the light/dark toggle "
-    "and the System theme switch to\0the dark theme the light/dark toggle and the System theme switch to\0how "
-    "MuPDF-rendered documents (PDF, XPS, DjVu, EPUB, MOBI, FB2, CBZ, images, etc.) use UI / FixedPageUI colors for the "
-    "page. Values: off (document's own colors; default); smart (recolor text and page background, keep photos/images "
-    "as-is — best for dark reading); legacy (also recolor images; pre-3.7 invert-style). Does not change "
-    "menus/toolbars — use Theme for UI chrome. Settings / Theme and the CmdSetDocumentColorsFollowTheme command set "
-    "all three values. Shift+I (Invert Colors) is separate: it swaps the page colors for the session whatever this is "
-    "set to\0if both the favorites and the bookmarks part of the sidebar are visible, this is the height of the "
-    "bookmarks (table of contents) part, in screen pixels\0if true, the toolbar has a Read Aloud button (with a "
-    "drop-down for voice, speed and what to read). Read Aloud is still reachable from the Read Aloud menu when this is "
-    "false\0size of the toolbar icons in pixels at 100% display scaling (8-64); the toolbar itself is a few pixels "
-    "taller\0font name for bookmarks and favorites tree views. automatic means Windows default\0font size for "
-    "bookmarks and favorites tree views, in pixels; 0 means the Windows default. Not scaled by the display "
-    "scaling\0overrides the font size used for menus, toolbar and dialogs, in pixels; 0 means the Windows default. Not "
-    "scaled by the display scaling\0if true, render MuPDF-based documents (PDF, XPS, DjVu, EPUB etc.) without "
-    "anti-aliasing, giving sharper but jagged edges\0CAD/engineering PDF line rendering: off, auto (enhance if a CAD "
-    "drawing is detected) or on\0if true, disables auto-linking of URLs and email addresses found in PDF text\0if "
-    "true, use the Windows system colors for the document background and text. Overrides other color settings\0if "
-    "true, documents are opened in tabs instead of new windows\0if true, a small floating toolbar with selection "
-    "actions (copy, read aloud, highlight etc.) pops up after selecting text. Set to false to disable it\0if true, "
-    "Ctrl+Tab and Ctrl+Shift+Tab show the tab switcher in most recently used order instead of tab-strip order\0if "
-    "true, Ctrl+Tab and Ctrl+Shift+Tab immediately switch to the next / previous tab in tab-strip order (the behavior "
-    "before version 3.6) instead of showing the tab switcher\0sequence of zoom levels when zooming in/out; all values "
-    "must lie between 8.33 and 6400\0how much a single zoom in / zoom out step changes the zoom, as a percentage of "
-    "the current zoom level. If 0 or negative, zooming steps through ZoomLevels instead\0\0viewport crop settings for "
-    "two-column reading\0margin trim settings (top/bottom elimination)\0flashcard study settings\0\0customization "
-    "options for PDF, XPS, DjVu and PostScript UI\0\0customization options for the ebook UI (EPUB, MOBI, FB2, PDB and "
-    "plain text)\0\0customization options for Comic Book UI\0\0customization options for image files "
-    "UI\0\0customization options for CHM UI. If UseFixedPageUI is true, FixedPageUI settings apply "
-    "instead\0\0customization options for Markdown UI. If UseFixedPageUI is true, MuPDF is used; otherwise WebView2 "
-    "browser view is used when available\0\0customization options for HTML UI. If UseFixedPageUI is true, MuPDF is "
-    "used; otherwise WebView2 browser view is used when available\0\0settings for the Claude Code chat "
-    "sidebar\0\0settings for the Grok Build chat sidebar\0\0settings for the OpenAI Codex chat sidebar\0\0settings for "
-    "the Antigravity chat sidebar\0\0width of the AI chat sidebar (0 = use default); shared by Claude Code, Grok "
-    "Build, and OpenAI Codex (internal)\0\0remembered destination language for selection translation; empty uses OS UI "
-    "language\0remembered source language for selection translation; empty means Auto\0remembered engine for Translate "
-    "Selection: Google, DeepL, Grok Build, Claude Code or OpenAI Codex\0\0default values for annotations in PDF "
-    "documents\0\0list of additional external viewers for various file types. See [docs for more "
+    "up\0directory for the single-file Profile Memory store (tumatraPDF-data_1.json). Empty = default app-data dir. "
+    "Point it at a cloud-synced folder (e.g. Google Drive) so the study histories, reading stats and per-doc info sync "
+    "between machines in ONE file\0default layout of pages. valid values: automatic, single page, facing, book view, "
+    "continuous, continuous facing, continuous book view\0default zoom. valid values: fit page, fit width, fit height, "
+    "fit content or percent like 100%\0if true, JavaScript in PDF documents is disabled (e.g. form-field calculations "
+    "won't run)\0if true, a PDF may load an image stored in a separate file referenced by name (an external image "
+    "stream); the file must sit next to the PDF. Off by default for security (matches Acrobat)\0if true, show the "
+    "SyncTeX inverse search command line in Settings -> Options, so a double-click in the document can jump to the "
+    "matching line in a LaTeX editor\0if true, Esc key closes SumatraPDF\0if true, show the full path to the document "
+    "in the title bar\0pattern used to launch the LaTeX editor when doing inverse search\0if true, restoring a session "
+    "delays loading each document until its tab is selected\0background color of the area around the document, "
+    "traditionally yellow. Only applies to the Light theme; the default #80fff200 is a marker meaning \"use the "
+    "theme's color\", so setting any other value also colorizes the toolbar and sidebars\0if true, doesn't open Home "
+    "tab\0if true, the home page lists documents by how often they've been opened (the pre-3.6 behavior); if false, "
+    "the most recently opened come first\0valid values: thumbnails, list\0valid values: (empty), os, sumatrapdf\0if "
+    "true, a document will be reloaded automatically whenever it's changed (currently doesn't work for documents shown "
+    "in the ebook UI)\0if true, remember which documents were opened and their display settings\0if true, store "
+    "display settings for each document separately (i.e. everything after UseDefaultState in FileStates)\0if true and "
+    "SessionData isn't empty, that session will be restored at startup\0if true, open documents in the already running "
+    "SumatraPDF instead of starting a new one\0if true, show the menu bar (F9 toggles it; the choice is remembered "
+    "across sessions)\0if true, show the menu bar when using tabs (useTabs = true)\0if true, show tips on the home "
+    "page\0up to 13 custom colors for the background color picker, separated by space (e.g. '#ff0000 #00ff00 "
+    "#0000ff')\0legacy bool for toolbar; if Toolbar is empty, derived as show/hide (internal; use Toolbar "
+    "instead)\0toolbar mode: show (pinned), hide (no toolbar), overlay (toolbar floats over the page, sized to its "
+    "natural width and centered, only shown when the mouse is near it). if empty, derived from ShowToolbar\0where the "
+    "toolbar is placed: top or bottom (applies to both show and overlay modes)\0if true, the find UI is a floating, "
+    "movable window with a results list instead of the compact toolbar overlay\0if true, show the Favorites "
+    "sidebar\0if true, favorites within each file are sorted alphabetically by name (or page label); if false (the "
+    "default), they are sorted by page number\0if true, show the table of contents (Bookmarks) sidebar when the "
+    "document has one\0if true, draw a blue border around links in the document\0Show ETA label during "
+    "auto-scroll\0Autoscroll timer duration in minutes (1-600, 0 = no timer)\0Enable autoscroll auto-stop "
+    "timer\0default autoscroll speed multiplier for new documents (last used speed is saved here)\0if true, draw a "
+    "focus ring around the document when it has keyboard focus (Tab to the page area)\0if true, show a tip when "
+    "hovering an annotation (e.g. \"Highlight annotation. Ctrl+click to edit.\")\0if true, show page numbers (labels) "
+    "right-aligned on bookmark / table-of-contents entries\0if true, show a list of frequently read documents when no "
+    "document is loaded\0width of the favorites / bookmarks sidebar in screen pixels, as last resized (0 means the "
+    "default)\0scrollbar mode: windows (standard Windows scrollbar), smart (overlay scrollbar with auto-hide), overlay "
+    "(always visible overlay scrollbar), hidden (no scrollbars)\0if true, show a scrollbar in single page mode as "
+    "well\0if true, smooth mouse-wheel scrolling (exponential chase of the target; continuous wheel input stays "
+    "fluid)\0if true, continuous view has extra scroll room after the last page so you can scroll the end of the "
+    "document to the top of the window\0how long an internal-document link has to be hovered, in milliseconds, before "
+    "a popup rendering the destination region (citation entry, figure, footnote) appears. -1 (the default) disables "
+    "the popup; set a positive value like 300 to enable it\0voice id for Read Aloud text-to-speech; empty or unset "
+    "means system default. Voice ids match those used internally by the Read Aloud Voice menu (WinRT voice id or SAPI "
+    "token id)\0playback speed multiplier for Read Aloud text-to-speech (0.5 .. 3.0), 1 is normal speed; can also be "
+    "changed from the Read Aloud playback bar\0if true, disables Read Aloud (text-to-speech) feature completely: hides "
+    "menu entries, toolbar button, and commands\0if true, disables AI Chat sidebar feature completely: hides menu "
+    "entries, toolbar buttons, and commands for all AI providers\0if true, enables Arch Tools (scale and measure) "
+    "feature: shows sidebar tab, toolbar buttons, and commands\0default unit for Arch Tools scale/measure: "
+    "0=mm,1=cm,2=m,3=in,4=ft\0decimal separator for Arch Tools numeric input/display: 0=dot (.), 1=comma (,)\0if true, "
+    "mouse wheel scrolling is faster when mouse is over a scrollbar\0if true, prevents the screen from turning off "
+    "when in fullscreen or presentation mode\0maximum width of a single tab, in pixels at 100% display scaling (at "
+    "least 60)\0valid themes: Light, Dark, Light Warm, Dark from 3.5, Charcoal, Solarized Light, Solarized Dark, "
+    "Dracula, Nebula, Greeny, Choco, Purpy, One Dark, Monokai, Nord, GitHub Dark, Catppuccin Mocha, Tokyo Night, "
+    "Gruvbox, Night Owl, Ayu, Palenight, System\0the light theme the light/dark toggle and the System theme switch "
+    "to\0the dark theme the light/dark toggle and the System theme switch to\0how MuPDF-rendered documents (PDF, XPS, "
+    "DjVu, EPUB, MOBI, FB2, CBZ, images, etc.) use UI / FixedPageUI colors for the page. Values: off (document's own "
+    "colors; default); smart (recolor text and page background, keep photos/images as-is — best for dark reading); "
+    "legacy (also recolor images; pre-3.7 invert-style). Does not change menus/toolbars — use Theme for UI chrome. "
+    "Settings / Theme and the CmdSetDocumentColorsFollowTheme command set all three values. Shift+I (Invert Colors) is "
+    "separate: it swaps the page colors for the session whatever this is set to\0if both the favorites and the "
+    "bookmarks part of the sidebar are visible, this is the height of the bookmarks (table of contents) part, in "
+    "screen pixels\0if true, the toolbar has a Read Aloud button (with a drop-down for voice, speed and what to read). "
+    "Read Aloud is still reachable from the Read Aloud menu when this is false\0size of the toolbar icons in pixels at "
+    "100% display scaling (8-64); the toolbar itself is a few pixels taller\0font name for bookmarks and favorites "
+    "tree views. automatic means Windows default\0font size for bookmarks and favorites tree views, in pixels; 0 means "
+    "the Windows default. Not scaled by the display scaling\0overrides the font size used for menus, toolbar and "
+    "dialogs, in pixels; 0 means the Windows default. Not scaled by the display scaling\0if true, render MuPDF-based "
+    "documents (PDF, XPS, DjVu, EPUB etc.) without anti-aliasing, giving sharper but jagged edges\0CAD/engineering PDF "
+    "line rendering: off, auto (enhance if a CAD drawing is detected) or on\0if true, disables auto-linking of URLs "
+    "and email addresses found in PDF text\0if true, use the Windows system colors for the document background and "
+    "text. Overrides other color settings\0if true, documents are opened in tabs instead of new windows\0if true, a "
+    "small floating toolbar with selection actions (copy, read aloud, highlight etc.) pops up after selecting text. "
+    "Set to false to disable it\0if true, Ctrl+Tab and Ctrl+Shift+Tab show the tab switcher in most recently used "
+    "order instead of tab-strip order\0if true, Ctrl+Tab and Ctrl+Shift+Tab immediately switch to the next / previous "
+    "tab in tab-strip order (the behavior before version 3.6) instead of showing the tab switcher\0sequence of zoom "
+    "levels when zooming in/out; all values must lie between 8.33 and 6400\0how much a single zoom in / zoom out step "
+    "changes the zoom, as a percentage of the current zoom level. If 0 or negative, zooming steps through ZoomLevels "
+    "instead\0\0viewport crop settings for two-column reading\0margin trim settings (top/bottom "
+    "elimination)\0flashcard study settings\0\0customization options for PDF, XPS, DjVu and PostScript "
+    "UI\0\0customization options for the ebook UI (EPUB, MOBI, FB2, PDB and plain text)\0\0customization options for "
+    "Comic Book UI\0\0customization options for image files UI\0\0customization options for CHM UI. If UseFixedPageUI "
+    "is true, FixedPageUI settings apply instead\0\0customization options for Markdown UI. If UseFixedPageUI is true, "
+    "MuPDF is used; otherwise WebView2 browser view is used when available\0\0customization options for HTML UI. If "
+    "UseFixedPageUI is true, MuPDF is used; otherwise WebView2 browser view is used when available\0\0settings for the "
+    "Claude Code chat sidebar\0\0settings for the Grok Build chat sidebar\0\0settings for the OpenAI Codex chat "
+    "sidebar\0\0settings for the Antigravity chat sidebar\0\0width of the AI chat sidebar (0 = use default); shared by "
+    "Claude Code, Grok Build, and OpenAI Codex (internal)\0\0remembered destination language for selection "
+    "translation; empty uses OS UI language\0remembered source language for selection translation; empty means "
+    "Auto\0remembered engine for Translate Selection: Google, DeepL, Grok Build, Claude Code or OpenAI "
+    "Codex\0\0default values for annotations in PDF documents\0\0list of additional external viewers for various file "
+    "types. See [docs for more "
     "information](https://www.sumatrapdfreader.org/docs/Customize-external-viewers)\0\0customization options for how "
     "forward search results are shown (used from LaTeX editors)\0\0these override the default settings in the Print "
     "dialog\0\0options for fullscreen mode\0\0list of handlers for selected text, shown in context menu when text "

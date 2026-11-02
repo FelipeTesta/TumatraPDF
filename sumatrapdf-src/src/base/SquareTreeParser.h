@@ -20,6 +20,10 @@ struct SquareTreeNode {
 
     Str GetValue(Str key, int* startIdx = nullptr) const;
     SquareTreeNode* GetChild(Str key, int* startIdx = nullptr) const;
+    // Set key=value, replacing any existing value item with the same key
+    // (case-insensitive). Used by settings-file migration to remap name/blob
+    // pairs before deserialization.
+    void SetValue(Str key, Str value);
 };
 
 SquareTreeNode* ParseSquareTree(Str s);

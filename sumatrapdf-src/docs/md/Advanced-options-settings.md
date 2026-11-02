@@ -37,6 +37,12 @@ If you add or remove lines with square brackets, **make sure to always add/remov
 ; cloud-synced folder (e.g. Google Drive) to keep the histories backed up
 FlashcardStudyDir = 
 
+; directory for the single-file Profile Memory store (tumatraPDF-data_1.json).
+; Empty = default app-data dir. Point it at a cloud-synced folder (e.g. Google
+; Drive) so the study histories, reading stats and per-doc info sync between
+; machines in ONE file
+ProfileDataDir = 
+
 ; default layout of pages. valid values: automatic, single page, facing, book
 ; view, continuous, continuous facing, continuous book view
 DefaultDisplayMode = automatic
@@ -356,7 +362,7 @@ ViewportCrop = 0 0 0 0 0 false false false
 Trim = 0 0 false
 
 ; flashcard study settings (introduced in version 3.7)
-FlashcardSettings = false 2
+FlashcardSettings = false 2 10
 
 ; customization options for PDF, XPS, DjVu and PostScript UI
 FixedPageUI [
@@ -1044,6 +1050,12 @@ FileStates [
 
     ; per-page scale states serialized for this document
     ArchScaleStates = 
+
+    ; total flashcard cards rated (studied) for this document
+    FlashcardCardsDone = 0
+
+    ; total seconds of flashcard study for this document
+    FlashcardStudyTimeSec = 0
   ]
 ]
 

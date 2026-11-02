@@ -6,7 +6,9 @@
 4. Housekeeping (2026-10-20, s36-ae; re-triaged s36-at): all `[x]` blocks archived — details live in LOG per session entry; this file lists open work only.
 
 ## 📋 NEXT_STEPS.md — Detailed Action Plan (Reference)
+
 **See [NEXT_STEPS.md](NEXT_STEPS.md)** for full prioritized action plan derived from FLOW analysis (tree-sitter + Serena) and critical findings below. Contains:
+
 - Priority 1: Blockers (ASan, Settings Migration, WebView2 Adapter)
 - Priority 2: Systemic Fixes (Coordinate Space Audit, Toolbar Ordering, ReloadDocument)
 - Priority 2.5: Theme Colors Compliance (Dark Mode White Controls in Dialogs)
@@ -17,46 +19,57 @@
 ## Critical Findings from FLOW Analysis (2026-11-01) — MUST FIX
 
 ### 1. Toolbar Critical Ordering — `SetWindowTheme` MUST run BEFORE `TbAddButtons`
+
 **Problem**: `ToolbarApplyThemeToRebar()` calls `SetWindowTheme` AFTER buttons are added → invalidates comctl32 per-button layout → `TB_GETITEMRECT` returns 0 → `ReportIf` triggers `TerminateProcess(exitCode=105)` → toolbar band paints BLANK (white buttons).
 **Why it's a problem**: This is the root cause of the "white/blank buttons" bug on secondary toolbars (Arch/Edit). The fix is replicating the Flashcard pattern: `SetWindowTheme(hwndToolbar, L"", L"")` **before** `TbAddButtons(iBitmap=TbIcon::Text)`. Affected: `CreateToolbar2()`, `EditToolbarCreate()`.
 **Status**: Partially fixed in s36-ax for Arch/Edit; verify all 4 toolbars follow this pattern.
 
 ### 2. Coordinate Space Mismatch — Recurring Bug Class (AGENTS.md §12)
+
 **Problem**: Mixing coordinate spaces silently breaks features. Convention:
+
 - `DisplayModel::CvtToScreen/CvtFromScreen`: PAGE coords ↔ CANVAS-CLIENT coords (includes scroll+zoom)
 - `VirtWnd` tree: `ev.pt` after `BubbleMouse` = LOCAL to target bounds; `ctx.bounds`/`VirtWnd::bounds` = ROOT-relative
 - E2E posted coords may arrive DPI-virtualized ×1.25 (non-deterministic)
-**Why it's a problem**: Silent coordinate mixing caused TrimConfigDialog to use wrong mediabox under TC2 (even pages = wrong box), TC2 render freeze (virtual pageNo passed to engine → `ReportIf` storm), and drag-line math duplication. Rule: before any hit-test, name the space of BOTH operands out loud (local/root/client/page). Mixed = bug.
+  **Why it's a problem**: Silent coordinate mixing caused TrimConfigDialog to use wrong mediabox under TC2 (even pages = wrong box), TC2 render freeze (virtual pageNo passed to engine → `ReportIf` storm), and drag-line math duplication. Rule: before any hit-test, name the space of BOTH operands out loud (local/root/client/page). Mixed = bug.
 
 ### 3. Dark Mode Epoch Invalidation — `darkModeEpoch` in RenderCache
+
 **Problem**: Theme change increments `darkModeEpoch` → `RenderCache::Find` skips stale entries → forces re-render with new colors (~1ms penalty). But `ToolbarApplyThemeToRebar` (legacy) doesn't trigger this properly.
 **Why it's a problem**: Inconsistent theme switching. The correct path is `DisplayModel::ApplyTheme()` → `darkModeEpoch++` → `gRenderCache->FreeAll()` → `WM_THEMECHANGED` → `RelayoutFrame()`. Legacy code paths bypass this, causing visual glitches on theme toggle.
 
 ### 4. WebView2 Adapter Trap — Silent Feature Death
+
 **Problem**: JS notify → `BrowserDocView::OnJsNotifyCb` → `MarkdownHtmlWindowHandler` (adapter, MarkdownModel.cpp:179) → `MarkdownModel` → `ControllerCallbackHandler`. Adapter **MUST** forward every new `HtmlWindowCallback` method. No-op default = feature silently dead.
 **Why it's a problem**: Autoscroll ETA for Markdown was stuck because the adapter didn't forward `autoscrollProgress` notifications. Contrast adapter had 3 divergent JS copies. Every new feature needing WebView2 communication MUST update the adapter, or it works in PDF but silently fails in Markdown.
 
 ### 5. Flashcard Annotation Convention — Author Token vs Contents
+
 **Problem**: Flashcards use `Author = "TumatraPDF-Flashcard#%08X"` for grouping (cross-page), `Contents = EMPTY`. Identity check MUST use `str::StartsWith(Author, "TumatraPDF-Flashcard")`, NOT `str::Eq`.
 **Why it's a problem**: `RebuildCommentsFromAnnotationsInner` turns ANY annot with non-empty contents into a page tooltip. If flashcard used contents for token, it would pollute the comments list. `str::Eq` silently drops tagged annots (breaks Canvas ctrl+click List panel and EditAnnotations filter). This convention is fragile and undocumented in code.
 
 ### 6. ASan Build Broken — `build-asan.ts` references `SumatraPDF.sln`
+
 **Problem**: `cmd/build-asan.ts` references upstream `SumatraPDF.sln` / `SumatraPDF-static` which don't exist in fork. ASan pipeline cannot run.
 **Why it's a problem**: No AddressSanitizer CI → memory bugs (UAF, buffer overflow) only caught in production. Premake encodes ASan `/DEPENDENTLOADFLAG:0xA00` exception but build script is stale. Fix: update `build-asan.ts` to use `TumatraPDF.sln` and `TumatraPDF` target.
 
 ### 7. Settings Migration Off-by-One — `gFileStateInfo` names blob missing `FlashcardStudyTimeSec`
+
 **Problem**: The `gFileStateInfo` names blob (serialized settings) is missing `FlashcardStudyTimeSec` (s36-at omission) → every FileState field ≥ 24 serializes under the NEXT field's name. Round-trip is index-consistent (data survives restarts) but names in settings file + AdvancedSettingsDialog lie. Pre-s36-at settings files read one-off (upgrade path corrupted).
 **Why it's a problem**: Inserting the missing name NOW would shift every read by one → needs a one-time migration. Rule: new FileState fields MUST append at the END of the table AND both blobs. This is a ticking time bomb for settings corruption on upgrade.
 
 ### 8. dmlib Intercepts NM_CUSTOMDRAW Before Subclass Chain
+
 **Problem**: `dmlib::setWindowNotifyCustomDrawSubclass()` intercepts `NM_CUSTOMDRAW` at window-proc level. Only `CDDS_POSTPAINT` reaches `ReBarWndProc`. Secondary toolbars (Arch/Edit) get NO custom draw → default comctl32 rendering = WHITE/BLANK buttons.
 **Why it's a problem**: The fix requires replicating Flashcard pattern: install rebar subclass **AFTER** dmlib (LIFO → first), handle `NM_CUSTOMDRAW` with wipe+redraw in `ITEMPOSTPAINT`, add `TBSTYLE_EX_MIXEDBUTTONS`, extend `ReBarWndProc` check to ALL 4 toolbars. This is a systemic issue affecting any custom-draw toolbar.
 
 ### 9. TC2 (Two Columns v2) Virtual→Physical Routing — Every Engine Call Must Route
+
 **Problem**: Under TC2, `PageCount() = VirtualPageCount (2N)`. Every engine call (`PageMediaBox`, `Transform`, `HasClipOptimizations`, `RenderPage`) must receive `VirtualToPhysical(pageNo)`. Missed one = `ReportIf(pageNo > pageCount)` = debug report storm + callstack **per paint** → UI freeze.
 **Why it's a problem**: Multiple sites missed routing (GetTileRes, TrimConfigDialog, non-cache Paint). The fix is systematic: grep for `engine->` calls in render path, ensure all get `dm->VirtualToPhysical(pageNo)`. Render cache key = VIRTUAL pageNo (left/right distinct), but engine calls = PHYSICAL.
 
 ### 10. ReloadDocument Must Preserve ALL Fork Fields
+
 **Problem**: `SaveAnnotationsToExistingFile` → `ReloadDocument` built a FRESH `FileState` and never copied fork's per-doc color fields → restore path reset them to defaults (invert/contrast/trim/crop lost on save).
 **Why it's a problem**: Fixed in LOG s36-az: `ReloadDocument` now carries `fs->invertColors/contrastEnabled/contrastOpacity/trimTop/trimBottom/viewportCropV2Enabled/autoScrollSpeedMultiplier` (same fields `UpdateFileState` persists). But this is a pattern: ANY new per-doc field must be added to BOTH `UpdateFileStateForTab` (save) AND `ReloadDocument` (restore). Missing one = silent data loss on save/reload.
 
@@ -78,7 +91,7 @@
 - [ ] **R7 / 16C-next**: continue god-file extraction — SumatraPDF.cpp (~14.2k lines, target ~10k), then Canvas.cpp (~5.7k; needs a dependency MAP first — mouse/keyboard interleaved with rendering, no established pattern), EngineMupdf.cpp (~6.7k, decouple rendering helpers per format).
 - [ ] **16D**: typed `gGlobalPrefs` accessors (152 accesses in SumatraPDF.cpp) — only when tests exist.
 - [ ] **TC2 leftovers**: uia `PageProvider` + legacy tile math not routed virtual→physical (non-cache path diverts; MVP-acceptable).
-- [ ] **Settings migration (names-blob off-by-one)**: the `gFileStateInfo` names blob is missing `FlashcardStudyTimeSec` (s36-at omission) → every FileState field ≥ 24 serializes under the NEXT field's name. Round-trip is index-consistent (data survives restarts intact — user's file proven), but the names in the settings file + AdvancedSettingsDialog lie, and pre-s36-at settings files read one-off (upgrade path corrupted). Inserting the missing name NOW would shift every read by one → needs a one-time migration. Rule (noted in Settings.h): new FileState fields MUST append at the END of the table AND both blobs (s36-az followed it for `flashcardCardsDone`).
+- [x] **Settings migration (names-blob off-by-one)** (fix s36-br): the `gFileStateInfo` names blob is missing `FlashcardStudyTimeSec` (s36-at omission) → every FileState field ≥ 24 serializes under the NEXT field's name. Round-trip is index-consistent (data survives restarts intact — user's file proven), but the names in the settings file + AdvancedSettingsDialog lie, and pre-s36-at settings files read one-off (upgrade path corrupted). Inserting the missing name NOW would shift every read by one → needs a one-time migration. Rule (noted in Settings.h): new FileState fields MUST append at the END of the table AND both blobs (s36-az followed it for `flashcardCardsDone`).
 
 ## Two Columns v2 — pending USER live-confirmations (code complete, all E2E-verified)
 
@@ -187,25 +200,30 @@ Shift+S: draw a rectangle that captures the image inside it at the document's DP
 - [ ] **Ctrl+click flashcard highlight opens List** — implemented s34-b (Canvas ctrl+click detects /T author TumatraPDF-Flashcard → FlashcardSidebarShow; turns flashcard mode on if off). USER live-test pending (needs a book with flashcard highlights).
 - [ ] **s34-g user validation pending**: Arch Measure Radius + Ref Line UX, resize-enlarge on a real book, flicker-free drag confirm (shipped + E2E 2026-10-11).
 - [ ] **ARCH/EDIT secondary toolbars white/blank buttons** (user: "continua branco sem botões"):
+
   ### Root cause
   - dmlib (gUseDarkModeLib=true on x64) intercepts NM_CUSTOMDRAW at window-proc level before subclass chain sees it (LOG s36-bb: only CDDS_POSTPAINT reaches ReBarWndProc)
   - Missing TBSTYLE_EX_MIXEDBUTTONs so comctl doesn't center button text under button rect
   - Flashcard toolbar works because FlashcardReBarSubclassProc installed after dmlib (LIFO→first) handles NM_CUSTOMDRAW directly + has TBSTYLE_EX_MIXEDBUTTONs
+
   ### Fix implemented (replicate flashcard pattern)
   - [x] Add TBSTYLE_EX_MIXEDBUTTONs to both toolbars (comctl centers text under button rect)
   - [x] Install dedicated rebar subclass (ToolbarArchEditRebarSubclassProc, unique ID 42) handling NM_CUSTOMDRAW with wipe+redraw in ITEMPOSTPAINT, installed AFTER dmlib (LIFO→first)
   - [x] Keep ToolbarSubclassPaint on toolbar HWND for WM_PAINT bypass (dmlib intercepts WM_NOTIFY but not WM_PAINT on toolbar HWND)
   - [x] Remove conflicting SetWindowSubclass(ReBarWndProc, ID 0) from Arch rebar (our ID-42 subclass runs first via LIFO)
   - [x] Build: 0 errors, 0 warnings
+
   ### Verification
   - [x] Internal TB_BUTTONCOUNT=7 confirms Arch toolbar buttons exist internally
   - [x] Code matches proven flashcard pattern (LOG s36-ax: 14/14 and 17/17 probe PASS)
   - [x] Automated pixel scan: INCONCLUSIVE — DWM makes GetPixel return CLR_INVALID under DWM (LOG s36-bb); captureWindowDCRegionToPng fails after sleep; cross-process TB_BUTTONCOUNT returns 0 (DPI virtualization)
   - [x] Manual visual confirmation: launch app, toggle Arch Tools + Edit Tools, verify buttons render with dark theme colors and visible text
+
   ### Files changed
   - src/Toolbar.cpp: ToolbarArchEditRebarSubclassProc, ToolbarSubclassSecondaryRebar, TBSTYLE_EX_MIXEDBUTTONs in CreateToolbar2, removed SetWindowSubclass(ReBarWndProc) ID 0
   - src/Toolbar.h: declarations for ToolbarSubclassSecondaryRebar, ToolbarSubclassPaint
   - src/Commands_Edit.cpp: ToolbarSubclassSecondaryRebar, TBSTYLE_EX_MIXEDBUTTONs, SetWindowTheme before buttons, ToolbarSubclassPaint
+
   ### Dot file
   - FLOW/toolbar-system.dot: complete system map (Flashcard working, Arch/Edit fixed, dmlib interception, shared infrastructure)
 
@@ -213,6 +231,7 @@ Shift+S: draw a rectangle that captures the image inside it at the document's DP
   - All done: crashes fixed (heap + stack overflow), labels full (PostAddTextButtonSizing helper), user-verified dark theme + full labels.
 
 ## Profile Memory
+
 Precisamos armazenar toda a informação de leitura e flashcards do usuário em um mesmo arquivo, esse arquivo precisa ser exportável, sincronizável e importável de outros lugares para caso o usuário transfira para outro computador.
 
 Vamos explorar as possibilidades de compatibilização com o sync do Google Drive, ou seja, eu salvo a minha base de dados de perfil `profile_data` em uma basta synced pelo google drive, e quero sincronizar essa mesma base de dados em outro PC que usa a mesma conta do google drive, precisamos explorar como o google drive trabalha o arquivo quando chegam atualizações desde a nuvem ou quando envia, e mapear um processamento para não corromper os arquivos e funcionar corretamente;
@@ -220,6 +239,7 @@ Vamos explorar as possibilidades de compatibilização com o sync do Google Driv
 Outro elemento, calcular a possibilidade e etapas para importar o `profile_data` desde o `TumatraPDF_Portable`→`TumatraPDF_Install`;
 
 Arquivo json de memória pode ter um prefixo indetificador: "tumatraPDF-data_"[numero de referencia, se necessario]
+
 - Gap s36-bf: ProfImportLegacy first-run-only — reconciliation of reading-stats.txt/flashcard-stats.txt day rows at startup pending (32reading days from legacy sidecars can go missing; recovery done manually 2026-10-31: added 20261017/20261019 rows to tumatraPDF-data_1.json).
 
 Quando aconteça de falhar a internet e o google drive ficar indisponível temporariamente, precisamos armazenar as novas informações localmente até que volte a conexão e o app substitua o arquivo antigo do drive pela versão mais recente. O sistema do backup também será importante por isso. Vamos criar um backup local a cada +-8 horas e armazenar localmente 9 backups, o botão de recuperar sessão (backup recover) deve dar uma lista de sessões de backup com data e hora para permitir recuperar. Botão 'import' obviamente deve substituir o data local.
@@ -228,13 +248,12 @@ Caso eu selecione uma pasta destino para a 'data' e já exista um 'data' anterio
 
 Podemos incluir na 'home', do lado direito do títuo "Stats", um botão `🔳 Sync` (símbolo + nome, pode escolher um símbolo que combine com o conceito). Clicar no botão abre a janela (ou similar) do flashcard/settings. Obviamente faltam informações nessa janela, podemos completar para deixar mais informativa e trabalhar melhor o visual dos botões e dos campos;
 
-
-
 ### Plan (s36 detail — F3/F4/F5)
 
 #### F3 — Drive-safe file handling (pre-sync hardening)
 
 Preconditions (verified):
+
 - profile_data file already carries version + lastWriteTs header fields — verify before use (ProfileData.h/.cpp).
 - Atomic local write via temp + MoveFileExW already exists — keep; never write directly to the synced path.
 - Local 9 × 8h rolling backups under <profileDir>/backup/ + ProfileBackupWnd (9-slot dialog, 5s hold + progress) already exist via F2.
@@ -272,21 +291,60 @@ Trap/risk: Portable path assumptions wrong → import reads empty/missing dirs; 
 Verify: copy real Portable data to temp, run import, diff state counts.
 
 ### Gap do roadmap original (sessão correta re-exportada 2026-11-01) — itens NÃO cobertos pelo F3/F4/F5 atual
+
 - [x] **F6 — Home botão `🔁 Sync` + janela Profile** (roadmap original F3): botão à direita do título `Stats` na Home; abre janela Profile (molde Config): campos = pasta destino (profileDataDir), nome/versão arquivo, tamanho, última gravação, máquina, nº livros/cards/dias, dica pasta Drive; botões = Salvar Agora (ProfileDataSaveNow), Exportar, Importar, Abrir Pasta, Backups (reusa CmdProfileBackups dialog). + nota: único export atualmente órfão=ProfileDataBackupCount → wire aqui. — DELIVERED s36-bn (+ repair rounds s36-br..)
 - [x] **F7 — Export/Import UI + checksum** (roadmap original F4 UX + F1 spec incompleta): — DELIVERED: (a) checksum s36-bp, (b) Export/Import buttons s36-bq, (c) Replace/Merge/Cancel prompt s36-bq
-  (a) **checksum no header** do tumatraPDF-data_1.json (spec F1 original tinha version/machine/lastWriteMs/checksum; header atual só version/lastWriteTs/machine) = base p/ detecção de corrupção no Drive;
-  (b) Exportar = copiar perfil (primary + opcionais loops de backup) p/ pasta escolhida — caminho natural p/ Drive (user escolhe pasta synced);
-  (c) Import wizard + diálogo sobrescrever-vs-usar-existente quando destino já tem dados (opt-in explícito).
+      (a) **checksum no header** do tumatraPDF-data_1.json (spec F1 original tinha version/machine/lastWriteMs/checksum; header atual só version/lastWriteTs/machine) = base p/ detecção de corrupção no Drive;
+      (b) Exportar = copiar perfil (primary + opcionais loops de backup) p/ pasta escolhida — caminho natural p/ Drive (user escolhe pasta synced);
+      (c) Import wizard + diálogo sobrescrever-vs-usar-existente quando destino já tem dados (opt-in explícito).
 - [ ] **F8 — Endgame centralização** (transição dual-write → profile é fonte única): migrar FlashcardStudyListDocs p/ iterar livros do perfil; deprecar write dual nos per-book *.json + sidecars QUANDO estável (janela Config flashcard continua lendo fallback legacy); manter per-machine day rows p/ multi-PC.
 - [x] NOTA s36-bm: F3 slices 1-3 (reconcile/conflicted-merge/cloud-revert), F4 setter+migração e F5 import Portable→Install silencioso JÁ implementados (branch fix/secondary-toolbars, s36-bf..s36-bj, committed (s36-bm follow-up commits)). Roadmap original consulta: sessão exportada session-3a61b9f2 (Temp).
 
 - **P1-migration (verified s36-bo, degrades perDoc):** `gFileStateInfo` (bloco de nomes em Settings.h ~1700) está SEM "FlashcardStudyTimeSec" (44 campos vs 43 nomes; campos de índice ≥23 deslocados: flashcardCardsDone, invertColors, contrastEnabled ... archScaleStates). Round-trip consistente, mas arquivos PRE-s36-at carregam valores nos campos ERRADOS → `ProfPullHistory` (ProfileData.cpp:1277) snapshot `flashcardStudyTimeSec`/`flashcardCardsDone` errados no perDoc do perfil para usuários que fizeram upgrade com settings antigas. Fix planejado: (1) adicionar `FlashcardStudyTimeSec` ao FIM da tabela FileState em `cmd/gen-settings.ts`; (2) `bun cmd/gen-code.ts`; (3) migration em Settings.cpp LoadSettings() p/ version < 37 deslocando os campos de volta uma posição antes de deserializar. NOTA: campos readingTimeSec (índice 22) NÃO afetados.
 
 ## Tab system
+
 Vamos incluir do lado direito do botão principal no topo da janela, antes de iniciar as abas (a esquerda das abas dos documentos), um botão "Tab Group", a ideia é melhorar e deixar mais dinâmico o Tab group que já existe; Ao clicar, deve exibir como dropdown a lista dos 'Tab groups' já existentes, ao clicar em algum deles, fecha todas os documentos atuais e reabre todos os documentos do tab group selecionado; ao abrir outro documento dentro de um tab group aberto, deve sincronizar automaticamente (salvar) para proximas sessões;
 abrir o app sempre restaura o último tab group usado pelo usuário; se não houver, abrir `new`;
 
 'Ctrl+n' abre uma janela com um tab group `New`, ou seja, não sincronizado; nesse caso, se o usuário quiser salvar essa sessão como uma tab group, vamos incluir um botão na lista dropdown `Save`, ao clicar abre um editor/input de texto para nomear o grupo, imediatamente depois disso, o grupo deve sincronizar automaticamente ao fechar ou incluir documentos na sessão; arrastar um documento para fora de uma sessão automaticamente o exclui desse group aberto e inclui em um tab group `new` não sincronizado;
+
+## Sumatra → Tumatra — labels UI (DONE)
+
+Renomeados "Sumatra" → "Tumatra" em strings visíveis ao usuário (labels/títulos/menus):
+
+- [x] `src/SumatraPDF.cpp` — `"SumatraPDF - Printers"`, `"SumatraPDF Documentation"`, `_TRA("SumatraPDF crashed")` (x2), corpo da mensagem crash
+- [x] `src/SumatraDialogs.cpp` — `_TRA("SumatraPDF Options")`
+- [x] `src/Flags.cpp` — `_TRA("SumatraPDF - Show Printers")`
+- [x] `src/Installer.cpp` — `L"SumatraPDF"` (título janela, x2)
+- [x] `src/SumatraStartup.cpp` — `L"SumatraPDF"`, `L"SumatraPDF installer"`, `L"SumatraPDF installer usage"`
+- [x] `src/MainWindowCreate.cpp` — comentário + `StrL("SumatraPDF is no longer the default app...")`
+- [x] `src/Commands.cpp` — `"Help: SumatraPDF Website"`, `"Help: About SumatraPDF..."`, `"SumatraPDF File Picker"`
+
+## Sumatra → Tumatra — itens não-label (revisão profunda pendente)
+
+Itens que envolvem nomes de arquivo .exe, classes de janela internas, registry/CLSID, instalador/uninstaller, testes de path/CLI, recursos .rc — requerem revisão case-by-case antes de alterar (não são labels de UI diretos):
+
+- [ ] `src/Installer.cpp:866,890` — `StrL("SumatraPDF.exe.copy")`, `StrL("SumatraPDF.exe")` (nomes de arquivo no instalador)
+- [ ] `src/Uninstaller.cpp:51,63,372,386` — `"SumatraPDF.exe"`, `"SumatraPDF-settings.txt"`, `"Sumatra-Uninstaller.exe"` (arquivos de desinstalação)
+- [ ] `src/RegistryPreview.cpp:194,210` — `StrL("SumatraPDF.exe")`, `StrL("SumatraPDF-data")` (caminhos de registry/preview)
+- [ ] `src/base/tests/File_ut.cpp` — `"SumatraPDF.exe"`, `"SumatraPDF"` (asserts de teste de path)
+- [ ] `src/SumatraUnitTests.cpp` — `"SumatraPDF.exe -bench ..."` (testes de linha de comando)
+- [ ] `src/SumatraPDF.rc:76-80` — arquivo de ícone `SumatraPDF-smaller.ico` (recurso)
+- [ ] `src/TestPlugin.cpp` / `tools/plugin-test.cpp` — `L"SumatraPDF Plugin Test"` (nome do plugin de teste)
+- [ ] Classes de janela internas (manter por compatibilidade Win32, avaliar caso a caso):
+  - `src/base/Win.cpp:1906` — `L"SumatraPDFClipboardOwner"`
+  - `src/wingui/Wnd.cpp:66` — `L"SumatraWgDefaultWinClass"`
+  - `src/previewer/PdfPreview.cpp:372` — `L"SumatraPDF_PreviewPane"`
+  - `src/ScreenshotCapture.cpp:25` — `L"SumatraScreenshotOverlay"`
+  - `src/SelectionToolbar.cpp:35` — `L"SumatraSelectionToolbar"`
+  - `src/RefHoverInternal.h:9` — `L"SumatraPDFRefHover"`
+- [ ] Registry/CLSID/DDE/user-agent (internos do Windows, avaliar impacto de registro/associação de arquivos):
+  - `src/RegistrySearchFilter.cpp` — `"SumatraPDF IFilter"`, etc.
+  - `src/SearchAndDDE.h` — `kSumatraDdeServer L"SUMATRA"`, structs `SumatraOpen*`
+  - `src/base/Http_win.cpp:62` / `Http_mac.cpp:53` — user-agent `SumatraPdfHTTP`
+  - `src/SumatraLog.cpp:13` / `SumatraLog_posix.cpp:9` — `gLogAppName = StrL("SumatraPDF")`
+  - `src/SumatraPDF.h` — funções `SumatraLaunchBrowser`, `WndProcSumatraFrame`, `GetSumatraDataDirTemp`, etc.
 
 ## Vertical_Toolbar (PARKED — DO NOT DO)
 

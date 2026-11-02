@@ -197,6 +197,18 @@ SquareTreeNode* SquareTreeNode::GetChild(Str key, int* startIdx) const {
     return item ? item->child : nullptr;
 }
 
+void SquareTreeNode::SetValue(Str key, Str value) {
+    // remove existing value items with this key (case-insensitive)
+    for (int i = len(data) - 1; i >= 0; i--) {
+        DataItem* item = data[i];
+        if (!item->child && str::EqI(key, item->key)) {
+            FreeDataItem(item);
+            data.RemoveAt(i);
+        }
+    }
+    data.Append(AllocDataItem(key, value, nullptr));
+}
+
 // Line classification after scanning key / separator / value span.
 enum class LineKind {
     NodeOpen,     // key [ ... ]  or  key \n [

@@ -1,83 +1,126 @@
-﻿## 2026-11-01 (s36-bq) — Profile Memory F7 slice B: Export + Import (merge/replace)
+﻿## 2026-11-01 (s36-br) — Settings FileState names-blob migration (P1-migration) — FIXED
 
 ### Added
+
+- AppSettings.cpp: one-time FileState names-blob migration at LoadSettings; parse raw settings tree, remap shifted name/blob pairs (old name[k+1] value → new name[k], k=23..41; FlashcardStudyTimeSec ← old InvertColors; FlashcardCardsDone ← 0), re-serialize, then deserialize. Int clamp [-1e9,1e9]; bools/strings/floats copy as-is.
+- base/SquareTreeParser.h/.cpp: SquareTreeNode::SetValue(Str key, Str value) for migration rename-roundtrip.
+- tests/ad-hoc-settings-migration.ts: gen1/gen2/gen3 fixtures in real on-disk format, isolated -appdata dirs, launch without -for-testing, assert on re-saved file. Registered in tests/before-release.ts only.
+
+### Fixed
+
+- Old on-disk settings (44 fields / 43 names, missing FlashcardStudyTimeSec at idx23) corrupted fields ≥ 23 on read (gen1/gen2). Structural 3-gen detection: gen3 has FlashcardStudyTimeSec → skip; gen2 has FlashcardCardsDone → migrate; gen1 has neither → migrate same shift.
+
+### Verified
+
+- bun cmd/build.ts 0 err/0 warn; copied to Compiled\TumatraPDF.exe.
+- tests/ad-hoc-settings-migration.ts gen1/gen2/gen3 PASS: gen2 FlashcardStudyTimeSec=1234 + InvertColors not polluted + ArchScaleStates remapped; gen3 identity roundtrip; gen1 re-saved, FlashcardCardsDone=0.
+
+### Notes
+
+- Root causes fixed: SquareTree section children keyed "" (iterate GetChild(StrL("")), not section name); StrL() on a const char* variable = sizeof(pointer)-1=7 (truncated keys) — use Str() for runtime strlen.
+- Generator owns Settings.h/Settings.cpp (hand edits caused s36-az debt); do not regenerate/touch them.
+- -for-testing blocks SaveSettings; test launches without it to observe re-saved file.
+- Old field idx43 flashcardCardsDone value unrecoverable-by-design → defaults 0.
+- No commit (awaiting explicit command).
+
+## 2026-11-01 (s36-bq) — Profile Memory F7 slice B: Export + Import (merge/replace)
+
+### Added
+
 - ProfileData.cpp: `ProfileDataExportToDir(const char* destDir)` — copies primary + backup/ subtree to destDir; fails if primary missing or dest primary exists; create dest recursively; logf counts.
 - ProfileData.cpp: `ProfileDataImportFromJson(const char* srcJsonPath, bool replace)` — replace=true moves primary to .pre-import, copies src → primary, reloads; replace=false merges (newest-wins-adopt-absent) book keys + (dateKey,machine) day rows, dirty+SaveNow.
 - ProfileSyncWnd.cpp: Export (folder pick, IFileDialog FOS_PICKFOLDERS) + Import (file pick, *.json filter) buttons; dest-exists confirmation MB_OKCANCEL; two-choice Replace/Merge/Cancel prompt; gForTesting skips pickers with logf.
 - ProfileSyncWnd.cpp: button row expanded to 6 (two rows of 3): Save Now/Open Folder/Backups + Export/Import/Close.
 
 ### Changed
+
 - ProfileData.h: two terse decls `ProfileDataExportToDir` / `ProfileDataImportFromJson`.
 - ProfileSyncWnd.cpp: two-button-row layout anchored bottom-up; picker precedent reused from FlashcardToolbar::FcPickFolder.
 
 ### Verified
+
 - bun cmd/build.ts 0 err/0 warn; copied to Compiled\TumatraPDF.exe.
 - launch -for-testing ext\a-zlib\zlib.3.pdf ALIVE_OK 12s, no sumatrapdfcrash.txt.
 - E2E closure: ad-hoc-profile-sync-visual.ts 13/13 (Export/Import clicks asserted no-hang via gForTesting skip); build 0/0; checksum test ad-hoc-profile-checksum.ts 3 launches PASS. Committed this turn (user-ordered).
 
 ### Notes
+
 - s36-bq chosen (s36-bp at top, bq unused).
 - No commit (awaiting explicit command).
 
 ## 2026-11-01 (s36-bp) — Profile Memory F7 slice A: integrity checksum
 
 ### Added
+
 - ProfileData.cpp: ProfReadChecksumTemp / ProfBlankChecksumTemp / ProfComputeChecksumTemp / ProfSubstChecksumTemp helpers (static, file-local).
 - ProfileData.cpp: ProfSaveInner writes `"checksum": ""` placeholder, computes MD5 over body-with-empty-checksum, substitutes real hex hash before atomic MoveFileExW swap.
 - ProfileData.cpp: ProfileDataEnsureLoaded verifies checksum after successful primary parse; mismatch → logf "[profile] checksum mismatch — primary corrupt (ts=%lld)" → routes to existing corrupt path (backup-slot recovery loop, then legacy import). Absent/empty checksum token (old-format files) → skip verify, log once.
 
 ### Changed
+
 - ProfileData.cpp: header gains `"checksum"` token after `"machine"` in version/lastWriteTs/machine block. Format version stays _1 (checksum is additive, optional; no migration needed).
 
 ### Verified
+
 - bun cmd/build.ts 0 err/0 warn; copied to Compiled\TumatraPDF.exe.
 - ad-hoc-profile-checksum.ts: Launch 1 ALIVE_OK (profile created with checksum); Launch 2 ALIVE_OK (checksum round-trip); corrupt 1 byte mid-file; Launch 3 ALIVE_OK (recovery via backup/legacy), no sumatrapdfcrash.txt.
 
 ### Notes
+
 - s36-bp chosen (s36-bn at top, bp unused).
 - No commit (awaiting explicit command).
 
 ## 2026-11-01 (s36-bn) — Profile Memory F6 slice 1: Home Sync button + ProfileSyncWnd
 
 ### Added
+
 - HomePage.cpp: HomeChromeWnd gains `syncBtn` member (HomeSyncBtnWnd : VirtWndText, clears vwfNoHitTest so it is a hit target). Renders "⟳ Sync" next to "Stats" header at rcSync(rcHdr.x + rcHdr.dx + DpiScale(8), centered vertically), always shown; RTL mirrors to left of header. Hover = ThemeWindowTextColor, idle = ThemeWindowDarkerTextColor, hand cursor. Click → ShowProfileSyncDialog(win) via WndFromPoint/BubbleMouse hit-test bridge (ev.pt local to target bounds; root-space = pt + bounds.{x,y}). Created in EnsureHomeChrome, bounds re-applied in HomePageSyncChrome.
 - src/ProfileSyncWnd.h / .cpp (NEW): ProfileSyncWnd modal dialog mirroring ShowProfileBackupsDialog mold. Readout rows: Destination dir (gGlobalPrefs->profileDataDir or default app-data dir via ProfileDataPathTemp), File (tumatraPDF-data_1.json), Format version (hand-rolled scan of "version" token, IntToStr), Size (%d KB), Last save (file LastWriteTime), Machine ("machine" key or GetComputerNameW), Counts (books / readingStats / fcStats via lite JSON object member count), Backups (ProfileDataBackupCount() — previously zero callers), Drive hint label "Place this folder in Google Drive to sync across devices". Buttons: Save Now (BS_DEFPUSHBUTTON → ProfileDataSaveNow() + refresh rows), Open Folder (ShellExecuteW on resolved dir), Backups → ShowProfileBackupsDialog(win), Close (Esc too).
 - premake5.files.lua: added ProfileSyncWnd.* next to ProfileBackupWnd.*.
 
 ### Verified
+
 - (pending build)
 
 ### Notes
+
 - s36-bn chosen because top entry was s36-bl (confirmed unused).
 - Export/Import deferred to F7 slice.
 - No commit (awaiting explicit command).
 
 ### Fixed
+
 - Root cause: split arrays (?)sToolbarPackStates [1302] / sToolbarRewrapStates [1632] — RebuildToolbarButtonsForWidth wrote lastPackedAvailDx only to pack table; ToolbarRewrapAfterSizing guard (1683) read rewrap table copy = -1 forever → 200ms rewrap loop when wraps change (narrow) → RelayoutFrame feedback = non-stop flicker.
 - Fix: synchronized write sToolbarRewrapStates[stateIdx].lastPackedAvailDx = availDx after pack write (Toolbar.cpp ~1446), fwd decl before use + duplicate def removed at ~1642; guard logic unchanged; comment added.
 
 ### Verified
+
 - build 0 err/0 warn (Compiled\ updated); launch ALIVE_OK 12s, no sumatrapdfcrash.txt.
 - Quantitative: MoveWindow 700x500→500x400, settle, 2 PNG captures 400ms apart byte-identical → no repaint loop while static.
 
 ### Notes
+
 - Wider lesson (lemma m…): array/state struct splits must re-partition all writer/reader pairs; stale comments citing cross-references go bad silently.
 
 ## 2026-11-01 (s36-bi) — Profile Memory F4: profileDataDir setter + migration
 
 ### Added
+
 - ProfileData.cpp: ProfEnsureProfileDirAndMigrate + ProfCopyDirTree helpers; ProfileDataEnsureLoaded calls ProfEnsureProfileDirAndMigrate before reading primary file; mkdir (dir::CreateAll) on load, logf when created; on dir change copies tumatraPDF-data_*.json + backup/ subtree from old app-data dir to new dir, never deletes source, conflict-copies included, logf counts; skips migrate when new dir already has primary (keeps new dir, logf).
 
 ### Changed
+
 - ProfileData.cpp: profileDataDir resolution EMPTY => default app-data dir (GetPathInAppDataDirTemp), NON-empty => used verbatim (path::Join); setting already registered String default "" in Settings.h (no gen-code change); advanced-settings JSON settable. ProfileDataPathTemp hardcodes nothing to AppData; kProfileDataFileName = tumatraPDF-data_1.json primary in any dir.
 - SumatraStartup.cpp: startup cloud-revert prompt wrapped: Consume always (clears flag), Prompt only when !gForTesting (-for-testing), comment "skip startup prompt in automated testing runs". Prevents modal hang of -for-testing automation.
 
 ### Verified
+
 - bun cmd/build.ts 0 err/0 warn; copied to Compiled\TumatraPDF.exe.
 - launch -for-testing ext\a-zlib\zlib.3.pdf ALIVE=True ≥12s; out\dbg64\sumatrapdfcrash.txt absent; taskkill clean.
 - Rebuild unblocked by killing stale TumatraPDF.exe (PID 11104) holding libsumatrapdf.dll (LNK1104 sharing violation).
 
 ### Notes
+
 - Migration old dir = default app-data dir (GetAppDataDirTemp); Drive use case: user sets profileDataDir to synced folder, profile (+ backup/) migrates on first load.
 - Overwrite-vs-use-existing dialog deferred (TODO F4 initial-load conflict UX).
 - gen-settings.ts does NOT list profileDataDir but Settings.h member + table entry (default "") already make it settable; no gen-code change (per instructions).
@@ -86,6 +129,7 @@
 ## 2026-11-01 (s36-bh) — Profile Memory F3 slice 3: cloud-revert restore prompt
 
 ### Added
+
 - ProfileData.cpp: file-local flag `gCloudRevertPending`; `ProfileDataEnsureLoaded` compares primary `lastWriteTs` vs max backup slot `lastWriteTs` (new static `ProfSlotLastWriteTs` helper reusing slot-read loop); sets flag + logs "[profile] cloud revert detected..." only when newest backup strictly newer than primary.
 - ProfileData.h: `ProfileDataConsumeCloudRevertPending()` (returns+clears flag), `ProfileDataCloudRevertPrimaryTs()`, `ProfileDataCloudRevertNewestBackupTs()`, `ProfileDataCloudRevertNewestBackupSlot()` declared near `ProfileDataRecoverBackupSlot`; no prose comments.
 - ProfileBackupWnd.cpp/.h: `ProfileDataPromptCloudRevert(MainWindow*, HWND)` small themed modal dialog showing primary vs newest backup stamp, Restore (default) / Keep buttons, Esc = Keep; Restore → `ProfileDataRecoverBackupSlot(newestSlot)`, mirrors F2 dialog restore + logf.
@@ -93,74 +137,90 @@
 - SumatraStartup.cpp include: ProfileData.h + ProfileBackupWnd.h added.
 
 ### Verified
+
 - bun cmd/build.ts 0 err/0 warn; auto-copied to Compiled\TumatraPDF.exe.
 - launch -for-testing ALIVE_OK PID 11104 ≥12s; out\dbg64\sumatrapdfcrash.txt absent; taskkill clean.
 - detection only fires when backup strictly newer (equal/older → flag never set, prompt skipped).
 - prompt skipped when no backups exist (no slots → consume false).
 
 ### Notes
+
 - Stamp formatted via localtime_s ("YYYY-MM-DD HH:MM"), not the ProfileDataBackupStampTemp string path, to keep dialog self-contained.
 - No commit (awaiting explicit command).
 
 ### Added
+
 - ProfReconcileSidecars (ProfileData.cpp): startup adopts sidecar day rows (reading-stats.txt / flashcard-stats.txt) whose (dateKey, machine) pair is absent from profile sections; idempotent; books deliberately excluded (ProfImportBooksFromDir appends w/o dedup — books merge via ProfileDataMergeStudyDoc on contact).
 - ProfileDataEnsureLoaded corrupt gate: empty/unparseable main profile → restore newest valid backup slot → else legacy import; reconcile runs after every successful load path.
 - ProfMergeConflictedCopies: scans profileDataDir top-level for tumatraPDF-data_*.json Drive conflicted copies (not primary, not backup slots); adopts absent book keys + absent (dateKey, machine) day rows; marks dirty so next save flushes merged lastWriteTs; copies never deleted/renamed; idempotent.
 
 ### Verified
+
 - SaveNow write path re-confirmed atomic (temp + MoveFileExW) — unchanged, no rewrite.
 - bun cmd/build.ts 0 err/0 warn; launch -for-testing ALIVE_OK ≥12s, no sumatrapdfcrash.txt.
 
 ### Notes
+
 No bulk merge fixture test (needs real Drive conflicted-copy fixture). F3 remainder: cloud-revert restore prompt via F2 dialog. F4 (profileDataDir setter → Drive folder) and F5 (Portable→Install import) pending — plan in TODO.md ## Profile Memory.
 
 ## 2026-10-31 (s36-bf) — PostAddTextButtonSizing consolidation + profile merge audit
 
 ### Fixed
+
 - Secondary toolbar labels truncated ("Measu…") — comctl derives BTNS_SHOWTEXT widths lazily. Consolidated PostAddTextButtonSizing(win, hwndToolbar) (Toolbar.cpp f.1396, Toolbar.h:66): TbAutosIZE + explicit cx enforcement (label + DpiScale(12) pad) after TbAddButtons AND after rebar re-wrap. CreateToolbar2 (Arch) + EditToolbarCreate call it, 2 passes. Paint draws DT_CENTER|DT_VCENTER over full rect — safe once sized; no DT_END_ELLIPSIS. Precedent EnforceToolbarTextButtonWidths (Toolbar.cpp f.1324) + relayout-storm trap m205d3d458df8.
 
 ### Added
+
 - Profile merge audit: legacy Compiled\data\*.json per-book auto-merge into tumatraPDF-data_1.json (newest-wins); reading-stats.txt/flashcard-stats.txt sidecars imported by ProfImportLegacy only on first profile run — later sidecar day rows silently unreconciled (future feature). One-off recovery: added 20261017/20261019 rows to tumatraPDF-data_1.json.
 
 ### Verified
+
 - Build 0 err 0 warn; launch ALIVE_OK. User visually confirmed Arch/Edit toolbars open dark theme, labels full.
 
 ### Notes
+
 - Startup reconciliation of sidecar day rows = pending future feature (Profile F3 drift-sync plan).
 - No commit.
 
 ## 2026-10-31 (s36-be) — Arch/Edit toolbar startup crash fix
 
 ### Fixed
+
 - 0xC0000005 heap corruption — NM_CUSTOMDRAW dwItemSpec is COMMAND ID, not button index; fed raw to TbGetButtonInfo(TBIF_BYINDEX)/TB_GETITEMRECT = OOB. Fixed via TB_COMMANDTOINDEX resolve, bail CDRF_DODEFAULT if <0 (flashcard FlashcardToolbar.cpp:225 precedent). Toolbar.cpp ToolbarArchEditRebarSubclassProc.
 - 0xC00000FD stack overflow — WndProcToolbar installed on secondary toolbars shared global DefWndProcToolbar and recursed with ToolbarPaintSubclassProc via same HWND (WndProcToolbar→CallWindowProcW→DefSubclassProc→paint proc→WndProcToolbar). Removed secondary WndProcToolbar installs, deleted ToolbarSubclassSecondaryToolbar (Toolbar.cpp + Toolbar.h + Commands_Edit.cpp call site), WndProcToolbar default path guards DefWndProcToolbar null or == own proc → DefWindowProcW. Secondary toolbars get ONLY ToolbarSubclassPaint.
 - Build clean 0 err 0 warn; launch ALIVE_OK 10s. Visual confirmation pending user.
 
 ### Files
+
 - src/Toolbar.cpp, src/Toolbar.h, src/Commands_Edit.cpp, FLOW/toolbar-system.dot, TODO.md
 
 ## 2026-10-28 (s36-bd) — Profile Memory F2: Profile Backups UI + CmdProfileBackups
 
 ### Added
+
 - ProfileBackupWnd.h/.cpp: modal dialog 9 slots ×8h, stamp display via ProfileDataBackupStampTemp, 5s hold restore via ProfileDataRecoverBackupSlot, per-slot progress, Esc close, DPI-aware layout.
 - CmdProfileBackups added to cmd/gen-commands.ts, regenerated Commands.h/.cpp.
 - SumatraPDF.cpp: case CmdProfileBackups dispatches ShowProfileBackupsDialog(win).
 - premake5.files.lua includes ProfileBackupWnd.*.
 
 ### Changed
+
 - ProfileBackupWnd.cpp include order fixed Base.h first, own header last, clang-format applied.
 
 ### Verified
+
 - Build clean 0 warnings 0 errors, ProfileBackupWnd.obj linked.
 
 ### Notes
+
 - Backups under <profileDir>/backup/00..08/stamp.txt + tumatraPDF-data_1.json.
 - UI matches design guidelines dark/light, screenshot verification pending.
 
 ## 2026-10-28 (s36-bc) — Profile Memory F1: tumatraPDF-data_1.json core, dual-write hooks, Home stats merged
 
 ### Added
-- ProfileData.h/.cpp: single-file user-data store 	umatraPDF-data_1.json with rolling 9-slot ×8h backups, atomic write (MoveFileExW replace), JSON hand-parsed/written same style as Flashcard.cpp. POD structs Vec<ProfileBook>, day-attributed reading/study rows, per-doc FileState snapshot pull.
+
+- ProfileData.h/.cpp: single-file user-data store umatraPDF-data_1.json with rolling 9-slot ×8h backups, atomic write (MoveFileExW replace), JSON hand-parsed/written same style as Flashcard.cpp. POD structs Vec<ProfileBook>, day-attributed reading/study rows, per-doc FileState snapshot pull.
 - Settings.h: profileDataDir member + table entry (148 fields). profileDataDir empty → same pattern as lashcardStudyDir (GetPathInAppDataDirTemp).
 - Flashcard.h exports: FlashcardStudyWriteJsonValue, FlashcardStudyWriteJsonStringLit, FlashcardStudyParseJsonInto, FlashcardStudyParseJsonStringFieldDup. Hooks: FlashcardStudySave → ProfileDataUpdateStudyDoc; FlashcardStudyLoad → ProfileDataMergeStudyDoc + profile-only adopt fallback; FlashcardStudyRecoverBackup → ProfileDataReimportStudyFiles; FlashcardDeleteAllStudyFiles → ProfileDataClearStudyDocs.
 - ReadingStats.cpp / FlashcardStats.cpp: ProfileDataUpsertReadingDay / ProfileDataUpsertStudyDay on flush, ProfileDataSaveNow to materialize day rows; live module still owns this-machine day values (profile rows of THIS machine are skipped on merged getters).
@@ -168,15 +228,18 @@ No bulk merge fixture test (needs real Drive conflicted-copy fixture). F3 remain
 - premake5.files.lua: ProfileData.* included.
 
 ### Changed
+
 - Merge policy: newest-wins per state key (lastReviewedAt), day entries per-machine attribution dateKey → machine → sec[,cards]. Legacy per-book <md5>.json + sidecars still written (dual) and imported on first run, zero regression risk F1.
 
 ### Verified
-- Build clean (clang-format, premake regen, C++ warnings as error). Probe 	ests/tmp/profile-probe.ts:
-  - PASS1 legacy import materialized 	umatraPDF-data_1.json (1 book, 2 reading days, 2 study days saved + backup slot 01 refreshed).
+
+- Build clean (clang-format, premake regen, C++ warnings as error). Probe ests/tmp/profile-probe.ts:
+  - PASS1 legacy import materialized umatraPDF-data_1.json (1 book, 2 reading days, 2 study days saved + backup slot 01 refreshed).
   - PASS2 after legacy deletion: profile-only adopt kept study states (profile loaded, not empty).
 - Existing ad-hoc flashcard tests (ad-hoc-flashcard-cloze, issue-1914) unchanged PASS on same exe.
 
 ### Notes
+
 - JSON schema v1: books keyed by md5-of-pdf-path, docName/docPath/states shape mirrors legacy; readingStats/fcStats day objects keep {machine: sec} or {machine:{sec,cards}}; perDoc counters mirror gFileHistory at save.
 - Day merge rule: this-machine rows are always taken from live module; other-machine rows summed from profile → no double counting.
 - Backups generalized from Flashcard 1d/3d/7d to 9×8h with stamp.txt period guard.

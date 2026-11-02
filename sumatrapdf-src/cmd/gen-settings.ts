@@ -810,6 +810,8 @@ const fileSettings: Field[] = [
   field("ArchScaleSet", Bool, false, "whether arch scale is defined for this doc"),
   field("ArchMeasurements", Str, "", "arch tools measurements serialized for this document"),
   field("ArchScaleStates", Str, "", "per-page scale states serialized for this document"),
+  field("FlashcardCardsDone", Int, 0, "total flashcard cards rated (studied) for this document"),
+  field("FlashcardStudyTimeSec", Int, 0, "total seconds of flashcard study for this document"),
 ];
 
 const tabState: Field[] = [
@@ -869,6 +871,7 @@ const flashcard: Field[] = [
     2,
     "where new (never rated) cards go relative to due reviews in the study queue: 0 = new first, 1 = new last, 2 = mixed (interleaved proportionally)",
   ),
+  field("FlashcardMarkerAlpha", Int, 10, "alpha (0-255) for the flashcard translucent gray marker. Lower values make the marker more subtle. Default 10 for very subtle highlighting."),
 ];
 
 const globalPrefs: Field[] = [
@@ -880,6 +883,12 @@ const globalPrefs: Field[] = [
     Str,
     "",
     "directory where flashcard study history JSONs are stored (per-book files, MD5-named). Empty = default app-data dir (FlashcardStudy). Point it at a cloud-synced folder (e.g. Google Drive) to keep the histories backed up",
+  ),
+  field(
+    "ProfileDataDir",
+    Str,
+    "",
+    "directory for the single-file Profile Memory store (tumatraPDF-data_1.json). Empty = default app-data dir. Point it at a cloud-synced folder (e.g. Google Drive) so the study histories, reading stats and per-doc info sync between machines in ONE file",
   ),
 
   field(

@@ -282,3 +282,34 @@ All project informativos (`README.md`, `LOG.md`, `TODO.md`, `BUILD.md`, `MERGE.m
 - Keep `FASE` (not PHASE) as phase identifier — matches LOG.md history.
 - `FLOW/*.dot` = process maps only. Never hand-maintain code-architecture `.dot` — use tree-sitter (§0b).
 - Deprecated informativos live in `TEMP/` (gitignored): `FLASHCARD_IMPLEMENTATION_PLAN.md`, `docs/TumatraPDF2/PLAN.md` (TumatraPDF2 discontinued), `sumatrapdf-src/LOG.md`, `sumatrapdf-src/readme.md`, `diff_sumatra.txt` — reference only, never extend.
+
+# 14. Lemma memory lifecycle (MANDATORY)
+
+- Every new session: lemma `session_start({task_type, technologies, initial_approach})` FIRST → loads relevant guides + preloaded memories
+- Before act: `memory_read`, query = keywords in English
+- After finish: `memory_add` fragment `## Title\n### Context\n...\n### Content\n...`, 30-2000 chars, ENGLISH + `session_end({outcome, final_approach, lessons})`
+- Never ask permission to save. Store fragments in ENGLISH for searchability.
+- Details: `prompts/mcp-shared.md` §Lemma
+
+# 15. context7 MCP (documentation lookup)
+
+- Use when: asking about any library / framework / SDK / API / CLI tool / cloud service — even well-known ones (training data may be outdated, no recent changes)
+- Do NOT use for: refactoring, writing scripts from scratch, debugging business logic, code review, general programming concepts
+- Step 1: `resolve-library-id({libraryName, query})` → library name + full user query → pick best match (name similarity, benchmark score, version specificity, official source over community fork)
+- Step 2: `query-docs({libraryId, query, language?})` → selected library ID + specific topic → up-to-date docs + code snippets
+- Incorporate retrieved info into response; official sources first
+- Details: `mcp_instructions` context7 server description
+
+# 16. sequentialthinking MCP (structured reasoning)
+
+- Tool: `sequentialthinking({thought, nextThoughtNeeded, thoughtNumber, totalThoughts, isRevision?, revisesThought?, branchFromThought?, branchId?, needsMoreThoughts?})`
+- Use when: multi-step dependent tasks, debugging root cause, architecture planning, any task too complex for single-shot reasoning
+- Workflow:
+  1. thoughtNumber=1, totalThoughts=estimated, nextThoughtNeeded=true
+  2. increment thoughtNumber per step
+  3. nextThoughtNeeded=false on final step
+  4. isRevision/revisesThought to correct earlier step
+  5. branchFromThought/branchId to explore alternatives
+- Does NOT execute code — only structures reasoning before action
+- `arquiteto` agent has `sequentialthinking_*` enabled
+- Details: `mcp_instructions` sequentialthinking server description
