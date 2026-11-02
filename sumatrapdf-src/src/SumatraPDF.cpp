@@ -9130,7 +9130,7 @@ static void ListPrintersShowResult(ListPrintersResult* d) {
 
     RemoveNotificationsForGroup(parent, kNotifActionResponse);
     // ShowTextInWindow copies text into the edit control before returning.
-    ShowTextInWindow("SumatraPDF - Printers", text);
+    ShowTextInWindow("TumatraPDF - Printers", text);
     str::Free(text);
 }
 
@@ -9593,7 +9593,7 @@ void LaunchDocumentation(Str docURI) {
         }
 
         SimpleBrowserCreateArgs args;
-        args.title = "SumatraPDF Documentation";
+        args.title = "TumatraPDF Documentation";
         args.url = localUrl;
         args.resourceProvider = ManualResourceProvider();
         args.resourceUriPrefix = kManualVirtualHostW;
@@ -14429,17 +14429,17 @@ void ShowCrashHandlerMessage() {
     }
 
 #if 0
-    int res = MsgBox(nullptr, _TRA("Sorry, that shouldn't have happened!\n\nPlease press 'Cancel', if you want to help us fix the cause of this crash."), _TRA("SumatraPDF crashed"), MB_ICONERROR | MB_OKCANCEL | MbRtlReadingMaybe());
+    int res = MsgBox(nullptr, _TRA("Sorry, that shouldn't have happened!\n\nPlease press 'Cancel', if you want to help us fix the cause of this crash."), _TRA("TumatraPDF crashed"), MB_ICONERROR | MB_OKCANCEL | MbRtlReadingMaybe());
     if (IDCANCEL == res) {
         LaunchBrowser(CRASH_REPORT_URL);
     }
 #endif
 
-    Str msg = _TRA("We're sorry, SumatraPDF crashed.\n\nPress 'Cancel' to see crash report.");
+    Str msg = _TRA("We're sorry, TumatraPDF crashed.\n\nPress 'Cancel' to see crash report.");
     uint flags = MB_ICONERROR | MB_OK | MB_OKCANCEL | MbRtlReadingMaybe();
     flags |= MB_SETFOREGROUND | MB_TOPMOST;
 
-    int res = MsgBox(nullptr, msg, _TRA("SumatraPDF crashed"), flags);
+    int res = MsgBox(nullptr, msg, _TRA("TumatraPDF crashed"), flags);
     if (IDCANCEL != res) {
         log("ShowCrashHandlerMessage: res != IDCANCEL\n");
         return;

@@ -119,9 +119,9 @@ void MaybeShowDefaultAppNotification(MainWindow* win) {
         return;
     }
 
-    // "SumatraPDF is no longer the default app for opening [pdf](CmdFixDefaultApp .pdf), ..."
+    // "TumatraPDF is no longer the default app for opening [pdf](CmdFixDefaultApp .pdf), ..."
     str::Builder sb;
-    sb.Append(StrL("SumatraPDF is no longer the default app for opening "));
+    sb.Append(StrL("TumatraPDF is no longer the default app for opening "));
     int nShow = std::min(len(missing), kMaxDefaultAppLinks);
     for (int i = 0; i < nShow; i++) {
         if (i > 0) {

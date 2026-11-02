@@ -1338,7 +1338,7 @@ For more information see <a href="%s">Failed to load libsumatrapdf.dll</a>.)",
         flags |= TDF_RTL_LAYOUT;
     }
     dialogConfig.cbSize = sizeof(TASKDIALOGCONFIG);
-    dialogConfig.pszWindowTitle = L"SumatraPDF";
+    dialogConfig.pszWindowTitle = L"TumatraPDF";
     dialogConfig.pszMainInstruction = L"Failed to load libsumatrapdf.dll";
     dialogConfig.pszContent = CWStrTemp(msg);
     dialogConfig.nDefaultButton = IDOK;
@@ -1405,7 +1405,7 @@ Learn more at https://github.com/FelipeTesta/TumatraPDF/blob/main/sumatrapdf-src
         printf("%s", corruptedInstallationConsole.s);
     }
 
-    const auto* title = L"SumatraPDF installer";
+    const auto* title = L"TumatraPDF installer";
     TASKDIALOGCONFIG dialogConfig{};
 
     DWORD flags =
@@ -1471,7 +1471,7 @@ static void ShowInstallerHelp() {
         flags |= TDF_RTL_LAYOUT;
     }
     dialogConfig.cbSize = sizeof(TASKDIALOGCONFIG);
-    dialogConfig.pszWindowTitle = L"SumatraPDF installer usage";
+    dialogConfig.pszWindowTitle = L"TumatraPDF installer usage";
     dialogConfig.pszMainInstruction = CWStrTemp(msg);
     dialogConfig.pszContent =
         LR"(<a href="https://github.com/FelipeTesta/TumatraPDF/blob/main/sumatrapdf-src/docs/md/Installer-cmd-line-arguments.md">Read more on website</a>)";
