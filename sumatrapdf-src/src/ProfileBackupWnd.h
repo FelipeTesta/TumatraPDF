@@ -4,5 +4,6 @@
 struct MainWindow;
 
 void ShowProfileBackupsDialog(MainWindow* win);
+void ProfileDataPromptCloudRevert(MainWindow* win, HWND hwndParent);
 
 #endif

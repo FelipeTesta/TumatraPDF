@@ -703,6 +703,7 @@ function sumatrapdf_files()
     "ReadingStats.*",
     "ProfileData.*",
     "ProfileBackupWnd.*",
+    "ProfileSyncWnd.*",
   })
   filter { "configurations:Debug or DebugFull" }
   files_in_dir("src", {

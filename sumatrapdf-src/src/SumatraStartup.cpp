@@ -68,6 +68,8 @@
 #include "RegistryPreview.h"
 #include "ExternalViewers.h"
 #include "Theme.h"
+#include "ProfileData.h"
+#include "ProfileBackupWnd.h"
 #include "Darkmodelib.h"
 #include "CommandPalette.h"
 #include "SelectTextKeyboard.h"
@@ -2811,6 +2813,16 @@ ContinueOpenWindow:
     }
     if (len(flags.fileNames) == 0) {
         FlagsEnterFullscreen(flags, win);
+    }
+
+    // Profile Memory F3: cloud-revert restore prompt (only fires when a backup
+    // slot is strictly newer than the primary profile; skipped when no backups)
+    // skip startup prompt in automated testing runs (-for-testing): still
+    // consume the flag so it is cleared, but don't block automation with a modal
+    bool cloudRevertPending;
+    cloudRevertPending = ProfileDataConsumeCloudRevertPending();
+    if (cloudRevertPending && !gForTesting) {
+        ProfileDataPromptCloudRevert(win, win->hwndFrame);
     }
 
     if (flags.stressTestPath) {

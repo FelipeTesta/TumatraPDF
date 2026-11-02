@@ -33,6 +33,10 @@
 #include "FlashcardStats.h"
 #include "ProfileData.h"
 
+// set by -for-testing cmd-line flag (SumatraConfig.cpp); never import during
+// test runs to avoid touching live user app-data
+extern bool gForTesting;
+
 // the number in the file name is the format version (schema changes bump it)
 // NOTE: must be a literal macro — StrL/compile-time length needs a literal
 #define kProfileDataFileName StrL("tumatraPDF-data_1.json")
@@ -67,15 +71,18 @@ static struct {
     Vec<ProfDayMachine> readingDaily;
     Vec<ProfDayMachine> studyDaily;
     Vec<ProfDocEntry> perDoc;
+    i64 lastWriteTs = 0;
     bool loaded = false;
     bool dirty = false;
 } gProfile;
 
 static char* gProfileThisMachine = nullptr; // owned, set at first load
+static bool gCloudRevertPending = false;    // newest backup slot is strictly newer than primary
 
 static void ProfSaveInner();
 static void ProfMaybeBackup();
 static void ProfPullHistory();
+static void ProfileDataEnsureLoaded();
 
 // forward: used by ProfMergeConflictedCopies before their definitions
 static ProfileBook* ProfFindBook(Str keyHex);
@@ -87,15 +94,51 @@ static void ProfMergeConflictedCopies();
 static const int kProfBackupSlots = 9;
 static const i64 kProfBackupSlotSec = 8 * 3600;
 static TempStr ProfBackupDirTemp();
+static i64 ProfSlotLastWriteTs(int slotIdx);
+
+// forward: F7 integrity checksum helpers
+static TempStr ProfReadChecksumTemp(Str json);
+static TempStr ProfBlankChecksumTemp(Str json);
+static TempStr ProfComputeChecksumTemp(Str json);
+static TempStr ProfSubstChecksumTemp(Str json, Str hex);
+
+// forward: F7 export/import — ProfCopyDirTree defined later (rolling-backups section)
+static int ProfCopyDirTree(Str srcDir, TempStr dstDir);
 
 // ---- small helpers ----
 
-static TempStr ProfileDataPathTemp() {
+TempStr ProfileDataPathTemp() {
     Str custom = gGlobalPrefs->profileDataDir;
     if (custom && len(custom) > 0) {
         return path::JoinTemp(Str(custom), kProfileDataFileName);
     }
     return GetPathInAppDataDirTemp(kProfileDataFileName);
+}
+
+// single parse of the primary profile: version, books, day counts, lastWriteTs.
+// false when the primary file does not exist.
+bool ProfileDataStats(int* version, int* books, int* readingDays, int* studyDays, i64* lastWriteTs) {
+    TempStr path = ProfileDataPathTemp();
+    if (!file::Exists(Str(path))) {
+        return false;
+    }
+    ProfileDataEnsureLoaded();
+    if (version) {
+        *version = kProfileDataVersion;
+    }
+    if (books) {
+        *books = (int)len(gProfile.books);
+    }
+    if (readingDays) {
+        *readingDays = (int)len(gProfile.readingDaily);
+    }
+    if (studyDays) {
+        *studyDays = (int)len(gProfile.studyDaily);
+    }
+    if (lastWriteTs) {
+        *lastWriteTs = gProfile.lastWriteTs;
+    }
+    return true;
 }
 
 // this machine's name (attribution key when two machines share the file)
@@ -393,10 +436,9 @@ static void ProfImportSidecar(Str text, Vec<ProfDayMachine>& out, bool isStudy) 
     ::free(machine);
 }
 
-// one-time import: the profile file does not exist yet, so pull the per-book
-// study JSONs and both sidecars out of their legacy homes
-static void ProfImportBooksFromDir(Vec<ProfileBook>& outBooks) {
-    TempStr dir = FlashcardStudyDir();
+// pull per-book study JSONs from a specific legacy study dir into outBooks.
+// Never deletes anything in dir. Appends without key dedup (caller dedups).
+static void ProfImportBooksFromDir(Vec<ProfileBook>& outBooks, TempStr dir) {
     if (!dir) {
         return;
     }
@@ -432,7 +474,7 @@ static void ProfImportBooksFromDir(Vec<ProfileBook>& outBooks) {
 }
 
 static void ProfImportLegacy() {
-    ProfImportBooksFromDir(gProfile.books);
+    ProfImportBooksFromDir(gProfile.books, FlashcardStudyDir());
     TempStr settingsPath = GetSettingsPathTemp();
     TempStr sideDir = path::GetDirTemp(Str(settingsPath));
     TempStr rcPath = path::JoinTemp(Str(sideDir), StrL("reading-stats.txt"));
@@ -447,6 +489,120 @@ static void ProfImportLegacy() {
     }
     logf("[profile] legacy import: %d book(s), %d reading day(s), %d study day(s)\n", len(gProfile.books),
          len(gProfile.readingDaily), len(gProfile.studyDaily));
+}
+
+// F5: one-time silent Portable→Install import. Runs only when the Install
+// build has no profile data of its own and the portable exe-adjacent location
+// holds data worth adopting (primary json, legacy study books, or non-empty
+// sidecars). Reads from the portable side only — never deletes anything there.
+// Installed side: books via ProfImportBooksFromDir(portable study dir),
+// sidecars via ProfImportSidecar(portable sidecar text), primary json via
+// ProfParseBooks-style struct load. Target is empty → set wholesale.
+static void ProfImportPortableInstall() {
+    if (gForTesting) {
+        logf("[profile] portable import: skipped (-for-testing)\n");
+        return;
+    }
+    if (IsRunningInPortableMode()) {
+        return;
+    }
+    Str custom = gGlobalPrefs->profileDataDir;
+    if (custom && len(custom) > 0) {
+        return; // user chose a custom profile dir — not the default install path
+    }
+
+    // ---- portable exe-adjacent location ----
+    TempStr portableDir = GetSelfExeDirTemp();
+    TempStr portablePrimaryPath = path::JoinTemp(Str(portableDir), kProfileDataFileName);
+    Str portablePrimary = file::ReadFile(Str(portablePrimaryPath));
+    bool hasPortablePrimary = portablePrimary && ProfBlockInterior(portablePrimary);
+
+    // portable legacy study books: <exeDir>\FlashcardStudy\*.json
+    TempStr portableStudyDir = path::JoinTemp(Str(portableDir), StrL("FlashcardStudy"));
+    bool hasPortableBooks = false;
+    {
+        TempStr pat = path::JoinTemp(Str(portableStudyDir), StrL("*.json"));
+        WIN32_FIND_DATAW fd{};
+        HANDLE h = FindFirstFileW(CWStrTemp(ToWStrTemp(Str(pat))), &fd);
+        if (h != INVALID_HANDLE_VALUE) {
+            do {
+                if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+                    continue;
+                }
+                hasPortableBooks = true;
+                break;
+            } while (FindNextFileW(h, &fd));
+            FindClose(h);
+        }
+    }
+
+    // portable sidecars live next to the portable exe (settings dir == exe dir)
+    TempStr portableRcPath = path::JoinTemp(Str(portableDir), StrL("reading-stats.txt"));
+    TempStr portableFcPath = path::JoinTemp(Str(portableDir), StrL("flashcard-stats.txt"));
+    Str rcText = file::ReadFile(Str(portableRcPath));
+    Str fcText = file::ReadFile(Str(portableFcPath));
+    bool hasPortableSidecars = (rcText && len(rcText) > 0) || (fcText && len(fcText) > 0);
+
+    if (!hasPortablePrimary && !hasPortableBooks && !hasPortableSidecars) {
+        return; // nothing to adopt
+    }
+
+    // ---- installed profile must be empty ----
+    TempStr installedPath = ProfileDataPathTemp();
+    Str installedJson = file::ReadFile(Str(installedPath));
+    if (installedJson && ProfBlockInterior(installedJson)) {
+        return; // installed primary already exists — don't clobber
+    }
+    bool installedHasBooks = false;
+    {
+        TempStr installedStudyDir = FlashcardStudyDir();
+        TempStr pat = path::JoinTemp(Str(installedStudyDir), StrL("*.json"));
+        WIN32_FIND_DATAW fd{};
+        HANDLE h = FindFirstFileW(CWStrTemp(ToWStrTemp(Str(pat))), &fd);
+        if (h != INVALID_HANDLE_VALUE) {
+            do {
+                if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+                    continue;
+                }
+                installedHasBooks = true;
+                break;
+            } while (FindNextFileW(h, &fd));
+            FindClose(h);
+        }
+    }
+    if (installedHasBooks) {
+        return; // installed already has legacy books — don't clobber
+    }
+
+    // ---- adopt from portable (target empty → set wholesale) ----
+    int importedBooks = 0;
+    int importedReadingDays = 0;
+    int importedStudyDays = 0;
+
+    if (hasPortablePrimary) {
+        ProfParseBooks(portablePrimary, gProfile.books);
+        ProfParseDaySection(portablePrimary, "readingStats", gProfile.readingDaily);
+        ProfParseDaySection(portablePrimary, "fcStats", gProfile.studyDaily);
+        gProfile.dirty = true;
+    }
+    ProfImportBooksFromDir(gProfile.books, portableStudyDir);
+    if (rcText) {
+        ProfImportSidecar(rcText, gProfile.readingDaily, false);
+    }
+    if (fcText) {
+        ProfImportSidecar(fcText, gProfile.studyDaily, true);
+    }
+
+    importedBooks = (int)len(gProfile.books);
+    importedReadingDays = (int)len(gProfile.readingDaily);
+    importedStudyDays = (int)len(gProfile.studyDaily);
+
+    if (gProfile.dirty) {
+        ProfileDataSaveNow();
+    }
+
+    logf("[profile] portable import: %d book(s), %d reading day(s), %d study day(s)\n", importedBooks,
+         importedReadingDays, importedStudyDays);
 }
 
 // Startup reconcile: adopt day keys from the legacy sidecars that are absent
@@ -651,6 +807,138 @@ static void ProfMergeConflictedCopies() {
          copies);
 }
 
+// ---- F7: export / import ----
+
+// Export primary + backup/ subtree to destDir. Create dest recursively.
+// Fail (false) if primary missing or dest primary already exists (caller decides UX).
+bool ProfileDataExportToDir(const char* destDir) {
+    if (!destDir || len(Str(destDir)) == 0) {
+        return false;
+    }
+    TempStr primarySrc = ProfileDataPathTemp();
+    if (!file::Exists(Str(primarySrc))) {
+        logf("[profile] export: primary missing, nothing to export\n");
+        return false;
+    }
+    TempStr destPrimary = path::JoinTemp(Str(destDir), kProfileDataFileName);
+    if (file::Exists(Str(destPrimary))) {
+        logf("[profile] export: dest primary already exists '%s', refusing\n", Str(destPrimary));
+        return false;
+    }
+    if (!dir::CreateAll(Str(destDir))) {
+        logf("[profile] export: failed to create dest dir '%s'\n", Str(destDir));
+        return false;
+    }
+    if (!file::Copy(Str(destPrimary), Str(primarySrc), true)) {
+        logf("[profile] export: failed to copy primary to '%s'\n", Str(destPrimary));
+        return false;
+    }
+    TempStr backupSrc = path::JoinTemp(ProfBackupDirTemp(), StrL("")); // backup/ dir
+    int copiedJson = 1;
+    int copiedBackup = 0;
+    if (file::Exists(Str(backupSrc))) {
+        copiedBackup = ProfCopyDirTree(Str(backupSrc), path::JoinTemp(Str(destDir), StrL("backup")));
+    }
+    logf("[profile] export: %d json file(s), %d backup file(s) -> '%s'\n", copiedJson, copiedBackup, Str(destDir));
+    return true;
+}
+
+// Import profile JSON from srcJsonPath.
+// replace=true: move current primary to <profileDir>\tumatraPDF-data_1.json.pre-import,
+//               copy src → primary, reload profile.
+// replace=false: merge newest-wins-adopt-absent (book keys + day-row pairs), dirty+save.
+// src must parse (ProfBlockInterior). Old-format files without checksum are fine — pure parse adopt.
+// Guard gForTesting outside (UI layer), not here.
+bool ProfileDataImportFromJson(const char* srcJsonPath, bool replace) {
+    if (!srcJsonPath || len(Str(srcJsonPath)) == 0) {
+        return false;
+    }
+    Str srcJson = file::ReadFile(Str(srcJsonPath));
+    if (!srcJson || !ProfBlockInterior(srcJson)) {
+        logf("[profile] import: src unparseable '%s'\n", Str(srcJsonPath));
+        return false;
+    }
+    TempStr primaryDst = ProfileDataPathTemp();
+    TempStr profileDir = path::GetDirTemp(Str(primaryDst));
+    if (replace) {
+        // move current primary to .pre-import (overwrite old .pre-import)
+        TempStr preImport = path::JoinTemp(Str(profileDir), StrL("tumatraPDF-data_1.json.pre-import"));
+        if (file::Exists(Str(primaryDst))) {
+            if (!file::Copy(Str(preImport), Str(primaryDst), true)) {
+                logf("[profile] import: failed to pre-import backup '%s'\n", Str(preImport));
+                return false;
+            }
+        }
+        // copy src → primary (keep source)
+        if (!file::Copy(Str(primaryDst), Str(srcJson), true)) {
+            logf("[profile] import: failed to copy src to primary '%s'\n", Str(primaryDst));
+            return false;
+        }
+        // drop in-memory state, reload from primary
+        gProfile.loaded = false;
+        ProfFreeBooks(gProfile.books);
+        ProfFreeDays(gProfile.readingDaily);
+        ProfFreeDays(gProfile.studyDaily);
+        ProfFreeDocs(gProfile.perDoc);
+        ::free(gProfileThisMachine);
+        gProfileThisMachine = nullptr;
+        ProfileDataEnsureLoaded();
+        logf("[profile] import: replaced primary from '%s', reloaded\n", Str(srcJsonPath));
+        return true;
+    }
+    // merge: adopt absent book keys + absent (dateKey, machine) day-row pairs
+    int addedBooks = 0;
+    int addedDayRows = 0;
+    // books
+    Str booksSec = ProfSectionInterior(srcJson, "books");
+    if (booksSec) {
+        ProfForEachMember(booksSec, [&](Str rawKey, Str valueTok, Str interior, bool isObj) {
+            if (!isObj) {
+                return;
+            }
+            if (ProfFindBook(rawKey)) {
+                return;
+            }
+            ProfileBook b;
+            b.streamKey = ProfUnescapeKeyDup(rawKey);
+            b.docName = FlashcardStudyParseJsonStringFieldDup(interior, StrL("docName"));
+            b.docPath = FlashcardStudyParseJsonStringFieldDup(interior, StrL("docPath"));
+            FlashcardStudyParseJsonInto(interior, b.study);
+            gProfile.books.Append(b);
+            addedBooks++;
+            gProfile.dirty = true;
+        });
+    }
+    // day rows: readingStats + fcStats
+    for (const char* secName : {"readingStats", "fcStats"}) {
+        Vec<ProfDayMachine> tempDays;
+        ProfParseDaySection(srcJson, secName, tempDays);
+        Vec<ProfDayMachine>& target = (secName[0] == 'r') ? gProfile.readingDaily : gProfile.studyDaily;
+        for (int i = 0; i < len(tempDays); i++) {
+            ProfDayMachine& e = tempDays[i];
+            bool have = false;
+            for (int j = 0; j < len(target); j++) {
+                if (target[j].dateKey == e.dateKey && str::EqI(Str(target[j].machine), Str(e.machine))) {
+                    have = true;
+                    break;
+                }
+            }
+            if (!have) {
+                target.Append(e);
+                e.machine = nullptr; // ownership transferred
+                addedDayRows++;
+                gProfile.dirty = true;
+            }
+        }
+        ProfFreeDays(tempDays);
+    }
+    if (gProfile.dirty) {
+        ProfileDataSaveNow();
+    }
+    logf("[profile] import: merge from '%s': +%d book(s), +%d day row(s)\n", Str(srcJsonPath), addedBooks, addedDayRows);
+    return true;
+}
+
 static void ProfParseDaySection(Str json, const char* section, Vec<ProfDayMachine>& out) {
     Str sec = ProfSectionInterior(json, section);
     if (!sec) {
@@ -706,16 +994,263 @@ static void ProfParseInfoSection(Str json, Vec<ProfDocEntry>& out) {
     });
 }
 
+// ---- F7: integrity checksum for tumatraPDF-data_1.json ----
+// Checksum = MD5 hex of the file content with the checksum value blanked to "".
+// On write: build content with "checksum": "", hash it, then substitute the real hash.
+// On load: blank the stored checksum value, re-hash, compare. Mismatch => corrupt.
+// Absent/empty checksum token (old-format files) => skip verify, log once.
+
+// Extract the checksum hex string from JSON text. Empty Str when absent/malformed.
+static TempStr ProfReadChecksumTemp(Str json) {
+    TempStr quoted = ProfQuotedNameTemp("checksum");
+    int idx = str::IndexOf(json, quoted);
+    if (idx < 0) {
+        return Str();
+    }
+    Str after = Str(json.s + idx + len(quoted));
+    str::TrimWSInPlace(after, str::TrimOpt::Left);
+    if (!after || after.s[0] != ':') {
+        return Str();
+    }
+    after = Str(after.s + 1);
+    str::TrimWSInPlace(after, str::TrimOpt::Left);
+    if (!after || after.s[0] != '"') {
+        return Str();
+    }
+    const char* p = after.s + 1;
+    const char* end = after.s + len(after);
+    while (p < end && *p != '"') {
+        p++;
+    }
+    if (p >= end) {
+        return Str();
+    }
+    int n = (int)(p - after.s - 1);
+    char buf[65]{};
+    n = std::min(n, 64);
+    memcpy(buf, after.s + 1, (size_t)n);
+    return Str(buf, n);
+}
+
+// Return a copy of json with the checksum value replaced by empty string "".
+static TempStr ProfBlankChecksumTemp(Str json) {
+    TempStr quoted = ProfQuotedNameTemp("checksum");
+    int idx = str::IndexOf(json, quoted);
+    if (idx < 0) {
+        return Str(json); // no checksum field -> nothing to blank
+    }
+    Str after = Str(json.s + idx + len(quoted));
+    str::TrimWSInPlace(after, str::TrimOpt::Left);
+    if (!after || after.s[0] != ':') {
+        return Str(json);
+    }
+    after = Str(after.s + 1);
+    str::TrimWSInPlace(after, str::TrimOpt::Left);
+    if (!after || after.s[0] != '"') {
+        return Str(json);
+    }
+    const char* p = after.s + 1;
+    const char* end = after.s + len(after);
+    while (p < end && *p != '"') {
+        p++;
+    }
+    if (p >= end) {
+        return Str(json);
+    }
+    int valStart = (int)((after.s + 1) - json.s); // position of first char inside quotes
+    int valEnd = (int)(p - json.s);               // position of closing quote
+    str::Builder sb(len(json));
+    sb.Append(Str(json.s, valStart)); // everything before the value
+    sb.AppendChar('"');
+    sb.AppendChar('"');                                          // empty value
+    sb.Append(Str(json.s + valEnd + 1, len(json) - valEnd - 1)); // after closing quote
+    return sb.TakeStr();
+}
+
+// Compute MD5 checksum of json with the checksum value blanked out.
+static TempStr ProfComputeChecksumTemp(Str json) {
+    TempStr blanked = ProfBlankChecksumTemp(json);
+    if (!blanked) {
+        return Str();
+    }
+    u8 digest[16];
+    CalcMD5Digest(blanked, digest);
+    return str::MemToHexTemp(Str((const char*)digest, dimofi(digest)));
+}
+
+// Replace "checksum": "" with "checksum": "<hex>" in json text.
+static TempStr ProfSubstChecksumTemp(Str json, Str hex) {
+    TempStr quoted = ProfQuotedNameTemp("checksum");
+    int idx = str::IndexOf(json, quoted);
+    if (idx < 0) {
+        return Str(json);
+    }
+    Str after = Str(json.s + idx + len(quoted));
+    str::TrimWSInPlace(after, str::TrimOpt::Left);
+    if (!after || after.s[0] != ':') {
+        return Str(json);
+    }
+    after = Str(after.s + 1);
+    str::TrimWSInPlace(after, str::TrimOpt::Left);
+    if (!after || after.s[0] != '"') {
+        return Str(json);
+    }
+    const char* p = after.s + 1;
+    const char* end = after.s + len(after);
+    while (p < end && *p != '"') {
+        p++;
+    }
+    if (p >= end) {
+        return Str(json);
+    }
+    int valStart = (int)((after.s + 1) - json.s); // position of first char inside quotes
+    int valEnd = (int)(p - json.s);               // position of closing quote
+    str::Builder sb(len(json));
+    sb.Append(Str(json.s, valStart)); // everything up to opening quote
+    sb.AppendChar('"');
+    sb.Append(hex);
+    sb.AppendChar('"');
+    sb.Append(Str(json.s + valEnd + 1, len(json) - valEnd - 1)); // after closing quote
+    return sb.TakeStr();
+}
+
+// ---- F4: profileDataDir setter — ensure dir exists + migrate on dir change ----
+
+// recursively copy every file in srcDir into dstDir (dstDir is created).
+// Never deletes anything in srcDir; files already in dstDir are kept
+// (dontOverwrite). Returns number of files copied.
+static int ProfCopyDirTree(Str srcDir, TempStr dstDir) {
+    dir::CreateAll(Str(dstDir));
+    int copied = 0;
+    TempStr pat = path::JoinTemp(srcDir, StrL("*.*"));
+    WIN32_FIND_DATAW fd{};
+    HANDLE h = FindFirstFileW(CWStrTemp(ToWStrTemp(Str(pat))), &fd);
+    if (h == INVALID_HANDLE_VALUE) {
+        return 0;
+    }
+    do {
+        TempStr name = ToUtf8Temp(WStr(fd.cFileName));
+        if (str::Eq(Str(name), StrL(".")) || str::Eq(Str(name), StrL(".."))) {
+            continue;
+        }
+        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+            copied += ProfCopyDirTree(path::JoinTemp(srcDir, name), path::JoinTemp(Str(dstDir), name));
+            continue;
+        }
+        TempStr srcFile = path::JoinTemp(srcDir, name);
+        TempStr dstFile = path::JoinTemp(Str(dstDir), name);
+        if (file::Copy(Str(dstFile), Str(srcFile), true)) {
+            copied++;
+        } else {
+            logf("[profile] F4: failed to copy '%s' -> '%s'\n", Str(srcFile), Str(dstFile));
+        }
+    } while (FindNextFileW(h, &fd));
+    FindClose(h);
+    return copied;
+}
+
+// ensure the profile dir exists (mkdir + logf when created) and, when
+// profileDataDir points at a folder other than the default app-data dir,
+// migrate the existing profile (+ backup/ subtree) into it on first load.
+// Only migrates when the new dir has no primary profile file
+// (overwrite-vs-use-existing is an explicit deferred UX decision). Never
+// deletes the source. Returns the (ensured) profile file path.
+static TempStr ProfEnsureProfileDirAndMigrate() {
+    TempStr newPath = ProfileDataPathTemp(); // <newDir>\tumatraPDF-data_1.json
+    TempStr newDir = path::GetDirTemp(Str(newPath));
+    TempStr oldDir = GetAppDataDirTemp(); // previous/default location
+    if (!newDir || !oldDir || str::Eq(Str(newDir), Str(oldDir))) {
+        // default app-data dir: nothing to migrate, just make sure it exists
+        if (newDir && !dir::CreateAll(Str(newDir))) {
+            logf("[profile] F4: could not create profile dir '%s'\n", Str(newDir));
+        }
+        return newPath;
+    }
+    bool created = !file::Exists(Str(newDir));
+    if (created && !dir::CreateAll(Str(newDir))) {
+        logf("[profile] F4: could not create profile dir '%s'\n", Str(newDir));
+        return newPath;
+    }
+    if (created) {
+        logf("[profile] F4: created profile dir '%s'\n", Str(newDir));
+    }
+    // new dir already has a primary profile -> keep it, no migration
+    TempStr primaryDst = path::JoinTemp(Str(newDir), kProfileDataFileName);
+    if (file::Exists(Str(primaryDst))) {
+        logf("[profile] F4: new dir already has primary profile, keeping it (no migrate)\n");
+        return newPath;
+    }
+    // old dir must hold data to migrate from
+    TempStr primarySrc = path::JoinTemp(Str(oldDir), kProfileDataFileName);
+    if (!file::Exists(Str(primarySrc))) {
+        logf("[profile] F4: no primary profile in old dir '%s', nothing to migrate\n", Str(oldDir));
+        return newPath;
+    }
+    // copy every tumatraPDF-data_*.json from oldDir to newDir (incl. conflicted copies)
+    int copiedJson = 0;
+    TempStr pat = path::JoinTemp(Str(oldDir), StrL("tumatraPDF-data_*.json"));
+    WIN32_FIND_DATAW fd{};
+    HANDLE h = FindFirstFileW(CWStrTemp(ToWStrTemp(Str(pat))), &fd);
+    if (h != INVALID_HANDLE_VALUE) {
+        do {
+            if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+                continue;
+            }
+            TempStr name = ToUtf8Temp(WStr(fd.cFileName));
+            TempStr srcFile = path::JoinTemp(Str(oldDir), name);
+            TempStr dstFile = path::JoinTemp(Str(newDir), name);
+            if (file::Copy(Str(dstFile), Str(srcFile), true)) {
+                copiedJson++;
+            } else {
+                logf("[profile] F4: failed to copy '%s' -> '%s'\n", Str(srcFile), Str(dstFile));
+            }
+        } while (FindNextFileW(h, &fd));
+        FindClose(h);
+    }
+    // copy the backup/ subtree (slot dirs with tumatraPDF-data_1.json + stamps)
+    int copiedBackup = 0;
+    TempStr oldBackup = path::JoinTemp(Str(oldDir), StrL("backup"));
+    if (file::Exists(Str(oldBackup))) {
+        copiedBackup = ProfCopyDirTree(Str(oldBackup), path::JoinTemp(Str(newDir), StrL("backup")));
+    }
+    logf("[profile] F4: migrated profile from '%s' to '%s' (%d json file(s), %d backup file(s); source kept)\n",
+         Str(oldDir), Str(newDir), copiedJson, copiedBackup);
+    return newPath;
+}
+
 static void ProfileDataEnsureLoaded() {
     if (gProfile.loaded) {
         return;
     }
     gProfile.loaded = true;
     gProfileThisMachine = ProfMachineNameDup();
-    TempStr path = ProfileDataPathTemp();
+    // F4: ensure the profile dir exists and, on a dir change, migrate the
+    // existing profile (+ backup/) from the old location before reading the
+    // primary file from the new location.
+    TempStr path = ProfEnsureProfileDirAndMigrate();
+    // F5: one-time Portable→Install import (after F4 migrate, before reading
+    // primary / reconcile). Only runs when the installed profile is empty and
+    // the portable exe-adjacent location has data worth adopting.
+    ProfImportPortableInstall();
     logf("[profile] loading %s\n", Str(path));
     Str json = file::ReadFile(Str(path));
-    if (!json || !ProfBlockInterior(json)) {
+    bool primaryParsedOk = json && ProfBlockInterior(json);
+    // F7: integrity checksum verification (only when checksum token present).
+    // Absent/empty checksum token (old-format files) => skip verify, log once.
+    if (primaryParsedOk) {
+        TempStr storedChecksum = ProfReadChecksumTemp(json);
+        if (len(storedChecksum) > 0) {
+            TempStr expectedChecksum = ProfComputeChecksumTemp(json);
+            if (!expectedChecksum || !str::Eq(Str(storedChecksum), Str(expectedChecksum))) {
+                logf("[profile] checksum mismatch — primary corrupt (ts=%lld)\n",
+                     (long long)ProfNumField(json, "lastWriteTs", 0));
+                primaryParsedOk = false;
+            }
+        } else {
+            logf("[profile] checksum absent — skipping verify (old-format file)\n");
+        }
+    }
+    if (!primaryParsedOk) {
         // file missing or corrupt: try newest valid backup slot before legacy import
         bool recovered = false;
         for (int i = 0; i < kProfBackupSlots; i++) {
@@ -742,6 +1277,23 @@ static void ProfileDataEnsureLoaded() {
             ProfReconcileSidecars();
             ProfMergeConflictedCopies();
             return;
+        }
+    }
+    // cloud-revert detection: newest backup slot strictly newer than the primary
+    if (primaryParsedOk) {
+        i64 primaryTs = ProfNumField(json, "lastWriteTs", 0);
+        gProfile.lastWriteTs = primaryTs;
+        i64 newestBackupTs = 0;
+        for (int i = 0; i < kProfBackupSlots; i++) {
+            i64 t = ProfSlotLastWriteTs(i);
+            if (t > newestBackupTs) {
+                newestBackupTs = t;
+            }
+        }
+        if (newestBackupTs > primaryTs) {
+            gCloudRevertPending = true;
+            logf("[profile] cloud revert detected: primary ts=%lld older than backup ts=%lld\n", (long long)primaryTs,
+                 (long long)newestBackupTs);
         }
     }
     ProfParseBooks(json, gProfile.books);
@@ -879,7 +1431,7 @@ void ProfileDataClearStudyDocs() {
 void ProfileDataReimportStudyFiles() {
     ProfileDataEnsureLoaded();
     ProfFreeBooks(gProfile.books);
-    ProfImportBooksFromDir(gProfile.books);
+    ProfImportBooksFromDir(gProfile.books, FlashcardStudyDir());
     logf("[profile] reimported %d book(s) from legacy dir\n", len(gProfile.books));
     gProfile.dirty = true;
     ProfileDataSaveNow();
@@ -1055,6 +1607,7 @@ static void ProfSaveInner() {
     fprintf(f, "  \"lastWriteTs\": %lld,\n", (long long)time(nullptr));
     fprintf(f, "  \"machine\": ");
     FlashcardStudyWriteJsonStringLit(f, gProfileThisMachine ? Str(gProfileThisMachine) : StrL("?"));
+    fprintf(f, ",\n  \"checksum\": \"\"\n");
 
     // books (keeps the legacy "states" shape so the shared parser applies)
     fprintf(f, ",\n  \"books\": {");
@@ -1097,6 +1650,19 @@ static void ProfSaveInner() {
 
     fclose(f);
 
+    // F7: compute integrity checksum over the file content with empty checksum
+    // placeholder, then rewrite the temp file with the real checksum value.
+    Str fileContent = file::ReadFile(Str(tmpPath));
+    if (fileContent) {
+        TempStr hexChecksum = ProfComputeChecksumTemp(fileContent);
+        if (hexChecksum) {
+            TempStr withChecksum = ProfSubstChecksumTemp(fileContent, hexChecksum);
+            if (withChecksum) {
+                file::WriteFile(Str(tmpPath), Str(withChecksum));
+            }
+        }
+    }
+
     // MOVEFILE_REPLACE_EXISTING makes the swap single-step; fall back to
     // remove+rename if the replace fails (antivirus / Drive holding a handle)
     WCHAR* tmpW = CWStrTemp(ToWStrTemp(Str(tmpPath)));
@@ -1131,6 +1697,21 @@ static TempStr ProfBackupDirTemp() {
     TempStr path = ProfileDataPathTemp();
     TempStr dir = path::GetDirTemp(Str(path));
     return path::JoinTemp(Str(dir), StrL("backup"));
+}
+
+// lastWriteTs recorded inside one backup slot's snapshot ("lastWriteTs": n),
+// 0 when the slot is absent or unparseable
+static i64 ProfSlotLastWriteTs(int slotIdx) {
+    TempStr slotDir = path::JoinTemp(ProfBackupDirTemp(), fmt("%02d", slotIdx));
+    TempStr srcPath = path::JoinTemp(Str(slotDir), kProfileDataFileName);
+    if (!file::Exists(Str(srcPath))) {
+        return 0;
+    }
+    Str slotJson = file::ReadFile(Str(srcPath));
+    if (!slotJson || !ProfBlockInterior(slotJson)) {
+        return 0;
+    }
+    return ProfNumField(slotJson, "lastWriteTs", 0);
 }
 
 // cheap guard: the slot for the current 8h period is refreshed when its stamp
@@ -1218,4 +1799,52 @@ bool ProfileDataRecoverBackupSlot(int slotIdx) {
     ProfileDataEnsureLoaded();
     ProfileDataSaveNow();
     return true;
+}
+
+// ---- cloud revert detection ----
+
+// returns + clears the "newest backup is strictly newer than primary" flag
+bool ProfileDataConsumeCloudRevertPending() {
+    bool pending = gCloudRevertPending;
+    gCloudRevertPending = false;
+    return pending;
+}
+
+// primary file's lastWriteTs (unix seconds), 0 when not loaded/absent
+i64 ProfileDataCloudRevertPrimaryTs() {
+    ProfileDataEnsureLoaded();
+    TempStr path = ProfileDataPathTemp();
+    Str json = file::ReadFile(Str(path));
+    if (!json || !ProfBlockInterior(json)) {
+        return 0;
+    }
+    return ProfNumField(json, "lastWriteTs", 0);
+}
+
+// newest backup slot's lastWriteTs (unix seconds), 0 when none
+i64 ProfileDataCloudRevertNewestBackupTs() {
+    ProfileDataEnsureLoaded();
+    i64 best = 0;
+    for (int i = 0; i < kProfBackupSlots; i++) {
+        i64 t = ProfSlotLastWriteTs(i);
+        if (t > best) {
+            best = t;
+        }
+    }
+    return best;
+}
+
+// index of the newest backup slot, -1 when none
+int ProfileDataCloudRevertNewestBackupSlot() {
+    ProfileDataEnsureLoaded();
+    int bestIdx = -1;
+    i64 best = 0;
+    for (int i = 0; i < kProfBackupSlots; i++) {
+        i64 t = ProfSlotLastWriteTs(i);
+        if (t > best) {
+            best = t;
+            bestIdx = i;
+        }
+    }
+    return bestIdx;
 }

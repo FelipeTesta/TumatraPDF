@@ -236,6 +236,8 @@ export const WM_MBUTTONDOWN = 0x0207;
 export const WM_CONTEXTMENU = 0x007b;
 export const WM_COMMAND = 0x0111;
 export const WM_COPYDATA = 0x004a;
+// button messages
+export const BM_CLICK = 0x00f5;
 // virtual-key / mouse-button flags
 export const MK_LBUTTON = 0x0001;
 export const MK_RBUTTON = 0x0002;
@@ -582,6 +584,13 @@ export function moveWindow(hwnd: number, x: number, y: number, w: number, h: num
 export const SWP_NOZORDER = 0x0004;
 export const SWP_NOACTIVATE = 0x0010;
 export const SWP_FRAMECHANGED = 0x0020;
+export const SWP_NOMOVE = 0x0002;
+export const SWP_NOSIZE = 0x0001;
+
+// HWND_* special values (as raw pointer numbers for FFI)
+export const HWND_TOPMOST = -1;
+export const HWND_NOTOPMOST = -2;
+
 export const GWL_STYLE = -16;
 export const WS_MAXIMIZE = 0x01000000;
 
@@ -602,6 +611,12 @@ export function setWindowPos(
   flags = SWP_NOZORDER | SWP_NOACTIVATE,
 ): boolean {
   return user32.symbols.SetWindowPos(hwnd, 0, x, y, w, h, flags);
+}
+
+// place window topmost / revert, without moving or resizing
+export function setWindowTopmost(hwnd: number, topmost: boolean): boolean {
+  const insertAfter = topmost ? HWND_TOPMOST : HWND_NOTOPMOST;
+  return user32.symbols.SetWindowPos(hwnd, insertAfter, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 }
 
 export function showWindow(hwnd: number, cmd: number): boolean {

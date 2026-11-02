@@ -40,8 +40,19 @@ int ProfileDataStudyTotalCards();
 // atomic save of tumatraPDF-data_1.json (books, day entries with the current
 // perDoc info pulled from gFileHistory) + cheap rolling backup guard
 void ProfileDataSaveNow();
+TempStr ProfileDataPathTemp();
+bool ProfileDataStats(int* version, int* books, int* readingDays, int* studyDays, i64* lastWriteTs);
 int ProfileDataBackupCount();
 TempStr ProfileDataBackupStampTemp(int slotIdx);
 bool ProfileDataRecoverBackupSlot(int slotIdx);
+bool ProfileDataConsumeCloudRevertPending();
+i64 ProfileDataCloudRevertPrimaryTs();
+i64 ProfileDataCloudRevertNewestBackupTs();
+int ProfileDataCloudRevertNewestBackupSlot();
+
+// F7: export / import. Export copies primary + backup/ subtree to destDir.
+// Import replaces primary or merges (newest-wins-adopt-absent) into live profile.
+bool ProfileDataExportToDir(const char* destDir);
+bool ProfileDataImportFromJson(const char* srcJsonPath, bool replace);
 
 #endif

@@ -223,3 +223,153 @@ void ShowProfileBackupsDialog(MainWindow* win) {
         if (gBackupDialog == nullptr) break;
     }
 }
+
+// ---- cloud revert restore prompt ----
+
+static TempStr CloudRevertStampTemp(i64 ts) {
+    if (ts <= 0) {
+        return TempStr(StrL("(none)"));
+    }
+    time_t tt = (time_t)ts;
+    struct tm tm{};
+    localtime_s(&tm, &tt);
+    wchar_t buf[64]{};
+    swprintf(buf, dimof(buf), L"%04d-%02d-%02d %02d:%02d", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour,
+             tm.tm_min);
+    return ToUtf8Temp(WStr(buf, (int)wcslen(buf)));
+}
+
+struct CloudRevertDialog {
+    HWND hwnd = nullptr;
+    MainWindow* win = nullptr;
+    bool restore = false;
+    i64 primaryTs = 0;
+    i64 backupTs = 0;
+    int newestSlot = -1;
+};
+
+static CloudRevertDialog* gCloudRevertDialog = nullptr;
+
+static LRESULT CALLBACK CloudRevertWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    CloudRevertDialog* d = gCloudRevertDialog;
+    if (!d || d->hwnd != hwnd) {
+        return DefWindowProcW(hwnd, msg, wp, lp);
+    }
+    switch (msg) {
+        case WM_PAINT: {
+            PAINTSTRUCT ps;
+            HDC hdc = BeginPaint(d->hwnd, &ps);
+            RECT rc;
+            GetClientRect(d->hwnd, &rc);
+            FillRect(hdc, &rc, GetSysColorBrush(COLOR_WINDOW));
+
+            HFONT font = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
+            HFONT oldFont = (HFONT)SelectObject(hdc, font);
+            SetBkMode(hdc, TRANSPARENT);
+            SetTextColor(hdc, ThemeWindowTextColor());
+
+            RECT trc{DpiScale(d->hwnd, 16), DpiScale(d->hwnd, 14), rc.right - DpiScale(d->hwnd, 16),
+                     DpiScale(d->hwnd, 14) + DpiScale(d->hwnd, 22)};
+            DrawTextW(hdc, L"A newer profile backup exists in the cloud-synced folder.", -1, &trc,
+                      DT_LEFT | DT_VCENTER | DT_WORDBREAK);
+
+            RECT lrc{DpiScale(d->hwnd, 16), DpiScale(d->hwnd, 50), rc.right - DpiScale(d->hwnd, 16),
+                     rc.bottom - DpiScale(d->hwnd, 70)};
+            TempStr primary = CloudRevertStampTemp(d->primaryTs);
+            TempStr backup = CloudRevertStampTemp(d->backupTs);
+            TempStr text =
+                fmt("Primary: %s\nNewest backup: %s\nRestore the backup to resume syncing from the newer data?",
+                    Str(primary), Str(backup));
+            DrawTextW(hdc, CWStrTemp(ToWStrTemp(Str(text))), -1, &lrc, DT_LEFT | DT_TOP | DT_WORDBREAK);
+
+            SelectObject(hdc, oldFont);
+            EndPaint(d->hwnd, &ps);
+            return 0;
+        }
+        case WM_COMMAND: {
+            if (LOWORD(wp) == 1) { // Restore
+                d->restore = true;
+                DestroyWindow(hwnd);
+            } else if (LOWORD(wp) == 2) { // Keep
+                d->restore = false;
+                DestroyWindow(hwnd);
+            }
+            return 0;
+        }
+        case WM_KEYDOWN:
+            if (wp == VK_ESCAPE) { // Keep
+                d->restore = false;
+                DestroyWindow(hwnd);
+            }
+            return 0;
+        case WM_CLOSE: {
+            d->restore = false;
+            DestroyWindow(hwnd);
+            return 0;
+        }
+        case WM_DESTROY:
+            gCloudRevertDialog = nullptr;
+            return 0;
+    }
+    return DefWindowProcW(hwnd, msg, wp, lp);
+}
+
+void ProfileDataPromptCloudRevert(MainWindow* win, HWND hwndParent) {
+    static const wchar_t* className = L"TUMATRA_CLOUD_REVERT";
+    WNDCLASSW wc{};
+    wc.lpfnWndProc = CloudRevertWndProc;
+    wc.hInstance = GetModuleHandle(nullptr);
+    wc.lpszClassName = className;
+    wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
+    wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
+    RegisterClassW(&wc);
+
+    int w = DpiScale(hwndParent, 380);
+    int h = DpiScale(hwndParent, 220);
+    RECT rcParent;
+    GetWindowRect(hwndParent, &rcParent);
+    int x = rcParent.left + (rcParent.right - rcParent.left - w) / 2;
+    int y = rcParent.top + (rcParent.bottom - rcParent.top - h) / 2;
+
+    CloudRevertDialog dlg;
+    dlg.win = win;
+    dlg.primaryTs = ProfileDataCloudRevertPrimaryTs();
+    dlg.backupTs = ProfileDataCloudRevertNewestBackupTs();
+    dlg.newestSlot = ProfileDataCloudRevertNewestBackupSlot();
+    gCloudRevertDialog = &dlg;
+    HWND hwnd =
+        CreateWindowExW(0, className, L"Cloud revert detected", WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_VISIBLE, x,
+                        y, w, h, hwndParent, nullptr, GetModuleHandle(nullptr), nullptr);
+    if (!hwnd) {
+        gCloudRevertDialog = nullptr;
+        return;
+    }
+    dlg.hwnd = hwnd;
+    int pad = DpiScale(hwnd, 16);
+    int btnW = DpiScale(hwnd, 100);
+    int btnH = DpiScale(hwnd, 28);
+    int bx = w - pad - btnW;
+    int by = h - pad - btnH;
+    CreateWindowW(L"BUTTON", L"Keep", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON, bx - btnW - DpiScale(hwnd, 8),
+                  by, btnW, btnH, hwnd, (HMENU)2, GetModuleHandle(nullptr), nullptr);
+    CreateWindowW(L"BUTTON", L"Restore", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON, bx, by, btnW, btnH,
+                  hwnd, (HMENU)1, GetModuleHandle(nullptr), nullptr);
+
+    // run modal message loop
+    MSG msg;
+    while (GetMessage(&msg, nullptr, 0, 0)) {
+        if (!IsDialogMessage(hwnd, &msg)) {
+            TranslateMessage(&msg);
+            DispatchMessage(&msg);
+        }
+        if (gCloudRevertDialog == nullptr) break;
+    }
+
+    if (dlg.restore && dlg.newestSlot >= 0) {
+        if (ProfileDataRecoverBackupSlot(dlg.newestSlot)) {
+            logf("[profile] cloud revert: restored backup slot %d\n", dlg.newestSlot);
+        } else {
+            logf("[profile] cloud revert: restore slot %d failed\n", dlg.newestSlot);
+        }
+    }
+}
