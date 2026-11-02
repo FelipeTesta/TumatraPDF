@@ -1,0 +1,152 @@
+digraph CommandSystem {
+    rankdir=TB;
+    node [shape=box, style=rounded, fontname="Consolas", fontsize=9];
+    edge [fontname="Consolas", fontsize=8];
+    compound=true;
+
+    // ===================== CODEGEN =====================
+    subgraph cluster_codegen {
+        label="Command Code Generation";
+        color="#ff9800";
+        style=filled;
+        fillcolor="#fff3e0";
+
+        gen_commands_ts [label="cmd/gen-commands.ts\n• Enum values in order\n• Add before CmdNone\n• Doc in docs/md/Commands.md", fillcolor="#c8e6c9", style=filled);
+        gen_code_ts [label="bun cmd/gen-code.ts\n→ Commands.h (generated)\n→ Commands.cpp (generated)\n• @gen-start commands\n• Raw enum { CmdX, CmdY, CmdNone }\n• NO include guard!", fillcolor="#bbdefb", style=filled);
+        gen_flags_ts [label="cmd/gen-flags.ts\n• Command-line flags\n• → Flags.cpp (generated)\n• @gen-start virt-keys-num", fillcolor="#bbdefb", style=filled);
+        warn_no_hand_edit [label="⚠ NEVER hand-edit Commands.h/.cpp\nEdit gen-commands.ts + regenerate", fillcolor="#ffcdd2", style=filled, shape=note);
+
+        gen_commands_ts -> gen_code_ts -> warn_no_hand_edit;
+        gen_flags_ts -> gen_code_ts [style=dotted];
+    }
+
+    // ===================== COMMAND ENUM =====================
+    subgraph cluster_enum {
+        label="Command Enum (Commands.h)";
+        color="#4285f4";
+        style=filled;
+        fillcolor="#e3f2fd";
+
+        enum_vals [label="enum CommandId : u16 {\n  CmdOpenFile = 1,\n  CmdSaveAs,\n  CmdPrint,\n  ...\n  CmdAutoScrollToggle,  [TUMATRA]\n  CmdAutoScrollSpeedUp, [TUMATRA]\n  CmdAutoScrollSpeedDown,[TUMATRA]\n  CmdContrastToggle,    [TUMATRA]\n  CmdContrastUp,        [TUMATRA]\n  CmdContrastDown,      [TUMATRA]\n  CmdViewportCropV2Toggle,[TUMATRA]\n  CmdMarginTrimToggle,  [TUMATRA]\n  CmdTrimConfig,        [TUMATRA]\n  CmdArchToolsToggle,   [TUMATRA]\n  CmdArchScale,         [TUMATRA]\n  CmdArchMeasure,       [TUMATRA]\n  CmdArchMeasureRadius, [TUMATRA]\n  CmdArchRefLine,       [TUMATRA]\n  CmdArchClear,         [TUMATRA]\n  CmdArchResetScale,    [TUMATRA]\n  CmdFlashcardToggle,   [TUMATRA]\n  CmdFlashcardAdd,      [TUMATRA]\n  CmdFlashcardReveal,   [TUMATRA]\n  CmdFlashcardRate1..4, [TUMATRA]\n  CmdFlashcardNext,     [TUMATRA]\n  CmdFlashcardBack,     [TUMATRA]\n  CmdFlashcardOrder,    [TUMATRA]\n  CmdFlashcardFilter,   [TUMATRA]\n  CmdFlashcardLista,    [TUMATRA]\n  CmdFlashcardImport,   [TUMATRA]\n  CmdFlashcardSession,  [TUMATRA]\n  CmdFlashcardConfig,   [TUMATRA]\n  CmdEditToolsToggle,   [TUMATRA]\n  CmdEditAddText,       [TUMATRA]\n  CmdEditAddImage,      [TUMATRA]\n  CmdEditCrop,          [TUMATRA]\n  CmdEditApply,         [TUMATRA]\n  CmdToggleFilePicker,  [TUMATRA]\n  ...\n  CmdNone = 0xFFFF\n};", fillcolor="#bbdefb", style=filled, fontsize=8);
+    }
+
+    // ===================== DISPATCH =====================
+    subgraph cluster_dispatch {
+        label="Command Dispatch";
+        color="#e91e63";
+        style=filled;
+        fillcolor="#fce4ec";
+
+        frame_on_cmd [label="FrameOnCommand(hwnd, msg, wp, lp)\nSumatraPDF.cpp:13000+\n• wp = command ID\n• Routes to HandleCmd*\n• Special: accelerator keys\n• Returns 0 if handled", fillcolor="#c8e6c9", style=filled);
+        handle_cmd [label="HandleCmdXxx(win)\nCommands_*.cpp\n• Thin handlers\n• Call core logic\n• Post RelayoutFrame if UI changes\n• Log: logf(\"[tag] CmdXxx\")", fillcolor="#bbdefb", style=filled);
+        accel_table [label="Accelerators.cpp\n• FVIRTKEY + key mappings\n• LoadAccelerators()\n• TranslateAccelerator in msg loop\n• Upstream defaults intact\n• TumatraPDF: F7/F8/F9, Ctrl+Shift+C", fillcolor="#bbdefb", style=filled);
+        ctrl_callback [label="ControllerCallbackHandler (SumatraPDF.cpp)\n• TocChanged / OnAutoScrollBottom\n• OnAutoScrollProgress / RenderThumbnail\n• RequestRendering / RequestPredictiveRendering\n• CleanUp / FocusFrame / SaveDownload\n• UpdateScrollbars / ZoomChanged / PageNoChanged\nImplemented by MainWindow", fillcolor="#e3f2fd", style=filled);
+    }
+
+    // ===================== AVAILABILITY =====================
+    subgraph cluster_avail {
+        label="Command Availability (CommandAvailability.cpp)";
+        color="#9c27b0";
+        style=filled;
+        fillcolor="#f3e5f5";
+
+        cmd_visibility [label="CommandVisibility enum\n• Show / Disable / Hide\n• Per surface: Menu / Palette / Toolbar", fillcolor="#bbdefb", style=filled);
+        avail_logic [label="IsCommandAvailable(cmd, surface, win)\n• Context-aware:\n  – Markdown? Disable PDF-only\n  – No doc? Disable save/print\n  – Selection? Enable copy\n  – TC2 active? Adjust crop cmds\n• Returns CommandVisibility", fillcolor="#c8e6c9", style=filled);
+        menu_enabler [label="MenuEnabler.cpp\n• WM_INITMENUPOPUP\n• Calls IsCommandAvailable\n• EnableMenuItem / CheckMenuItem\n• Checked state for toggles", fillcolor="#bbdefb", style=filled);
+        toolbar_state [label="ToolbarUpdateStateForWindow()\nToolbar.cpp:1600\n• SetToolbarButtonCheckedState()\n• TB_SETSTATE for BTNS_CHECK\n• Called on RelayoutFrame", fillcolor="#bbdefb", style=filled);
+        command_surface [label="CommandSurface enum\n• Menu / Palette / Toolbar / ContextMenu\nUsed by IsCommandAvailable\nContextMenu for right-click image items", fillcolor="#fff9c4", style=filled);
+    }
+
+    // ===================== HANDLERS BY FEATURE =====================
+    subgraph cluster_handlers {
+        label="Handler Files (Commands_*.cpp) — Serena Detail";
+        color="#4caf50";
+        style=filled;
+        fillcolor="#e8f5e9";
+
+        cmd_file [label="Commands_File.cpp\n• HandleCmdOpenFile / HandleCmdOpenFileWithOSFilePicker\n• HandleCmdToggleFilePicker / HandleCmdShowInFolder\n• HandleCmdOpenPrev/NextFileInFolder\n• HandleCmdNavigateFilesInFolder\n• HandleCmdRenameFile / HandleCmdDeleteFile\n• HandleCmdDeleteFileAndOpenNext\n• HandleCmdSaveAs / HandleCmdPrint\n• HandleCmdCopyFilePath / HandleCmdClearHistory\n• HandleCmdRemoveDeletedFilesFromHistory\n• HandleCmdDeleteCachedFiles\n• HandleCmdReopenLastClosedFile\n• HandleCmdShowLog / HandleCmdScreenshot\n• HandleCmdExit / HandleCmdReloadDocument\n• HandleCmdCreateShortcutToFile", fillcolor="#bbdefb", style=filled);
+        cmd_view [label="Commands_View.cpp\n• Zoom: FitWidth/FitPage/In/Out/Actual\n• Rotate L/R\n• DisplayMode: Continuous/Single/Facing\n• Presentation: F5/F11/F12/L\n• HandleCmdZoom / HandleCmdRotate\n• HandleCmdDisplayMode / HandleCmdPresentation", fillcolor="#bbdefb", style=filled);
+        cmd_nav [label="Commands_Nav.cpp\n• PagePrev/Next/First/Last\n• GoToPage (FocusPageNoEdit)\n• Back/Forward (nav history)\n• AddUniquePageNo (static)\n• HandleCmdGoToPage / HandleCmdBack/Forward", fillcolor="#bbdefb", style=filled);
+        cmd_edit [label="Commands_Edit.cpp\n• EditToolsToggle → EditToolbarCreate\n• AddText / AddImage / Crop / Apply\n• Selection handlers\n• EditNotify / EditArmPlaceImage\n• EditToolsPlacePendingImage\n• EditToolsImageMouseDown/Move/End\n• EditGetPreviewBmp / EditSaveArgbBitmapAsPng\n• EditApplyImageEdits / HandleCmdEditImageCrop\n• EditToolsSelectImageFromMenu / EditSyncTab", fillcolor="#c8e6c9", style=filled);
+        cmd_arch [label="Commands_ArchTools.cpp\n• ArchToolsToggle → CreateToolbar2\n• Scale/Measure/MeasureRadius/RefLine\n• Clear / ResetScale / CleanAll\n• ArchVector math (ArchVector.cpp)\n• HandleCmdArchScale / HandleCmdArchMeasure\n• HandleCmdArchMeasureRadius / HandleCmdArchRefLine\n• HandleCmdArchClear / HandleCmdArchResetScale\n• HandleCmdArchCleanAll", fillcolor="#c8e6c9", style=filled);
+        cmd_flash [label="Commands_Flashcard.cpp\n• Toggle/Add/Reveal/Rate/Next/Back\n• Order/Filter/Lista/Import/Session/Config\n• FlashcardToolbarCreate\n• FlashcardEnsureTabCards / FindTabIndex\n• CollectTabCards / BuildFilteredStudyOrder\n• FlashcardPrefetchRenderUpcoming\n• FlashcardNavigateToEntry\n• FlashcardApplyStudyOrder\n• HandleFlashcardRate / FlashcardStopSession\n• FlashcardOnTabChanged / HandleCommandFlashcard\n• FlashcardStudyTimerStart/Stop/Tick\n• FlashcardTimerUIOverlayProc / RegisterFlashcardTimerUIOverlayClass\n• FlashcardShowTimerDoneOverlay / RegisterFlashcardTimerDoneOverlayClass", fillcolor="#c8e6c9", style=filled);
+        cmd_scroll [label="AutoScroll.cpp\n• AutoScrollToggle/SpeedUp/SpeedDown\n• AutoScrollContinuousTick (timer)\n• ETA calculation\n• AutoScrollPxPerSec / SnapSpeedMultiplier\n• RecalcAutoScrollEtaPdf / RecalcAutoScrollEtaWebview\n• SetWebviewAutoScroll / AutoScrollToggle\n• AutoScrollPauseForFocus / ResumeFromFocus\n• AutoScrollPauseForTrimConfig / ResumeFromTrimConfig\n• AutoScrollSpeedAdjust / TimerDoneOverlayProc\n• RegisterTimerDoneOverlayClass / ShowTimerDoneOverlay\n• StartAutoScrollAtCursor / AutoScrollMiddleClickTick", fillcolor="#c8e6c9", style=filled);
+        cmd_contrast [label="SumatraPDF.cpp:10923\n• ContrastToggle/Up/Down (±10%)\n• CreateContrastOverlay\n• Per-doc persist\n• CreateContrastOverlay / RestoreContrastOverlay\n• UpdateDocumentColors()\n• MarkdownContrastJs() (single source)", fillcolor="#c8e6c9", style=filled);
+        cmd_crop [label="Commands_Crop.cpp\n• ViewportCropV2Toggle\n• QuickToggleViewportCropV2 (Shift-hold)\n• VirtualToPhysical routing\n• ApplyViewportCropV2 / RestoreViewportAfterV2Toggle\n• RemapNavHistoryForV2 / PhysicalToVirtualForRect\n• DisplayModel::ColumnOffsetXForPage", fillcolor="#c8e6c9", style=filled);
+        cmd_trim [label="SumatraPDF.cpp:10961\n• MarginTrimToggle / TrimConfig\n• TrimConfigDialog singleton (gTrimConfigWnd)\n• Cache invalidation: FreeForDisplayModel()\n• TrimConfigDialogSyncEdits / OnEditTopChanged\n• OnEditBottomChanged / OnEditColGapChanged\n• OnReset / OnSave / OnCancel", fillcolor="#c8e6c9", style=filled);
+        cmd_readaloud [label="ReadAloud.cpp\n• ReadAloudInTab / ReadAloudFromViewportTopInTab\n• ReadAloudSelectionInTab / ReadAloudStartFromCursor\n• ReadAloudContinueInTab / ReadAloudStopRememberPos\n• ReadAloudPlaybackPauseOrResume / SpeedLabelTemp\n• ClosestSpeedIdx / SetSpeed / PlaybackCycleSpeed\n• PlaybackStop / ShowTtsVoiceMenu / BuildReadAloudVoiceMenuItems\n• RebuildReadAloudMenu / HandleReadAloudMenuSelection\n• TtsLangIdToLocaleNameTemp", fillcolor="#e3f2fd", style=filled);
+    }
+
+    // ===================== PALETTE / SEARCH =====================
+    subgraph cluster_palette {
+        label="Command Palette";
+        color="#ff9800";
+        style=filled;
+        fillcolor="#fff3e0";
+
+        palette [label="CommandPalette.cpp\n• Ctrl+Shift+P / F1\n• Fuzzy search all commands\n• Shows availability\n• StartLoadDocument for recent files\n• Execute → FrameOnCommand", fillcolor="#c8e6c9", style=filled);
+    }
+
+    // ===================== DEBUG CONTROL =====================
+    subgraph cluster_debug {
+        label="Debug Control (-dbg-control pipe)";
+        color="#795548";
+        style=filled;
+        fillcolor="#efebe9";
+
+        dbg_control [label="cmd/control.ts\n• 44 Test* commands\n• Ping / Quit\n• TestSearch / TestToc\n• TestToolbarButtons\n• TestAIChat\n• Preferred over GUI automation", fillcolor="#bbdefb", style=filled);
+    }
+
+    // ===================== EDGES =====================
+    gen_code_ts -> enum_vals;
+    enum_vals -> frame_on_cmd;
+    frame_on_cmd -> handle_cmd;
+    handle_cmd -> cmd_file;
+    handle_cmd -> cmd_view;
+    handle_cmd -> cmd_nav;
+    handle_cmd -> cmd_edit;
+    handle_cmd -> cmd_arch;
+    handle_cmd -> cmd_flash;
+    handle_cmd -> cmd_scroll;
+    handle_cmd -> cmd_contrast;
+    handle_cmd -> cmd_crop;
+    handle_cmd -> cmd_trim;
+    handle_cmd -> cmd_readaloud;
+
+    accel_table -> frame_on_cmd [style=dashed, label="WM_COMMAND"];
+    palette -> frame_on_cmd [style=dashed, label="Execute"];
+
+    handle_cmd -> avail_logic [style=dotted, label="checks"];
+    avail_logic -> menu_enabler;
+    avail_logic -> toolbar_state;
+
+    frame_on_cmd -> dbg_control [style=dotted, label="Test* cmds"];
+
+    // Controller callback integration
+    frame_on_cmd -> ctrl_callback [style=dotted, label="implements"];
+    cmd_scroll -> ctrl_callback [style=dotted, label="OnAutoScrollBottom/Progress"];
+    cmd_flash -> ctrl_callback [style=dotted, label="RequestRendering"];
+    cmd_crop -> ctrl_callback [style=dotted, label="ZoomChanged/PageNoChanged"];
+
+    // Cross-refs
+    cmd_arch ..> dm_virtual [style=dotted, label="VirtualToPhysical"];
+    cmd_crop ..> dm_virtual [style=dotted];
+    cmd_trim ..> cache [style=dotted, label="FreeForDisplayModel"];
+    cmd_scroll ..> render [style=dotted, label="blit"];
+    cmd_flash ..> annot [style=dotted, label="MuPDF highlight"];
+    cmd_readaloud ..> cvt_screen [style=dotted, label="CvtToScreen for word rects"];
+
+    // Legend
+    subgraph cluster_legend {
+        label="Legend";
+        color="#ccc";
+        gen [label="Generated", fillcolor="#fff3e0", style=filled];
+        enum_n [label="Enum", fillcolor="#e3f2fd", style=filled];
+        dispatch [label="Dispatch", fillcolor="#fce4ec", style=filled];
+        avail [label="Availability", fillcolor="#f3e5f5", style=filled];
+        handlers [label="Handlers", fillcolor="#e8f5e9", style=filled];
+        palette_n [label="Palette", fillcolor="#fff3e0", style=filled];
+        debug [label="Debug", fillcolor="#efebe9", style=filled];
+        callback [label="ControllerCallbackHandler", fillcolor="#e3f2fd", style=filled];
+    }
+}

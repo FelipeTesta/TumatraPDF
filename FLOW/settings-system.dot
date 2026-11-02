@@ -1,0 +1,155 @@
+digraph SettingsSystem {
+    rankdir=TB;
+    node [shape=box, style=rounded, fontname="Consolas", fontsize=9];
+    edge [fontname="Consolas", fontsize=8];
+    compound=true;
+
+    // ===================== CODEGEN =====================
+    subgraph cluster_codegen {
+        label="Code Generation (NEVER edit @gen-start blocks)";
+        color="#ff9800";
+        style=filled;
+        fillcolor="#fff3e0";
+
+        gen_settings_ts [label="cmd/gen-settings.ts\n• GlobalPrefs struct definition\n• Per-doc FileState fields\n• Version tags (ver3.7)\n• Default values", fillcolor="#c8e6c9", style=filled);
+        gen_code_ts [label="bun cmd/gen-code.ts\n→ Settings.h (generated)\n→ Settings.cpp (generated)\n• @gen-start docprop-*\n• @gen-start virt-keys-num", fillcolor="#bbdefb", style=filled);
+        regenerate [label="⚠ ALWAYS regenerate after\ngen-settings.ts changes\nNEVER hand-edit generated", fillcolor="#ffcdd2", style=filled, shape=note);
+
+        gen_settings_ts -> gen_code_ts -> regenerate;
+    }
+
+    // ===================== GLOBAL PREFS =====================
+    subgraph cluster_global {
+        label="GlobalPrefs (gGlobalPrefs) — sumatrapdf-src/src/Settings.cpp";
+        color="#4caf50";
+        style=filled;
+        fillcolor="#e8f5e9";
+
+        viewport_crop [label="ViewportCrop ver3.7\n• Left/Right/Top/Bottom = 0\n• ColGap = 0\n• Enabled = false\n• QuickToggle = false (orphan)", fillcolor="#c8e6c9", style=filled);
+        trim_prefs [label="Trim ver3.7\n• Top = 0\n• Bottom = 0\n• Enabled = false", fillcolor="#c8e6c9", style=filled);
+        autoscroll_prefs [label="AutoScrollShowEta = true\n(gate ETA toolbar label)", fillcolor="#c8e6c9", style=filled);
+        filepicker_prefs [label="filePicker = \"\" (os|sumatrapdf)", fillcolor="#c8e6c9", style=filled);
+        ui_prefs [label="UI preferences\n• toolbarVisible\n• showMenubar\n• tabBarVisible\n• theme (system/light/dark)\n• language", fillcolor="#bbdefb", style=filled);
+    }
+
+    // ===================== PER-DOC STATE =====================
+    subgraph cluster_perdoc {
+        label="FileState (per document) — sumatrapdf-src/src/SumatraPDF.cpp";
+        color="#2196f3";
+        style=filled;
+        fillcolor="#e3f2fd";
+
+        invert_state [label="InvertColors = false\n(per-doc toggle)", fillcolor="#c8e6c9", style=filled);
+        contrast_state [label="ContrastEnabled = false\nContrastOpacity = 50\n(per-doc, steps ±10%)", fillcolor="#c8e6c9", style=filled);
+        autoscroll_state [label="AutoScrollSpeedMultiplier = 0.1\n(clamp 0.1–10)\nsaved in AutoScroll.cpp", fillcolor="#c8e6c9", style=filled);
+        trim_state [label="MarginTrimEnabled = false\nTrimTop = -1 (inherit global)\nTrimBottom = -1\n(per-doc override)", fillcolor="#c8e6c9", style=filled);
+        crop_state [label="ViewportCropV2Enabled = false\n(per-doc, applies on load)", fillcolor="#c8e6c9", style=filled);
+        base_state [label="Base FileState fields\n• pageNo / zoom / displayMode\n• scrollPos (x,y)\n• scrollMode", fillcolor="#bbdefb", style=filled);
+    }
+
+    // ===================== PERSISTENCE =====================
+    subgraph cluster_persist {
+        label="Persistence Layer";
+        color="#9c27b0";
+        style=filled;
+        fillcolor="#f3e5f5";
+
+        save_settings [label="SaveSettings()\nSettings.cpp\n• GlobalPrefs → registry\n  HKCU\\Software\\SumatraPDF\n• FileHistory (Vec<FileState>) → AppData\n  %LOCALAPPDATA%\\SumatraPDF\\<hash>\\\n• Version migration handled", fillcolor="#c8e6c9", style=filled);
+        load_settings [label="LoadSettings()\nSettings.cpp\n• On startup\n• Registry → GlobalPrefs\n• AppData → FileHistory\n• Missing fields = defaults", fillcolor="#c8e6c9", style=filled);
+        file_history [label="gFileHistory (FileHistory.cpp)\n• Vec<FileState> keyed by path\n• UpdateTabFileDisplayStateForTab()\n  called on tab switch / close\n• SaveSettings() serializes all", fillcolor="#bbdefb", style=filled);
+        reload_preserve [label="ReloadDocument Preservation\nSumatraPDF.cpp:2612 / 870\n• UpdateFileStateForTab() BEFORE reload\n  captures ALL fork fields\n• LoadDocumentFinish restores\n  invert/contrast/trim/crop/autoscroll\n• UpdateDocumentColors()", fillcolor="#e1bee7", style=filled);
+    }
+
+    // ===================== UI CONTROLS =====================
+    subgraph cluster_ui {
+        label="UI Controls → Settings";
+        color="#e91e63";
+        style=filled;
+        fillcolor="#fce4ec";
+
+        settings_dlg [label="Settings Dialog\nAdvancedOptions.cpp\n• Binds to GlobalPrefs\n• Per-doc overrides in Advanced\n• Apply = SaveSettings() + Relayout", fillcolor="#c8e6c9", style=filled);
+        toolbar_toggles [label="Toolbar BTNS_CHECK toggles\n• Contrast (CmdContrastToggle)\n• Autoscroll (CmdAutoScrollToggle)\n• ViewportCrop (CmdViewportCropV2Toggle)\n• MarginTrim (CmdMarginTrimToggle)\n• SetToolbarButtonCheckedState()", fillcolor="#bbdefb", style=filled);
+        menu_items [label="Menu items (Menu.cpp)\n• New &Tools → AutoScroll/Contrast/Crop/Trim\n• Settings → Advanced Options\n• Checked state from GlobalPrefs/FileState", fillcolor="#bbdefb", style=filled);
+        trim_dialog [label="TrimConfigDialog\n• Singleton gTrimConfigWnd\n• Edits synced on drag\n• Save → gGlobalPrefs->trim\n• Cancel restores + frees cache", fillcolor="#fff9c4", style=filled);
+    }
+
+    // ===================== ENGINE INTEGRATION =====================
+    subgraph cluster_engine {
+        label="Engine / DisplayModel Consumption";
+        color="#795548";
+        style=filled;
+        fillcolor="#efebe9";
+
+        dm_ctor [label="DisplayModel ctor\nDisplayModel.cpp\n• Reads GlobalPrefs viewportCrop\n• Applies Trim prefs\n• BEFORE SetInitialViewSettings\n• Latent flag safe: gate = layout truth", fillcolor="#c8e6c9", style=filled);
+        dm_trim [label="DisplayModel::marginTrimEnabled\nDisplayModel::trimTop/trimBottom\nPer-document override\nRenderCache.cpp uses these", fillcolor="#bbdefb", style=filled);
+        dm_crop [label="DisplayModel::viewportCropV2Enabled\nVirtualToPhysical / ColumnOfVirtual\nBuildPagesInfo() on toggle\nRemapNavHistoryForV2", fillcolor="#bbdefb", style=filled);
+        engine_crop [label="EngineBase::PageMediaBox()\n→ DisplayModel::PageMediaBox()\nRoutes virtual→physical for TC2\nHalves mediabox for column", fillcolor="#e1bee7", style=filled);
+        cache_trim [label="RenderCache::GetTileRectDevice/User\nPasses dm->marginTrimEnabled\nShrinks mediabox by trimTop/trimBottom\nShouldCacheRendering = true when trim", fillcolor="#e1bee7", style=filled);
+    }
+
+    // ===================== VERSION MIGRATION =====================
+    subgraph cluster_version {
+        label="Version Migration (ver3.7)";
+        color="#607d8b";
+        style=filled;
+        fillcolor="#eceff1";
+
+        ver_check [label="Settings version check\nSettings.cpp\n• GlobalPrefs.version\n• FileState.version\n• Migration functions\n  MigrateGlobalPrefs()\n  MigrateFileState()", fillcolor="#bbdefb", style=filled);
+        ver37 [label="ver3.7 additions\n• ViewportCrop ColGap\n• Trim Top/Bottom per-doc\n• ViewportCropV2Enabled\n• AutoScrollShowEta", fillcolor="#c8e6c9", style=filled);
+    }
+
+    // ===================== EDGES =====================
+    gen_settings_ts -> gen_code_ts;
+    gen_code_ts -> viewport_crop [style=dotted];
+    gen_code_ts -> trim_prefs [style=dotted];
+    gen_code_ts -> autoscroll_prefs [style=dotted];
+    gen_code_ts -> filepicker_prefs [style=dotted];
+    gen_code_ts -> ui_prefs [style=dotted];
+
+    viewport_crop -> save_settings [style=dotted];
+    trim_prefs -> save_settings [style=dotted];
+    autoscroll_prefs -> save_settings [style=dotted];
+    filepicker_prefs -> save_settings [style=dotted];
+    ui_prefs -> save_settings [style=dotted];
+
+    save_settings -> file_history;
+    load_settings -> file_history;
+    file_history -> invert_state [style=dotted];
+    file_history -> contrast_state [style=dotted];
+    file_history -> autoscroll_state [style=dotted];
+    file_history -> trim_state [style=dotted];
+    file_history -> crop_state [style=dotted];
+    file_history -> base_state [style=dotted];
+
+    invert_state -> reload_preserve [style=dotted];
+    contrast_state -> reload_preserve [style=dotted];
+    autoscroll_state -> reload_preserve [style=dotted];
+    trim_state -> reload_preserve [style=dotted];
+    crop_state -> reload_preserve [style=dotted];
+
+    settings_dlg -> save_settings;
+    toolbar_toggles -> global_prefs [style=dotted];
+    menu_items -> global_prefs [style=dotted];
+    trim_dialog -> trim_prefs;
+
+    dm_ctor -> viewport_crop [style=dotted];
+    dm_ctor -> trim_prefs [style=dotted];
+    dm_trim -> cache_trim [style=dotted];
+    dm_crop -> engine_crop [style=dotted];
+
+    ver_check -> ver37;
+
+    // Legend
+    subgraph cluster_legend {
+        label="Legend";
+        color="#ccc";
+        gen [label="Generated code", fillcolor="#fff3e0", style=filled];
+        global_n [label="Global prefs", fillcolor="#e8f5e9", style=filled];
+        per_doc [label="Per-doc state", fillcolor="#e3f2fd", style=filled];
+        persist [label="Persistence", fillcolor="#f3e5f5", style=filled];
+        ui_ctrl [label="UI Controls", fillcolor="#fce4ec", style=filled];
+        engine [label="Engine integration", fillcolor="#efebe9", style=filled];
+        version [label="Version migration", fillcolor="#eceff1", style=filled];
+        warn [label="⚠ Warning", fillcolor="#ffcdd2", style="filled,shape=note"];
+    }
+}

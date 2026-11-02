@@ -13,14 +13,23 @@ digraph ToolbarSystem {
         fillcolor=palegreen;
 
         FcCreate [label="FlashcardToolbarCreate()\nCommands_Flashcard.cpp:552\nFlashcardToolbar.cpp:415"];
-        FcRebarSubclass [label="FlashcardReBarSubclassProc()\nFlashcardToolbar.cpp:145\nHandles NM_CUSTOMDRAW"];
-        FcToolbarSubclass [label="FlashcardToolbarSubclassProc()\nFlashcardToolbar.cpp:310\nWM_PAINT + WM_CTLCOLOR"];
-        FcCreateTrio [label="FlashcardCreateStudyTimerControls()"];
+        FcRebarSubclass [label="FlashcardReBarSubclassProc()\nFlashcardToolbar.cpp:145\nHandles NM_CUSTOMDRAW\nkFcRebarSubclassId"];
+        FcToolbarSubclass [label="FlashcardToolbarSubclassProc()\nFlashcardToolbar.cpp:310\nWM_PAINT + WM_CTLCOLOR\nkFcToolbarSubclassId"];
+        FcCreateTrio [label="FlashcardCreateStudyTimerControls()\nFlashcardToolbar.cpp"];
         FcUpdateState [label="FlashcardToolbarUpdateState()\nTB_SETSTATE for checked buttons"];
+        FcMeasureTimer [label="FlashcardMeasureTimerTrioDx()\nFlashcardToolbar.cpp"];
+        FcPositionTimer [label="FlashcardPositionTimerTrio()\nFlashcardToolbar.cpp"];
+        FcDrawButton [label="FlashcardDrawButton()\nFlashcardToolbar.cpp\nCustom draw with theme colors"];
+        FcDrawHold [label="FlashcardDrawHoldButton()\nFlashcardToolbar.cpp\nHold state rendering"];
 
         FcCreate -> FcRebarSubclass [label="installs on rebar\n(kFcRebarSubclassId)"];
         FcCreate -> FcToolbarSubclass [label="installs on toolbar\n(kFcToolbarSubclassId)"];
+        FcCreate -> FcCreateTrio;
+        FcCreate -> FcMeasureTimer;
+        FcCreate -> FcPositionTimer;
         FcRebarSubclass -> FcUpdateState [label="NM_CUSTOMDRAW\nITEMPREPAINT+ITEMPOSTPAINT"];
+        FcRebarSubclass -> FcDrawButton [label="custom draw"];
+        FcRebarSubclass -> FcDrawHold [label="hold state"];
     }
 
     // === ARCH TOOLS TOOLBAR (FIXED) ===
@@ -31,14 +40,26 @@ digraph ToolbarSystem {
         fillcolor=palegreen;
 
         ArchCreate [label="CreateToolbar2()\nToolbar.cpp:2990"];
-        ArchRebarSubclass [label="ToolbarArchEditRebarSubclassProc()\nToolbar.cpp:3191\nNM_CUSTOMDRAW wipe+redraw (ID 42)"];
+        ArchRebarSubclass [label="ToolbarArchEditRebarSubclassProc()\nToolbar.cpp:3191\nNM_CUSTOMDRAW wipe+redraw\nkArchEditRebarSubclassId=42"];
         ArchSubclassPaint [label="ToolbarSubclassPaint()\nToolbar.cpp:3302\nWM_PAINT bypass only"];
-        ArchTbAddButtons [label="TbAddButtons()\nbase/Win.cpp:3682"];
+        ArchTbAddButtons [label="TbAddButtons()\nbase/Win.cpp:3682\n7 text buttons"];
         ArchUpdateState [label="UpdateToolbar2State()\nTB_SETSTATE"];
+        ArchScale [label="HandleCmdArchScale()\nCommands_ArchTools.cpp\nShowArchScaleDialog()"];
+        ArchMeasure [label="HandleCmdArchMeasure()\nCommands_ArchTools.cpp\nMeasure/Radius/RefLine"];
+        ArchClear [label="HandleCmdArchClear()\nCommands_ArchTools.cpp"];
+        ArchResetScale [label="HandleCmdArchResetScale()\nCommands_ArchTools.cpp"];
+        ArchToggle [label="HandleCmdArchToolsToggle()\nCommands_ArchTools.cpp:134\nRelayoutFrame + UpdateToolbar2State"];
 
         ArchCreate -> ArchRebarSubclass [label="installs after dmlib\n(kArchEditRebarSubclassId=42)"];
         ArchCreate -> ArchSubclassPaint [label="installs on toolbar HWND (ONLY subclass)"];
         ArchCreate -> ArchTbAddButtons [label="adds 7 text buttons"];
+        ArchCreate -> ArchScale;
+        ArchCreate -> ArchMeasure;
+        ArchCreate -> ArchClear;
+        ArchCreate -> ArchResetScale;
+        ArchToggle -> ArchCreate [label="first toggle ON"];
+        ArchToggle -> ArchUpdateState;
+        ArchToggle -> ArchRebarSubclass;
         ArchRebarSubclass -> ArchUpdateState [label="NM_CUSTOMDRAW\nwipe+redraw in ITEMPOSTPAINT"];
     }
 
@@ -52,11 +73,24 @@ digraph ToolbarSystem {
         EditCreate [label="EditToolbarCreate()\nCommands_Edit.cpp:74"];
         EditRebarSubclass [label="ToolbarArchEditRebarSubclassProc()\nToolbar.cpp:3191\nShared NM_CUSTOMDRAW handler (ID 42)"];
         EditSubclassPaint [label="ToolbarSubclassPaint()\nToolbar.cpp:3302\nWM_PAINT bypass only"];
-        EditTbAddButtons [label="TbAddButtons()\nbase/Win.cpp:3682"];
+        EditTbAddButtons [label="TbAddButtons()\nbase/Win.cpp:3682\n4 text buttons (+Text,+Img,Crop,Apply)"];
+        EditNotify [label="EditNotify()\nCommands_Edit.cpp\nEditToolsSelectImageFromMenu"];
+        EditPlaceImage [label="EditArmPlaceImage()\nEditToolsPlacePendingImage()\nEditMupdfErrorCb()"];
+        EditDrag [label="EditToolsImageMouseDown()\nEditToolsImageDragMove()\nEditToolsImageDragEnd()"];
+        EditSave [label="EditGetPreviewBmp()\nEditSaveArgbBitmapAsPng()\nEditApplyImageEdits()"];
+        EditCrop [label="HandleCmdEditImageCrop()"];
+        EditToggle [label="HandleCmdEditToolsToggle()\nCommands_Edit.cpp:969\nRelayoutFrame + ToolbarRewrapAfterSizing"];
 
         EditCreate -> EditRebarSubclass [label="installs after dmlib\n(kArchEditRebarSubclassId=42)"];
         EditCreate -> EditSubclassPaint [label="installs on toolbar HWND (ONLY subclass)"];
         EditCreate -> EditTbAddButtons [label="adds 4 text buttons (+Text,+Img,Crop,Apply)"];
+        EditCreate -> EditNotify;
+        EditCreate -> EditPlaceImage;
+        EditCreate -> EditDrag;
+        EditCreate -> EditSave;
+        EditCreate -> EditCrop;
+        EditToggle -> EditCreate [label="first toggle ON"];
+        EditToggle -> EditRebarSubclass;
     }
 
     // === DMLIB (blocks custom draw) ===
@@ -68,6 +102,36 @@ digraph ToolbarSystem {
 
         DmlibStrip [label="dmlib::setWindowNotifyCustomDrawSubclass()\nTheme.cpp:54\nIntercepts NM_CUSTOMDRAW\nat window-proc level"];
         DmlibOwns [label="dmlib owns ITEMPREPAINT/\nITEMPOSTPAINT on rebar\nLOG s36-bb"];
+        DmlibHooks [label="Hooked Window Classes\n• #32770 (Dialog)\n• ReBarWindow32\n• ToolbarWindow32\n• Edit / Static / Button\n• SysTabControl32"];
+        DmlibColors [label="Theme colors API\n• ThemeControlBackgroundColor()\n• ThemeWindowTextColor()\n• ThemeHighlightColor()\nUsed by WndProcToolbar WM_CTLCOLOR"];
+    }
+
+    // === MAIN TOOLBAR ===
+    subgraph cluster_main {
+        label="Main Toolbar (Toolbar.cpp:2794)";
+        style=filled;
+        color=lightblue;
+        fillcolor=aliceblue;
+
+        MainCreate [label="CreateToolbar()\nToolbar.cpp:2794\nMain toolbar"];
+        MainRebar [label="hwndReBar (MainWindow)\nRB_INSERTBAND + RB_SETBKCOLOR"];
+        MainButtons [label="gToolbarButtons[]\nToolbar.cpp:2845-3014\nOpen·Print·PageInfo·PagePrev·PageNext\nReadAloud▾\nFitWidth·FitSingle·RotateL·RotateR\nZoomOut·ZoomIn·Find\nAutoscroll·Vel−·Vel+\nContrast·Invert·Crop·Trim·TrimConfig"];
+        MainUpdateState [label="ToolbarUpdateStateForWindow()\nToolbar.cpp:1600+\nSetToolbarButtonCheckedState()"];
+        MainRewrap [label="ToolbarRewrapAfterSizing()\nToolbar.cpp:1570\nWM_SIZE timer 200ms debounce"];
+        MainBandHeight [label="SetToolbarBandToRowHeight()\nToolbar.cpp:1502\nCollapsed-child recovery"];
+        MainWndProc [label="WndProcToolbar()\nToolbar.cpp:1658\nWM_CTLCOLOR/WM_PAINT/WM_SIZE\nWM_TIMER/kMsgToolbarRelocateChildren"];
+        MainSubclass [label="SubclassToolbar()\nSetWindowLongPtr(GWLP_WNDPROC)"];
+        MainEta [label="CreateEtaLabel() / PositionEtaOverlay()\nUpdateEtaOverlayText()\nUpdateToolbarEtaText() / UpdateToolbarSpeedLabel()\nWndProcEtaOverlay()"];
+        MainTimer [label="CreateTimerControls()\nCreatePageBox()\nShortcutToolbarToolTipTemp()"];
+
+        MainCreate -> MainRebar;
+        MainCreate -> MainButtons;
+        MainCreate -> MainSubclass;
+        MainUpdateState -> MainRewrap [style=dotted];
+        MainRewrap -> MainBandHeight;
+        MainRewrap -> MainWndProc;
+        MainWndProc -> MainEta [style=dotted];
+        MainCreate -> MainTimer;
     }
 
     // === SHARED INFRASTRUCTURE ===
@@ -77,10 +141,13 @@ digraph ToolbarSystem {
         color=lightblue;
         fillcolor=aliceblue;
 
-        MainWin [label="MainWindow::archTools / editTools\nMainWindow.h"];
-        Theme [label="ThemeControlBackgroundColor()\nThemeWindowTextColor()"];
-        TBStyles [label="TBSTYLE_LIST | TBSTYLE_WRAPABLE |\nTBSTYLE_EX_MIXEDBUTTONs (our fix)"];
+        MainWin [label="MainWindow::archTools / editTools\nMainWindow.h\n• hwndReBar2 / hwndToolbar2\n• hwndReBarEdit / hwndToolbarEdit\n• hwndReBarFlashcard / hwndToolbarFlashcard\n• on / showHomeOverlay flags"];
+        Theme [label="ThemeControlBackgroundColor()\nThemeWindowTextColor()\nThemeHighlightColor()"];
+        TBStyles [label="TBSTYLE_LIST | TBSTYLE_WRAPABLE |\nTBSTYLE_EX_MIXEDBUTTONs (our fix)\nTBSetExtendedStyle()"];
         Comctl [label="comctl32 ToolbarWindow32\nDraws button faces + labels"];
+        CustomButtons [label="gCustomButtons / gCustomButtonsCount\nkMaxCustomButtons\nPopulateCustomToolbarButtons()"];
+        PageBox [label="Page Box (text box)\nCreatePageBox() / WndProcPageBox()\nPseudo-id PageInfoId L66\nUpdateToolbarPageText()"];
+        FindBox [label="Find Box\nUpdateFindbox() / UpdateToolbarFindText()"];
     }
 
     // === CROSS-CUTTING EDGES ===
@@ -103,24 +170,68 @@ digraph ToolbarSystem {
     TBStyles -> ArchCreate [label="TBSetExtendedStyle\n(TBSTYLE_EX_MIXEDBUTTONs)"];
     TBStyles -> EditCreate [label="TBSetExtendedStyle\n(TBSTYLE_EX_MIXEDBUTTONs)"];
     TBStyles -> FcCreate [label="already had it"];
+    TBStyles -> MainCreate [label="already had it"];
 
     Comctl -> FcRebarSubclass [label="NM_CUSTOMDRAW notifications"];
     Comctl -> ArchRebarSubclass [label="NM_CUSTOMDRAW notifications"];
     Comctl -> EditRebarSubclass [label="NM_CUSTOMDRAW notifications"];
+    Comctl -> MainWndProc [label="NM_CUSTOMDRAW notifications"];
+
+    // Critical ordering (Serena)
+    FcCreate -> FcRebarSubclass [style=bold, color="#2e7d32", label="1. ToolbarSetupSecondaryRebar\n2. Create toolbar\n3. SetWindowTheme(L\"\",L\"\") BEFORE buttons\n4. TbAddButtons(iBitmap=TbIcon::Text)\n5. TbSetBitmapSize + TbSetButtonSize\n6. TbGetItemRect\n7. ShowWindow(SW_SHOW)\n8. RB_INSERTBAND\n9. SetWindowPos(rebar)\n10. ToolbarSubclassSecondaryToolbar AFTER"];
+    ArchCreate -> ArchRebarSubclass [style=bold, color="#2e7d32", label="REPLICATE FLASHCARD PATTERN:\n1. ToolbarSetupSecondaryRebar (ID 42)\n2. Create toolbar\n3. SetWindowTheme(L\"\",L\"\") BEFORE buttons\n4. TbAddButtons(iBitmap=TbIcon::Text)\n5. TbSetBitmapSize + TbSetButtonSize\n6. TbGetItemRect\n7. ShowWindow(SW_SHOW)\n8. RB_INSERTBAND\n9. SetWindowPos(rebar)\n10. ToolbarSubclassSecondaryToolbar AFTER"];
+    EditCreate -> EditRebarSubclass [style=bold, color="#2e7d32", label="REPLICATE FLASHCARD PATTERN:\n1. ToolbarSetupSecondaryRebar (ID 42)\n2. Create toolbar\n3. SetWindowTheme(L\"\",L\"\") BEFORE buttons\n4. TbAddButtons(iBitmap=TbIcon::Text)\n5. TbSetBitmapSize + TbSetButtonSize\n6. TbGetItemRect\n7. ShowWindow(SW_SHOW)\n8. RB_INSERTBAND\n9. SetWindowPos(rebar)\n10. ToolbarSubclassSecondaryToolbar AFTER"];
 
     // === TROUBLESHOOTING NOTES ===
     Note1 [label="ROOT CAUSE: dmlib intercepts NM_CUSTOMDRAW\nbefore subclass chain sees it\n(LOG s36-bb: only CDDS_POSTPAINT reaches ReBarWndProc)", shape=note, color=red];
     Note2 [label="FLASHCARD WORKS: FlashcardReBarSubclassProc\ninstalled after dmlib (LIFO -> first)\nhandles NM_CUSTOMDRAW directly\n+ TBSTYLE_EX_MIXEDBUTTONs", shape=note, color=green];
     Note3 [label="OUR FIX: Replicate flashcard pattern for Arch/Edit:\n1. TBSTYLE_EX_MIXEDBUTTONs on both toolbars\n2. Dedicated rebar subclass (ID 42) handling NM_CUSTOMDRAW\n3. Paint subclass on toolbar HWND for WM_PAINT bypass\n4. Removed conflicting ReBarWndProc (ID 0) from Arch rebar", shape=note, color=blue];
+    Note4 [label="CRITICAL ORDERING (Serena):\nSetWindowTheme MUST run BEFORE TbAddButtons\nToolbarApplyThemeToRebar() does it AFTER → BUG\n→ TB_GETITEMRECT=0 → ReportIf → exitCode=105\n→ Band paints BLANK (white toolbar)\nFix: ToolbarSetupSecondaryRebar + ToolbarSubclassSecondaryToolbar", shape=note, color=orange];
 
     Note1 -> ArchCreate [style=dashed];
     Note1 -> EditCreate [style=dashed];
     Note2 -> FcCreate [style=dashed];
     Note3 -> ArchRebarSubclass [style=dashed];
     Note3 -> EditRebarSubclass [style=dashed];
+    Note4 -> MainCreate [style=dashed];
+    Note4 -> ArchCreate [style=dashed];
+    Note4 -> EditCreate [style=dashed];
 
     // === LAZY-WIDTH TRAP (s36-bf) ===
     NoteLazyWidth [label="comctl lazy BTNS_SHOWTEXT width\n-> ellipsis truncation\nFix: TbAutosIZE + EnforceToolbarTextButtonWidths (=PostAddTextButtonSizing)\nafter TbAddButtons AND after rebar re-wrap", shape=note, color=orange];
     NoteLazyWidth -> ArchTbAddButtons [style=dashed];
     NoteLazyWidth -> EditTbAddButtons [style=dashed];
+    NoteLazyWidth -> MainButtons [style=dashed];
+
+    // === PER-TOOLBAR PACK STATE (D10 fix) ===
+    PackState [label="Per-Toolbar Pack State (D10 fix)\nsToolbarPackStates[4]\nIndex 0=Main, 1=Arch, 2=FC, 3=Edit\nToolbarPackStateIndex(hwnd) → idx\nlastBuiltDx / lastPackedAvailDx\nToolbarRewrapAfterSizing uses this", fillcolor="#fff9c4", style=filled];
+    PackState -> MainRewrap [style=dotted];
+    PackState -> ArchRebarSubclass [style=dotted];
+    PackState -> FcRebarSubclass [style=dotted];
+    PackState -> EditRebarSubclass [style=dotted];
+
+    // === NM_CUSTOMDRAW EXTENDED CHECK ===
+    NmcdCheck [label="ReBarWndProc NM_CUSTOMDRAW Extended (Toolbar.cpp:972)\nisToolbarCustomDraw =\n  win->hwndToolbar == chwnd ||\n  win->archTools.hwndToolbar2 == chwnd ||\n  win->flashcard.hwndToolbarFlashcard == chwnd ||\n  win->editTools.hwndToolbarEdit == chwnd;\nAll 4 toolbars get themed draw", fillcolor="#c8e6c9", style=filled];
+    NmcdCheck -> FcRebarSubclass [style=dotted];
+    NmcdCheck -> ArchRebarSubclass [style=dotted];
+    NmcdCheck -> EditRebarSubclass [style=dotted];
+    NmcdCheck -> MainWndProc [style=dotted];
+
+    // === OVERLAY TOOLBAR ===
+    Overlay [label="Overlay Toolbar (auto-hide)\nPositionOverlayToolbar()\nOverlayToolbarShouldShowForCursor()\nScheduleOverlayHide() / CancelOverlayHide()\nRevealOverlayToolbar()", fillcolor="#e3f2fd", style=filled];
+    MainWndProc -> Overlay [style=dotted, label="WM_MOUSEMOVE"];
+    Overlay -> MainCreate [style=dotted];
+
+    // Legend
+    subgraph cluster_legend {
+        label="Legend";
+        color="#ccc";
+        working [label="Working (Flashcard)", fillcolor="palegreen", style=filled];
+        fixed [label="Fixed (Arch/Edit)", fillcolor="palegreen", style=filled];
+        main [label="Main Toolbar", fillcolor="aliceblue", style=filled];
+        dmlib [label="dmlib (blocks)", fillcolor="lemonchiffon", style=filled];
+        shared [label="Shared", fillcolor="aliceblue", style=filled];
+        critical [label="Critical Fix", fillcolor="#fff9c4", style="filled,rounded"];
+        note_n [label="Notes", shape=note];
+    }
 }

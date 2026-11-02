@@ -1,0 +1,204 @@
+digraph RenderPipeline {
+    rankdir=TB;
+    node [shape=box, style=rounded, fontname="Consolas", fontsize=9];
+    edge [fontname="Consolas", fontsize=8];
+    compound=true;
+
+    // ===================== ENTRY POINTS =====================
+    subgraph cluster_entry {
+        label="Paint Trigger";
+        color="#4285f4";
+        paint [label="WM_PAINT → OnPaintDocument\nCanvas.cpp", fillcolor="#bbdefb", style=filled];
+        draw_doc [label="DrawDocument loop\nCanvas.cpp", fillcolor="#bbdefb", style=filled];
+    }
+
+    // ===================== RENDER CACHE =====================
+    subgraph cluster_cache {
+        label="RenderCache (sumatrapdf-src/src/RenderCache.cpp)";
+        color="#4caf50";
+        style=filled;
+        fillcolor="#e8f5e9";
+
+        paint_entry [label="RenderCache::Paint(dm, hdc, rc)\n~line 1140", fillcolor="#c8e6c9", style=filled];
+        should_cache [label="ShouldCacheRendering(dm)\nDisplayModel.cpp:2200\nreturn !marginTrimEnabled &&\n!viewportCropV2Active", fillcolor="#fff9c4", style=filled];
+        recalc_parts [label="RecalcVisibleParts(dm)\nDisplayModel.cpp\n→ visible page range", fillcolor="#e1bee7", style=filled);
+        render_visible [label="RenderVisibleParts(dm)\nDisplayModel.cpp\n→ queue render requests", fillcolor="#e1bee7", style=filled);
+
+        // Cached path
+        get_tile [label="GetTileRectDevice/User/OnScreen\nRenderCache.cpp:360/745/1170\nroute virtual→physical for TC2", fillcolor="#bbdefb", style=filled);
+        find_tile [label="Find(tileKey) → cache hit?\nNEWEST-FIRST scan (O(1) hot)\nRenderCache.cpp:941", fillcolor="#bbdefb", style=filled);
+        blit [label="BlitPixmap(hdc, tileBmp, rect)\n~1ms cached blit", fillcolor="#c8e6c9", style=filled);
+
+        // Non-cached path
+        render_request [label="RenderPageArgs{pageNo, rect, rot, zoom}\nqueue → render thread", fillcolor="#fff9c4", style=filled);
+        engine_render [label="EngineBase::RenderPage()\n→ EngineMupdf::RenderPage()\n~23ms SYNC", fillcolor="#ffcdd2", style=filled);
+        cache_tile [label="Cache tile → bitmap\nRenderCache::PutTile()", fillcolor="#bbdefb", style=filled);
+
+        // Predictive rendering (Serena)
+        pred_render [label="Predictive Rendering\nRenderCache::RequestPredictiveRendering\nLIFO queue → nearby pages pre-rendered\nGetNextRequest() pops tail", fillcolor="#e3f2fd", style=filled);
+        abort_cookie [label="AbortCookie (EngineBase.h:398)\nRender interruption helper\nChecked in render loop\nSet on RelayoutFrame / tab close\nPrevents stale renders", fillcolor="#fff9c4", style=filled);
+        render_guard [label="Render Thread Guard (LOG.md:2099)\nDiscards queued requests with invalid pageNo\nPost-relayout (2N→N page count change)\nInstead of feeding engine → ReportIf storm", fillcolor="#c8e6c9", style=filled);
+
+        // Trim/TC2 integration
+        trim_math [label="Trim: pageRect clip + shift\nRenderCache.cpp:360/745/1170\ntrimTop/trimBottom per doc", fillcolor="#e3f2fd", style=filled);
+        tc2_math [label="TC2: mediabox halved + colX shift\nVirtualToPhysical(pageNo)\ncolumn 0/1 = left/right", fillcolor="#e3f2fd", style=filled);
+
+        paint_entry -> should_cache;
+        should_cache -> recalc_parts [label="cached"];
+        should_cache -> render_request [label="non-cached"];
+        recalc_parts -> render_visible;
+        render_visible -> get_tile;
+        get_tile -> find_tile;
+        find_tile -> blit [label="hit"];
+        find_tile -> render_request [label="miss"];
+        render_request -> engine_render -> cache_tile -> blit;
+
+        render_visible -> pred_render [style=dotted];
+        pred_render -> render_request [style=dotted];
+        render_request -> abort_cookie [style=dotted];
+        render_request -> render_guard [style=dotted];
+
+        get_tile -> trim_math [style=dotted];
+        get_tile -> tc2_math [style=dotted];
+    }
+
+    // ===================== DISPLAY MODEL =====================
+    subgraph cluster_dm {
+        label="DisplayModel (sumatrapdf-src/src/DisplayModel.cpp)";
+        color="#ff9800";
+        style=filled;
+        fillcolor="#fff3e0";
+
+        virtual_phys [label="VirtualToPhysical(v)\n= (v+1)/2\nColumnOfVirtual(v)\n= (v-1)%2", fillcolor="#bbdefb", style=filled);
+        page_media_box [label="PageMediaBox(pageNo)\nTC2: halve mediabox dx\ntrim: shrink top/bottom\nRoutes virtual→physical", fillcolor="#bbdefb", style=filled);
+        cvt_screen [label="CvtToScreen/CvtFromScreen\npage coords ↔ canvas client\nincludes scroll + zoom\nTC2: pt.x ±= colX", fillcolor="#bbdefb", style=filled);
+        scroll [label="ScrollYBy(dy, false)\nTC2: column advance\nDisplayModel.cpp:2236", fillcolor="#e1bee7", style=filled);
+        build_pages [label="BuildPagesInfo()\npageCount / mediaBoxes\nTC2: 2N virtual pages", fillcolor="#fff9c4", style=filled);
+
+        // Navigation history (Serena)
+        nav_history [label="Navigation History\nAddNavPoint / CanNavigate / Navigate\nCopyNavHistory / GetScrollState\nSetScrollState / StableNavPoint\nShouldCommitStableNavPointBeforeViewChange", fillcolor="#e1bee7", style=filled);
+        relayout [label="Relayout / RelayoutKeepingView\nEnsureMediaBoxesForVisiblePages\nChangeStartPage / BuildPagesInfo\nNotifyMediaBoxRelayout", fillcolor="#e1bee7", style=filled);
+        zoom [label="Zoom Management\nCalcZoomReal / GetZoomReal\nSetZoomVirtual / GetZoomVirtual\nGetNextZoomStep / ZoomRealFromVirtualForPage\nVirtualFitZoom / ZoomRealMatchFacingHeights", fillcolor="#fff9c4", style=filled);
+        hit_test [label="Hit Testing\nGetPageNoByPoint / GetPageNextToPoint\nGetElementAtPos / GetAnnotationAtPos\nGetWidgetAtPos / IsOverText\nGetTextInRegion / ShowResultRectToScreen\nScrollScreenToRect", fillcolor="#bbdefb", style=filled);
+        dark_mode [label="Dark Mode\nApplyTheme() → darkModeEpoch++\nFreeAll() → WM_THEMECHANGED\nInvalidateDarkMode()", fillcolor="#fff9c4", style=filled);
+        render_finish [label="Render Finished\nRenderFinished / RenderFinishedAsync\nRequestRendering / RequestPredictiveRendering\nCleanUp / FocusFrame / SaveDownload\nUpdateScrollbars / ZoomChanged / PageNoChanged", fillcolor="#e1bee7", style=filled);
+    }
+
+    // ===================== ENGINE LAYER =====================
+    subgraph cluster_engine {
+        label="Engine Layer";
+        color="#9c27b0";
+        style=filled;
+        fillcolor="#f3e5f5";
+
+        engine_base [label="EngineBase (virtual)\nEngineBase.h:425\nKind kind\nRenderPage() pure virtual\nPageMediaBox()\nTransform()\nHasClipOptimizations()\nSearchText()\nGetAnnotations()\nGetToc()\nGetNamedDest()\nExtractText()\nSaveFileAs()\nGetPageImage()", fillcolor="#bbdefb", style=filled);
+        engine_mupdf [label="EngineMupdf : EngineBase\nEngineMupdf.cpp:4972\nRenderPage() → MuPDF\nfz_run_page()\nPageMediaBox() → fz_bound_page()\nHasClipOptimizationsLocked()\nFzNewContentBBoxDevice\nDarkLegacySkipRects\nReplaceImageWithFile()\nExtractPageTextLocked()", fillcolor="#c8e6c9", style=filled);
+        engine_ebook [label="EngineEbook : EngineBase\nEngineEbook.cpp:346\nRenderPage() → Gumbo/HTML", fillcolor="#bbdefb", style=filled);
+        engine_img [label="EngineImages : EngineBase\nEngineImages.cpp:454\nRenderPage() → GDI+", fillcolor="#bbdefb", style=filled);
+
+        engine_base -> engine_mupdf [label="PDF"];
+        engine_base -> engine_ebook [label="EPUB/MD"];
+        engine_base -> engine_img [label="Images"];
+    }
+
+    // ===================== RENDER THREAD =====================
+    subgraph cluster_render_thread {
+        label="Render Thread (RenderCache.cpp)";
+        color="#ff9800";
+        style=filled;
+        fillcolor="#fff3e0";
+
+        thread [label="Render Thread\nSingle worker thread\nProcesses RenderRequest queue\nCalls EngineBase::RenderPage()\nPosts WM_PAINT on completion", fillcolor="#c8e6c9", style=filled);
+        request_queue [label="RenderRequest Queue\nVec<RenderRequest> (LIFO for predictive)\nGetNextRequest() pops tail\nRequest: {dm, pageNo, rect, rot, zoom, target}\nPredictive: nearby pages pre-rendered", fillcolor="#bbdefb", style=filled);
+    }
+
+    // ===================== COORDINATE SPACES =====================
+    subgraph cluster_coords {
+        label="Coordinate Spaces (Critical — AGENTS.md §12)";
+        color="#f44336";
+        style=dashed;
+        penwidth=2.0;
+
+        page_space [label="PAGE SPACE\nPDF page coords (72 DPI)\nEngineBase::PageMediaBox()", fillcolor="#ffcdd2", style=filled);
+        virtual_space [label="VIRTUAL SPACE\n2N pages when TC2 active\nDisplayModel::VirtualToPhysical()", fillcolor="#fff9c4", style=filled);
+        canvas_client [label="CANVAS CLIENT SPACE\nDisplayModel::CvtToScreen()\nincludes scroll + zoom", fillcolor="#c8e6c9", style=filled);
+        screen_space [label="SCREEN SPACE\nGetCursorPos / WindowFromPoint\nDPI-virtualized ×1.25 trap!", fillcolor="#ffcdd2", style=filled);
+        toolbar_client [label="TOOLBAR CLIENT SPACE\nTB_GETITEMRECT / hit-test\nseparate from canvas", fillcolor="#e1bee7", style=filled);
+
+        page_space -> virtual_space [label="TC2: ×2 pages"];
+        virtual_space -> canvas_client [label="CvtToScreen + scroll/zoom"];
+        canvas_client -> screen_space [label="ClientToScreen"];
+    }
+
+    // ===================== FEATURE INTEGRATION =====================
+    subgraph cluster_features {
+        label="Feature Hooks into Render Pipeline";
+        color="#795548";
+
+        autoscroll [label="AutoScroll\nAutoScrollContinuousTick\n→ ScrollYBy → RecalcVisibleParts\nRenderCache blit (~1ms)", fillcolor="#c8e6c9", style=filled);
+        trim_feat [label="MarginTrim\npageRect clip in RenderCache\ncache-aware (ShouldCacheRendering=true)\ncache freed on toggle", fillcolor="#e1bee7", style=filled);
+        tc2_feat [label="Two Columns v2\nvirtual→physical routing\nevery engine call\ndisplay cache key = virtual", fillcolor="#e3f2fd", style=filled);
+        contrast_feat [label="Contrast\nPDF: WS_EX_LAYERED overlay\nMD: CSS filter via WebView2\nper-doc persist", fillcolor="#fff9c4", style=filled);
+        invert_feat [label="Invert\nRecolorPixmap in cached\n+ non-cached Paint\nper-doc persist", fillcolor="#fff9c4", style=filled);
+        flashcard_feat [label="Flashcard\nopaque mask on current card\nDrawDocument loop\nGDI+ alpha blend", fillcolor="#e1bee7", style=filled);
+        readaloud [label="ReadAloud\nReadAloudHighlight.cpp\nWord rects via CvtToScreen\nSync with TTS playback", fillcolor="#e3f2fd", style=filled);
+        cad [label="CAD Enhancement\nEngineMupdf::RunCadDetection\nToggleCadEnhanceOverride\nDarkLegacySkipRects", fillcolor="#fff9c4", style=filled);
+
+        autoscroll -> scroll [style=dotted];
+        trim_feat -> trim_math [style=dotted];
+        tc2_feat -> virtual_phys [style=dotted];
+        tc2_feat -> tc2_math [style=dotted];
+    }
+
+    // ===================== DARK MODE EPOCH =====================
+    subgraph cluster_dark {
+        label="Dark Mode Epoch Invalidation";
+        color="#607d8b";
+        style=filled;
+        fillcolor="#eceff1";
+
+        epoch [label="darkModeEpoch (RenderCache)\nincremented on theme change\nDisplayModel.cpp:ApplyTheme()", fillcolor="#bbdefb", style=filled);
+        invalidate [label="DropCacheEntry + epoch check\nRenderCache::Find skips stale\n~1ms penalty on theme switch", fillcolor="#bbdefb", style=filled);
+    }
+
+    // ===================== EDGES =====================
+    paint -> draw_doc -> paint_entry;
+    draw_doc -> canvas_client [style=dotted, label="canvas DC"];
+
+    // Coordinate space references
+    page_media_box -> page_space [style=dotted];
+    virtual_phys -> virtual_space [style=dotted];
+    cvt_screen -> canvas_client [style=dotted];
+    get_tile -> trim_math [style=dotted];
+    get_tile -> tc2_math [style=dotted];
+    engine_render -> engine_mupdf [style=dotted];
+
+    // New edges from Serena
+    render_visible -> pred_render [style=dotted];
+    render_request -> abort_cookie [style=dotted];
+    render_request -> render_guard [style=dotted];
+    render_visible -> thread [style=dotted];
+    thread -> request_queue [style=dotted];
+
+    // Feature integration edges
+    autoscroll -> scroll [style=dotted];
+    trim_feat -> trim_math [style=dotted];
+    tc2_feat -> virtual_phys [style=dotted];
+    tc2_feat -> tc2_math [style=dotted];
+    contrast_feat -> dark_mode [style=dotted];
+    invert_feat -> engine_mupdf [style=dotted, label="RecolorPixmap"];
+    readaloud -> cvt_screen [style=dotted, label="word rects"];
+    cad -> engine_mupdf [style=dotted];
+
+    // Legend
+    subgraph cluster_legend {
+        label="Legend";
+        color="#ccc";
+        cached [label="Cached path (~1ms)", fillcolor="#c8e6c9", style=filled];
+        noncached [label="Non-cached (~23ms)", fillcolor="#ffcdd2", style=filled];
+        coord [label="Coordinate space", fillcolor="#ffcdd2", style="filled,dashed"];
+        feature [label="Feature integration", fillcolor="#e1bee7", style=filled];
+        pred [label="Predictive/Thread", fillcolor="#fff3e0", style=filled];
+        dm [label="DisplayModel", fillcolor="#fff3e0", style=filled];
+    }
+}

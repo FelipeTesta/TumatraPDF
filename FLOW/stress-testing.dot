@@ -1,0 +1,129 @@
+digraph StressTesting {
+    rankdir=TB;
+    node [shape=box, style=rounded, fontname="Consolas", fontsize=9];
+    edge [fontname="Consolas", fontsize=8];
+    compound=true;
+
+    // ===================== STRESS TEST RUNNER =====================
+    subgraph cluster_runner {
+        label="Stress Test Runner (StressTesting.cpp)";
+        color="#4285f4";
+        style=filled;
+        fillcolor="#e3f2fd";
+
+        stress_struct [label="StressTest struct\nMainWindow.h\n• int iteration\n• int maxIterations\n• Str testFile\n• bool running\n• Timer ID", fillcolor="#c8e6c9", style=filled);
+        runner [label="StressTestRunner()\nStressTesting.cpp:400\n• Creates dedicated MainWindow\n• Loads test file (CmdLine)\n• Runs iterations sequentially\n• Logs each iteration result\n• Reports summary on exit", fillcolor="#bbdefb", style=filled);
+        cmdline [label="Command Line\n• -stress-test <file> <iterations>\n• -stress-test-auto (CI mode)\n• Runs without UI interaction\n• Exit code = failures", fillcolor="#bbdefb", style=filled);
+    }
+
+    // ===================== TEST SCENARIOS =====================
+    subgraph cluster_scenarios {
+        label="Test Scenarios (StressTesting.cpp:500+)";
+        color="#e91e63";
+        style=filled;
+        fillcolor="#fce4ec";
+
+        open_close [label="Open/Close Cycle\nStressTesting.cpp:550\n• LoadDocument()\n• Wait for IsDocLoaded()\n• CloseTab()\n• Verify no leaks\n• Iterate N times", fillcolor="#c8e6c9", style=filled);
+        nav_stress [label="Navigation Stress\n• PageNext/Prev rapid\n• GoToPage random\n• Zoom In/Out\n• Rotate L/R\n• Continuous mode toggle", fillcolor="#bbdefb", style=filled);
+        search_stress [label="Search Stress\n• Find random terms\n• FindNext/Prev\n• Highlight verification\n• Clear + repeat", fillcolor="#bbdefb", style=filled);
+        selection_stress [label="Selection Stress\n• Text select/deselect\n• Copy to clipboard\n• Annotation create/delete\n• Highlight/underline", fillcolor="#e1bee7", style=filled);
+        render_stress [label="Render Stress\n• Scroll rapidly\n• Zoom to trigger re-render\n• Toggle continuous\n• Cache hit/miss verify", fillcolor="#fff9c4", style=filled);
+        feature_stress [label="TumatraPDF Features\n• AutoScroll on/off\n• TC2 toggle\n• Trim on/off\n• Contrast/Invert\n• Flashcard create/study", fillcolor="#c8e6c9", style=filled);
+    }
+
+    // ===================== MEMORY / LEAK CHECK =====================
+    subgraph cluster_leak {
+        label="Memory/Leak Detection";
+        color="#f44336";
+        style=filled;
+        fillcolor="#ffebee";
+
+        leak_check [label="Leak Checks\n• gRenderCache tile count\n• Engine ref count\n• DisplayModel allocations\n• GDI handles (GetGuiResources)\n• Virtual memory (VMMap)", fillcolor="#c8e6c9", style=filled);
+        asan [label="ASan Integration\n• build-asan.ts (BROKEN - references SumatraPDF.sln)\n• Would catch: buffer overflow, use-after-free\n• Fix needed for CI", fillcolor="#ffcdd2", style=filled, shape=note);
+        valgrind [label="Valgrind/DrMemory\n• Not configured\n• Could add to CI pipeline\n• Suppressions for MuPDF", fillcolor="#fff9c4", style=filled);
+    }
+
+    // ===================== AUTOMATION / CI =====================
+    subgraph cluster_ci {
+        label="CI Integration";
+        color="#ff9800";
+        style=filled;
+        fillcolor="#fff3e0";
+
+        ci_script [label="CI Script (tests/stress-ci.ts)\n• bun tests/stress-ci.ts\n• Spawns TumatraPDF.exe -stress-test\n• Parses output for failures\n• Timeout per iteration (30s)\n• Artifact: stress-log.txt", fillcolor="#c8e6c9", style=filled);
+        github_actions [label="GitHub Actions\n• .github/workflows/stress.yml\n• Runs on push/PR\n• Matrix: Debug/Release\n• Fails on any leak/crash", fillcolor="#bbdefb", style=filled);
+    }
+
+    // ===================== TEST UTILITIES =====================
+    subgraph cluster_util {
+        label="Test Utilities (tests/)";
+        color="#9c27b0";
+        style=filled;
+        fillcolor="#f3e5f5";
+
+        win_automation [label="tests/win-automation.ts\n• FFI Win32 (PostMessage)\n• captureWindowToPng()\n• Works occluded\n• Click/type automation", fillcolor="#bbdefb", style=filled);
+        winapi [label="tests/winapi.ts\n• User32/GDI32/DwmApi FFI\n• HWND find by class/title\n• GetClientRect / WindowRect\n• packCoords for clicks", fillcolor="#bbdefb", style=filled);
+        dbg_control [label="cmd/control.ts\n• -dbg-control <pipe>\n• 44 Test* commands\n• TestSearch/TestToc\n• TestToolbarButtons\n• Preferred over GUI auto", fillcolor="#c8e6c9", style=filled);
+        ad_hoc [label="Ad-hoc Tests\n• tests/ad-hoc-*.ts\n• Register in before-release.ts\n• Issue repro: tests/issue-<n>.ts\n• Run: bun tests/issue-<n>.ts", fillcolor="#e1bee7", style=filled);
+    }
+
+    // ===================== PERFORMANCE BASELINES =====================
+    subgraph cluster_perf {
+        label="Performance Baselines";
+        color="#795548";
+        style=filled;
+        fillcolor="#efebe9";
+
+        baselines [label="Baselines (s36-v)\n• Compile: 36s / 238 TUs\n• Edit-build-test: ~10s\n• Debug render: ~23ms/page\n• Cached render: ~1ms/tile\n• Startup: <2s cold", fillcolor="#c8e6c9", style=filled);
+        regression [label="Regression Detection\n• Compare iteration times\n• Memory growth per iter\n• Cache hit rate\n• Frame time (autoscroll)", fillcolor="#bbdefb", style=filled);
+    }
+
+    // ===================== EDGES =====================
+    cmdline -> runner;
+    runner -> stress_struct;
+    stress_struct -> open_close;
+    stress_struct -> nav_stress;
+    stress_struct -> search_stress;
+    stress_struct -> selection_stress;
+    stress_struct -> render_stress;
+    stress_struct -> feature_stress;
+
+    open_close -> leak_check;
+    nav_stress -> leak_check;
+    search_stress -> leak_check;
+    selection_stress -> leak_check;
+    render_stress -> leak_check;
+    feature_stress -> leak_check;
+
+    leak_check -> asan [style=dashed];
+    leak_check -> valgrind [style=dashed];
+
+    runner -> ci_script [style=dotted];
+    ci_script -> github_actions;
+
+    runner -> win_automation [style=dotted];
+    runner -> winapi [style=dotted];
+    runner -> dbg_control [style=dotted];
+    runner -> ad_hoc [style=dotted];
+
+    baselines -> regression;
+
+    // Cross-refs
+    feature_stress ..> autoscroll [style=dotted, label="see autoscroll.dot"];
+    feature_stress ..> tc2 [style=dotted, label="see two-columns-v2.dot"];
+    feature_stress ..> trim [style=dotted, label="see trim-contrast.dot"];
+    feature_stress ..> flashcard [style=dotted, label="see flashcard.dot"];
+
+    // Legend
+    subgraph cluster_legend {
+        label="Legend";
+        color="#ccc";
+        runner_n [label="Runner", fillcolor="#e3f2fd", style=filled];
+        scenarios [label="Scenarios", fillcolor="#fce4ec", style=filled];
+        leak [label="Leak Check", fillcolor="#ffebee", style=filled];
+        ci [label="CI", fillcolor="#fff3e0", style=filled];
+        util [label="Test Utils", fillcolor="#f3e5f5", style=filled];
+        perf [label="Perf Baselines", fillcolor="#efebe9", style=filled];
+        broken [label="⚠ Broken", fillcolor="#ffcdd2", style="filled,shape=note"];
+    }
+}

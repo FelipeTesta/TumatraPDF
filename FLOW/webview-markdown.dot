@@ -1,0 +1,163 @@
+digraph WebViewMarkdown {
+    rankdir=TB;
+    node [shape=box, style=rounded, fontname="Consolas", fontsize=9];
+    edge [fontname="Consolas", fontsize=8];
+    compound=true;
+
+    // ===================== ENGINE SELECTION =====================
+    subgraph cluster_engine_sel {
+        label="Markdown Engine Selection";
+        color="#4285f4";
+        style=filled;
+        fillcolor="#e3f2fd";
+
+        file_type [label="FileType::Markdown\nGuessFileType.cpp:66-67\n• Extension: .md / .markdown\n• Content sniff: not used", fillcolor="#bbdefb", style=filled);
+        engine_choice [label="Engine Selection\nEngineCreate.cpp:179\n• markdownUI.useFixedPageUI flag\n• true → WebView2 (BrowserDocView)\n• false → EngineMupdf (MuPDF fallback)\n• Default: WebView2 (modern)\n• CreateControllerForMarkdown()", fillcolor="#c8e6c9", style=filled);
+        should_use [label="ShouldUseBrowserView()\nSumatraPDF.cpp\n• Checks markdownUI.useFixedPageUI\n• Returns true for WebView2 path\n• False → EngineMupdf fallback", fillcolor="#e3f2fd", style=filled);
+    }
+
+    // ===================== WEBVIEW2 RENDERING =====================
+    subgraph cluster_webview2 {
+        label="WebView2 Rendering (BrowserDocView.cpp / MarkdownModel.cpp)";
+        color="#e91e63";
+        style=filled;
+        fillcolor="#fce4ec";
+
+        browser_doc_view [label="BrowserDocView : DocView\n• hwndWebView (WebView2 controller)\n• HtmlWindowCallback interface\n• NavigateToString(html) or file://\n• Script injection for features\n• OnJsNotifyCb(json) → MarkdownModel\n• OnDocumentComplete()\n• OnNavigationStarting()\n• OnWebResourceRequested()\n• OnPermissionRequested()", fillcolor="#c8e6c9", style=filled);
+        markdown_model [label="MarkdownModel\n• BrowserDocView* view\n• HtmlWindowCallback* callback\n• MarkdownCacheEntry (cached HTML)\n• cmark-gfm → HTML pipeline\n• ext/cmark-gfm vendored\n• GetEBookUI() → BrowserDocView", fillcolor="#bbdefb", style=filled);
+        html_gen [label="HTML Generation\n• cmark-gfm (GitHub Flavored MD)\n• Extensions: table, strikethrough, tasklist\n• Custom CSS injected\n• Syntax highlight: custom JS\n• MarkdownHtmlWindowHandler (adapter)\n• MarkdownContrastJs() (R2 fix)\n• kBlockSpaceScrollJs / kForwardAppKeysJs", fillcolor="#bbdefb", style=filled);
+        js_bridge [label="JS Bridge (HtmlWindowCallback)\n• OnJsNotifyCb(json) → MarkdownModel\n• notify(type, payload)\n• Types: appKey / autoscrollProgress\n  autoscrollBottom / scrollPos\n  linkClick / imageClick\n• BrowserDocView::OnJsNotifyCb → adapter", fillcolor="#fff9c4", style=filled);
+        webview_init [label="WebView2 Initialization\n• CreateCoreWebView2EnvironmentWithOptions\n• UserDataFolder persistence\n• DevTools disabled in release\n• Settings: IsScriptEnabled = true\n• AddScriptToExecuteOnDocumentCreated", fillcolor="#e3f2fd", style=filled);
+    }
+
+    // ===================== FEATURE ADAPTERS =====================
+    subgraph cluster_adapters {
+        label="Feature Adapters (Critical — Adapter Trap)";
+        color="#f44336";
+        style=filled;
+        fillcolor="#ffebee";
+
+        adapter_trap [label="⚠ ADAPTER TRAP (2026-09-23 fix):\nJS notify → BrowserDocView::OnJsNotifyCb\n→ MarkdownHtmlWindowHandler (adapter, MarkdownModel.cpp:179)\n→ MarkdownModel → ControllerCallbackHandler\nadapter MUST forward every new HtmlWindowCallback method\n(no-op default = feature silently dead)", fillcolor="#ffcdd2", style=filled, penwidth=2.0, shape=note);
+        autoscroll_adapter [label="Autoscroll Adapter\n• rAF loop __tumatraAS (60fps, px/sec)\n• scroll steps quantized to device pixels\n• step = floor(accum*dpr)/dpr\n• 1-CSS-px steps at 125/150% = fractional device px = shimmer\n• throttled autoscrollProgress notify ~10s → OnAutoScrollProgress\n• autoscrollBottom → hide label + stop\n• Ctrl pause: webviewCtrlDown state machine → SetWebviewAutoScroll(0)", fillcolor="#c8e6c9", style=filled);
+        contrast_adapter [label="Contrast Adapter (R2 fix)\n• MarkdownContrastJs(enabled, opacity, invert)\n• Single source in MarkdownModel (3 copies killed)\n• MD visual INTENTIONALLY different from PDF veil:\n  body bg #FAFAFA/#050505 + gray text\n  (opacity scales text gray; invert swaps)\n• CreateContrastOverlay no-op for MD\n• RestoreContrastOverlay on OnDocumentComplete", fillcolor="#c8e6c9", style=filled);
+        keys_adapter [label="WebView2 Keys (2026-09-23)\n• kBlockSpaceScrollJs: Chromium-native Space=page-down\n  lives INSIDE webview → preventDefault via init script\n• kForwardAppKeysJs: plain letters A-Z\n  → notify('appKey') → resolveAccelCmd → WM_COMMAND\n• WebView2 only raises AcceleratorKeyPressed for F-keys/arrows/Home/End\n• Ctrl pause: webviewCtrlDown state machine", fillcolor="#c8e6c9", style=filled);
+        scroll_pos [label=".md Reading Position\n• fs->scrollPos → ScrollTo on LoadDoc\n• Seeds htmlScrollPos\n• Applied at OnDocumentComplete (like CHM)\n• Restores scroll position on reopen", fillcolor="#e1bee7", style=filled);
+        link_adapter [label="Link Click Adapter\n• notify('linkClick', {url, target})\n• MarkdownModel → ControllerCallbackHandler\n• HandleLinkMupdf() / NewLinkDestination()\n• Internal: ScrollTo() / External: ShellExecuteEx", fillcolor="#e3f2fd", style=filled);
+        image_adapter [label="Image Click Adapter\n• notify('imageClick', {src, rect})\n• Context menu: Replace/Edit With Paint\n• EngineMupdf::ReplaceImageWithFile()\n• EngineMupdf::GetImageElementCoords()", fillcolor="#e3f2fd", style=filled);
+    }
+
+    // ===================== AUTO-SCROLL WEBVIEW BRANCH =====================
+    subgraph cluster_as_webview {
+        label="AutoScroll WebView Branch (AutoScroll.cpp)";
+        color="#1565c0";
+        style=filled;
+        fillcolor="#e3f2fd";
+
+        as_webview [label="Markdown (.md) webview branch\n• wv->Eval(\"window.scrollBy(0,dy)\")\n• rAF loop __tumatraAS (60fps)\n• JS autoscrollBottom → OnAutoScrollBottom → stop timer\n• ETA: floor 1min, throttled progress notify", fillcolor="#c8e6c9", style=filled);
+        as_pdf [label="PDF Branch (MuPDF)\n• Timer tick → AutoScrollContinuousTick\n• MoveDocBy → ScrollYBy → WM_PAINT\n• RenderCache blit (~1ms)\n• ETA: page-based math", fillcolor="#bbdefb", style=filled);
+        set_webview_as [label="SetWebviewAutoScroll()\nAutoScroll.cpp\n• Enables/disables webview autoscroll\n• Called by autoscroll toggle\n• webviewCtrlDown state machine", fillcolor="#e3f2fd", style=filled);
+    }
+
+    // ===================== CACHING =====================
+    subgraph cluster_cache {
+        label="Markdown Caching";
+        color="#ff9800";
+        style=filled;
+        fillcolor="#fff3e0";
+
+        md_cache [label="MarkdownCacheEntry\n• path → HTML string\n• Invalidate on file mtime change\n• cmark-gfm render cached\n• Memory: Vec<MarkdownCacheEntry>", fillcolor="#bbdefb", style=filled);
+        webview_cache [label="WebView2 Cache\n• UserDataFolder persistence\n• Cookies / localStorage\n• DevTools disabled in release", fillcolor="#c8e6c9", style=filled);
+    }
+
+    // ===================== PRINT / EXPORT =====================
+    subgraph cluster_print {
+        label="Print / Export for Markdown";
+        color="#795548";
+        style=filled;
+        fillcolor="#efebe9";
+
+        print_md [label="Print Markdown\n• WebView2: PrintToPdf()\n• CSS @media print injected\n• EngineMupdf fallback: render HTML", fillcolor="#bbdefb", style=filled);
+        extract_text [label="Extract Text\n• -extract-text flag\n• cmark-gfm → plain text\n• Or WebView2: DOM textContent", fillcolor="#c8e6c9", style=filled);
+    }
+
+    // ===================== MARKDOWN MODEL METHODS =====================
+    subgraph cluster_md_model {
+        label="MarkdownModel Methods (Serena)";
+        color="#607d8b";
+        style=filled;
+        fillcolor="#eceff1";
+
+        md_methods [label="MarkdownModel Methods\n• OnJsNotifyCb() → adapter\n• MarkdownContrastJs() (R2 fix)\n• kBlockSpaceScrollJs / kForwardAppKeysJs\n• GetEBookUI() → BrowserDocView\n• MarkdownCacheEntry management\n• htmlScrollPos seeding", fillcolor="#c8e6c9", style=filled);
+    }
+
+    // ===================== BROWSER DOC VIEW METHODS =====================
+    subgraph cluster_browser_view {
+        label="BrowserDocView Methods (Serena)";
+        color="#607d8b";
+        style=filled;
+        fillcolor="#eceff1";
+
+        browser_methods [label="BrowserDocView Methods\n• OnJsNotifyCb() → MarkdownModel\n• OnDocumentComplete() → restore scroll/contrast\n• OnNavigationStarting() / OnWebResourceRequested()\n• OnPermissionRequested()\n• NavigateToString(html)\n• Script injection for features\n• WebView2 controller lifecycle", fillcolor="#c8e6c9", style=filled);
+    }
+
+    // ===================== EDGES =====================
+    file_type -> engine_choice;
+    engine_choice -> browser_doc_view [label="WebView2"];
+    engine_choice -> markdown_model [label="MuPDF fallback"];
+    engine_choice -> should_use;
+
+    browser_doc_view -> markdown_model;
+    markdown_model -> html_gen;
+    markdown_model -> js_bridge;
+    markdown_model -> md_methods;
+    browser_doc_view -> browser_methods;
+    webview_init -> browser_doc_view;
+
+    js_bridge -> autoscroll_adapter [style=dotted];
+    js_bridge -> contrast_adapter [style=dotted];
+    js_bridge -> keys_adapter [style=dotted];
+    js_bridge -> scroll_pos [style=dotted];
+    js_bridge -> link_adapter [style=dotted];
+    js_bridge -> image_adapter [style=dotted];
+
+    adapter_trap -> autoscroll_adapter [style=dashed];
+    adapter_trap -> contrast_adapter [style=dashed];
+    adapter_trap -> keys_adapter [style=dashed];
+    adapter_trap -> link_adapter [style=dashed];
+    adapter_trap -> image_adapter [style=dashed];
+
+    as_webview -> js_bridge [style=dotted];
+    as_webview -> set_webview_as [style=dotted];
+    as_pdf -> autoscroll_adapter [style=dotted, label="different impl"];
+
+    markdown_model -> md_cache;
+    browser_doc_view -> webview_cache;
+
+    markdown_model -> print_md [style=dotted];
+    markdown_model -> extract_text [style=dotted];
+
+    md_methods -> contrast_adapter [style=dotted];
+    md_methods -> autoscroll_adapter [style=dotted];
+    md_methods -> keys_adapter [style=dotted];
+    browser_methods -> scroll_pos [style=dotted];
+    browser_methods -> contrast_adapter [style=dotted];
+
+    // Cross-refs
+    autoscroll_adapter ..> as_pdf [style=dotted, label="see autoscroll.dot"];
+    contrast_adapter ..> md_contrast [style=dotted];
+    link_adapter ..> internal [style=dotted, label="see search-dde-flow.dot"];
+    image_adapter ..> img_replace [style=dotted, label="see annotation-edit-flow.dot"];
+
+    // Legend
+    subgraph cluster_legend {
+        label="Legend";
+        color="#ccc";
+        engine [label="Engine Selection", fillcolor="#e3f2fd", style=filled];
+        webview [label="WebView2", fillcolor="#fce4ec", style=filled];
+        adapter [label="Adapters", fillcolor="#ffebee", style=filled];
+        autoscroll_n [label="AutoScroll", fillcolor="#e3f2fd", style=filled];
+        cache [label="Caching", fillcolor="#fff3e0", style=filled];
+        print [label="Print/Export", fillcolor="#efebe9", style=filled].
+        trap [label="⚠ Adapter Trap", fillcolor="#ffcdd2", style="filled,shape=note"].
+    }
+}
