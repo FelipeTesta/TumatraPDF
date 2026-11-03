@@ -4,7 +4,7 @@
 #ifndef ProfileData_h
 #define ProfileData_h
 
-struct FlashcardStudyDoc;
+#include "Flashcard.h"
 
 // Single-file "Profile Memory" store: <profileDataDir>\tumatraPDF-data_1.json
 // consolidates every user-data category (study states, reading/study daily
@@ -26,6 +26,21 @@ void ProfileDataReimportStudyFiles();
 // carries this machine name; rows of other machines stay untouched)
 void ProfileDataUpsertReadingDay(int dateKey, int sec);
 void ProfileDataUpsertStudyDay(int dateKey, int sec, int cards);
+
+// list profile books for the Config flashcard list (merged with json-derived
+// rows by the caller); fills docName/docPath/totalCards/dueCount/lastReviewedAt
+// from the in-memory profile, syncStatus from PDF presence. Owned strings freed
+// by ConfigFreeDocs (same as json-derived rows).
+int ProfileDataListBooks(Vec<FlashcardStudyDocInfo>& out);
+// remove one book row (and its perDoc section) keyed by full pdfPath; dirty +
+// save via the normal cadence. false when the book is not in the profile.
+bool ProfileDataDeleteBook(const char* pdfPath);
+
+// incremental live ticks (per document, keyed by full pdfPath); mark dirty +
+// debounced save handled by the existing flush cadence / shutdown, not per tick
+void ProfileDataAddReadingSec(const char* pdfPath, int sec);
+void ProfileDataAddFlashcardSec(const char* pdfPath, int sec);
+void ProfileDataAddFlashcardCard(const char* pdfPath);
 
 // day getters merged across machines: this machine's live numbers come from
 // the owning stats module (ReadingStats* / FlashcardStats*), other machines'

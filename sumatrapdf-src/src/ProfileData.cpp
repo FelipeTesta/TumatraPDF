@@ -935,7 +935,8 @@ bool ProfileDataImportFromJson(const char* srcJsonPath, bool replace) {
     if (gProfile.dirty) {
         ProfileDataSaveNow();
     }
-    logf("[profile] import: merge from '%s': +%d book(s), +%d day row(s)\n", Str(srcJsonPath), addedBooks, addedDayRows);
+    logf("[profile] import: merge from '%s': +%d book(s), +%d day row(s)\n", Str(srcJsonPath), addedBooks,
+         addedDayRows);
     return true;
 }
 
@@ -1575,6 +1576,163 @@ static void ProfEnsureFreshDocRow(const char* docPath, int readingSec, int fcStu
     e.fcStudySec = fcStudySec;
     e.fcCards = fcCards;
     gProfile.perDoc.Append(e);
+}
+
+// YYYYMMDD for "today" in local time (bucket key; matches the stats sidecars)
+static int ProfTodayDateKey() {
+    SYSTEMTIME st{};
+    GetLocalTime(&st);
+    return (int)st.wYear * 10000 + (int)st.wMonth * 100 + (int)st.wDay;
+}
+
+// increment one per-document counter row in gProfile.perDoc, keyed by docPath
+// (full path, same key the perDoc snapshot uses). Each field clamped to >= 0.
+static void ProfIncDocEntry(const char* docPath, int readingDelta, int fcStudyDelta, int fcCardsDelta) {
+    if (!docPath || !*docPath) {
+        return;
+    }
+    for (int i = 0; i < len(gProfile.perDoc); i++) {
+        ProfDocEntry& e = gProfile.perDoc[i];
+        if (str::EqI(Str(e.docPath), docPath)) {
+            e.readingSec += readingDelta;
+            e.fcStudySec += fcStudyDelta;
+            e.fcCards += fcCardsDelta;
+            if (e.readingSec < 0) {
+                e.readingSec = 0;
+            }
+            if (e.fcStudySec < 0) {
+                e.fcStudySec = 0;
+            }
+            if (e.fcCards < 0) {
+                e.fcCards = 0;
+            }
+            gProfile.dirty = true;
+            return;
+        }
+    }
+    ProfDocEntry e;
+    e.docPath = str::Dup(Str(docPath)).s;
+    e.readingSec = readingDelta;
+    e.fcStudySec = fcStudyDelta;
+    e.fcCards = fcCardsDelta;
+    gProfile.perDoc.Append(e);
+    gProfile.dirty = true;
+}
+
+// current own-machine day value from a profile day section (dateKey + machine keyed)
+static int ProfDayRead(const Vec<ProfDayMachine>& v, int dateKey, bool cards) {
+    for (int i = 0; i < len(v); i++) {
+        if (v[i].dateKey == dateKey && str::EqI(Str(v[i].machine), gProfileThisMachine)) {
+            return cards ? v[i].cards : v[i].sec;
+        }
+    }
+    return 0;
+}
+
+// incremental live ticks: per-document counters + today's own-machine day row.
+// mark dirty only; save cadence is the existing flush / shutdown (not per tick).
+void ProfileDataAddReadingSec(const char* pdfPath, int sec) {
+    if (!pdfPath || !*pdfPath || sec <= 0) {
+        return;
+    }
+    if (sec > 24 * 3600) {
+        sec = 24 * 3600;
+    }
+    ProfileDataEnsureLoaded();
+    ProfIncDocEntry(pdfPath, sec, 0, 0);
+    int today = ProfTodayDateKey();
+    ProfileDataUpsertReadingDay(today, ProfDayRead(gProfile.readingDaily, today, false) + sec);
+}
+
+void ProfileDataAddFlashcardSec(const char* pdfPath, int sec) {
+    if (!pdfPath || !*pdfPath || sec <= 0) {
+        return;
+    }
+    if (sec > 24 * 3600) {
+        sec = 24 * 3600;
+    }
+    ProfileDataEnsureLoaded();
+    ProfIncDocEntry(pdfPath, 0, sec, 0);
+    int today = ProfTodayDateKey();
+    ProfileDataUpsertStudyDay(today, ProfDayRead(gProfile.studyDaily, today, false) + sec,
+                              ProfDayRead(gProfile.studyDaily, today, true));
+}
+
+void ProfileDataAddFlashcardCard(const char* pdfPath) {
+    if (!pdfPath || !*pdfPath) {
+        return;
+    }
+    ProfileDataEnsureLoaded();
+    ProfIncDocEntry(pdfPath, 0, 0, 1);
+    int today = ProfTodayDateKey();
+    ProfileDataUpsertStudyDay(today, ProfDayRead(gProfile.studyDaily, today, false),
+                              ProfDayRead(gProfile.studyDaily, today, true) + 1);
+}
+
+// list profile books for the Config flashcard list: docName/docPath from the
+// profile, totalCards/dueCount/lastReviewedAt from the in-memory states,
+// syncStatus from PDF presence on disk. Owned strings are freed by the caller
+// (ConfigFreeDocs), same contract as json-derived rows.
+int ProfileDataListBooks(Vec<FlashcardStudyDocInfo>& out) {
+    ProfileDataEnsureLoaded();
+    i64 now = (i64)time(nullptr) * 1000;
+    for (int i = 0; i < len(gProfile.books); i++) {
+        ProfileBook& b = gProfile.books[i];
+        FlashcardStudyDocInfo info{};
+        info.fileName = nullptr; // profile-only rows have no json file name
+        info.docName = b.docName ? str::Dup(Str(b.docName)).s : nullptr;
+        info.docPath = b.docPath ? str::Dup(Str(b.docPath)).s : nullptr;
+        Vec<FlashcardStudyDoc::StateEntry>& states = b.study.states;
+        info.totalCards = len(states);
+        for (int j = 0; j < len(states); j++) {
+            const FlashcardStudyState& st = states[j].state;
+            if (st.rating != 0 && st.nextReviewAt <= now) {
+                info.dueCount++;
+            }
+            if (st.lastReviewedAt > info.lastReviewedAt) {
+                info.lastReviewedAt = st.lastReviewedAt;
+            }
+        }
+        if (!info.docName) {
+            info.docName = str::Dup(StrL("")).s;
+        }
+        if (info.docPath && len(info.docPath) > 0) {
+            info.syncStatus = file::Exists(Str(info.docPath)) ? 1 : 2;
+        }
+        out.Append(info);
+    }
+    return len(out);
+}
+
+// remove one book row (and its perDoc section) keyed by full pdfPath; dirty +
+// save via the normal cadence (not per call). false when the book is absent.
+bool ProfileDataDeleteBook(const char* pdfPath) {
+    if (!pdfPath || !*pdfPath) {
+        return false;
+    }
+    ProfileDataEnsureLoaded();
+    bool found = false;
+    for (int i = 0; i < len(gProfile.books); i++) {
+        if (gProfile.books[i].docPath && str::EqI(Str(gProfile.books[i].docPath), Str(pdfPath))) {
+            ProfFreeBook(gProfile.books[i]);
+            gProfile.books.RemoveAt(i);
+            found = true;
+            break;
+        }
+    }
+    for (int i = 0; i < len(gProfile.perDoc); i++) {
+        if (gProfile.perDoc[i].docPath && str::EqI(Str(gProfile.perDoc[i].docPath), Str(pdfPath))) {
+            ::free(gProfile.perDoc[i].docPath);
+            gProfile.perDoc.RemoveAt(i);
+            break;
+        }
+    }
+    if (found) {
+        gProfile.dirty = true;
+        ProfileDataSaveNow();
+        logf("[profile] deleted book '%s'\n", Str(pdfPath));
+    }
+    return found;
 }
 
 // pull the per-document counters from gFileHistory (settings FileState stores)

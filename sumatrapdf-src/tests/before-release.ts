@@ -20,6 +20,7 @@ import { testit as adHocB4CoordinateInvariants } from "./ad-hoc-b4-coordinate-in
 import { testit as latexTests } from "./latex.ts";
 import { testit as issueChmLzx } from "./issue-chm-lzx.ts";
 import { testit as adHocSettingsMigration } from "./ad-hoc-settings-migration.ts";
+import { testit as adHocProfileLiveWrites } from "./ad-hoc-profile-live-writes.ts";
 
 const adHocTests: [string, () => void | Promise<void>][] = [
   ["ad-hoc-exif", adHocExif],
@@ -34,6 +35,7 @@ const adHocTests: [string, () => void | Promise<void>][] = [
   ["ad-hoc-b4-coordinate-invariants", adHocB4CoordinateInvariants],
   ["issue-chm-lzx", issueChmLzx],
   ["ad-hoc-settings-migration", adHocSettingsMigration],
+  ["ad-hoc-profile-live-writes", adHocProfileLiveWrites],
 ];
 
 export async function testit(): Promise<void> {

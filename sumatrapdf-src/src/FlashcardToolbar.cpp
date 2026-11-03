@@ -32,6 +32,7 @@ extern "C" {
 #include "Darkmodelib.h"
 #include "AppSettings.h"
 #include "Flashcard.h"
+#include "ProfileData.h"
 
 // Forward declarations — these are defined in other translation units
 bool SetToolbarBandToRowHeight(HWND hwndToolbar);
@@ -1051,6 +1052,10 @@ static void ConfigClearSelected(ConfigDialog* d) {
             FlashcardToolbarUpdateCount(d->win);
             FlashcardToolbarUpdateState(d->win);
             FlashcardSidebarPopulate(d->win); // every card is "new" now
+            // drop the book from the single-file profile store too (no-op if absent)
+            if (info.docPath && len(info.docPath) > 0) {
+                ProfileDataDeleteBook(info.docPath);
+            }
             MainWindowRerender(d->win);
         }
     }
@@ -1060,6 +1065,7 @@ static void ConfigClearSelected(ConfigDialog* d) {
 // delete EVERY study JSON + reset every tab's in-memory history (5s hold)
 static void ConfigClearAll(ConfigDialog* d) {
     int nDeleted = FlashcardDeleteAllStudyFiles();
+    ProfileDataClearStudyDocs(); // drop every book row from the single-file profile store too
     auto tabs = d->win->Tabs();
     for (WindowTab* tab : tabs) {
         tab->flashcard.studyDoc.states.Reset();

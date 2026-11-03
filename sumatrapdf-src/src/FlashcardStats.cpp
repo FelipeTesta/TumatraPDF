@@ -28,6 +28,10 @@ struct DailyEntry {
     int cards; // cards rated that day (0 for entries written before the count)
 };
 
+// dual-write gate: when false, skip writing the legacy sidecar file but keep
+// streaming day rows into the single-file profile store (unconditional)
+static bool kProfDualWriteSidecars = true;
+
 static struct {
     Vec<DailyEntry> daily; // kept sorted by dateKey
     float accumSec = 0.0f; // sub-second carry: ticks arrive ~64Hz with ~0.01s
@@ -124,6 +128,7 @@ void FlashcardStatsAddCard(MainWindow* win) {
         FileState* fs = gFileHistory.FindByPath(tab->filePath);
         if (fs) {
             fs->flashcardCardsDone += 1;
+            ProfileDataAddFlashcardCard(tab->filePath.s);
         }
     }
     FlashcardStatsLoadIfNeeded();
@@ -170,6 +175,7 @@ void FlashcardStatsAddSeconds(MainWindow* win, float sec) {
         FileState* fs = gFileHistory.FindByPath(tab->filePath);
         if (fs) {
             fs->flashcardStudyTimeSec += whole;
+            ProfileDataAddFlashcardSec(tab->filePath.s, whole);
         }
     }
     FlashcardStatsAddDaily((float)whole);
@@ -190,7 +196,9 @@ void FlashcardStatsFlush(bool force) {
         sb.Append(fmt("%d %d %d\r\n", e.dateKey, e.sec, e.cards));
     }
     Str data = sb.TakeStr();
-    file::WriteFile(FlashcardStatsPathTemp(), data);
+    if (kProfDualWriteSidecars) {
+        file::WriteFile(FlashcardStatsPathTemp(), data);
+    }
     str::Free(data);
     gFlashcardStats.dirtySec = 0;
     gFlashcardStats.dirtyCards = 0;

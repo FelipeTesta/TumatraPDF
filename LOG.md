@@ -1,4 +1,35 @@
-﻿## 2026-11-01 (s36-br) — Settings FileState names-blob migration (P1-migration) — FIXED
+﻿## 2026-11-01 (s36-bt) — Profile F8 slice2: Config flashcard list merges profile books + delete/clear wired
+
+### Added
+
+- ProfileData.h/.cpp: `ProfileDataListBooks(out)` — lists profile books as FlashcardStudyDocInfo (docName/docPath/totalCards/dueCount/lastReviewedAt from in-memory states, syncStatus from PDF presence); `ProfileDataDeleteBook(pdfPath)` — removes book row + matching perDoc section, dirty + save via normal cadence; `ProfileDataClearStudyDocs()` already existed, now wired.
+- Flashcard.cpp: `FlashcardStudyListDocs` merges profile-only books (gProfile.books rows with no json file) into the list, deduped by docPath against json-derived rows; Config semantics unchanged, only profile-only rows added.
+- FlashcardToolbar.cpp: `ConfigClearSelected` calls `ProfileDataDeleteBook(info.docPath)`; `ConfigClearAll` calls `ProfileDataClearStudyDocs()`. Resync/RecoverBackup/ApplyPath keep legacy file-based behavior (dual-write until gate flip).
+- tests/ad-hoc-profile-live-writes.ts already covers slice1 store save; slice2 covered by the 13/13 sync-visual test + manual list render.
+
+### Verified
+
+- bun cmd/build.ts 0 err/0 warn; copied to Compiled\TumatraPDF.exe.
+- tests/ad-hoc-profile-sync-visual.ts 13/13 PASS.
+- tests/ad-hoc-profile-live-writes.ts PASS.
+- No commit (awaiting explicit command).
+
+## 2026-11-01 (s36-bs) — Profile F8 slice1: live stats → profile (dual-write gate)
+
+### Added
+
+- ProfileData.h/.cpp: `ProfileDataAddReadingSec(pdfPath, sec)`, `ProfileDataAddFlashcardSec(pdfPath, sec)`, `ProfileDataAddFlashcardCard(pdfPath)` — increment per-doc perDoc counters (readingSec/fcStudySec/fcCards, keyed by full pdfPath) + upsert today's own-machine day row; mark dirty only (save via existing flush/shutdown cadence, not per tick); clamp sec to [0, 86400].
+- FlashcardStats.cpp / ReadingStats.cpp: wire live ticks at FileState credit sites (same tab->filePath key) → new profile APIs.
+- FlashcardStats.cpp / ReadingStats.cpp / Flashcard.cpp (FlashcardStudySave): `static bool kProfDualWriteSidecars = true`; wrap legacy sidecar `file::WriteFile` / per-book json writes in `if (kProfDualWriteSidecars)`; profile upserts unconditional.
+- tests/ad-hoc-profile-live-writes.ts: isolated -appdata launch + PDF + graceful quit; assert profile json re-saved on exit; per-doc row / sec>0 logged best-effort (honestCoverage: ticks need autoscroll/study active). Registered in before-release.ts only.
+
+### Verified
+
+- bun cmd/build.ts 0 err/0 warn; copied to Compiled\TumatraPDF.exe.
+- tests/ad-hoc-profile-live-writes.ts PASS: launch alive, quit clean, profile store re-saved (216 B); no per-doc row (ticks need autoscroll/study active — honestCoverage).
+- No commit (awaiting explicit command).
+
+## 2026-11-01 (s36-br) — Settings FileState names-blob migration (P1-migration) — FIXED
 
 ### Added
 
