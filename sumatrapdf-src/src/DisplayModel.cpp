@@ -1832,6 +1832,26 @@ static float getZoomSafe(DisplayModel* dm, int pageNo, const PageInfo* pageInfo)
 }
 
 Point DisplayModel::CvtToScreen(int pageNo, PointF pt) {
+#if defined(DEBUG)
+    // DEBUG guard: pageNo must be a live virtual page in [1, pageCount].
+    // Invariant: CvtToScreen dereferences pageInfo->pageOnScreen and calls
+    // engine->Transform(..., VirtualToPhysical(pageNo), ...), so an out-of-range
+    // pageNo is a caller bug (wrong coordinate space / stale pageNo), never a
+    // legitimate state. Compiles out entirely in release (no hot-path cost).
+    // No legitimate caller passes an invalid pageNo here: every internal call
+    // site (RenderCache, Selection, Search) resolves to a valid virtual page,
+    // and GetPageInfo() already ReportIf(!pageInfo) on invalid input — this
+    // guard flags the same class earlier with a [coord] tag for log filtering.
+    // False-positive review: none found; pageCount==0 (no doc/engine) only
+    // occurs when CvtToScreen itself would be meaningless.
+    const int pageCount = PageCount();
+    const bool badPage = pageNo < 1 || pageNo > pageCount;
+    if (badPage) {
+        logf("[coord] CvtToScreen bad pageNo=%d pagecount=%d\n", pageNo, pageCount);
+    }
+    ReportIf(badPage);
+#endif
+
     PageInfo* pageInfo = GetPageInfo(pageNo);
     if (!pageInfo) {
         Str isValid = ValidPageNo(pageNo) ? "yes" : "no";
