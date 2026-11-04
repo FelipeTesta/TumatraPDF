@@ -319,6 +319,9 @@ void ExitFullScreen(MainWindow* win);
 void SetCurrentLang(Str langCode);
 void RebuildMenuBarForWindow(MainWindow* win);
 void DeleteMainWindow(MainWindow* win);
+bool ShowTabGroupNameDialog(MainWindow* win, Str* nameOut, bool isRename, bool forceReal = false);
+void RefreshTabGroupButton(MainWindow* win);
+void HandleTabGroupMenuCmd(MainWindow* win, int cmdId);
 
 // snapshot of settings whose changes need explicit handling beyond a settings
 // reload (used by the advanced settings dialog to apply changes on Save)

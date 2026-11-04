@@ -1126,6 +1126,9 @@ PropWinPos = 0 0
 
 ; if true, check once a day whether an update is available
 CheckForUpdates = true
+
+; name of the tab group session this window auto-syncs to (empty = unsynced)
+ActiveTabGroup = 
 ```
 
 ## Syntax for color values

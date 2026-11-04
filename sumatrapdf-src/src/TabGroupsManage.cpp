@@ -20,10 +20,20 @@
 #include "WindowTab.h"
 #include "Translations.h"
 #include "SumatraConfig.h"
+#include "Tabs.h"
 #include "Theme.h"
 #include "Darkmodelib.h"
 
 constexpr int kPadding = 8;
+
+// T2 data-loss fix: when set, UpdateActiveGroupAutoSave skips syncing current
+// window tabs into the active group. Used by ActivateTabGroupInWindow so the
+// destination group's tabFiles are not clobbered by the close-tab hook.
+static bool sSuppressGroupAutoSave = false;
+
+void SuppressGroupAutoSave(bool suppress) {
+    sSuppressGroupAutoSave = suppress;
+}
 
 enum class TabGroupDialogMode {
     Save,
@@ -142,6 +152,108 @@ void TabGroupsWnd::SaveTabGroup() {
     Close();
 }
 
+// T1: live auto-sync API
+
+TabGroup* FindTabGroup(const char* name) {
+    if (!name || !*name || !gGlobalPrefs->tabGroups) {
+        return nullptr;
+    }
+    for (auto* g : *gGlobalPrefs->tabGroups) {
+        if (g && g->name && str::EqI(Str(g->name), Str(name))) {
+            return g;
+        }
+    }
+    return nullptr;
+}
+
+// rebuild group->tabFiles from win->Tabs() in order; deep-copies paths.
+// Caller is responsible for SaveSettings().
+void SyncGroupFromWindow(const char* name, MainWindow* win) {
+    if (!name || !*name || !win) {
+        return;
+    }
+    TabGroup* group = FindTabGroup(name);
+    if (!group) {
+        group = AllocStruct<TabGroup>();
+        str::ReplaceWithCopy(&group->name, Str(name));
+        group->tabFiles = new Vec<TabFile*>();
+        if (!gGlobalPrefs->tabGroups) {
+            gGlobalPrefs->tabGroups = new Vec<TabGroup*>();
+        }
+        gGlobalPrefs->tabGroups->Append(group);
+    }
+    // free old tabFiles
+    if (group->tabFiles) {
+        for (auto* tf : *group->tabFiles) {
+            str::Free(tf->path);
+            free(tf);
+        }
+        delete group->tabFiles;
+    }
+    group->tabFiles = new Vec<TabFile*>();
+    for (WindowTab* tab : win->Tabs()) {
+        if (tab->IsAboutTab()) {
+            continue;
+        }
+        if (!tab->filePath.s) {
+            continue;
+        }
+        auto* tf = AllocStruct<TabFile>();
+        str::ReplaceWithCopy(&tf->path, tab->filePath);
+        group->tabFiles->Append(tf);
+    }
+}
+
+void SetActiveTabGroup(MainWindow* win, const char* name) {
+    if (!win) {
+        return;
+    }
+    str::ReplaceWithCopy(&gGlobalPrefs->activeTabGroup, Str(name ? name : ""));
+    if (name && *name) {
+        // only sync when there are document tabs to record — empty sessions stay empty
+        bool hasFileTab = false;
+        for (WindowTab* tab : win->Tabs()) {
+            if (!tab->IsAboutTab()) {
+                hasFileTab = true;
+                break;
+            }
+        }
+        if (hasFileTab) {
+            SyncGroupFromWindow(name, win);
+        }
+    }
+    SaveSettings();
+    RefreshTabGroupButton(win);
+}
+
+// guard chain: shutdown / empty active / drag in progress → skip.
+// then sync + persist the activeTabGroup pointer (SaveSettings).
+void UpdateActiveGroupAutoSave(MainWindow* win) {
+    if (!win || !win->tabsCtrl) {
+        return;
+    }
+    // (a) shutting down: gGlobalPrefs is being torn down
+    if (!gGlobalPrefs) {
+        return;
+    }
+    // (b1) activation in progress: suppress auto-sync so the destination
+    // group's tabFiles are not clobbered by close-tab hooks.
+    if (sSuppressGroupAutoSave) {
+        return;
+    }
+    // (b) empty active group → unsynced, nothing to save
+    if (!gGlobalPrefs->activeTabGroup.s || !*gGlobalPrefs->activeTabGroup.s) {
+        return;
+    }
+    // genuine last-tab close: sync EMPTY (0 files) — empty sessions are first-class
+    // (d) drag/migration in progress → skip, will fire on drop
+    if (win->tabsCtrl->draggingTab) {
+        return;
+    }
+    SyncGroupFromWindow(gGlobalPrefs->activeTabGroup.s, win);
+    SaveSettings();
+}
+
 void TabGroupsWnd::OpenTabGroup() {
     int sel = listBox ? listBox->GetCurrentSelection() : -1;
     if (sel < 0) {
@@ -152,9 +264,6 @@ void TabGroupsWnd::OpenTabGroup() {
         return;
     }
     TabGroup* group = (*groups)[sel];
-    if (!group->tabFiles || len(*group->tabFiles) == 0) {
-        return;
-    }
 
     // reuse current window if it has no files open (only about tab or empty)
     MainWindow* targetMain = win;
@@ -495,4 +604,85 @@ void ShowSaveTabGroupDialog(MainWindow* win) {
 
 void ShowOpenTabGroupDialog(MainWindow* win) {
     ShowTabGroupsDialog(win, TabGroupDialogMode::Open);
+}
+
+// Tab system T3: activate a group in a specific window — set active, close
+// current document tabs, then load the group's files into that window.
+// Two-phase to prevent data loss:
+//   1. Suppress UpdateActiveGroupAutoSave so closing current tabs does NOT
+//      overwrite the destination group's tabFiles with the current book.
+//   2. Set activeTabGroup directly (not via SetActiveTabGroup, which calls
+//      SyncGroupFromWindow and would clobber the group's file list before
+//      load).
+void ActivateTabGroupInWindow(MainWindow* win, const char* name) {
+    if (!name || !*name || !win) {
+        return;
+    }
+    TabGroup* g = FindTabGroup(name);
+    if (!g) {
+        return;
+    }
+    sSuppressGroupAutoSave = true;
+    // snapshot destination group's files BEFORE any mutation (async loads may
+    // fire auto-save hooks that would clobber the group we're loading)
+    Vec<Str> snapshot;
+    for (TabFile* tf : *g->tabFiles) {
+        if (tf->path.s) {
+            snapshot.Append(Str(tf->path));
+        }
+    }
+    // set the active pointer without syncing current tabs into the group
+    str::ReplaceWithCopy(&gGlobalPrefs->activeTabGroup, Str(name));
+    logf("[tabs] activate '%s' close-loop start %d ms\n", Str(name), (int)GetTickCount());
+    // close tabs not in destination group (keep already-open dest tabs to
+    // preserve scroll position and avoid rebuild churn)
+    auto tabs = win->Tabs();
+    for (int i = len(tabs) - 1; i >= 0; i--) {
+        WindowTab* tab = tabs[i];
+        if (!tab || tab->IsNonDocumentTab()) {
+            continue;
+        }
+        bool keep = false;
+        for (Str s : snapshot) {
+            if (str::EqI(tab->filePath, s)) {
+                keep = true;
+                break;
+            }
+        }
+        if (keep) {
+            continue;
+        }
+        CloseTab(tab, false);
+    }
+    logf("[tabs] activate '%s' close-loop done %d ms\n", Str(name), (int)GetTickCount());
+    // load group files lazily: first file sync (selected immediately), rest lazy
+    bool first = true;
+    for (TabFile* tf : *g->tabFiles) {
+        if (!tf->path.s) {
+            continue;
+        }
+        // skip files already open in this window
+        bool alreadyOpen = false;
+        for (WindowTab* t : win->Tabs()) {
+            if (!t->IsNonDocumentTab() && str::EqI(t->filePath, tf->path)) {
+                alreadyOpen = true;
+                break;
+            }
+        }
+        if (alreadyOpen) {
+            continue;
+        }
+        LoadArgs args(tf->path, win);
+        args.lazyLoad = !first; // first file sync so selection shows content at once
+        if (!first) {
+            args.forceReuse = false;
+        }
+        LoadDocument(&args);
+        first = false;
+    }
+    TabsSelect(win, 0);
+    logf("[tabs] activate '%s' load-loop done %d ms\n", Str(name), (int)GetTickCount());
+    sSuppressGroupAutoSave = false;
+    SaveSettings();
+    RefreshTabGroupButton(win);
 }

@@ -1475,6 +1475,7 @@ const globalPrefs: Field[] = [
   field("CheckForUpdates", Bool, true, "if true, check once a day whether an update is available").internal(),
   emptyLine(),
   comment("Settings below are not recognized by the current version"),
+  field("ActiveTabGroup", Str, "", "name of the tab group session this window auto-syncs to (empty = unsynced)"),
 ];
 
 const globalPrefsStruct = struct("GlobalPrefs", globalPrefs, "Preferences are persisted in SumatraPDF-settings.txt");

@@ -821,6 +821,7 @@ static void UpdateSidebarDisplayState(WindowTab* tab, FileState* fs) {
         TocTree* tocTree = tab->ctrl->GetToc();
         UpdateTocExpansionState(tab->tocState, win->tocTreeView, tocTree);
     }
+    if (!fs->tocState) fs->tocState = new Vec<int>();
     *fs->tocState = tab->tocState;
 }
 
@@ -2426,7 +2427,9 @@ static void ReplaceDocumentInCurrentTab(LoadArgs* args, DocController* ctrl, Fil
         }
         // else let win->ctrl->GoToPage(ss.page, false) verify the page number
         rotation = fs->rotation;
-        tab->tocState = *fs->tocState;
+        if (fs->tocState) {
+            tab->tocState = *fs->tocState;
+        }
     }
 
     // DisplayModel needs a valid zoom value before any relayout
@@ -5744,6 +5747,7 @@ static TabState* NewTabStateFromTab(WindowTab* tab) {
     FileState* fs = NewFileState(tab->filePath);
     tab->ctrl->GetDisplayState(fs);
     fs->showToc = tab->showToc;
+    if (!fs->tocState) fs->tocState = new Vec<int>();
     *fs->tocState = tab->tocState;
 
     TabState* state = NewTabState(fs);
@@ -6589,8 +6593,8 @@ bool RelayoutFrame(MainWindow* win, bool updateToolbars, int sidebarDx) {
             int rebar2Dy = tbDy + chrome;
             bool atBottom = ToolbarAtBottom();
             int rebar2Y = atBottom ? (rc.y + rc.dy - rebar2Dy) : rc.y;
-            logf("[arch] relayout rc.y=%d rebar2Y=%d rebar2Dy=%d (tbDy=%d chrome=%d) atBottom=%d\n",
-                 rc.y, rebar2Y, rebar2Dy, tbDy, chrome, (int)atBottom);
+            logf("[arch] relayout rc.y=%d rebar2Y=%d rebar2Dy=%d (tbDy=%d chrome=%d) atBottom=%d\n", rc.y, rebar2Y,
+                 rebar2Dy, tbDy, chrome, (int)atBottom);
             if (updateToolbars) {
                 dh.SetWindowPos(win->archTools.hwndReBar2, nullptr, rc.x, rebar2Y, rc.dx, rebar2Dy, SWP_NOZORDER);
             }
@@ -6622,8 +6626,8 @@ bool RelayoutFrame(MainWindow* win, bool updateToolbars, int sidebarDx) {
             int rebarFCDy = tbDy + chrome;
             bool atBottom = ToolbarAtBottom();
             int rebarFCY = atBottom ? (rc.y + rc.dy - rebarFCDy) : rc.y;
-            logf("[fc] relayout rc.y=%d rebarFCY=%d rebarFCDy=%d (tbDy=%d chrome=%d) atBottom=%d\n",
-                 rc.y, rebarFCY, rebarFCDy, tbDy, chrome, (int)atBottom);
+            logf("[fc] relayout rc.y=%d rebarFCY=%d rebarFCDy=%d (tbDy=%d chrome=%d) atBottom=%d\n", rc.y, rebarFCY,
+                 rebarFCDy, tbDy, chrome, (int)atBottom);
             if (updateToolbars) {
                 dh.SetWindowPos(win->flashcard.hwndReBarFlashcard, nullptr, rc.x, rebarFCY, rc.dx, rebarFCDy,
                                 SWP_NOZORDER);
@@ -6656,8 +6660,8 @@ bool RelayoutFrame(MainWindow* win, bool updateToolbars, int sidebarDx) {
             int rebarEDDy = tbDy + chrome;
             bool atBottom = ToolbarAtBottom();
             int rebarEDY = atBottom ? (rc.y + rc.dy - rebarEDDy) : rc.y;
-            logf("[edit] relayout rc.y=%d rebarEDY=%d rebarEDDy=%d (tbDy=%d chrome=%d) atBottom=%d\n",
-                 rc.y, rebarEDY, rebarEDDy, tbDy, chrome, (int)atBottom);
+            logf("[edit] relayout rc.y=%d rebarEDY=%d rebarEDDy=%d (tbDy=%d chrome=%d) atBottom=%d\n", rc.y, rebarEDY,
+                 rebarEDDy, tbDy, chrome, (int)atBottom);
             if (updateToolbars) {
                 dh.SetWindowPos(win->editTools.hwndReBarEdit, nullptr, rc.x, rebarEDY, rc.dx, rebarEDDy, SWP_NOZORDER);
             }
@@ -9820,7 +9824,15 @@ static void PrintCurrentFileDeferred(MainWindow* win) {
 // ---- File command wrappers (C5 extraction) ----
 
 static void HandleCmdNewWindow(MainWindow* win) {
+    // T2: Ctrl+N opens an unsynced window — clear the global activeTabGroup so
+    // the new window is not attached to any group. Single-global-pointer
+    // semantics: only the last-focused window can be attached; switching back
+    // to a previously-attached window re-asserts its group via T1 hooks (user
+    // re-attaches via T3 dropdown if needed). Previous window's group data is
+    // already persisted by T1 auto-sync on every tab change.
+    str::ReplaceWithCopy(&gGlobalPrefs->activeTabGroup, Str(""));
     CreateAndShowMainWindow(nullptr);
+    logf("[tabs] new window unsynced\n");
 }
 
 static void HandleCmdOpenFile(MainWindow* win) {
@@ -12179,6 +12191,575 @@ static void HandleCaptionClick(MainWindow* win, int btnIdx) {
 }
 
 constexpr int kTabsButtonGapX = 32;
+// Tab system T3: dropdown button left of tabs (real child HWND, BS_OWNERDRAW)
+constexpr int kTabGroupBtnId = 8000;
+constexpr int kTabGroupBtnDxBase = 28; // button width in base DPI units
+
+// Tab system T3: subclass proc for the tab-group button (fills WM_ERASEBKGND
+// theme-dark to kill the owner-draw button white flash). Defined below.
+static LRESULT CALLBACK TabGroupBtnSubclassProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR uIdSubclass,
+                                                DWORD_PTR dwRefData);
+
+// Tab system T3: create/position/show the dropdown button left of tabs.
+// Call from both layout branches; shifts tabsX right by tabGroupBtnDx.
+static void UpdateTabGroupButton(MainWindow* win, int btnX, int btnY, int btnDx, int btnDy, bool visible) {
+    if (!win->hwndTabGroupBtn && visible) {
+        win->hwndTabGroupBtn = CreateWindowW(
+            L"Button", nullptr, WS_CHILD | WS_VISIBLE | BS_OWNERDRAW | BS_CENTER | BS_VCENTER, btnX, btnY, btnDx, btnDy,
+            win->hwndFrame, (HMENU)(INT_PTR)kTabGroupBtnId, GetModuleHandleW(nullptr), nullptr);
+        if (win->hwndTabGroupBtn) {
+            SetWindowTheme(win->hwndTabGroupBtn, L"", L""); // classic: enables owner-draw
+            // Subclass so we own WM_ERASEBKGND: the BS_OWNERDRAW button class
+            // erases its background with COLOR_BTNFACE (bright white band)
+            // BEFORE WM_DRAWITEM draws our dark glyph — that erase is the white
+            // flash between synced/unsynced states. Filling dark here kills it.
+            SetWindowSubclass(win->hwndTabGroupBtn, TabGroupBtnSubclassProc, kTabGroupBtnId, 0);
+        }
+    }
+    if (win->hwndTabGroupBtn) {
+        // position + size (DPI may change)
+        MoveWindow(win->hwndTabGroupBtn, btnX, btnY, btnDx, btnDy, TRUE);
+        ShowWindow(win->hwndTabGroupBtn, visible ? SW_SHOW : SW_HIDE);
+    }
+}
+
+// Tab system T3: subclass proc for the tab-group button.
+// Handles WM_ERASEBKGND to fill theme-dark (no class erase) so the owner-draw
+// button never flashes white between synced/unsynced glyph states.
+static LRESULT CALLBACK TabGroupBtnSubclassProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR uIdSubclass,
+                                                DWORD_PTR dwRefData) {
+    if (msg == WM_ERASEBKGND) {
+        HDC hdc = (HDC)wp;
+        Rect rc = HwndClientRect(hwnd);
+        HBRUSH br = CreateSolidBrush(ThemeControlBackgroundColor());
+        HdcFillRect(hdc, rc, br);
+        DeleteObject(br);
+        return 1; // handled: suppress class erase (the white flash)
+    }
+    return DefSubclassProc(hwnd, msg, wp, lp);
+}
+
+// Tab system T3: menu item command IDs (dynamic groups use index offset)
+constexpr int kTabGroupMenuUnsynced = 8500;
+constexpr int kTabGroupMenuOpenHereBase = 8501; // + group index
+constexpr int kTabGroupMenuOpenNewBase = 8601;  // + group index
+constexpr int kTabGroupMenuRenameBase = 8701;   // + group index
+constexpr int kTabGroupMenuDeleteBase = 8801;   // + group index
+constexpr int kTabGroupMenuNewSession = 8900;
+constexpr int kTabGroupDialogTestCmd =
+    8950; // async dialog-open replanted from control pipe (outside 8500-8900 menu range)
+
+// Tab system T3: owner-draw the dropdown button glyph (filled circle = synced,
+// outline circle = unsynced). Uses theme accent/body tokens, no hardcoded colors.
+static void DrawTabGroupButton(DRAWITEMSTRUCT* dis) {
+    HDC hdc = dis->hDC;
+    Rect rc = Rect(dis->rcItem.left, dis->rcItem.top, dis->rcItem.right - dis->rcItem.left,
+                   dis->rcItem.bottom - dis->rcItem.top);
+    Graphics gfx(hdc);
+    gfx.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
+
+    logf("[tabs] drawbtn rc=(%d,%d,%d,%d) hwnd=%p synced=%d", (int)dis->rcItem.left, (int)dis->rcItem.top,
+         (int)dis->rcItem.right, (int)dis->rcItem.bottom, dis->hwndItem,
+         gGlobalPrefs->activeTabGroup.s && *gGlobalPrefs->activeTabGroup.s ? 1 : 0);
+
+    DsAccents ac = DsAccentsGet();
+    bool synced = gGlobalPrefs->activeTabGroup.s && *gGlobalPrefs->activeTabGroup.s;
+
+    // button bg (button-local coords: rcItem is parent-relative, draw on button DC at 0,0)
+    COLORREF bgc = ThemeControlBackgroundColor();
+    SolidBrush bgBr(GdiRgbFromCOLORREF(bgc));
+    gfx.FillRectangle(&bgBr, 0.0f, 0.0f, (float)rc.dx, (float)rc.dy);
+
+    // circle: small glyph, diameter = min(dx,dy) - 2*padding(5px)
+    int dotD = std::max(4, std::min(rc.dx, rc.dy) - 2 * DpiScale(dis->hwndItem, 5));
+    float cx = rc.dx / 2.0f;
+    float cy = rc.dy / 2.0f;
+    Gdiplus::RectF dot(cx - dotD / 2.0f, cy - dotD / 2.0f, (float)dotD, (float)dotD);
+
+    if (synced) {
+        // synced: filled green disc
+        Color fillCol(255, 46, 158, 79); // #2E9E4F green, opaque alpha=255
+        SolidBrush fillBr(fillCol);
+        gfx.FillEllipse(&fillBr, dot);
+    } else {
+        // unsynced: outline only, red border, transparent fill
+        Color outlineCol(255, 224, 58, 58); // #E03A3A red, opaque alpha=255
+        Pen outlinePen(outlineCol, (float)DpiScale(dis->hwndItem, 2));
+        gfx.DrawEllipse(&outlinePen, dot);
+    }
+
+    logf("[tabs] draw tab-group button synced=%d\n", synced ? 1 : 0);
+}
+
+// Tab system T3: invalidate + repaint the tab-group button so the glyph
+// (green disc / red ring) updates instantly on state change.
+void RefreshTabGroupButton(MainWindow* win) {
+    if (!win || !win->hwndTabGroupBtn) {
+        return;
+    }
+    InvalidateRect(win->hwndTabGroupBtn, nullptr, TRUE);
+    UpdateWindow(win->hwndTabGroupBtn);
+}
+
+// Tab system T3: build the dropdown menu dynamically from tabGroups.
+// Returns the popup menu HWND; caller tracks selected cmdId via TrackPopupMenu.
+static HMENU BuildTabGroupMenu(MainWindow* win) {
+    HMENU popup = CreatePopupMenu();
+
+    // Unsynced item
+    AppendMenuW(popup, MF_STRING, kTabGroupMenuUnsynced, ToWStrTemp(_TRA("Unsynced")).s);
+    AppendMenuW(popup, MF_SEPARATOR, 0, nullptr);
+
+    // Groups
+    if (gGlobalPrefs->tabGroups) {
+        for (int i = 0; i < len(*gGlobalPrefs->tabGroups); i++) {
+            TabGroup* g = (*gGlobalPrefs->tabGroups)[i];
+            if (!g || !g->name) continue;
+            int nFiles = g->tabFiles ? len(*g->tabFiles) : 0;
+            // mark the active group with a filled-circle prefix + checkmark
+            bool isActive = gGlobalPrefs->activeTabGroup.s && str::EqI(g->name, gGlobalPrefs->activeTabGroup);
+            TempStr label = fmt("%s%s (%d file(s))", isActive ? StrL("\xe2\x96\x8f ") : StrL(""), Str(g->name), nFiles);
+            UINT itemFlags = MF_STRING | (isActive ? MF_CHECKED : 0);
+            // plain MF_STRING item: left-click opens in current window (OpenHere routing).
+            // Right-click is intercepted via menu-window subclass in ShowTabGroupDropdown
+            // and shows an options popup (Open in new window / Rename / Delete).
+            AppendMenuW(popup, itemFlags, kTabGroupMenuOpenHereBase + i, ToWStrTemp(label).s);
+        }
+    }
+
+    AppendMenuW(popup, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(popup, MF_STRING, kTabGroupMenuNewSession, ToWStrTemp(_TRA("New session...")).s);
+
+    // apply dark mode to popup
+    if (UseDarkModeLib() && dmlib::isEnabled()) {
+        // dark title bar applied on WM_INITMENUPOPUP by caller
+    }
+
+    return popup;
+}
+
+// Tab system T3: handle a menu command from the dropdown.
+void HandleTabGroupMenuCmd(MainWindow* win, int cmdId) {
+    logf("[tabs] menu cmd=%d\n", cmdId);
+    if (cmdId == kTabGroupMenuUnsynced) {
+        SetActiveTabGroup(win, "");
+        logf("[tabs] menu activate unsynced\n");
+        return;
+    }
+    if (cmdId == kTabGroupMenuNewSession) {
+        Str name;
+        if (ShowTabGroupNameDialog(win, &name, false)) {
+            // new session = empty group: just set active pointer, do NOT sync
+            // current open tabs into it (that would clobber saved groups)
+            str::ReplaceWithCopy(&gGlobalPrefs->activeTabGroup, Str(name.s));
+            // ensure the group exists in tabGroups (empty tabFiles)
+            if (!gGlobalPrefs->tabGroups) {
+                gGlobalPrefs->tabGroups = new Vec<TabGroup*>();
+            }
+            bool exists = false;
+            for (auto* g : *gGlobalPrefs->tabGroups) {
+                if (g && g->name && str::EqI(g->name, name.s)) {
+                    exists = true;
+                    break;
+                }
+            }
+            if (!exists) {
+                auto* ng = AllocStruct<TabGroup>();
+                str::ReplaceWithCopy(&ng->name, Str(name.s));
+                ng->tabFiles = new Vec<TabFile*>();
+                gGlobalPrefs->tabGroups->Append(ng);
+            }
+            // new session captures the currently open books into the group
+            SyncGroupFromWindow(name.s, win);
+            SaveSettings();
+            RefreshTabGroupButton(win);
+            logf("[tabs] menu new session '%s'\n", Str(name));
+        }
+        return;
+    }
+    // group actions: decode base + index (check highest base first to avoid
+    // overlap: 8501-9500 open-here overlaps 8601-9600 open-new etc.)
+    if (!gGlobalPrefs->tabGroups) return;
+    int idx = -1;
+    int action = 0; // 0=open here, 1=open new, 2=rename, 3=delete
+    if (cmdId >= kTabGroupMenuDeleteBase && cmdId < kTabGroupMenuDeleteBase + 1000) {
+        idx = cmdId - kTabGroupMenuDeleteBase;
+        action = 3;
+    } else if (cmdId >= kTabGroupMenuRenameBase && cmdId < kTabGroupMenuRenameBase + 1000) {
+        idx = cmdId - kTabGroupMenuRenameBase;
+        action = 2;
+    } else if (cmdId >= kTabGroupMenuOpenNewBase && cmdId < kTabGroupMenuOpenNewBase + 1000) {
+        idx = cmdId - kTabGroupMenuOpenNewBase;
+        action = 1;
+    } else if (cmdId >= kTabGroupMenuOpenHereBase && cmdId < kTabGroupMenuOpenHereBase + 1000) {
+        idx = cmdId - kTabGroupMenuOpenHereBase;
+        action = 0;
+    }
+    if (idx < 0 || idx >= len(*gGlobalPrefs->tabGroups)) return;
+
+    TabGroup* g = (*gGlobalPrefs->tabGroups)[idx];
+    if (!g || !g->name) return;
+
+    switch (action) {
+        case 0: { // open here
+            // set activeTabGroup directly (bypass SyncGroupFromWindow which would clobber
+            // destination group's tabFiles with the current window's tabs)
+            str::ReplaceWithCopy(&gGlobalPrefs->activeTabGroup, Str(g->name.s));
+            ActivateTabGroupInWindow(win, g->name.s);
+            logf("[tabs] menu activate '%s' (open here)\n", Str(g->name));
+            break;
+        }
+        case 1: { // open in new window
+            // resolve group name string FIRST (before any window creation that may
+            // invalidate g/tabGroups via settings reload)
+            Str groupName = str::Dup(g->name);
+            MainWindow* newWin = CreateAndShowMainWindow(nullptr);
+            if (newWin) {
+                // set activeTabGroup AFTER window init (init hooks may reset it)
+                str::ReplaceWithCopy(&gGlobalPrefs->activeTabGroup, groupName);
+                SuppressGroupAutoSave(true);
+                bool first = true;
+                for (TabFile* tf : *g->tabFiles) {
+                    if (!tf->path.s) continue;
+                    LoadArgs args(tf->path, newWin);
+                    args.lazyLoad = !first; // first file sync so selection shows content at once
+                    if (!first) args.forceReuse = false;
+                    LoadDocument(&args);
+                    first = false;
+                }
+                TabsSelect(newWin, 0);
+                SuppressGroupAutoSave(false);
+                SaveSettings();
+                RefreshTabGroupButton(newWin);
+                ShowMainWindow(newWin, WIN_STATE_NORMAL);
+            }
+            break;
+        }
+        case 2: { // rename
+            // deep-copy original name BEFORE dialog: dialog's ReplaceWithCopy frees
+            // d->nameOut.s which aliases g->name.s via shallow copy -> double-free/UAF
+            Str newName = str::Dup(g->name);
+            if (ShowTabGroupNameDialog(win, &newName, true)) {
+                str::ReplaceWithCopy(&g->name, newName.s);
+                SaveSettings();
+                RefreshTabGroupButton(win);
+                logf("[tabs] menu rename '%s' -> '%s'\n", Str(g->name), Str(newName));
+            }
+            str::Free(newName);
+            break;
+        }
+        case 3: { // delete
+            TempStr msg = fmt("Delete tab group '%s'?", Str(g->name));
+            int res = MessageBoxW(win->hwndFrame, ToWStrTemp(msg).s, L"Tab Group",
+                                  MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2);
+            if (res == IDYES) {
+                if (gGlobalPrefs->activeTabGroup && str::EqI(Str(gGlobalPrefs->activeTabGroup), Str(g->name))) {
+                    str::ReplaceWithCopy(&gGlobalPrefs->activeTabGroup, Str(""));
+                }
+                // capture name BEFORE freeing: logf below would read freed g->name
+                Str deletedName = str::Dup(g->name);
+                // free the group
+                if (g->tabFiles) {
+                    for (auto* tf : *g->tabFiles) {
+                        str::Free(tf->path);
+                        free(tf);
+                    }
+                    delete g->tabFiles;
+                }
+                str::Free(g->name);
+                free(g);
+                gGlobalPrefs->tabGroups->RemoveAt(idx);
+                SaveSettings();
+                RefreshTabGroupButton(win);
+                logf("[tabs] menu delete '%s'\n", Str(deletedName));
+                str::Free(deletedName);
+            }
+            break;
+        }
+    }
+}
+
+// Tab group dropdown menu (#32768) right-click capture: WH_MSGFILTER hook
+// intercepts WM_RBUTTONDOWN/UP on the #32768 menu window during TrackPopupMenuEx
+// modal loop (FindWindow before tracking always returns NULL — WM_INITMENUPOPUP
+// subclass install was unreliable for top-level popups). Stored across tracking:
+// idx of the right-clicked group.
+static HMENU gTabGroupMenuPopup = nullptr;
+static MainWindow* gTabGroupDropdownWin = nullptr;
+static HWND gTabGroupDropdownFrame = nullptr;
+
+// Tab system T3: build the right-click options menu (Open in new window / Rename / Delete)
+// for a group index. Items reuse the OpenNew/Rename/Delete command-id bases + idx so
+// HandleTabGroupMenuCmd decodes them exactly like the main-menu group actions.
+static HMENU BuildTabGroupOptionsMenu(int idx) {
+    HMENU optPopup = CreatePopupMenu();
+    AppendMenuW(optPopup, MF_STRING, kTabGroupMenuOpenNewBase + idx, ToWStrTemp(_TRA("Open in new window")).s);
+    AppendMenuW(optPopup, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(optPopup, MF_STRING, kTabGroupMenuRenameBase + idx, ToWStrTemp(_TRA("Rename...")).s);
+    AppendMenuW(optPopup, MF_STRING, kTabGroupMenuDeleteBase + idx, ToWStrTemp(_TRA("Delete")).s);
+    return optPopup;
+}
+
+// Tab group dropdown menu (#32768) right-click capture: WH_MSGFILTER hook
+// intercepts WM_RBUTTONUP on the #32768 menu window during TrackPopupMenuEx
+// modal loop (FindWindow before tracking always returns NULL — WM_INITMENUPOPUP
+// subclass install was unreliable for top-level popups). Stored across tracking:
+// the popup HMENU, the owning MainWindow, and its frame HWND.
+// On a right-click over a session item we show the options popup with TPM_RECURSE:
+// the options window overlays the main dropdown while the main menu keeps tracking,
+// then resumes after the options popup is dismissed (dropdown stays open).
+static LRESULT CALLBACK TabGroupMenuFilterProc(int code, WPARAM wp, LPARAM lp) {
+    if (code >= 0 && lp && gTabGroupMenuPopup && gTabGroupDropdownWin) {
+        MSG* msg = (MSG*)lp;
+        if (msg->message == WM_RBUTTONUP) {
+            POINT pt;
+            GetCursorPos(&pt);
+            int pos = (int)MenuItemFromPoint(msg->hwnd, gTabGroupMenuPopup, pt);
+            if (pos < 0) {
+                logf("[tabs] hook rclick no-hit\n");
+            } else {
+                UINT cmdId = GetMenuItemID(gTabGroupMenuPopup, (UINT)pos); // 0xFFFFFFFF on separator
+                if (cmdId >= kTabGroupMenuOpenHereBase && cmdId < kTabGroupMenuOpenHereBase + 1000) {
+                    int idx = (int)(cmdId - kTabGroupMenuOpenHereBase);
+                    if (!gGlobalPrefs->tabGroups || idx < 0 || idx >= len(*gGlobalPrefs->tabGroups)) {
+                        logf("[tabs] hook rclick idx=%d out of range -> native\n", idx);
+                        return 0; // do not swallow; let the menu behave natively
+                    }
+                    TabGroup* g = (*gGlobalPrefs->tabGroups)[idx];
+                    if (!g || !g->name) {
+                        logf("[tabs] hook rclick idx=%d invalid group -> native\n", idx);
+                        return 0;
+                    }
+                    HMENU opts = BuildTabGroupOptionsMenu(idx);
+                    if (!opts) {
+                        logf("[tabs] hook rclick idx=%d options build failed -> native\n", idx);
+                        return 0;
+                    }
+                    // TPM_RECURSE: nested popup while the main menu is still tracking.
+                    // Options overlay the main dropdown; main menu resumes after options close.
+                    int optCmdId = TrackPopupMenuEx(opts, TPM_RECURSE | TPM_RETURNCMD | TPM_RIGHTBUTTON, pt.x, pt.y,
+                                                    gTabGroupDropdownFrame, nullptr);
+                    DestroyMenu(opts);
+                    logf("[tabs] hook rclick idx=%d optCmdId=%d\n", idx, optCmdId);
+                    if (optCmdId > 0) {
+                        // Rename opens a modal dialog during tracking — TPM_RECURSE supports
+                        // nested modals. Swallow the right-click so the main menu never sees it.
+                        HandleTabGroupMenuCmd(gTabGroupDropdownWin, optCmdId);
+                    }
+                    return 1; // swallow: main menu keeps tracking (dropdown stays open)
+                }
+                logf("[tabs] hook rclick pos=%d cmdId=%u no-session\n", pos, cmdId);
+            }
+        }
+    }
+    return 0;
+}
+
+// Tab system T3: show the dropdown menu below the button.
+// Left-click on a session item = open here (OpenHere routing).
+// Right-click on a session item = options popup (Open in new window / Rename / Delete).
+// The right-click item is captured by TabGroupMenuFilterProc (WH_MSGFILTER on #32768).
+// Single TrackPopupMenuEx call: build main menu -> install hook -> Track -> wait ->
+// unhook -> route cmdId. The reopen-after-teardown loop is REMOVED (never worked on
+// real machine); options now use TPM_RECURSE so the main dropdown stays open.
+static void ShowTabGroupDropdown(MainWindow* win, HWND btnHwnd) {
+    // foreground needed so TrackPopupMenuEx tracks reliably across processes
+    SetForegroundWindow(win->hwndFrame);
+
+    Rect anchorRc;
+    GetWindowRect(btnHwnd, (LPRECT)&anchorRc);
+
+    HMENU popup = BuildTabGroupMenu(win);
+    if (!popup) {
+        logf("[tabs] dropdown: build null -> exit\n");
+        return;
+    }
+
+    gTabGroupMenuPopup = popup;
+    gTabGroupDropdownWin = win;
+    gTabGroupDropdownFrame = win->hwndFrame;
+    // install thread hook so we see WM_RBUTTONUP on the #32768 menu window
+    // during TrackPopupMenuEx modal loop (FindWindow before tracking = NULL)
+    HHOOK hMenuHook = SetWindowsHookExW(WH_MSGFILTER, TabGroupMenuFilterProc, nullptr, GetCurrentThreadId());
+    logf("[tabs] hook inst hMenuHook=%p\n", hMenuHook);
+
+    // WITHOUT TPM_RIGHTBUTTON: right-click would normally cancel the menu silently;
+    // the WH_MSGFILTER hook catches WM_RBUTTONUP and shows the options popup via TPM_RECURSE.
+    int cmdId = TrackPopupMenuEx(popup, TPM_RETURNCMD | TPM_LEFTALIGN | TPM_TOPALIGN | TPM_VERTICAL, anchorRc.x,
+                                 anchorRc.y + anchorRc.dy, win->hwndFrame, nullptr);
+    logf("[tabs] menu done cmdId=%d\n", cmdId);
+
+    if (hMenuHook) {
+        UnhookWindowsHookEx(hMenuHook);
+    }
+    gTabGroupMenuPopup = nullptr;
+    gTabGroupDropdownWin = nullptr;
+    gTabGroupDropdownFrame = nullptr;
+
+    DestroyMenu(popup);
+    if (cmdId > 0) {
+        HandleTabGroupMenuCmd(win, cmdId);
+    }
+    logf("[tabs] dropdown done cmdId=%d\n", cmdId);
+}
+
+// Tab system T3: modal input dialog for "New session" / "Rename" (UNICODE, 20-char limit).
+// gForTesting: auto-accept "T1" and log, skip modal.
+// Uses poll-based modal loop (ProfileBackupWnd precedent) so buttons stay alive
+// in dark theme; GetMessage-based modal loops hang child buttons.
+struct TabGroupNameDialog {
+    HWND hwnd = nullptr;
+    MainWindow* win = nullptr;
+    Str* nameOut = nullptr;
+    bool isRename = false;
+    HWND hEdit = nullptr;
+    bool result = false;
+};
+
+static TabGroupNameDialog* gTabGroupNameDialog = nullptr;
+static HBRUSH gTabGroupDlgBrControlBg = nullptr;
+
+#pragma warning(disable : 4505) // static WndProc only referenced via WNDCLASS
+static LRESULT CALLBACK TabGroupNameWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    TabGroupNameDialog* d = gTabGroupNameDialog;
+    if (!d || d->hwnd != hwnd) {
+        return DefWindowProcW(hwnd, msg, wp, lp);
+    }
+    switch (msg) {
+        case WM_COMMAND:
+            if (LOWORD(wp) == IDOK) {
+                WCHAR buf[64] = {};
+                GetWindowTextW(d->hEdit, buf, dimof(buf));
+                TempStr s = ToUtf8Temp(WStr(buf));
+                TempStr trimmed = str::Dup(s);
+                str::TrimWSInPlace(trimmed, str::TrimOpt::Both);
+                if (trimmed && d->nameOut) {
+                    str::ReplaceWithCopy(d->nameOut, Str(trimmed));
+                    d->result = true;
+                }
+                DestroyWindow(hwnd);
+            } else if (LOWORD(wp) == IDCANCEL) {
+                DestroyWindow(hwnd);
+            }
+            return 0;
+        case WM_KEYDOWN:
+            if (wp == VK_RETURN) {
+                PostMessageW(hwnd, WM_COMMAND, IDOK, 0);
+            } else if (wp == VK_ESCAPE) {
+                DestroyWindow(hwnd);
+            }
+            return 0;
+        case WM_CTLCOLOREDIT:
+        case WM_CTLCOLORBTN: {
+            HDC hdc = (HDC)wp;
+            SetTextColor(hdc, ThemeWindowTextColor());
+            SetBkColor(hdc, ThemeControlBackgroundColor());
+            if (!gTabGroupDlgBrControlBg) {
+                gTabGroupDlgBrControlBg = CreateSolidBrush(ThemeControlBackgroundColor());
+            }
+            return (LRESULT)gTabGroupDlgBrControlBg;
+        }
+        case WM_ERASEBKGND: {
+            RECT rc;
+            GetClientRect(hwnd, &rc);
+            HBRUSH br = CreateSolidBrush(ThemeWindowBackgroundColor());
+            FillRect((HDC)wp, &rc, br);
+            DeleteObject(br);
+            return 1;
+        }
+        case WM_CLOSE:
+            DestroyWindow(hwnd);
+            return 0;
+        case WM_DESTROY:
+            gTabGroupNameDialog = nullptr;
+            if (gTabGroupDlgBrControlBg) {
+                DeleteObject(gTabGroupDlgBrControlBg);
+                gTabGroupDlgBrControlBg = nullptr;
+            }
+            return 0;
+    }
+    return DefWindowProcW(hwnd, msg, wp, lp);
+}
+
+bool ShowTabGroupNameDialog(MainWindow* win, Str* nameOut, bool isRename, bool forceReal) {
+    if (gForTesting && !forceReal) {
+        TempStr def = isRename ? *nameOut : StrL("T1");
+        if (nameOut) str::ReplaceWithCopy(nameOut, def);
+        logf("[tabs] new session auto-named (for-testing)\n");
+        return true;
+    }
+
+    // register the dialog window class ONCE (CreateWindowExW needs it)
+    static bool sRegDone = false;
+    if (!sRegDone) {
+        WNDCLASSW wc{};
+        wc.lpfnWndProc = TabGroupNameWndProc;
+        wc.hInstance = GetModuleHandleW(nullptr);
+        wc.lpszClassName = L"TUMATRA_TAB_GROUP_NAME";
+        RegisterClassW(&wc);
+        sRegDone = true;
+    }
+
+    int w = DpiScale(win->hwndFrame, 300);
+    int h = DpiScale(win->hwndFrame, 180);
+    RECT rcParent;
+    GetWindowRect(win->hwndFrame, &rcParent);
+    int x = rcParent.left + (rcParent.right - rcParent.left - w) / 2;
+    int y = rcParent.top + (rcParent.bottom - rcParent.top - h) / 2;
+
+    static const wchar_t* className = L"TUMATRA_TAB_GROUP_NAME";
+    TabGroupNameDialog dlg;
+    dlg.win = win;
+    dlg.nameOut = nameOut;
+    dlg.isRename = isRename;
+    gTabGroupNameDialog = &dlg;
+    HWND hwnd = CreateWindowExW(0, className, ToWStrTemp(isRename ? _TRA("Rename session") : _TRA("New session")).s,
+                                WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_VISIBLE, x, y, w, h, win->hwndFrame,
+                                nullptr, GetModuleHandleW(nullptr), nullptr);
+    if (!hwnd) {
+        gTabGroupNameDialog = nullptr;
+        return false;
+    }
+    // dark theme: title bar + raw child controls (EDIT/BUTTON are unthemed by default)
+    if (UseDarkModeLib() && dmlib::isEnabled()) {
+        dmlib::setDarkTitleBarEx(hwnd, false);
+        dmlib::setChildCtrlsTheme(hwnd);
+    }
+    logf("[tabs] namedialog opened isRename=%d\n", isRename ? 1 : 0);
+    dlg.hwnd = hwnd;
+
+    int editX = DpiScale(win->hwndFrame, 20);
+    int editY = DpiScale(win->hwndFrame, 40);
+    int editW = DpiScale(win->hwndFrame, 240);
+    int editH = DpiScale(win->hwndFrame, 26);
+    dlg.hEdit = CreateWindowExW(0, L"EDIT", isRename ? ToWStrTemp(*nameOut).s : L"",
+                                WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL | 0x0080, editX, editY, editW, editH,
+                                hwnd, (HMENU)1001, GetModuleHandleW(nullptr), nullptr);
+    SendMessageW(dlg.hEdit, EM_SETLIMITTEXT, 20, 0);
+
+    int btnW = DpiScale(win->hwndFrame, 70);
+    int btnH = DpiScale(win->hwndFrame, 30);
+    int btnY = editY + editH + DpiScale(win->hwndFrame, 20);
+    CreateWindowW(L"BUTTON", ToWStrTemp(_TRA("OK")).s, WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON, editX, btnY, btnW,
+                  btnH, hwnd, (HMENU)IDOK, GetModuleHandleW(nullptr), nullptr);
+    CreateWindowW(L"BUTTON", ToWStrTemp(_TRA("Cancel")).s, WS_CHILD | WS_VISIBLE,
+                  editX + btnW + DpiScale(win->hwndFrame, 10), btnY, btnW, btnH, hwnd, (HMENU)IDCANCEL,
+                  GetModuleHandleW(nullptr), nullptr);
+
+    SetFocus(dlg.hEdit);
+
+    // modal message loop (poll-based, ProfileBackupWnd precedent)
+    MSG msg;
+    while (GetMessageW(&msg, nullptr, 0, 0)) {
+        if (!IsDialogMessageW(hwnd, &msg)) {
+            TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
+        if (gTabGroupNameDialog == nullptr) break;
+    }
+
+    return dlg.result && nameOut && *nameOut;
+}
 
 void RelayoutCaption(MainWindow* win) {
     for (int i = CB_BTN_FIRST; i < CB_BTN_COUNT; i++) {
@@ -12272,6 +12853,11 @@ void RelayoutCaption(MainWindow* win) {
             tabsDx = rc.dx;
         }
 
+        // Tab system T3: reserve space for dropdown button left of tabs
+        int tabGroupBtnDx = DpiScale(win->hwndFrame, kTabGroupBtnDxBase);
+        tabsX += tabGroupBtnDx;
+        tabsDx -= tabGroupBtnDx;
+
         // CB_MENU hidden when menu bar rebar is showing
         win->captionBtn[CB_MENU].rect = {row1X, row1Y, menuBarDy, menuBarDy};
         win->captionBtn[CB_MENU].visible = false;
@@ -12316,12 +12902,14 @@ void RelayoutCaption(MainWindow* win) {
             win->tabsCtrl->SetIsVisible(true);
             int tabBarX = HwndMapChildXForRtlParent(win->hwndFrame, tabsX, tabsDx);
             dh.SetWindowPos(win->tabsCtrl->hwnd, nullptr, tabBarX, row2Y, tabsDx, tabHeight, SWP_NOZORDER);
+            UpdateTabGroupButton(win, tabsX - tabGroupBtnDx, row2Y, tabGroupBtnDx, tabHeight, true);
         } else {
             // no file tabs: hide tab bar, single-row caption
             win->tabsVisible = false;
             if (win->tabsCtrl) {
                 win->tabsCtrl->SetIsVisible(false);
             }
+            UpdateTabGroupButton(win, 0, 0, 0, 0, false);
         }
         dh.End();
     } else {
@@ -12401,9 +12989,15 @@ void RelayoutCaption(MainWindow* win) {
             tabsDx = rc.dx;
         }
 
+        // Tab system T3: reserve space for dropdown button left of tabs (single-row)
+        int tabGroupBtnDx = DpiScale(win->hwndFrame, kTabGroupBtnDxBase);
+        tabsX += tabGroupBtnDx;
+        tabsDx -= tabGroupBtnDx;
+
         DeferWinPosHelper dh;
         int tabBarX = HwndMapChildXForRtlParent(win->hwndFrame, tabsX, tabsDx);
         dh.SetWindowPos(win->tabsCtrl->hwnd, nullptr, tabBarX, tabY, tabsDx, tabDy, SWP_NOZORDER);
+        UpdateTabGroupButton(win, tabsX - tabGroupBtnDx, tabY, tabGroupBtnDx, tabDy, true);
         dh.End();
         if (IsRunningOnWine()) {
             logf("RelayoutCaption: singleRow btnDy=%d tabY=%d tabDy=%d tabsDx=%d\n", btnDy, tabY, tabDy, tabsDx);
@@ -13941,6 +14535,21 @@ LRESULT CALLBACK WndProcSumatraFrame(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) 
             return (LRESULT)win->brControlBgColor;
         }
 
+        case WM_CTLCOLORBTN: {
+            // Owner-draw tab-group button: default erase paints COLOR_BTNFACE
+            // (bright white band) before WM_DRAWITEM draws our dark glyph.
+            // Return the theme-dark brush so the button background matches the
+            // chrome (kills the white flash between draw calls).
+            HWND hwndCtl = (HWND)lp;
+            if (win && hwndCtl == win->hwndTabGroupBtn) {
+                if (!win->brControlBgColor) {
+                    win->brControlBgColor = CreateSolidBrush(ThemeControlBackgroundColor());
+                }
+                return (LRESULT)win->brControlBgColor;
+            }
+            break;
+        }
+
         case WM_CREATE:
             // do nothing
             TtsSetNotifyWindow(hwnd, WM_TTS_EVENT, 0, 0);
@@ -14052,6 +14661,72 @@ LRESULT CALLBACK WndProcSumatraFrame(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) 
         }
 
         case WM_COMMAND:
+            // Tab system T3: tab group dropdown button click
+            if (LOWORD(wp) == kTabGroupBtnId && HIWORD(wp) == BN_CLICKED) {
+                ShowTabGroupDropdown(win, win->hwndTabGroupBtn ? win->hwndTabGroupBtn : hwnd);
+                return 0;
+            }
+            // Tab system T3: async dialog-open replanted from control pipe.
+            // Params stashed by SumatraControl.cpp::TabGroupDialogOpenResultTemp
+            // into gTestDialogIsRename/gTestDialogName; this handler runs the
+            // real modal dialog on the main UI thread (not the pipe thread).
+            if (LOWORD(wp) == kTabGroupDialogTestCmd) {
+                extern bool gTestDialogIsRename;
+                extern Str gTestDialogName;
+                Str tmp;
+                if (gTestDialogIsRename) {
+                    // prefill with the group's current name (like the rename menu case)
+                    TabGroup* g = FindTabGroup(gTestDialogName.s);
+                    tmp = (g && g->name) ? str::Dup(g->name) : str::Dup(gTestDialogName);
+                } else {
+                    tmp = str::Dup(gTestDialogName);
+                }
+                bool ok = ShowTabGroupNameDialog(win, &tmp, gTestDialogIsRename, true);
+                if (ok) {
+                    if (gTestDialogIsRename) {
+                        TabGroup* g = FindTabGroup(gTestDialogName.s);
+                        if (g) {
+                            str::ReplaceWithCopy(&g->name, tmp);
+                            SaveSettings();
+                            RefreshTabGroupButton(win);
+                            logf("[tabs] dialog rename '%s' -> '%s'\n", Str(gTestDialogName), Str(g->name));
+                        }
+                    } else {
+                        str::ReplaceWithCopy(&gGlobalPrefs->activeTabGroup, Str(tmp.s));
+                        if (!gGlobalPrefs->tabGroups) {
+                            gGlobalPrefs->tabGroups = new Vec<TabGroup*>();
+                        }
+                        bool exists = false;
+                        for (auto* g : *gGlobalPrefs->tabGroups) {
+                            if (g && g->name && str::EqI(g->name, tmp.s)) {
+                                exists = true;
+                                break;
+                            }
+                        }
+                        if (!exists) {
+                            auto* ng = AllocStruct<TabGroup>();
+                            str::ReplaceWithCopy(&ng->name, Str(tmp.s));
+                            ng->tabFiles = new Vec<TabFile*>();
+                            gGlobalPrefs->tabGroups->Append(ng);
+                        }
+                        // dialog newsession captures the currently open books into the group
+                        SyncGroupFromWindow(tmp.s, win);
+                        SaveSettings();
+                        RefreshTabGroupButton(win);
+                        logf("[tabs] dialog newsession '%s'\n", Str(tmp));
+                    }
+                }
+                str::Free(tmp);
+                str::Free(gTestDialogName);
+                gTestDialogName = {};
+                gTestDialogIsRename = false;
+                return 0;
+            }
+            // Tab system T3: menu command from TrackPopupMenu or control-pipe replay
+            if (LOWORD(wp) >= kTabGroupMenuUnsynced && LOWORD(wp) <= kTabGroupMenuNewSession) {
+                HandleTabGroupMenuCmd(win, LOWORD(wp));
+                return 0;
+            }
             return FrameOnCommand(win, hwnd, msg, wp, lp);
 
         case WM_MEASUREITEM:
@@ -14061,12 +14736,18 @@ LRESULT CALLBACK WndProcSumatraFrame(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) 
             }
             break;
 
-        case WM_DRAWITEM:
+        case WM_DRAWITEM: {
+            DRAWITEMSTRUCT* dis = (DRAWITEMSTRUCT*)lp;
+            if (dis->CtlID == kTabGroupBtnId) {
+                DrawTabGroupButton(dis);
+                return TRUE;
+            }
             if (ThemeColorizeControls()) {
                 MenuCustomDrawItem(hwnd, (DRAWITEMSTRUCT*)lp);
                 return TRUE;
             }
             break;
+        }
 
         case WM_SETFOCUS:
         case WM_KILLFOCUS:

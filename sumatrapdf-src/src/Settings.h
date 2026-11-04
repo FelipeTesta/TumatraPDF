@@ -1062,6 +1062,9 @@ struct GlobalPrefs {
     Point propWinPos;
     // if true, check once a day whether an update is available
     bool checkForUpdates;
+    // name of the tab group session this window auto-syncs to (empty =
+    // unsynced)
+    Str activeTabGroup;
 };
 // for parsing themes
 struct Themes {
@@ -1960,10 +1963,11 @@ static const FieldInfo gGlobalPrefsFields[] = {
     {offsetof(GlobalPrefs, checkForUpdates), SettingType::Bool, true, true},
     {(size_t)-1, SettingType::Comment, 0, true},
     {(size_t)-1, SettingType::Comment, (intptr_t)"Settings below are not recognized by the current version", true},
+    {offsetof(GlobalPrefs, activeTabGroup), SettingType::String, (intptr_t)"", true},
 };
 static const StructInfo gGlobalPrefsInfo = {
     sizeof(GlobalPrefs),
-    148,
+    149,
     gGlobalPrefsFields,
     "\0\0FlashcardStudyDir\0ProfileDataDir\0DefaultDisplayMode\0DefaultZoom\0DisableJavaScript\0AllowExternalImages\0En"
     "ableTeXEnhancements\0EscToExit\0FullPathInTitle\0InverseSearchCmdLine\0LazyLoading\0MainWindowBackground\0NoHomeTa"
@@ -1982,7 +1986,7 @@ static const StructInfo gGlobalPrefsInfo = {
     "\0Annotations\0\0ExternalViewers\0\0ForwardSearch\0\0PrinterDefaults\0\0Fullscreen\0\0SelectionHandlers\0\0Shortcu"
     "ts\0\0Themes\0\0TabGroups\0\0CustomScreenDPI\0\0\0DefaultPasswords\0UiLanguage\0VersionToSkip\0WindowState\0Window"
     "Pos\0SearchUIWindowPos\0FileStates\0SessionData\0ReopenOnce\0TimeOfLastUpdateCheck\0OpenCountWeek\0PropWinPos\0Che"
-    "ckForUpdates\0\0",
+    "ckForUpdates\0\0\0ActiveTabGroup",
     "\0\0directory where flashcard study history JSONs are stored (per-book files, MD5-named). Empty = default "
     "app-data dir (FlashcardStudy). Point it at a cloud-synced folder (e.g. Google Drive) to keep the histories backed "
     "up\0directory for the single-file Profile Memory store (tumatraPDF-data_1.json). Empty = default app-data dir. "
@@ -2093,7 +2097,7 @@ static const StructInfo gGlobalPrefsInfo = {
     "documents after an auto-update\0data required to determine when SumatraPDF last checked for updates\0value "
     "required to determine recency for the OpenCount value in FileStates\0position of the document properties "
     "window\0if true, check once a day whether an update is available\0\0Settings below are not recognized by the "
-    "current version",
+    "current version\0name of the tab group session this window auto-syncs to (empty = unsynced)",
     false};
 static const FieldInfo gTheme_1_Fields[] = {
     {offsetof(Theme, name), SettingType::String, (intptr_t)""},

@@ -178,7 +178,10 @@ TabState* NewTabState(FileState* fs) {
     state->rotation = fs->rotation;
     state->scrollPos = fs->scrollPos;
     state->showToc = fs->showToc;
-    *state->tocState = *fs->tocState;
+    if (fs->tocState) {
+        if (!state->tocState) state->tocState = new Vec<int>();
+        *state->tocState = *fs->tocState;
+    }
     return state;
 }
 

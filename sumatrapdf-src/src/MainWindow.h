@@ -211,6 +211,8 @@ struct MainWindow {
     // state related to table of contents (PDF bookmarks etc.)
     HWND hwndTocBox = nullptr;
     UINT_PTR tocBoxSubclassId = 0;
+    // Tab system T3: dropdown button left of tabs (real child HWND, BS_OWNERDRAW)
+    HWND hwndTabGroupBtn = nullptr;
 
     LabelWithCloseWnd* tocLabelWithClose = nullptr;
     Edit* tocFilterEdit = nullptr;

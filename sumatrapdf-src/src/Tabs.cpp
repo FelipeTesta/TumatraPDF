@@ -29,6 +29,7 @@
 #include "Menu.h"
 #include "TableOfContents.h"
 #include "Tabs.h"
+#include "TabGroupsManage.h"
 #include "SumatraDialogs.h"
 #include "FileHistory.h"
 #include "Theme.h"
@@ -590,11 +591,13 @@ static void MainWindowTabClosed(MainWindow* win, TabsCtrl::ClosedEvent* ev) {
     int closedTabIdx = ev->tabIdx;
     WindowTab* tab = win->GetTab(closedTabIdx);
     CloseTab(tab, false);
+    UpdateActiveGroupAutoSave(win);
 }
 
 static void MainWindowTabSelectionChanging(MainWindow* win, TabsCtrl::SelectionChangingEvent* ev) {
     // TODO: Should we allow the switch of the tab if we are in process of printing?
     SaveCurrentWindowTab(win);
+    UpdateActiveGroupAutoSave(win);
     ev->preventChanging = false;
 }
 
@@ -617,6 +620,16 @@ static void MainWindowTabMigration(MainWindow* win, TabsCtrl::MigrationEvent* ev
         releaseWnd = nullptr;
     }
     MaybeMigrateTab(tab, releaseWnd, ev->releasePoint);
+    // T2: if the tab was dragged out to a brand-new window (not onto another
+    // SumatraPDF frame), the new window is unsynced. Single-global-pointer
+    // semantics: clearing activeTabGroup unsyncs all windows, but the original
+    // window's group data was already persisted by T1 hooks (RemoveTab →
+    // MainWindowTabClosed → UpdateActiveGroupAutoSave fired before MaybeMigrateTab
+    // returned, with activeTabGroup still pointing at the group).
+    if (!releaseWnd) {
+        str::ReplaceWithCopy(&gGlobalPrefs->activeTabGroup, Str(""));
+        logf("[tabs] drag-out new window unsynced\n");
+    }
 }
 
 void CreateTabbar(MainWindow* win) {
@@ -756,6 +769,7 @@ WindowTab* AddTabToWindow(MainWindow* win, WindowTab* tab, bool deferUpdate) {
         tabs->SetSelected(insertedIdx);
         UpdateTabWidth(win);
     }
+    UpdateActiveGroupAutoSave(win);
     return tab;
 }
 

@@ -629,7 +629,7 @@ static TabState* CloneTabState(const TabState* src) {
     dst->rotation = src->rotation;
     dst->scrollPos = src->scrollPos;
     dst->showToc = src->showToc;
-    dst->tocState = new Vec<int>(*src->tocState);
+    dst->tocState = src->tocState ? new Vec<int>(*src->tocState) : nullptr;
     return dst;
 }
 
@@ -756,6 +756,7 @@ static void RememberSessionState() {
             FileState* fs = NewFileState(fp);
             tab->ctrl->GetDisplayState(fs);
             fs->showToc = tab->showToc;
+            if (!fs->tocState) fs->tocState = new Vec<int>();
             *fs->tocState = tab->tocState;
             TabState* ts = NewTabState(fs);
             windowState->tabStates->Append(ts);

@@ -26,6 +26,9 @@
 #include "SelectTextKeyboard.h"
 #include "HomePage.h"
 #include "AIChatCommon.h"
+#include "TabGroupsManage.h"
+#include "AppSettings.h"
+#include "Tabs.h"
 
 // Silent add for -dbg-control tests (no name dialog, no settings flush).
 static void AddFavoriteSilent(MainWindow* win, int pageNo) {
@@ -102,6 +105,219 @@ static TempStr FavoriteNavResultTemp(Str action, int pageNo, int* exitCodeOut) {
     return finish(fmt("OK page=%d", cur), 0);
 }
 
+// ---------------------------------------------------------------------------
+// Tab system T3 control-pipe test commands (for ad-hoc E2E session tests).
+// Each drives the same statics the menu handlers call, so the control-pipe
+// path exercises identical code to a user click.
+// ---------------------------------------------------------------------------
+
+static TempStr TabGroupActivateResultTemp(Str name, int* exitCodeOut) {
+    str::Builder out;
+    auto finish = [&](Str msg, int code) -> TempStr {
+        out.Append(msg);
+        out.AppendChar('\n');
+        if (exitCodeOut) *exitCodeOut = code;
+        return ToStrTemp(out);
+    };
+    if (len(gWindows) == 0) {
+        return finish(StrL("NOTREADY no-window"), 2);
+    }
+    MainWindow* win = gWindows[0];
+    TabGroup* g = FindTabGroup(name.s);
+    if (!g) {
+        return finish(fmt("ERROR no-such-group name=%s", Str(name)), 1);
+    }
+    ActivateTabGroupInWindow(win, name.s);
+    return finish(fmt("OK activated=%s tabs=%d", Str(name), len(*g->tabFiles)), 0);
+}
+
+static TempStr TabGroupListResultTemp(int* exitCodeOut) {
+    str::Builder out;
+    auto finish = [&](Str msg, int code) -> TempStr {
+        out.Append(msg);
+        out.AppendChar('\n');
+        if (exitCodeOut) *exitCodeOut = code;
+        return ToStrTemp(out);
+    };
+    if (!gGlobalPrefs || !gGlobalPrefs->tabGroups) {
+        return finish(StrL("OK groups=0"), 0);
+    }
+    out.Append(fmt("OK groups=%d", len(*gGlobalPrefs->tabGroups)));
+    for (TabGroup* g : *gGlobalPrefs->tabGroups) {
+        if (!g || !g->name) continue;
+        int n = g->tabFiles ? len(*g->tabFiles) : 0;
+        out.AppendChar(' ');
+        out.Append(Str(g->name));
+        out.AppendChar('=');
+        out.Append(fmt("%d", n));
+    }
+    out.AppendChar('\n');
+    // report activeTabGroup so tests can verify it without reading settings file
+    // (SaveSettings is a no-op under -for-testing)
+    out.Append(fmt("active=%s", gGlobalPrefs->activeTabGroup.s ? gGlobalPrefs->activeTabGroup.s : StrL("")));
+    out.AppendChar('\n');
+    if (exitCodeOut) *exitCodeOut = 0;
+    return ToStrTemp(out);
+}
+
+static TempStr TabGroupNewSessionResultTemp(Str name, int* exitCodeOut) {
+    str::Builder out;
+    auto finish = [&](Str msg, int code) -> TempStr {
+        out.Append(msg);
+        out.AppendChar('\n');
+        if (exitCodeOut) *exitCodeOut = code;
+        return ToStrTemp(out);
+    };
+    if (len(gWindows) == 0) {
+        return finish(StrL("NOTREADY no-window"), 2);
+    }
+    MainWindow* win = gWindows[0];
+    if (len(name) == 0) {
+        return finish(StrL("ERROR empty-name"), 1);
+    }
+    // new session = empty group: just set active pointer, do NOT sync current tabs
+    str::ReplaceWithCopy(&gGlobalPrefs->activeTabGroup, Str(name));
+    // ensure the group exists in tabGroups (empty tabFiles) so TestTabGroupList sees it
+    if (!FindTabGroup(name.s) && gGlobalPrefs->tabGroups) {
+        auto* g = AllocStruct<TabGroup>();
+        str::ReplaceWithCopy(&g->name, Str(name));
+        g->tabFiles = new Vec<TabFile*>();
+        gGlobalPrefs->tabGroups->Append(g);
+    }
+    SaveSettings();
+    return finish(fmt("OK new-session=%s", Str(name)), 0);
+}
+
+static TempStr TabGroupOpenNewResultTemp(Str name, int* exitCodeOut) {
+    str::Builder out;
+    auto finish = [&](Str msg, int code) -> TempStr {
+        out.Append(msg);
+        out.AppendChar('\n');
+        if (exitCodeOut) *exitCodeOut = code;
+        return ToStrTemp(out);
+    };
+    if (len(gWindows) == 0) {
+        return finish(StrL("NOTREADY no-window"), 2);
+    }
+    TabGroup* g = FindTabGroup(name.s);
+    if (!g || !g->tabFiles || len(*g->tabFiles) == 0) {
+        return finish(fmt("ERROR no-such-group name=%s", Str(name)), 1);
+    }
+    MainWindow* newWin = CreateAndShowMainWindow(nullptr);
+    if (!newWin) {
+        return finish(StrL("ERROR create-window-failed"), 1);
+    }
+    str::ReplaceWithCopy(&gGlobalPrefs->activeTabGroup, Str(name.s));
+    bool first = true;
+    for (TabFile* tf : *g->tabFiles) {
+        if (!tf->path.s) continue;
+        LoadArgs args(tf->path, newWin);
+        if (!first) args.forceReuse = false;
+        LoadDocument(&args);
+        first = false;
+    }
+    TabsSelect(newWin, 0);
+    ShowMainWindow(newWin, WIN_STATE_NORMAL);
+    SaveSettings();
+    return finish(fmt("OK open-new=%s tabs=%d", Str(name), len(*g->tabFiles)), 0);
+}
+
+// Tab system T3: resolve a menu-cmd name string to the kTabGroupMenu* id the
+// real TrackPopupMenu route would use, then post WM_COMMAND to the frame exactly
+// as TrackPopupMenuEx dispatch does (HandleTabGroupMenuCmd).
+// Supported strings:
+//   "newsession"                    -> kTabGroupMenuNewSession (8900)
+//   "openhere:<groupName>"          -> kTabGroupMenuOpenHereBase + index
+//   "opennew:<groupName>"           -> kTabGroupMenuOpenNewBase + index
+//   "rename:<groupName>:<newName>"  -> kTabGroupMenuRenameBase + index
+//   "delete:<groupName>"            -> kTabGroupMenuDeleteBase + index
+static int TabGroupMenuCmdResolveId(Str cmdStr) {
+    if (!cmdStr) return 0;
+    if (str::Eq(cmdStr, StrL("newsession"))) {
+        return 8900; // kTabGroupMenuNewSession
+    }
+    // split on first ':' -> action
+    int colon1 = str::IndexOfChar(cmdStr, ':');
+    if (colon1 < 0) return 0;
+    Str action = Str(cmdStr.s, colon1);
+    Str rest = Str(cmdStr.s + colon1 + 1, len(cmdStr) - colon1 - 1);
+    // split rest on second ':' if present -> groupName, newName (rename only)
+    int colon2 = str::IndexOfChar(rest, ':');
+    Str groupName, newName;
+    if (colon2 < 0) {
+        groupName = rest;
+    } else {
+        groupName = Str(rest.s, colon2);
+        newName = Str(rest.s + colon2 + 1, len(rest) - colon2 - 1);
+    }
+    if (!gGlobalPrefs || !gGlobalPrefs->tabGroups) return 0;
+    int idx = -1;
+    for (int i = 0; i < len(*gGlobalPrefs->tabGroups); i++) {
+        TabGroup* g = (*gGlobalPrefs->tabGroups)[i];
+        if (g && g->name && str::EqI(g->name, groupName)) {
+            idx = i;
+            break;
+        }
+    }
+    if (idx < 0) return 0;
+    if (str::EqI(action, StrL("openhere"))) return 8501 + idx;
+    if (str::EqI(action, StrL("opennew"))) return 8601 + idx;
+    if (str::EqI(action, StrL("rename"))) return 8701 + idx;
+    if (str::EqI(action, StrL("delete"))) return 8801 + idx;
+    return 0;
+}
+
+static TempStr TabGroupMenuCmdResultTemp(Str cmdStr, int* exitCodeOut) {
+    str::Builder out;
+    auto finish = [&](Str msg, int code) -> TempStr {
+        out.Append(msg);
+        out.AppendChar('\n');
+        if (exitCodeOut) *exitCodeOut = code;
+        return ToStrTemp(out);
+    };
+    if (len(gWindows) == 0) {
+        return finish(StrL("NOTREADY no-window"), 2);
+    }
+    MainWindow* win = gWindows[0];
+    int menuId = TabGroupMenuCmdResolveId(cmdStr);
+    if (menuId == 0) {
+        return finish(fmt("ERROR bad-menu-cmd cmd=%s", cmdStr), 1);
+    }
+    logf("[tabs] menu cmd=%d (from %s)\n", menuId, Str(cmdStr));
+    HandleTabGroupMenuCmd(win, menuId);
+    return finish(fmt("OK menu-cmd=%d", menuId), 0);
+}
+
+// Tab system T3: open the new-session/rename dialog as the real menu route does.
+// For rename, prefill with the existing group name. Under -for-testing the dialog
+// auto-accepts (nameOut = "T1" or existing name).
+// Tab system T3: dialog-open params replanted from the control pipe onto the
+// main UI thread (see WM_COMMAND kTabGroupDialogTestCmd in SumatraPDF.cpp).
+// Defined here (external linkage) so SumatraPDF.cpp can consume/free them.
+bool gTestDialogIsRename = false;
+Str gTestDialogName{}; // str::Dup'd; owned by pipe handler until WM_COMMAND frees it
+
+static TempStr TabGroupDialogOpenResultTemp(Str name, int* exitCodeOut) {
+    str::Builder out;
+    auto finish = [&](Str msg, int code) -> TempStr {
+        out.Append(msg);
+        out.AppendChar('\n');
+        if (exitCodeOut) *exitCodeOut = code;
+        return ToStrTemp(out);
+    };
+    if (len(gWindows) == 0) {
+        return finish(StrL("NOTREADY no-window"), 2);
+    }
+    MainWindow* win = gWindows[0];
+    gTestDialogIsRename = len(name) > 0;
+    str::Free(gTestDialogName);
+    gTestDialogName = str::Dup(name);
+    // replant as WM_COMMAND on the frame so the modal dialog runs on the main
+    // thread, not the pipe thread; reply immediately without waiting.
+    PostMessageW(win->hwndFrame, WM_COMMAND, MAKEWPARAM(8950, 0), 0);
+    return finish(StrL("OK posted"), 0);
+}
+
 enum class ControlCmd : u16 {
     Ping = 1,
     Quit = 2,
@@ -143,6 +359,12 @@ enum class ControlCmd : u16 {
     TestStatsToggleGraph = 46,
     TestCvtRoundTrip = 47,
     TestVirtWndHitTest = 48,
+    TestTabGroupActivate = 49,
+    TestTabGroupList = 50,
+    TestTabGroupNewSession = 51,
+    TestTabGroupOpenNew = 52,
+    TestTabGroupMenuCmd = 53,
+    TestTabGroupDialogOpen = 54,
 };
 
 enum class ControlArgType : u16 {
@@ -798,6 +1020,53 @@ static void ExecuteControlRequest(ControlRequest* req) {
             }
             int exitCode = 0;
             Str res = AIChatTestReplayResultTemp(userMsg, response, &exitCode);
+            AppendTestResult(req, exitCode, res);
+            break;
+        }
+
+        case ControlCmd::TestTabGroupActivate: {
+            Str name = StringArg(req, 0);
+            int exitCode = 0;
+            Str res = TabGroupActivateResultTemp(name, &exitCode);
+            AppendTestResult(req, exitCode, res);
+            break;
+        }
+
+        case ControlCmd::TestTabGroupList: {
+            int exitCode = 0;
+            Str res = TabGroupListResultTemp(&exitCode);
+            AppendTestResult(req, exitCode, res);
+            break;
+        }
+
+        case ControlCmd::TestTabGroupNewSession: {
+            Str name = StringArg(req, 0);
+            int exitCode = 0;
+            Str res = TabGroupNewSessionResultTemp(name, &exitCode);
+            AppendTestResult(req, exitCode, res);
+            break;
+        }
+
+        case ControlCmd::TestTabGroupOpenNew: {
+            Str name = StringArg(req, 0);
+            int exitCode = 0;
+            Str res = TabGroupOpenNewResultTemp(name, &exitCode);
+            AppendTestResult(req, exitCode, res);
+            break;
+        }
+
+        case ControlCmd::TestTabGroupMenuCmd: {
+            Str cmdStr = StringArg(req, 0);
+            int exitCode = 0;
+            Str res = TabGroupMenuCmdResultTemp(cmdStr, &exitCode);
+            AppendTestResult(req, exitCode, res);
+            break;
+        }
+
+        case ControlCmd::TestTabGroupDialogOpen: {
+            Str name = StringArg(req, 0);
+            int exitCode = 0;
+            Str res = TabGroupDialogOpenResultTemp(name, &exitCode);
             AppendTestResult(req, exitCode, res);
             break;
         }

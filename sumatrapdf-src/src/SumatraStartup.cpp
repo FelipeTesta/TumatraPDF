@@ -57,6 +57,7 @@
 #include "SearchAndDDE.h"
 #include "SumatraProperties.h"
 #include "Tabs.h"
+#include "TabGroupsManage.h"
 #include "Translations.h"
 #include "StressTesting.h"
 #include "Version.h"
@@ -395,7 +396,9 @@ void SetTabState(WindowTab* tab, TabState* state) {
         }
     }
 
-    tab->tocState = *state->tocState;
+    if (state->tocState) {
+        tab->tocState = *state->tocState;
+    }
     // sidebar always starts hidden on open (user request): ignore saved showToc
     SetSidebarVisibility(win, false, false);
 
@@ -2668,6 +2671,39 @@ ContinueOpenWindow:
         SHFILEINFOW sfi{};
         uint flg = SHGFI_SYSICONINDEX | SHGFI_SMALLICON | SHGFI_USEFILEATTRIBUTES;
         SHGetFileInfoW(L".pdf", 0, &sfi, sizeof(sfi), flg);
+    }
+
+    // T2: active tab group takes precedence over session restore
+    if (gGlobalPrefs->activeTabGroup.s && *gGlobalPrefs->activeTabGroup.s) {
+        TabGroup* activeGroup = FindTabGroup(gGlobalPrefs->activeTabGroup.s);
+        if (activeGroup && activeGroup->tabFiles) {
+            restoreSession = false; // suppress normal session restore
+            logf("[tabs] startup restore group '%s' (%d files)\n", Str(gGlobalPrefs->activeTabGroup),
+                 len(*activeGroup->tabFiles));
+            // suppress auto-save during boot restore: LoadDocument is async,
+            // TabsSelect would fire UpdateActiveGroupAutoSave with empty/in-progress
+            // tabs and clobber the saved group (#session-data-loss)
+            SuppressGroupAutoSave(true);
+            win = CreateAndShowMainWindow(nullptr, false);
+            if (win) {
+                bool first = true;
+                for (TabFile* tf : *activeGroup->tabFiles) {
+                    if (!tf->path.s) {
+                        continue;
+                    }
+                    LoadArgs args(tf->path, win);
+                    if (!first) {
+                        args.forceReuse = false;
+                    }
+                    LoadDocument(&args);
+                    first = false;
+                }
+                TabsSelect(win, 0);
+                SuppressGroupAutoSave(false);
+                ShowMainWindow(win, WIN_STATE_NORMAL);
+                RefreshTabGroupButton(win);
+            }
+        }
     }
 
     if (restoreSession) {
