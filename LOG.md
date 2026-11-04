@@ -1,4 +1,14 @@
-﻿## 2026-11-04 (s36-cp) — Tab batch closed: docs + TODO trim + commit
+﻿## 2026-11-04 (s36-cr) — Toolbar Save icon: classic device-floppy SVG (tabler) stroke 2 — REVERTED same session
+
+### Fixed
+
+- Reverted `gIconSave` in `src/SvgIcons.cpp:112-119` to the original tabler `floppy-disk` (hairline `stroke-width="1"`): user visual verdict — device-floppy (`device-floppy`, stroke 2) reads worse at toolbar size; original floppy-disk restored. `src/Toolbar.cpp:82` (`TbIcon::Save → CmdSaveAnnotations`) unchanged.
+- Verified via `git diff`: icon block identical to HEAD. Scratch probe `tests/ad-hoc-save-icon.ts` deleted (never committed).
+- clang-format applied; `bun cmd/build.ts` 0 err/0 warn, deployed to `Compiled\TumatraPDF.exe`. Guard `bun tests/ad-hoc-tab-session.ts --no-build` PASS.
+
+commit: (see git log)
+
+## 2026-11-04 (s36-cp) — Tab batch closed: docs + TODO trim + commit
 
 ### Fixed
 
