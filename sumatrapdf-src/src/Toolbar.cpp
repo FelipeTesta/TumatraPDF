@@ -949,48 +949,9 @@ static int MeasureTimerTrioDx(MainWindow* win, HWND hwndToolbar) {
     return gap + ctrlH + gap + lbl.dx + gap + editW;
 }
 
-// The v6 comctl runtime ignores TB_SETDISABLEDIMAGELIST even with visual
-// styles stripped, and the icon is drawn AFTER CDDS_ITEMPOSTPAINT, so an
-// item-level overlay gets repainted over. Dim in a whole-control
-// CDDS_POSTPAINT pass instead, when every item is already on screen.
-// (~55% theme background over whatever was drawn)
-static void DrawToolbarDisabledOverlay(HDC hdc, const RECT& rc) {
-    if (rc.right <= rc.left || rc.bottom <= rc.top) {
-        return;
-    }
-    COLORREF bgCol = ThemeControlBackgroundColor();
-    u8 r, g, b;
-    UnpackColor(bgCol, r, g, b);
-    Gdiplus::Graphics gs(hdc);
-    // ~55% background over whatever comctl drew
-    Gdiplus::SolidBrush br(Gdiplus::Color(140, r, g, b));
-    gs.FillRectangle(&br, (INT)rc.left, (INT)rc.top, (INT)(rc.right - rc.left), (INT)(rc.bottom - rc.top));
-}
-
-// dim every visible-but-disabled button on the toolbar (e.g. Save with no
-// unsaved annotations); called from the whole-control CDDS_POSTPAINT pass
-static void DimDisabledToolbarButtons(HWND hwndToolbar) {
-    int n = (int)SendMessageW(hwndToolbar, TB_BUTTONCOUNT, 0, 0);
-    for (int i = 0; i < n; i++) {
-        TBBUTTONINFOW bi{};
-        bi.cbSize = sizeof(bi);
-        bi.dwMask = TBIF_BYINDEX | TBIF_COMMAND | TBIF_STATE;
-        if (TbGetButtonInfo(hwndToolbar, i, &bi) < 0) {
-            continue;
-        }
-        // a button is disabled when its TBSTATE_ENABLED bit is clear
-        if ((bi.fsState & TBSTATE_ENABLED) || (bi.fsState & TBSTATE_HIDDEN)) {
-            continue;
-        }
-        RECT rc{};
-        if (!SendMessageW(hwndToolbar, TB_GETITEMRECT, i, (LPARAM)&rc)) {
-            continue;
-        }
-        HDC hdc = GetDC(hwndToolbar);
-        DrawToolbarDisabledOverlay(hdc, rc);
-        ReleaseDC(hwndToolbar, hdc);
-    }
-}
+// Dim overlay for disabled toolbar buttons removed: GDI+ overlay on toolbar DC
+// caused accumulation/black-out artifacts during autoscroll repaints. Disabled
+// state is conveyed by text color via custom draw.
 
 static LRESULT CALLBACK ReBarWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam, UINT_PTR uIdSubclass,
                                      DWORD_PTR /*dwRefData*/) {
@@ -1009,7 +970,14 @@ static LRESULT CALLBACK ReBarWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM
         NMHDR* hdr = (NMHDR*)lParam;
         HWND chwnd = hdr->hwndFrom;
         if (hdr->code == NM_CUSTOMDRAW) {
-            if (win && win->hwndToolbar == chwnd) {
+            // Handle custom draw for all toolbars: main, Arch, Flashcard, Edit
+            bool isToolbarCustomDraw = false;
+            if (win) {
+                isToolbarCustomDraw = (win->hwndToolbar == chwnd) || (win->archTools.hwndToolbar2 == chwnd) ||
+                                      (win->flashcard.hwndToolbarFlashcard == chwnd) ||
+                                      (win->editTools.hwndToolbarEdit == chwnd);
+            }
+            if (isToolbarCustomDraw) {
                 NMTBCUSTOMDRAW* custDraw = (NMTBCUSTOMDRAW*)hdr;
                 switch (custDraw->nmcd.dwDrawStage) {
                     case CDDS_PREPAINT:
@@ -1023,7 +991,13 @@ static LRESULT CALLBACK ReBarWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM
                         // subclass owns the item-level ones. Keep the subclass
                         // chain alive: dmlib and the rebar's own proc still
                         // expect this notification.
-                        DimDisabledToolbarButtons(chwnd);
+                        {
+                            // Dim overlay removed: GDI+ overlay on toolbar DC causes
+                            // accumulation / black-out artifacts during autoscroll
+                            // repaints. Disabled state is already conveyed by text color.
+                            // If dimming is needed again, draw on the NMCD hdc with a
+                            // single-pass overlay, not GetDC.
+                        }
                         return DefSubclassProc(hWnd, uMsg, wParam, lParam);
 
                     case CDDS_ITEMPREPAINT: {
@@ -1320,7 +1294,29 @@ static int sDbgAutoscrollSet = -1;
 // the width the last group-pack planned against (d6 pipe: packAvail) — also
 // the self-heal key in ToolbarRewrapAfterSizing: a pack that ran at a stale
 // rebar width mid-transition is redone when the rebar settles
-static int sLastPackedAvailDx = -1;
+// Per-toolbar state (indexed by HWND handle)
+static struct ToolbarPackState {
+    HWND hwnd = nullptr;
+    int lastBuiltDx = -1;
+    int lastPackedAvailDx = -1;
+} sToolbarPackStates[4]; // main, arch, flashcard, edit
+
+static int FindToolbarStateIndex(HWND hwndToolbar) {
+    for (int i = 0; i < 4; i++) {
+        if (sToolbarPackStates[i].hwnd == hwndToolbar) {
+            return i;
+        }
+    }
+    // Find empty slot
+    for (int i = 0; i < 4; i++) {
+        if (sToolbarPackStates[i].hwnd == nullptr) {
+            sToolbarPackStates[i].hwnd = hwndToolbar;
+            return i;
+        }
+    }
+    return 0; // fallback
+}
+
 static int sDbgPackRebarDx = -1;
 static int sDbgPackRows = -1;
 static int sDbgPackMarkIdx[4] = {-1, -1, -1, -1}; // first planned break indices
@@ -1382,12 +1378,35 @@ static void EnforceToolbarTextButtonWidths(MainWindow* win, HWND hwndToolbar) {
     }
 }
 
+// Public wrapper so secondary toolbars (Arch / Edit) run the same BTNS_SHOWTEXT
+// width derivation as the main toolbar — comctl derives those widths lazily,
+// so without an explicit pass their text labels get truncated (ellipsis).
+// Skip autoscroll special-case: idCommand never equals CmdAutoScrollToggle for
+// secondary-toolbar buttons.
+void ToolbarEnforceSecondaryTextWidths(MainWindow* win, HWND hwndToolbar) {
+    if (!win || !hwndToolbar) {
+        return;
+    }
+    EnforceToolbarTextButtonWidths(win, hwndToolbar);
+}
+
+// Post-add text-button sizing for secondary toolbars: comctl derives
+// BTNS_SHOWTEXT button widths lazily, so every caller must force TB_AUTOSIZE
+// then pin explicit cx = label+pad, else labels render truncated (ellipsis).
+void PostAddTextButtonSizing(MainWindow* win, HWND hwndToolbar) {
+    TbAutosIZE(hwndToolbar);
+    ToolbarEnforceSecondaryTextWidths(win, hwndToolbar);
+}
+
 // Delete and re-add every button so comctl lays out FRESH wrap points for the
 // current width (user request: buttons that don't fit move down to the next
 // row and the band grows taller). Adding buttons resets their state to the
 // TBBUTTON defaults, so every piece of per-button state is re-applied right
 // after: hidden/enabled (ToolbarUpdateStateForWindow), the checked toggles
 // and the zoom-layout checks, the page box, and the floating timer controls.
+// sToolbarRewrapStates is defined later (~1632) but written from here; forward
+// declared so RebuildToolbarButtonsForWidth can sync the rewrap guard.
+static struct ToolbarPackState sToolbarRewrapStates[4];
 static void RebuildToolbarButtonsForWidth(MainWindow* win, HWND hwndToolbar) {
     DWORD sz = (DWORD)SendMessageW(hwndToolbar, TB_GETBUTTONSIZE, 0, 0);
     int dxBtn = LOWORD(sz);
@@ -1426,7 +1445,15 @@ static void RebuildToolbarButtonsForWidth(MainWindow* win, HWND hwndToolbar) {
         // band cx to exactly this, so the child ends up this wide
         HWND hwndRebarP = GetParent(hwndToolbar);
         int availDx = hwndRebarP ? HwndClientRect(hwndRebarP).dx : rcClient.right;
-        sLastPackedAvailDx = availDx;
+        int stateIdx = FindToolbarStateIndex(hwndToolbar);
+        sToolbarPackStates[stateIdx].lastPackedAvailDx = availDx;
+        // rewrap-guard sync: ToolbarRewrapAfterSizing compares its hysteresis
+        // against THIS array's lastPackedAvailDx — the pack table was split
+        // from the rewrap table (1302/1632) and this write used to land only
+        // in sToolbarPackStates, leaving the rewrap guard orphaned at -1 and
+        // re-wrapping (flicker) forever while wraps keep changing on narrow
+        // frames. See TODO Toolbars Flickering.
+        sToolbarRewrapStates[stateIdx].lastPackedAvailDx = availDx;
         sDbgPackRebarDx = hwndRebarP ? HwndClientRect(hwndRebarP).dx : -1;
         bool wrapAfter[kButtonsCount + 8];
         sDbgPackRows = 1;
@@ -1509,7 +1536,7 @@ static WNDPROC DefWndProcToolbar = nullptr;
 // single-row height; without this update the wrapped rows are clipped away and
 // the buttons look simply hidden (user report: at half the screen width the
 // toolbar buttons disappeared). Returns true when the height changed.
-static bool SetToolbarBandToRowHeight(HWND hwndToolbar) {
+bool SetToolbarBandToRowHeight(HWND hwndToolbar) {
     HWND hwndRebar = GetParent(hwndToolbar);
     if (!hwndRebar) {
         return false;
@@ -1611,12 +1638,33 @@ static bool SetToolbarBandToRowHeight(HWND hwndToolbar) {
 // WM_TIMER handler does the actual rebuild once the drag has settled)
 static const int kRewrapToolbarTimerId = 0x4242;
 
-// the debounced rewrap state (see ToolbarRewrapAfterSizing): ONE width of
-// memory is enough to kill rebuild loops — a rebuild at the same width cannot
-// change the band height, so no new WM_SIZE fires — and it makes
-// shrink-to-grow round-trips rebuild correctly (the old two-width memory
-// SKIPPED the grow-back rebuild, leaving the toolbar wrapped forever).
-static int sLastBuiltDx = -1;
+// Per-toolbar last built width for the width guard in ToolbarRewrapAfterSizing
+// (forward-declared near RebuildToolbarButtonsForWidth; written from there).
+
+// Reentrancy guard: set while RelayoutFrame is resizing the rebar, so the
+// WM_SIZE handler doesn't call ScheduleUiUpdate(kUiRelayout) which would
+// trigger another RelayoutFrame → infinite loop → flashing/freeze PC.
+static bool gInRelayoutFrame = false;
+
+void SetInRelayoutFrame(bool inRelayout) {
+    gInRelayoutFrame = inRelayout;
+}
+
+static int FindRewrapStateIndex(HWND hwndToolbar) {
+    for (int i = 0; i < 4; i++) {
+        if (sToolbarRewrapStates[i].hwnd == hwndToolbar) {
+            return i;
+        }
+    }
+    // Find empty slot
+    for (int i = 0; i < 4; i++) {
+        if (sToolbarRewrapStates[i].hwnd == nullptr) {
+            sToolbarRewrapStates[i].hwnd = hwndToolbar;
+            return i;
+        }
+    }
+    return 0; // fallback
+}
 
 // Delete+re-add the buttons for the CURRENT toolbar width and re-fit the
 // rebar band. Called after a resize settles: from the debounced WM_TIMER and
@@ -1641,14 +1689,21 @@ void ToolbarRewrapAfterSizing(MainWindow* win, HWND hwndToolbar, bool force) {
     // force=true (WM_EXITSIZEMOVE = the user's click-release on the border)
     // bypasses the width guard: a drag can end in a degenerate state (client
     // collapsed / rows glued) that a width-gated rebuild would skip
-    if (dx <= 0 || (dx == sLastBuiltDx && rebarDx == sLastPackedAvailDx && !force)) {
+    int stateIdx = FindRewrapStateIndex(hwndToolbar);
+    // NB: availDx must be written to BOTH tables (see
+    // RebuildToolbarButtonsForWidth) — this guard reads only this table's
+    // copy.
+    if (dx <= 0 || (dx == sToolbarRewrapStates[stateIdx].lastBuiltDx &&
+                    rebarDx == sToolbarRewrapStates[stateIdx].lastPackedAvailDx && !force)) {
         return;
     }
-    sLastBuiltDx = dx;
+    sToolbarRewrapStates[stateIdx].lastBuiltDx = dx;
     RebuildToolbarButtonsForWidth(win, hwndToolbar);
     if (SetToolbarBandToRowHeight(hwndToolbar)) {
         win->uiState.layout = {}; // force the deferred relayout (see WM_SIZE)
-        ScheduleUiUpdate(win, kUiRelayout);
+        if (!gInRelayoutFrame) {
+            ScheduleUiUpdate(win, kUiRelayout);
+        }
     }
 }
 
@@ -1743,16 +1798,20 @@ static LRESULT CALLBACK WndProcToolbar(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp
     if (WM_SIZE == msg) {
         LRESULT sizeRes = CallWindowProc(DefWndProcToolbar, hwnd, msg, wp, lp);
         MainWindow* win = FindMainWindowByHwnd(hwnd);
-        if (win && !win->isBeingClosed) {
-            if (hwnd == win->hwndToolbar) {
-                int nPages = win->ctrl ? win->ctrl->PageCount() : -1;
-                UpdateToolbarPageText(win, nPages);
-                LayoutToolbarChildWindows(win);
-                // comctl only moves buttons to the next row for widths it saw
-                // when the buttons were added, so a real re-wrap needs the
-                // delete+re-add rebuild. WM_SIZE fires continuously while the
-                // user drags the frame edge, so debounce: restart a short
-                // timer and rebuild once, when the drag settles.
+        if (win && !win->isBeingClosed && hwnd == win->hwndToolbar) {
+            int nPages = win->ctrl ? win->ctrl->PageCount() : -1;
+            UpdateToolbarPageText(win, nPages);
+            LayoutToolbarChildWindows(win);
+            // comctl only moves buttons to the next row for widths it saw
+            // when the buttons were added, so a real re-wrap needs the
+            // delete+re-add rebuild. WM_SIZE fires continuously while the
+            // user drags the frame edge, so debounce: restart a short
+            // timer and rebuild once, when the drag settles.
+            // Don't arm the timer while inside RelayoutFrame (gInRelayoutFrame):
+            // SetWindowPos on the rebar triggers this WM_SIZE, and a timer
+            // firing after RelayoutFrame ends would call ScheduleUiUpdate
+            // → another RelayoutFrame → infinite loop → flashing/freeze PC.
+            if (!gInRelayoutFrame) {
                 SetTimer(hwnd, kRewrapToolbarTimerId, 200, nullptr);
             }
             if (SetToolbarBandToRowHeight(hwnd)) {
@@ -1765,7 +1824,9 @@ static LRESULT CALLBACK WndProcToolbar(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp
                 // canvas at a stale reserved height (e.g. the stacked-height
                 // flash after an on-demand secondary toolbar is created).
                 win->uiState.layout = {};
-                ScheduleUiUpdate(win, kUiRelayout);
+                if (!gInRelayoutFrame) {
+                    ScheduleUiUpdate(win, kUiRelayout);
+                }
             }
         }
         return sizeRes;
@@ -1797,6 +1858,9 @@ static LRESULT CALLBACK WndProcToolbar(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp
         return 0;
     }
 
+    if (DefWndProcToolbar == nullptr || DefWndProcToolbar == (WNDPROC)WndProcToolbar) {
+        return DefWindowProcW(hwnd, msg, wp, lp);
+    }
     return CallWindowProc(DefWndProcToolbar, hwnd, msg, wp, lp);
 }
 
@@ -1828,8 +1892,9 @@ void UpdateToolbarState(MainWindow* win) {
 // subclass the toolbar so we can handle WM_CTLCOLOR* for the page box and
 // allow dragging the window from empty toolbar areas
 static void SubclassToolbar(MainWindow* win) {
-    if (!DefWndProcToolbar) {
-        DefWndProcToolbar = (WNDPROC)GetWindowLongPtr(win->hwndToolbar, GWLP_WNDPROC);
+    WNDPROC prevProc = (WNDPROC)GetWindowLongPtr(win->hwndToolbar, GWLP_WNDPROC);
+    if (prevProc && prevProc != (WNDPROC)WndProcToolbar && !DefWndProcToolbar) {
+        DefWndProcToolbar = prevProc;
     }
     SetWindowLongPtr(win->hwndToolbar, GWLP_WNDPROC, (LONG_PTR)WndProcToolbar);
 }
@@ -2714,11 +2779,13 @@ TempStr ToolbarButtonsResultTemp(int* exitCodeOut) {
         }
         Rect rw = HwndWindowRect(hwnd);
         Rect rcTbClient = HwndClientRect(hwnd);
+        int stateIdx = FindToolbarStateIndex(hwnd);
         out.Append(
             fmt("d6 band=%d nBands=%d toolbarDy=%d toolbarClientDx=%d rebarWinDy=%d rebarClientDy=%d packAvail=%d "
                 "packRebar=%d packRows=%d marks=%d,%d,%d,%d\n",
-                bandCy, nBands, rw.dy, rcTbClient.dx, rebarWinDy, rebarClientDy, sLastPackedAvailDx, sDbgPackRebarDx,
-                sDbgPackRows, sDbgPackMarkIdx[0], sDbgPackMarkIdx[1], sDbgPackMarkIdx[2], sDbgPackMarkIdx[3]));
+                bandCy, nBands, rw.dy, rcTbClient.dx, rebarWinDy, rebarClientDy,
+                sToolbarPackStates[stateIdx].lastPackedAvailDx, sDbgPackRebarDx, sDbgPackRows, sDbgPackMarkIdx[0],
+                sDbgPackMarkIdx[1], sDbgPackMarkIdx[2], sDbgPackMarkIdx[3]));
         // D12/j diagnostics: the Autoscroll button hosts the timer trio and
         // gets an explicit width from EnforceToolbarTextButtonWidths — dump
         // its live style+width so the E2E can verify the widening stuck
@@ -2826,13 +2893,8 @@ void CreateToolbar(MainWindow* win) {
     // TBSTATE_WRAP breaks baked in by RebuildToolbarButtonsForWidth
     // (PackToolbarGroupsByWidth) — the classic manual multi-row technique.
     style |= TBSTYLE_LIST | CCS_NODIVIDER | CCS_NOPARENTALIGN;
-    if (!IsCurrentThemeDefault()) {
-        // Rebar-hosted toolbar: skip the control's own background (comctl always
-        // paints it in the classic light "btnface") and let the rebar's themed
-        // erase show through. A dark theme otherwise showed black tabs sitting
-        // on light-gray icon bars (s36-an).
-        style |= TBSTYLE_TRANSPARENT;
-    }
+    // Rebar-hosted toolbar transparency removed (s36-an revert): opaque background
+    // avoids white band and button disappearance on non-default themes.
     exStyle = 0;
     if (isRtl) exStyle |= WS_EX_LAYOUTRTL;
     HMENU cmd = (HMENU)IDC_TOOLBAR;
@@ -2980,31 +3042,35 @@ void CreateToolbar2(MainWindow* win) {
     if (isRtl) exStyle |= WS_EX_LAYOUTRTL;
 
     win->archTools.hwndReBar2 = CreateWindowExW(exStyle, REBARCLASSNAME, nullptr, style, 0, 0, 0, 0, hwndParent,
-                                                (HMENU)IDC_REBAR, hinst, nullptr);
-    SetWindowSubclass(win->archTools.hwndReBar2, ReBarWndProc, 0, 0);
+                                                (HMENU)IDC_ARCH_REBAR, hinst, nullptr);
 
     REBARINFO rbi{};
     rbi.cbSize = sizeof(REBARINFO);
     rbi.fMask = 0;
     rbi.himl = (HIMAGELIST) nullptr;
     SendMessageW(win->archTools.hwndReBar2, RB_SETBARINFO, 0, (LPARAM)&rbi);
-    if (!IsCurrentThemeDefault()) {
-        SendMessageW(win->archTools.hwndReBar2, RB_SETBKCOLOR, 0, ThemeControlBackgroundColor());
-    }
+    SendMessageW(win->archTools.hwndReBar2, RB_SETBKCOLOR, 0, ThemeControlBackgroundColor());
 
     style = WS_CHILD | WS_CLIPSIBLINGS | TBSTYLE_TOOLTIPS | TBSTYLE_FLAT;
     style |= TBSTYLE_LIST | CCS_NODIVIDER | CCS_NOPARENTALIGN | TBSTYLE_WRAPABLE;
-    if (!IsCurrentThemeDefault()) {
-        // rebar-hosted: let the rebar's themed background show through (s36-an)
-        style |= TBSTYLE_TRANSPARENT;
-    }
+    // rebar-hosted: toolbar background must be opaque to avoid white band on
+    // Windows 10/11 default themes (s36-an revert). Transparency caused buttons
+    // to disappear/turn white after cadf9ce.
     exStyle = 0;
     if (isRtl) exStyle |= WS_EX_LAYOUTRTL;
-    HMENU cmd = (HMENU)IDC_TOOLBAR;
+    HMENU cmd = (HMENU)IDC_ARCH_TOOLBAR;
     HWND hwndToolbar2 = CreateWindowExW(exStyle, TOOLBARCLASSNAME, nullptr, style, 0, 0, 0, 0,
                                         win->archTools.hwndReBar2, cmd, hinst, nullptr);
     win->archTools.hwndToolbar2 = hwndToolbar2;
     TbSetButtonStructSize(hwndToolbar2, sizeofi(TBBUTTON));
+
+    // TBSTYLE_EX_MIXEDBUTTONS lets comctl center each button's own text under
+    // the button rect, so our POSTPAINT centered re-draw lands on the same
+    // spot instead of ghosting over a left-aligned draw (same combo as the
+    // main toolbar and flashcard toolbar).
+    DWORD tbEx2 = TbGetExtendedStyle(hwndToolbar2);
+    tbEx2 |= TBSTYLE_EX_MIXEDBUTTONS;
+    TbSetExtendedStyle(hwndToolbar2, tbEx2);
 
     // Unconditionally strip comctl32 v6 themes so NM_CUSTOMDRAW clrText/font are honored under any Windows theme
     SetWindowTheme(hwndToolbar2, L"", L"");
@@ -3012,6 +3078,10 @@ void CreateToolbar2(MainWindow* win) {
     if (UseDarkModeLib()) {
         dmlib::setWindowNotifyCustomDrawSubclass(win->archTools.hwndReBar2);
     }
+    // Custom-draw subclass runs AFTER dmlib (LIFO → first). Wipes comctl's
+    // white button face + label for Arch text-only buttons before re-drawing
+    // with theme colors. Without this, TBSTYLE_LIST buttons appear white.
+    ToolbarSubclassSecondaryRebar(win, win->archTools.hwndReBar2);
 
     // Add 5 buttons: Scale, Measure, Clean lines, Reset Scale, Clean All
     struct ToolbarButtonInfo2 {
@@ -3049,6 +3119,9 @@ void CreateToolbar2(MainWindow* win) {
     }
     TbAddButtons(hwndToolbar2, kToolbar2ButtonsCount, tbButtons2);
 
+    // Post-add text-button sizing for Arch toolbar buttons (label + pad).
+    PostAddTextButtonSizing(win, hwndToolbar2);
+
     // Use same icon size as main toolbar
     int iconSize = DpiScale(hwndParent, gGlobalPrefs->toolbarSize);
     iconSize = RoundUp(iconSize, 4);
@@ -3075,28 +3148,36 @@ void CreateToolbar2(MainWindow* win) {
     rbBand.cx = 0;
     SendMessageW(win->archTools.hwndReBar2, RB_INSERTBAND, (WPARAM)-1, (LPARAM)&rbBand);
 
-    // size the rebar to the frame width right away (FlashcardToolbarCreate /
-    // EditToolbarCreate recipe): at width 0 a WRAPABLE toolbar stacks every
-    // button on its own row and the band adopts that stacked height (90px+),
-    // which RelayoutFrame then reserves; comctl only re-wraps for widths it
-    // saw when the buttons were added, so give the band the real width before
-    // any relayout measures us
+    // Size rebar to frame width so toolbar wraps at correct width (like main toolbar).
+    // v1.0.12 pattern: size rebar to frame width but only toolbar height initially.
     {
         Rect rcFrame = HwndClientRect(hwndParent);
         SetWindowPos(win->archTools.hwndReBar2, nullptr, 0, 0, rcFrame.dx, rc.dy + (2 * rc.y),
                      SWP_NOZORDER | SWP_NOMOVE);
+        // Toolbar receives WM_SIZE and wraps naturally; band height updated in RelayoutFrame
+        // via SetToolbarBandToRowHeight when rebar receives WM_SIZE.
     }
+    // Second pass after rebar resize once the real wrap width is known.
+    PostAddTextButtonSizing(win, hwndToolbar2);
 
     // Initially hidden
     ShowWindow(win->archTools.hwndReBar2, SW_HIDE);
 
-    // Subclass toolbar2 for WM_CTLCOLOR handling (same as main toolbar)
-    if (!DefWndProcToolbar) {
-        DefWndProcToolbar = (WNDPROC)GetWindowLongPtr(win->hwndToolbar, GWLP_WNDPROC);
-    }
-    SetWindowLongPtr(win->archTools.hwndToolbar2, GWLP_WNDPROC, (LONG_PTR)WndProcToolbar);
+    // Paint subclass handles dark-theme button redraw. Do NOT install
+    // WndProcToolbar (SetWindowLongPtr) on secondary toolbars: mixing it with
+    // the SetWindowSubclass-based paint subclass on one HWND recurses forever
+    // through the shared DefWndProcToolbar (stack overflow, READ s36). The
+    // Flashcard toolbar (working precedent) never installs WndProcToolbar.
+    // Paint subclass runs after comctl paints → wipe white faces, re-draw text
+    ToolbarSubclassPaint(win, win->archTools.hwndToolbar2);
 }
 
+// Legacy helper: strips the toolbar theme AND installs WndProcToolbar on an
+// already-populated toolbar. Kept for callers that still use it, but a
+// theme strip AFTER TbAddButtons invalidates comctl's per-button layout
+// (TB_GETITEMRECT starts failing -> ReportIf terminates the app) and paints
+// the band blank. New code must strip the theme BEFORE adding buttons — see
+// ToolbarSetupSecondaryRebar.
 void ToolbarApplyThemeToRebar(HWND hwndRebar, HWND hwndToolbar) {
     SetWindowSubclass(hwndRebar, ReBarWndProc, 0, 0);
     SetWindowTheme(hwndToolbar, L"", L"");
@@ -3107,6 +3188,204 @@ void ToolbarApplyThemeToRebar(HWND hwndRebar, HWND hwndToolbar) {
     if (!IsCurrentThemeDefault()) {
         SendMessageW(hwndRebar, RB_SETBKCOLOR, 0, ThemeControlBackgroundColor());
     }
+}
+
+// Rebar side of an on-demand secondary toolbar: subclass, bar info, band
+// background. Must run BEFORE the band is inserted.
+void ToolbarSetupSecondaryRebar(HWND hwndRebar) {
+    SetWindowSubclass(hwndRebar, ReBarWndProc, 0, 0);
+    REBARINFO rbi{};
+    rbi.cbSize = sizeof(REBARINFO);
+    rbi.fMask = 0;
+    rbi.himl = (HIMAGELIST) nullptr;
+    SendMessageW(hwndRebar, RB_SETBARINFO, 0, (LPARAM)&rbi);
+    SendMessageW(hwndRebar, RB_SETBKCOLOR, 0, ThemeControlBackgroundColor());
+    if (UseDarkModeLib()) {
+        dmlib::setWindowNotifyCustomDrawSubclass(hwndRebar);
+    }
+}
+
+// Subclass ID for Arch/Edit rebar custom-draw subclass. Unique (not 0) to
+// avoid colliding with ReBarWndProc (also ID 0) installed on the main rebar.
+constexpr UINT_PTR kArchEditRebarSubclassId = 42;
+
+// Dedicated rebar subclass for Arch/Edit secondary toolbars. Handles
+// NM_CUSTOMDRAW directly with wipe+redraw in ITEMPOSTPAINT, bypassing dmlib's
+// interception of item-level custom draw on the rebar. Modeled after
+// FlashcardReBarSubclassProc (FlashcardToolbar.cpp:146) which works because
+// it's installed after dmlib (LIFO → first) and consumes NM_CUSTOMDRAW for
+// its own toolbar HWND only.
+//
+// IMPORTANT: in NM_CUSTOMDRAW, dwItemSpec is the COMMAND ID, not a button
+// index. It must be mapped to a button index via TB_COMMANDTOINDEX before
+// being passed to TbGetButtonInfo/TB_GETITEMRECT (flashcard toolbar
+// precedent, FlashcardToolbar.cpp:225). If TB_COMMANDTOINDEX returns -1
+// (command not found), the handler bails with CDRF_DODEFAULT.
+//
+// Installed AFTER dmlib::setWindowNotifyCustomDrawSubclass on the rebar so
+// this subclass runs first (LIFO). Everything not matching Arch/Edit falls
+// through to DefSubclassProc → dmlib → ReBarWndProc, so main toolbar and
+// other rebars are unaffected.
+static LRESULT CALLBACK ToolbarArchEditRebarSubclassProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam,
+                                                         UINT_PTR uIdSubclass, DWORD_PTR /*dwRefData*/) {
+    if (uMsg == WM_NOTIFY) {
+        NMHDR* hdr = (NMHDR*)lParam;
+        MainWindow* win = FindMainWindowByHwnd(hWnd);
+        if (win && hdr && hdr->code == NM_CUSTOMDRAW) {
+            HWND chwnd = hdr->hwndFrom;
+            if (chwnd == win->archTools.hwndToolbar2 || chwnd == win->editTools.hwndToolbarEdit) {
+                auto* custDraw = (NMTBCUSTOMDRAW*)hdr;
+                switch (custDraw->nmcd.dwDrawStage) {
+                    case CDDS_PREPAINT:
+                        return CDRF_NOTIFYITEMDRAW;
+                    case CDDS_ITEMPREPAINT: {
+                        auto col = ThemeWindowTextColor();
+                        UINT itemState = custDraw->nmcd.uItemState;
+                        if (itemState & (CDIS_DISABLED | CDIS_GRAYED)) {
+                            col = ThemeWindowTextDisabledColor();
+                        }
+                        HWND hwndToolbar = custDraw->nmcd.hdr.hwndFrom;
+                        // NM_CUSTOMDRAW dwItemSpec is the command ID, not a
+                        // button index — map via TB_COMMANDTOINDEX (flashcard
+                        // toolbar precedent). Unknown command -> bail out.
+                        int btnCmd = (int)custDraw->nmcd.dwItemSpec;
+                        int btnIdx = (int)SendMessageW(hwndToolbar, TB_COMMANDTOINDEX, btnCmd, 0);
+                        if (btnIdx < 0) {
+                            return CDRF_DODEFAULT;
+                        }
+                        bool isCheckedToggle = false;
+                        bool isTextBtn = false;
+                        TBBUTTONINFOW bi1{};
+                        bi1.cbSize = sizeof(bi1);
+                        bi1.dwMask = TBIF_BYINDEX | TBIF_COMMAND | TBIF_STYLE | TBIF_TEXT;
+                        WCHAR tbuf1[256]{};
+                        bi1.pszText = tbuf1;
+                        bi1.cchText = dimof(tbuf1);
+                        if (TbGetButtonInfo(hwndToolbar, btnIdx, &bi1)) {
+                            if (bi1.idCommand > 0 && SendMessageW(hwndToolbar, TB_ISBUTTONCHECKED, bi1.idCommand, 0)) {
+                                col = ThemeWindowTextColor();
+                                SelectObject(custDraw->nmcd.hdc, GetAppTreeFontEx(hwndToolbar, true, false));
+                                isCheckedToggle = true;
+                            }
+                            if (!isCheckedToggle && (bi1.fsStyle & BTNS_SHOWTEXT) && tbuf1[0]) {
+                                isTextBtn = true;
+                            }
+                        }
+                        custDraw->clrText = col;
+                        SetTextColor(custDraw->nmcd.hdc, col);
+                        return isTextBtn ? CDRF_NEWFONT | CDRF_NOTIFYPOSTPAINT : CDRF_NEWFONT;
+                    }
+                    case CDDS_ITEMPOSTPAINT: {
+                        HWND hwndToolbar2 = custDraw->nmcd.hdr.hwndFrom;
+                        // NM_CUSTOMDRAW dwItemSpec is the command ID, not a
+                        // button index — map via TB_COMMANDTOINDEX (flashcard
+                        // toolbar precedent). Unknown command -> bail out.
+                        int btnCmd2 = (int)custDraw->nmcd.dwItemSpec;
+                        int idx2 = (int)SendMessageW(hwndToolbar2, TB_COMMANDTOINDEX, btnCmd2, 0);
+                        if (idx2 < 0) {
+                            return CDRF_DODEFAULT;
+                        }
+                        TBBUTTONINFOW bi2{};
+                        bi2.cbSize = sizeof(bi2);
+                        bi2.dwMask = TBIF_BYINDEX | TBIF_STYLE | TBIF_TEXT | TBIF_COMMAND;
+                        WCHAR txtBuf[256]{};
+                        bi2.pszText = txtBuf;
+                        bi2.cchText = dimof(txtBuf);
+                        if (!TbGetButtonInfo(hwndToolbar2, idx2, &bi2)) {
+                            return CDRF_DODEFAULT;
+                        }
+                        if (!(bi2.fsStyle & BTNS_SHOWTEXT) || !txtBuf[0]) return CDRF_DODEFAULT;
+                        RECT rcBtn{};
+                        SendMessageW(hwndToolbar2, TB_GETITEMRECT, idx2, (LPARAM)&rcBtn);
+                        UINT st = custDraw->nmcd.uItemState;
+                        COLORREF bg = (st & CDIS_HOT) ? ThemeHotBackgroundColor() : ThemeControlBackgroundColor();
+                        HBRUSH bgBr = CreateSolidBrush(bg);
+                        FillRect(custDraw->nmcd.hdc, &rcBtn, bgBr);
+                        DeleteObject(bgBr);
+                        SetTextColor(custDraw->nmcd.hdc, (st & (CDIS_DISABLED | CDIS_GRAYED))
+                                                             ? ThemeWindowTextDisabledColor()
+                                                             : ThemeWindowTextColor());
+                        HFONT fnt = (HFONT)SendMessageW(hwndToolbar2, WM_GETFONT, 0, 0);
+                        HGDIOBJ oldF = SelectObject(custDraw->nmcd.hdc, fnt);
+                        SetBkMode(custDraw->nmcd.hdc, TRANSPARENT);
+                        DrawTextW(custDraw->nmcd.hdc, txtBuf, -1, &rcBtn, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+                        SelectObject(custDraw->nmcd.hdc, oldF);
+                        return CDRF_DODEFAULT;
+                    }
+                    default:
+                        break;
+                }
+            }
+        }
+    }
+    if (WM_NCDESTROY == uMsg) {
+        RemoveWindowSubclass(hWnd, ToolbarArchEditRebarSubclassProc, uIdSubclass);
+    }
+    return DefSubclassProc(hWnd, uMsg, wParam, lParam);
+}
+
+// Install the Arch/Edit rebar custom-draw subclass. Must run AFTER
+// dmlib::setWindowNotifyCustomDrawSubclass so this subclass runs first (LIFO).
+void ToolbarSubclassSecondaryRebar(MainWindow* win, HWND hwndRebar) {
+    if (!win || !hwndRebar) {
+        return;
+    }
+    SetWindowSubclass(hwndRebar, ToolbarArchEditRebarSubclassProc, kArchEditRebarSubclassId, 0);
+}
+
+// Install the paint subclass on Arch/Edit toolbar windows. Runs after comctl
+// paints, so we can wipe white button faces and re-draw with theme colors.
+static LRESULT CALLBACK ToolbarPaintSubclassProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam,
+                                                 UINT_PTR uIdSubclass, DWORD_PTR /*dwRefData*/);
+void ToolbarSubclassPaint(MainWindow* win, HWND hwndToolbar) {
+    if (!win || !hwndToolbar) {
+        return;
+    }
+    SetWindowSubclass(hwndToolbar, ToolbarPaintSubclassProc, 0, 0);
+}
+
+static LRESULT CALLBACK ToolbarPaintSubclassProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam,
+                                                 UINT_PTR uIdSubclass, DWORD_PTR /*dwRefData*/) {
+    if (uMsg == WM_PAINT) {
+        LRESULT res = DefSubclassProc(hWnd, uMsg, wParam, lParam);
+        MainWindow* win = FindMainWindowByHwnd(hWnd);
+        if (win && !win->isBeingClosed &&
+            (hWnd == win->archTools.hwndToolbar2 || hWnd == win->editTools.hwndToolbarEdit)) {
+            // NOTE: DefSubclassProc already validated the update region, so
+            // BeginPaint would return an empty rect. Use GetDC instead to
+            // paint over comctl's output.
+            HDC hdc = GetDC(hWnd);
+            if (hdc) {
+                int count = (int)SendMessageW(hWnd, TB_BUTTONCOUNT, 0, 0);
+                for (int i = 0; i < count; i++) {
+                    TBBUTTONINFOW bi{};
+                    bi.cbSize = sizeof(bi);
+                    bi.dwMask = TBIF_BYINDEX | TBIF_STYLE | TBIF_TEXT | TBIF_COMMAND;
+                    WCHAR tbuf[256]{};
+                    bi.pszText = tbuf;
+                    bi.cchText = dimof(tbuf);
+                    if (!SendMessageW(hWnd, TB_GETBUTTONINFO, i, (LPARAM)&bi)) continue;
+                    if (!(bi.fsStyle & BTNS_SHOWTEXT) || !tbuf[0]) continue;
+                    RECT rc{};
+                    if (!SendMessageW(hWnd, TB_GETITEMRECT, i, (LPARAM)&rc)) continue;
+                    // Wipe comctl's button face
+                    HBRUSH bgBr = CreateSolidBrush(ThemeControlBackgroundColor());
+                    FillRect(hdc, &rc, bgBr);
+                    DeleteObject(bgBr);
+                    // Draw text centered
+                    SetTextColor(hdc, ThemeWindowTextColor());
+                    SetBkMode(hdc, TRANSPARENT);
+                    HFONT fnt = (HFONT)SendMessageW(hWnd, WM_GETFONT, 0, 0);
+                    HGDIOBJ oldF = SelectObject(hdc, fnt);
+                    DrawTextW(hdc, tbuf, -1, &rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+                    SelectObject(hdc, oldF);
+                }
+                ReleaseDC(hWnd, hdc);
+            }
+        }
+        return res;
+    }
+    return DefSubclassProc(hWnd, uMsg, wParam, lParam);
 }
 
 void DestroyToolbar2(MainWindow* win) {
@@ -3414,10 +3693,7 @@ void CreateMenuBarRebar(MainWindow* win) {
 
     style = WS_CHILD | WS_CLIPSIBLINGS | TBSTYLE_FLAT | TBSTYLE_LIST;
     style |= CCS_NODIVIDER | CCS_NOPARENTALIGN;
-    if (!IsCurrentThemeDefault()) {
-        // rebar-hosted: let the rebar's themed background show through (s36-an)
-        style |= TBSTYLE_TRANSPARENT;
-    }
+    // menu bar toolbar transparency removed (s36-an revert)
     exStyle = 0;
     if (isRtl) {
         exStyle |= WS_EX_LAYOUTRTL;

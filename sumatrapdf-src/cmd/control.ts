@@ -41,6 +41,12 @@ export enum ControlCommand {
   TestStatsToggleGraph = 46,
   TestCvtRoundTrip = 47,
   TestVirtWndHitTest = 48,
+  TestTabGroupActivate = 49,
+  TestTabGroupList = 50,
+  TestTabGroupNewSession = 51,
+  TestTabGroupOpenNew = 52,
+  TestTabGroupMenuCmd = 53,
+  TestTabGroupDialogOpen = 54,
 }
 
 export type ControlArg = number | string | Uint8Array | ControlArg[];

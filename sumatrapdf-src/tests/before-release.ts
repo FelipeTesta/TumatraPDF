@@ -19,6 +19,13 @@ import { testit as adHocFlashcardCrossPage } from "./ad-hoc-flashcard-crosspage.
 import { testit as adHocB4CoordinateInvariants } from "./ad-hoc-b4-coordinate-invariants.ts";
 import { testit as latexTests } from "./latex.ts";
 import { testit as issueChmLzx } from "./issue-chm-lzx.ts";
+import { testit as adHocSettingsMigration } from "./ad-hoc-settings-migration.ts";
+import { testit as adHocProfileLiveWrites } from "./ad-hoc-profile-live-writes.ts";
+import { testit as adHocTabSession } from "./ad-hoc-tab-session.ts";
+import { testit as adHocTabMenu } from "./ad-hoc-tab-menu.ts";
+import { testit as adHocTabSessionE2E } from "./ad-hoc-tab-session-e2e.ts";
+import { testit as adHocAnnotSaveIntegrity } from "./ad-hoc-annot-save-integrity.ts";
+import { testit as adHocRestoreNoFileStates } from "./ad-hoc-restore-no-filestates.ts";
 
 const adHocTests: [string, () => void | Promise<void>][] = [
   ["ad-hoc-exif", adHocExif],
@@ -32,6 +39,13 @@ const adHocTests: [string, () => void | Promise<void>][] = [
   ["ad-hoc-flashcard-crosspage", adHocFlashcardCrossPage],
   ["ad-hoc-b4-coordinate-invariants", adHocB4CoordinateInvariants],
   ["issue-chm-lzx", issueChmLzx],
+  ["ad-hoc-settings-migration", adHocSettingsMigration],
+  ["ad-hoc-profile-live-writes", adHocProfileLiveWrites],
+  ["ad-hoc-tab-session", adHocTabSession],
+  ["ad-hoc-tab-menu", adHocTabMenu],
+  ["ad-hoc-tab-session-e2e", adHocTabSessionE2E],
+  ["ad-hoc-annot-save-integrity", adHocAnnotSaveIntegrity],
+  ["ad-hoc-restore-no-filestates", adHocRestoreNoFileStates],
 ];
 
 export async function testit(): Promise<void> {

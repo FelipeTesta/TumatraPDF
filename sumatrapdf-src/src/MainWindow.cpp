@@ -185,6 +185,12 @@ MainWindow::~MainWindow() {
         tabsCtrl = nullptr;
     }
 
+    // Tab system T3: destroy tab group dropdown button
+    if (hwndTabGroupBtn) {
+        DestroyWindow(hwndTabGroupBtn);
+        hwndTabGroupBtn = nullptr;
+    }
+
     // cbHandler is passed into DocController and must be deleted afterwards
     // (all controllers should have been deleted prior to MainWindow, though)
     delete cbHandler;

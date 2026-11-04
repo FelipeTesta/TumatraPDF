@@ -1,0 +1,134 @@
+// Toolbar White/No Buttons - Cause Tree & Analysis Map
+// TumatraPDF - Debug Flow: all potential causes, discarded items, and current status
+digraph ToolbarWhiteNoButtons {
+    rankdir=TB;
+    node [shape=box, style="rounded,filled", fontname="Consolas", fontsize=10];
+    edge [fontname="Consolas", fontsize=8];
+
+    // === ROOT SYMPTOM ===
+    symptom [label="SYMPTOM:\nToolbar windows exist at correct positions\nbut buttons are WHITE/INVISIBLE\nUsers see blank bands", fillcolor="#ffcdd2", color="#ff0000", penwidth=2];
+
+    // === CAUSE CATEGORY A: THEME STRIP ORDER ===
+    subgraph cluster_theme {
+        label="CAUSE A: Theme Strip Order (SetWindowTheme vs TbAddButtons)";
+        color="#ff9800";
+
+        a1 [label="A1: SetWindowTheme AFTER TbAddButtons\nInvalidates comctl per-button layout\n→ TB_GETITEMRECT returns 0 → blank band", fillcolor="#fff3e0"];
+        a2 [label="A2: SetWindowTheme BEFORE TbAddButtons\nCorrect order (CreateToolbar2 pattern)", fillcolor="#c8e6c9", color="#2e7d32"];
+
+        symptom -> a1 [label="suspected"];
+        a1 -> a2 [label="fix applied", style=dashed];
+    }
+
+    // === CAUSE CATEGORY B: iBitmap VALUE ===
+    subgraph cluster_ibitmap {
+        label="CAUSE B: iBitmap for text-only buttons";
+        color="#9c27b0";
+
+        b1 [label="B1: iBitmap = 0 (wrong)\ncomctl thinks image list index 0\nbut no image list set → blank buttons", fillcolor="#fff3e0"];
+        b2 [label="B2: iBitmap = TbIcon::Text (-2 = I_IMAGENONE)\nCorrect for text-only buttons", fillcolor="#c8e6c9", color="#2e7d32"];
+
+        symptom -> b1 [label="suspected"];
+        b1 -> b2 [label="fix applied", style=dashed];
+    }
+
+    // === CAUSE CATEGORY C: NM_CUSTOMDRAW ROUTING ===
+    subgraph cluster_customdraw {
+        label="CAUSE C: NM_CUSTOMDRAW not reaching secondary toolbars";
+        color="#e91e63";
+
+        c1 [label="C1: ReBarWndProc only checked win->hwndToolbar\nArch/FC/Edit got no themed drawing → white", fillcolor="#fff3e0"];
+        c2 [label="C2: Extended check to all 4 toolbars\n(main + archTools2 + flashcard + edit)", fillcolor="#c8e6c9", color="#2e7d32"];
+
+        symptom -> c1 [label="suspected"];
+        c1 -> c2 [label="fix applied", style=dashed];
+    }
+
+    // === CAUSE CATEGORY D: dwItemSpec = COMMAND ID vs INDEX ===
+    subgraph cluster_itemspec {
+        label="CAUSE D: NM_CUSTOMDRAW dwItemSpec interpretation";
+        color="#7b1fa2";
+
+        d1 [label="D1: dwItemSpec is COMMAND ID for toolbars\n(not index per MSDN docs)\nTB_GETBUTTONINFOW with TBIF_BYINDEX fails → -1", fillcolor="#fff3e0"];
+        d2 [label="D2: Query by command id, resolve index via TB_COMMANDTOINDEX\nfor TB_GETITEMRECT only", fillcolor="#c8e6c9", color="#2e7d32"];
+
+        symptom -> d1 [label="suspected (flashcard)"];
+        d1 -> d2 [label="fix applied (s36-ax)", style=dashed];
+    }
+
+    // === CAUSE CATEGORY E: RELAYOUT LOOP ===
+    subgraph cluster_loop {
+        label="CAUSE E: Infinite RelayoutFrame loop → flashing/freeze";
+        color="#f57c00";
+
+        e1 [label="E1: ToolbarRewrapAfterSizing(force=true) on every RelayoutFrame\n→ rebuilds buttons → WM_SIZE → ScheduleUiUpdate → loop", fillcolor="#fff3e0"];
+        e2 [label="E2: Removed force=true rewrap from RelayoutFrame\nKept only SetToolbarBandToRowHeight", fillcolor="#c8e6c9", color="#2e7d32"];
+        e3 [label="E3: Hard reentrancy guard in RelayoutFrame\n(static bool gRelayoutFrameActive)", fillcolor="#c8e6c9", color="#2e7d32"];
+        e4 [label="E4: Guard in WndProcToolbar WM_SIZE timer\n(don't arm timer while gInRelayoutFrame)", fillcolor="#c8e6c9", color="#2e7d32"];
+        e5 [label="E5: Guard in ToolbarRewrapAfterSizing ScheduleUiUpdate\n(skip when gInRelayoutFrame)", fillcolor="#c8e6c9", color="#2e7d32"];
+
+        symptom -> e1 [label="causes flashing not white"];
+        e1 -> e2 [label="fix applied"];
+        e2 -> e3;
+        e2 -> e4;
+        e2 -> e5;
+    }
+
+    // === CAUSE CATEGORY F: BAND HEIGHT / CHROME ===
+    subgraph cluster_band {
+        label="CAUSE F: Band height / chrome calculation wrong";
+        color="#607d8b";
+
+        f1 [label="F1: Secondary toolbar band height = toolbar client dy + chrome\nchrome = rebar window dy - rebar client dy", fillcolor="#e3f2fd"];
+        f2 [label="F2: chrome=0 observed in logs\nmay need non-client inset handling", fillcolor="#fff3e0", color="#ff9800"];
+
+        symptom -> f2 [label="possible contributor"];
+    }
+
+    // === CAUSE CATEGORY G: VISIBILITY / HWND STATE ===
+    subgraph cluster_visibility {
+        label="CAUSE G: Visibility / HWND state issues";
+        color="#4caf50";
+
+        g1 [label="G1: Test harness vis=false (SetForegroundWindow fails)\nNOT an app bug - geometry correct", fillcolor="#e3f2fd"];
+        g2 [label="G2: Real app shows vis=true\nbuttons exist but not rendered", fillcolor="#fff3e0"];
+
+        symptom -> g1 [label="test artifact"];
+    }
+
+    // === DISCARDED / PREVIOUSLY FIXED ===
+    subgraph cluster_discarded {
+        label="DISCARDED (previously fixed, do NOT retry)";
+        color="#9e9e9e";
+        style=dashed;
+
+        h1 [label="H1: RBBS_FIXEDSIZE on main toolbar band\nRemoved (s36-k round 2)", fillcolor="#eceff1"];
+        h2 [label="H2: RB_GETBANDINFO→RB_SETBANDINFO cx write-back\nFeedback loop glues transient width", fillcolor="#eceff1"];
+        h3 [label="H3: collapsed-child recovery + pre-measure pass\nFixed drag-DOWN but drag-UP regressed", fillcolor="#eceff1"];
+        h4 [label="H4: TbSetButtonSize(iconDx, dyBtn) in rebuild\nNo effect", fillcolor="#eceff1"];
+        h5 [label="H5: rbi.cx = rebar-client-dx in band height path\nUnreachable when client==0", fillcolor="#eceff1"];
+        h6 [label="H6: PrintWindow on comctl toolbar\nRe-entrant render → wedge/AV", fillcolor="#eceff1"];
+
+        symptom -> h1 [style=dotted];
+        h1 -> h2 [style=dotted];
+        h2 -> h3 [style=dotted];
+        h3 -> h4 [style=dotted];
+        h4 -> h5 [style=dotted];
+        h5 -> h6 [style=dotted];
+    }
+
+    // === CURRENT STATUS ===
+    status [label="CURRENT STATUS:\n- Geometry: CORRECT (y=105, h=24)\n- Build: CLEAN (0/0)\n- No crashes (exitCode=null)\n- Loop: GUARDED\n- Buttons rendering: STILL WHITE\n- Root cause of white buttons: UNDER INVESTIGATION", fillcolor="#e1bee7", color="#7b1fa2", penwidth=2];
+
+    symptom -> status;
+    f2 -> status [label="investigating chrome=0"];
+}
+
+// ==========================================
+// LEGEND (as notes)
+// ==========================================
+note1 [label="FIXES APPLIED:\nA: Theme strip BEFORE buttons\nB: iBitmap = TbIcon::Text (-2)\nC: NM_CUSTOMDRAW extended to all 4 toolbars\nE: force=true rewrap removed + reentrancy guards", shape=note, fillcolor="#c8e6c9", color="#2e7d32"];
+
+note2 [label="STILL OPEN:\n- chrome=0 in logs (secondary toolbar non-client height)\n- Buttons exist geometrically but not painted\n- Need vision model to analyze actual PNGs\n- Need to verify NM_CUSTOMDRAW actually fires for secondary toolbars", shape=note, fillcolor="#fff3e0", color="#ff9800"];
+
+note3 [label="LOG REFERENCES:\n- s36-ax: flashcard white band (5 causes)\n- s36-k: toolbar round-trip + drag collapse\n- s36-az: arch band 90px fix\n- s36-bb: startup AV / reentrancy", shape=note, fillcolor="#e3f2fd", color="#3f51b5"];

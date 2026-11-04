@@ -1,0 +1,251 @@
+digraph ToolbarFunctionCallGraph {
+    rankdir=LR;
+    node [shape=box, style=rounded, fontname="Consolas", fontsize=9];
+    edge [fontname="Consolas", fontsize=8];
+    compound=true;
+    nodesep=0.3;
+    ranksep=0.5;
+
+    // ============================================================
+    // ENTRY POINTS (FrameOnCommand / WinMain)
+    // ============================================================
+    subgraph cluster_entries {
+        label="Entry Points";
+        color="#4285f4";
+        
+        frame_on_cmd [label="FrameOnCommand(hwnd, msg, wp, lp)\nSumatraPDF.cpp:13000+", fillcolor="#c8e6c9", style=filled];
+        win_main [label="WinMain → CreateAndShowMainWindow\nSumatraStartup.cpp:2585+", fillcolor="#c8e6c9", style=filled];
+        load_doc [label="LoadDocument → LoadDocumentFinish\nSumatraPDF.cpp:3978/3308", fillcolor="#c8e6c9", style=filled];
+    }
+
+    // ============================================================
+    // TOOLBAR CREATION FUNCTIONS
+    // ============================================================
+    subgraph cluster_creation {
+        label="Toolbar Creation Functions";
+        color="#4caf50";
+        
+        create_toolbar [label="CreateToolbar(win)\nToolbar.cpp:2794\n// Main toolbar", fillcolor="#bbdefb", style=filled];
+        create_toolbar2 [label="CreateToolbar2(win)\nToolbar.cpp:2963\n// Arch Tools toolbar", fillcolor="#bbdefb", style=filled];
+        fc_toolbar_create [label="FlashcardToolbarCreate(win)\nFlashcardToolbar.cpp", fillcolor="#fff9c4", style=filled];
+        edit_toolbar_create [label="EditToolbarCreate(win)\nCommands_Edit.cpp:74", fillcolor="#e1bee7", style=filled];
+        
+        toolbar_setup_rebar [label="ToolbarSetupSecondaryRebar(hwndRebar)\nToolbar.cpp:3111", fillcolor="#fff9c4", style=filled];
+        toolbar_subclass_tb [label="ToolbarSubclassSecondaryToolbar(win, hwnd)\nToolbar.cpp:3128", fillcolor="#ffcdd2", style=filled];
+        toolbar_apply_theme [label="ToolbarApplyThemeToRebar(hwndRebar, hwndTb)\nToolbar.cpp:3097 — LEGACY", fillcolor="#ffcdd2", style=filled];
+    }
+
+    // ============================================================
+    // TOOLBAR STATE / TOGGLE FUNCTIONS
+    // ============================================================
+    subgraph cluster_state {
+        label="Toolbar State / Toggle Functions";
+        color="#ff9800";
+        
+        arch_toggle [label="HandleCmdArchToolsToggle(win)\nCommands_ArchTools.cpp:134", fillcolor="#bbdefb", style=filled];
+        fc_toggle [label="HandleCmdFlashcardToggle(win)\nCommands_Flashcard.cpp", fillcolor="#fff9c4", style=filled];
+        edit_toggle [label="HandleCmdEditToolsToggle(win)\nCommands_Edit.cpp:969", fillcolor="#e1bee7", style=filled];
+        main_toggle [label="ToggleMainToolbar(win)\nToolbar.cpp", fillcolor="#c8e6c9", style=filled];
+        
+        update_arch_state [label="UpdateToolbar2State(win)\nToolbar.cpp:3148", fillcolor="#bbdefb", style=filled];
+        update_main_state [label="ToolbarUpdateStateForWindow(win, force)\nToolbar.cpp:1600+", fillcolor="#c8e6c9", style=filled];
+        set_btn_checked [label="SetToolbarButtonCheckedState(win, cmdId, checked)\nToolbar.cpp", fillcolor="#bbdefb", style=filled];
+    }
+
+    // ============================================================
+    // RELAYOUT & POSITIONING
+    // ============================================================
+    subgraph cluster_relayout {
+        label="Relayout & Positioning";
+        color="#607d8b";
+        
+        relayout_frame [label="RelayoutFrame(win, updateToolbars, sidebarDx)\nSumatraPDF.cpp:6300+", fillcolor="#e1bee7", style=filled];
+        set_band_row_height [label="SetToolbarBandToRowHeight(hwndToolbar)\nToolbar.cpp:1502", fillcolor="#bbdefb", style=filled];
+        rewrap_after_sizing [label="ToolbarRewrapAfterSizing(win, hwnd, force)\nToolbar.cpp:1570", fillcolor="#bbdefb", style=filled);
+        schedule_ui_update [label="ScheduleUiUpdate(win, kUiRelayout)\nSumatraPDF.cpp", fillcolor="#c8e6c9", style=filled];
+        layout_children [label="LayoutToolbarChildWindows(win)\nToolbar.cpp:1850+", fillcolor="#bbdefb", style=filled);
+        position_children [label="PositionToolbarChildWindows(win)\nToolbar.cpp:1900+", fillcolor="#bbdefb", style=filled);
+        update_page_text [label="UpdateToolbarPageText(win, nPages)\nToolbar.cpp:2000+", fillcolor="#bbdefb", style=filled);
+    }
+
+    // ============================================================
+    // WNDPROC TOOLBAR (Message Handling)
+    // ============================================================
+    subgraph cluster_wndproc {
+        label="WndProcToolbar Message Handling";
+        color="#e91e63";
+        
+        wndproc_tb [label="WndProcToolbar(hwnd, msg, wp, lp)\nToolbar.cpp:1658", fillcolor="#ffcdd2", style=filled];
+        
+        // Message handlers
+        on_ctlcolor [label="WM_CTLCOLORSTATIC/EDIT/BTN\n→ Theme colors for child controls", fillcolor="#bbdefb", style=filled];
+        on_lbuttondown [label="WM_LBUTTONDOWN/DBLCLK\n→ Window drag from empty area", fillcolor="#bbdefb", style=filled];
+        on_paint [label="WM_PAINT\n→ Draw checked button underlines", fillcolor="#bbdefb", style=filled];
+        on_size [label="WM_SIZE\n→ Debounce rewrap (timer 200ms)\n→ SetToolbarBandToRowHeight\n→ ScheduleUiUpdate if band changed", fillcolor="#bbdefb", style=filled];
+        on_timer [label="WM_TIMER (kRewrapToolbarTimerId)\n→ ToolbarRewrapAfterSizing", fillcolor="#ffcdd2", style=filled];
+        on_relocate [label="kMsgToolbarRelocateChildren\n→ PositionToolbarChildWindows\n→ UpdateToolbarTooltipRects", fillcolor="#bbdefb", style=filled];
+    }
+
+    // ============================================================
+    // REBAR WNDPROC
+    // ============================================================
+    subgraph cluster_rebar_wndproc {
+        label="ReBarWndProc";
+        color="#9c27b0";
+        
+        rebar_wndproc [label="ReBarWndProc(hWnd, uMsg, wParam, lParam, ...)\nToolbar.cpp:956", fillcolor="#fff9c4", style=filled];
+        rebar_chevrondrop [label="RBN_CHEVRONPUSHED\n→ Show chevron dropdown menu", fillcolor="#bbdefb", style=filled];
+        rebar_heightchange [label="RBN_HEIGHTCHANGE\n→ Forward to parent for relayout", fillcolor="#bbdefb", style=filled];
+        rebar_layout [label="WM_SIZE / WM_WINDOWPOSCHANGED\n→ Band height sync", fillcolor="#bbdefb", style=filled];
+    }
+
+    // ============================================================
+    // CUSTOM DRAW
+    // ============================================================
+    subgraph cluster_customdraw {
+        label="NM_CUSTOMDRAW Handling";
+        color="#3f51b5";
+        
+        frame_notify [label="FrameWndProc WM_NOTIFY\n→ NM_CUSTOMDRAW from toolbar", fillcolor="#c8e6c9", style=filled];
+        tb_notify [label="WndProcToolbar WM_NOTIFY\n→ NM_CUSTOMDRAW (toolbar buttons)", fillcolor="#bbdefb", style=filled);
+        fc_notify [label="FlashcardWndProc WM_NOTIFY\n→ NM_CUSTOMDRAW (flashcard toolbar)", fillcolor="#fff9c4", style=filled);
+        menu_notify [label="MenuBarWndProc WM_NOTIFY\n→ NM_CUSTOMDRAW (menu bar)", fillcolor="#e1bee7", style=filled);
+        
+        cd_prepaint [label="CDDS_PREPAINT → CDRF_NOTIFYITEMDRAW", fillcolor="#bbdefb", style=filled];
+        cd_item_prepaint [label="CDDS_ITEMPREPAINT\nDraw button background + text\nChecked underline overlay", fillcolor="#bbdefb", style=filled);
+        cd_postpaint [label="CDDS_POSTPAINT", fillcolor="#bbdefb", style=filled);
+    }
+
+    // ============================================================
+    // DESTROY / CLEANUP
+    // ============================================================
+    subgraph cluster_destroy {
+        label="Destroy / Cleanup";
+        color="#795548";
+        
+        destroy_main [label="DestroyToolbar(win)\nToolbar.cpp", fillcolor="#c8e6c9", style=filled];
+        destroy_arch [label="DestroyToolbar2(win)\nToolbar.cpp:3141", fillcolor="#bbdefb", style=filled);
+        destroy_fc [label="FlashcardToolbarDestroy(win)\nFlashcardToolbar.cpp", fillcolor="#fff9c4", style=filled);
+        destroy_edit [label="EditToolbarDestroy(win)\nCommands_Edit.cpp:189", fillcolor="#e1bee7", style=filled);
+    }
+
+    // ============================================================
+    // EDGES - Creation calls
+    // ============================================================
+    win_main -> create_toolbar [label="first window"];
+    load_doc -> create_toolbar [label="new window"];
+    
+    arch_toggle -> create_toolbar2 [label="first toggle ON"];
+    fc_toggle -> fc_toolbar_create [label="first toggle ON"];
+    edit_toggle -> edit_toolbar_create [label="first toggle ON"];
+    
+    // Secondary toolbar helpers
+    fc_toolbar_create -> toolbar_setup_rebar;
+    fc_toolbar_create -> toolbar_subclass_tb;
+    edit_toolbar_create -> toolbar_setup_rebar;
+    edit_toolbar_create -> toolbar_subclass_tb;
+    create_toolbar2 -> toolbar_apply_theme [style=dashed, label="OLD pattern"];
+    
+    // ============================================================
+    // EDGES - State/Toggle
+    // ============================================================
+    frame_on_cmd -> arch_toggle [label="CmdArchToolsToggle"];
+    frame_on_cmd -> fc_toggle [label="CmdFlashcardToggle"];
+    frame_on_cmd -> edit_toggle [label="CmdEditToolsToggle"];
+    frame_on_cmd -> main_toggle [label="CmdShowToolbar"];
+    
+    arch_toggle -> update_arch_state;
+    arch_toggle -> set_btn_checked;
+    arch_toggle -> relayout_frame;
+    fc_toggle -> relayout_frame;
+    edit_toggle -> relayout_frame;
+    main_toggle -> update_main_state -> relayout_frame;
+    
+    update_arch_state -> set_btn_checked;
+    
+    // ============================================================
+    // EDGES - Relayout
+    // ============================================================
+    arch_toggle -> relayout_frame;
+    fc_toggle -> relayout_frame;
+    edit_toggle -> relayout_frame;
+    main_toggle -> relayout_frame;
+    schedule_ui_update -> relayout_frame [label="deferred"];
+    
+    relayout_frame -> set_band_row_height [label="main toolbar"];
+    relayout_frame -> layout_children;
+    relayout_frame -> position_children;
+    relayout_frame -> update_page_text;
+    
+    set_band_row_height -> rewrap_after_sizing [style=dashed, label="may trigger"];
+    rewrap_after_sizing -> schedule_ui_update;
+    
+    // ============================================================
+    // EDGES - WndProcToolbar
+    // ============================================================
+    // These are called by Windows message dispatch
+    wndproc_tb -> on_ctlcolor [label="WM_CTLCOLOR*"];
+    wndproc_tb -> on_lbuttondown [label="WM_LBUTTONDOWN"];
+    wndproc_tb -> on_paint [label="WM_PAINT"];
+    wndproc_tb -> on_size [label="WM_SIZE"];
+    wndproc_tb -> on_timer [label="WM_TIMER"];
+    wndproc_tb -> on_relocate [label="kMsgToolbarRelocateChildren"];
+    
+    on_size -> set_band_row_height;
+    on_size -> schedule_ui_update;
+    on_timer -> rewrap_after_sizing;
+    on_relocate -> position_children;
+    on_relocate -> update_page_text;
+    
+    // ============================================================
+    // EDGES - ReBarWndProc
+    // ============================================================
+    rebar_wndproc -> rebar_chevrondrop [label="RBN_CHEVRONPUSHED"];
+    rebar_wndproc -> rebar_heightchange [label="RBN_HEIGHTCHANGE"];
+    rebar_wndproc -> rebar_layout [label="WM_SIZE"];
+    
+    // ============================================================
+    // EDGES - CustomDraw
+    // ============================================================
+    frame_notify -> cd_prepaint [label="toolbar"];
+    tb_notify -> cd_prepaint [label="toolbar"];
+    fc_notify -> cd_prepaint [label="flashcard toolbar"];
+    menu_notify -> cd_prepaint [label="menu bar"];
+    
+    cd_prepaint -> cd_item_prepaint -> cd_postpaint;
+    
+    // ============================================================
+    // EDGES - Destroy
+    // ============================================================
+    destroy_main -> destroy_arch [style=dashed];
+    destroy_main -> destroy_fc [style=dashed];
+    destroy_main -> destroy_edit [style=dashed];
+    
+    // ============================================================
+    // CRITICAL DEPENDENCIES (highlighted)
+    // ============================================================
+    create_toolbar -> create_toolbar2 [style=dashed, color="#ff0000", penwidth=2.0, label="same pattern"];
+    create_toolbar2 -> fc_toolbar_create [style=dashed, color="#ff0000", penwidth=2.0, label="same pattern"];
+    fc_toolbar_create -> edit_toolbar_create [style=dashed, color="#ff0000", penwidth=2.0, label="same pattern"];
+    
+    // Order constraints
+    toolbar_setup_rebar -> edit_toolbar_create [style=dashed, color="#ff0000", penwidth=2.0, dir=back, label="BEFORE buttons"];
+    toolbar_subclass_tb -> edit_toolbar_create [style=dashed, color="#ff0000", penwidth=2.0, dir=back, label="AFTER buttons"];
+    
+    // ============================================================
+    // PER-TOOLBAR STATE (D10 fix)
+    // ============================================================
+    subgraph cluster_pack_state {
+        label="Per-Toolbar Pack State (D10 fix)";
+        color="#000000";
+        style=dotted;
+        
+        sToolbarPackStates [label="static struct ToolbarPackState {\n  int lastBuiltDx;\n  int lastPackedAvailDx;\n} sToolbarPackStates[4];\n// Index 0=main, 1=arch, 2=fc, 3=edit", fillcolor="#fff9c4", style=filled];
+        
+        sToolbarRewrapStates [label="static struct ToolbarRewrapState {\n  int lastWidth;\n  bool rewrapPending;\n} sToolbarRewrapStates[4];", fillcolor="#fff9c4", style=filled);
+    }
+    
+    rewrap_after_sizing -> sToolbarPackStates [style=dotted, label="uses"];
+    rewrap_after_sizing -> sToolbarRewrapStates [style=dotted, label="uses"];
+    set_band_row_height -> sToolbarPackStates [style=dotted, label="uses"];
+}

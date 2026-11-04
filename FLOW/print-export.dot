@@ -1,0 +1,152 @@
+digraph PrintExport {
+    rankdir=TB;
+    node [shape=box, style=rounded, fontname="Consolas", fontsize=9];
+    edge [fontname="Consolas", fontsize=8];
+    compound=true;
+
+    // ===================== PRINT UI =====================
+    subgraph cluster_print_ui {
+        label="Print UI (PrintDialog.cpp)";
+        color="#4285f4";
+        style=filled;
+        fillcolor="#e3f2fd";
+
+        print_dialog [label="Print Dialog (PrintDialog.cpp)\n• Standard Win32 PrintDlgEx\n• Printer selection / copies / range\n• Properties → printer driver UI\n• CmdPrint / CmdPrintSetup\n• PrintCurrentFileDeferred()\n• ListPrintersShowResult() / ListPrintersThread()\n• GetSettingsApplyState() / ApplyChangedSettingsAndRelayout()", fillcolor="#c8e6c9", style=filled);
+        page_setup [label="Page Setup\n• Margins / Orientation / Paper size\n• Headers/Footers (date/title/page)\n• Saved in GlobalPrefs\n• PrintDialog.cpp", fillcolor="#bbdefb", style=filled);
+        print_preview [label="Print Preview (not implemented)\n• Would use EngineMupdf::RenderPage\n• RenderTarget::Print with preview matrix\n• High DPI offscreen render", fillcolor="#fff9c4", style=filled);
+    }
+
+    // ===================== PRINT ENGINE =====================
+    subgraph cluster_print_engine {
+        label="Print Engine (EngineBase::RenderTarget::Print)";
+        color="#e91e63";
+        style=filled;
+        fillcolor="#fce4ec";
+
+        render_target [label="RenderTarget enum (EngineBase.h:56)\n• View (screen)\n• Print (high-res, no UI)\n• EngineBase::RenderPage(target, ...)\n• EngineMupdf: fz_run_page with print matrix\n• fz_scale / fz_rotate for print transform", fillcolor="#c8e6c9", style=filled);
+        page_layout [label="PageLayout (EngineBase.h:63)\n• Type: Single / Facing / Booklet\n• Facing: 2 pages per sheet\n• Booklet: imposed for folding\n• Duplex: PdfDuplexPref (Simplex/ShortEdge/LongEdge)\n• PageLayoutMargin for margins", fillcolor="#bbdefb", style=filled);
+        duplex [label="PdfDuplexPref (EngineBase.h:579)\n• Simplex (single-sided)\n• FlipShortEdge (landscape duplex)\n• FlipLongEdge (portrait duplex)\n• Printer capability queried\n• fz_set_duplex() if supported", fillcolor="#bbdefb", style=filled);
+        ocg [label="OCG (Optional Content Groups)\n• Layers visible for print only\n• e.g., watermarks, comments\n• EngineMupdf: fz_set_ocg_print()\n• fz_ocg_context / fz_ocg_descriptor\n• GetPdfViewerPrintPrefs()", fillcolor="#e1bee7", style=filled);
+        print_prefs [label="GetPdfViewerPrintPrefs()\nEngineMupdf.cpp\n• Duplex / Paper size / Orientation\n• Page range / Copies / Collate\n• Color / Grayscale\n• Scaling (fit/shrink/actual)", fillcolor="#e3f2fd", style=filled);
+    }
+
+    // ===================== PRINT SPOOLING =====================
+    subgraph cluster_spool {
+        label="Print Spooling (PrintDialog.cpp)";
+        color="#ff9800";
+        style=filled;
+        fillcolor="#fff3e0";
+
+        spool [label="Print Spooling (PrintDialog.cpp)\n• StartDoc / StartPage / EndPage / EndDoc\n• GDI: HDC from printer DC\n• Engine renders to printer DC\n• High DPI (600+ DPI typical)\n• Color management: ICM\n• fz_new_draw_device(hdc) for printer", fillcolor="#c8e6c9", style=filled);
+        multi_page [label="Multi-page Print\n• Range: all / current / selection / pages\n• Selection = highlighted pages\n• Collate / Reverse order options\n• Print to file (.prn)\n• fz_run_page per page with print ctm", fillcolor="#bbdefb", style=filled);
+        pdf_print [label="PDF Print (SaveAs)\n• CmdSaveAs → SaveAnnotationsToExistingFile\n• Incremental save (preserves annotations)\n• EngineMupdf::SaveFileAs()\n• pdf_write_document()\n• pdf_default_write_options2", fillcolor="#e1bee7", style=filled);
+    }
+
+    // ===================== EXPORT =====================
+    subgraph cluster_export {
+        label="Export Commands";
+        color="#9c27b0";
+        style=filled;
+        fillcolor="#f3e5f5";
+
+        save_as [label="CmdSaveAs (Commands_File.cpp)\n• Save As dialog (IFileSaveDialog)\n• Formats: PDF only (MuPDF)\n• Incremental save (preserves annotations)\n• Calls SaveAnnotationsToExistingFile()\n• HandleCmdSaveAs()", fillcolor="#c8e6c9", style=filled);
+        extract_text [label="CmdExtractText (Commands_File.cpp)\n• -extract-text flag\n• Output: stdout or file\n• EngineBase::ExtractText()\n• EngineMupdf: fz_extract_text()\n• Options: page range / format (txt/json)\n• fz_new_stext_page_from_page2", fillcolor="#bbdefb", style=filled);
+        extract_images [label="CmdExtractImages\n• EngineMupdf::ExtractImages()\n• fz_extract_images()\n• Output folder + naming pattern\n• Formats: PNG/JPEG/TIFF\n• FzCollectImagesFromPageContent()\n• FzFindImageByRect() / FzGetKeptPageImage()", fillcolor="#bbdefb", style=filled);
+        pdf_tools [label="PDF Tools (PdfTools.cpp)\n• Bake (flatten annotations)\n• Compress (downsample images)\n• Delete pages\n• Encrypt / Decrypt\n• Convert images to PDF\n• Each: Close → process → StartLoadDocument\n• PdfBakeDoIt / PdfCompressDoIt / PdfDeletePageDoIt\n• PdfEncryptDoIt / PdfDecryptDoIt\n• ConvertToPdf / SaveImageCollectionAsPdf", fillcolor="#e1bee7", style=filled);
+        pdf_bake [label="Bake (PdfTools.cpp)\n• PdfBakeDoIt()\n• Flattens annotations into content\n• fz_flatten_annot() / pdf_add_annot\n• Removes annotation layer\n• Useful for compatibility", fillcolor="#fff9c4", style=filled);
+        pdf_compress [label="Compress (PdfTools.cpp)\n• PdfCompressDoIt()\n• pdf_clean_write_options\n• Downsample images > threshold\n• Remove duplicate objects\n• fz_optimize_document()", fillcolor="#fff9c4", style=filled);
+    }
+
+    // ===================== MARKDOWN PRINT =====================
+    subgraph cluster_md_print {
+        label="Markdown Print / Export";
+        color="#1565c0";
+        style=filled;
+        fillcolor="#e3f2fd";
+
+        md_print [label="Markdown Print\n• WebView2: controller->PrintToPdf()\n• CSS @media print injected\n• @page { margin: ... }\n• EngineMupdf fallback: HTML → PDF\n• BrowserDocView::PrintToPdf()", fillcolor="#c8e6c9", style=filled);
+        md_export [label="Markdown Export\n• -extract-text: cmark-gfm → plain text\n• SaveAs: WebView2 PrintToPdf + file\n• Or EngineMupdf: HTML → PDF", fillcolor="#e3f2fd", style=filled);
+    }
+
+    // ===================== COMMAND LINE =====================
+    subgraph cluster_cli {
+        label="Command Line Print/Export";
+        color="#795548";
+        style=filled;
+        fillcolor="#efebe9";
+
+        cli_print [label="-print flag\n• Silent print to default printer\n• -print-to \"printer name\"\n• -print-settings \"key=val\"\n• Used by external automation\n• HandleCmdPrint()", fillcolor="#bbdefb", style=filled);
+        cli_export [label="-extract-text / -extract-images\n• Batch processing\n• -output \"folder\"\n• -pages \"1-5,10\"\n• JSON output for scripting\n• HandleCmdExtractText/Images()", fillcolor="#c8e6c9", style=filled);
+        cli_pdf [label="-render / -bench\n• -render: offscreen render to file\n• -bench: performance benchmark\n• -stress-test: stress testing\n• Flags.cpp handles all", fillcolor="#e3f2fd", style=filled);
+    }
+
+    // ===================== ENGINE PRINT METHODS =====================
+    subgraph cluster_engine_print {
+        label="Engine Print Methods (Serena)";
+        color="#607d8b";
+        style=filled;
+        fillcolor="#eceff1";
+
+        engine_print [label="EngineBase Print Methods\n• RenderPage(target, ...) with RenderTarget::Print\n• GetPdfViewerPrintPrefs()\n• SaveFileAs() / pdf_write_document()\n• HasClipOptimizations() for print\n• Transform() for print matrix", fillcolor="#c8e6c9", style=filled);
+        mupdf_print [label="EngineMupdf Print\n• fz_run_page with print ctm\n• fz_new_draw_device(hdc) for printer\n• fz_set_ocg_print() for OCG\n• fz_duplex for duplex mode\n• fz_scale / fz_rotate for transform\n• pdf_set_ocg_intent() for print intent", fillcolor="#bbdefb", style=filled);
+        fz_print [label="MuPDF Print Internals\n• fz_device for printer output\n• fz_ctm for coordinate transform\n• fz_irect for page bounds\n• Color management: ICM profile\n• Font embedding / subsetting", fillcolor="#e3f2fd", style=filled);
+    }
+
+    // ===================== EDGES =====================
+    print_dialog -> render_target;
+    print_dialog -> page_layout;
+    print_dialog -> duplex;
+    page_setup -> page_layout [style=dotted];
+
+    render_target -> page_layout;
+    render_target -> duplex;
+    render_target -> ocg;
+    render_target -> print_prefs [style=dotted];
+
+    page_layout -> spool;
+    duplex -> spool;
+    ocg -> spool [style=dotted];
+    print_prefs -> spool [style=dotted];
+
+    spool -> multi_page;
+    spool -> pdf_print [style=dotted];
+
+    save_as -> render_target [style=dotted, label="incremental save"];
+    extract_text -> render_target [style=dotted];
+    extract_images -> render_target [style=dotted];
+    pdf_tools -> save_as [style=dashed, label="StartLoadDocument"];
+    pdf_bake -> pdf_tools [style=dotted];
+    pdf_compress -> pdf_tools [style=dotted];
+
+    md_print -> render_target [style=dotted, label="fallback"];
+    md_export -> md_print [style=dotted];
+
+    cli_print -> spool;
+    cli_export -> extract_text;
+    cli_pdf -> render_target [style=dotted];
+
+    // Engine print methods
+    render_target -> engine_print [style=dotted];
+    engine_print -> mupdf_print;
+    mupdf_print -> fz_print;
+
+    // Cross-refs
+    render_target ..> engine_mupdf [style=dotted, label="EngineMupdf::RenderPage"];
+    ocg ..> engine_mupdf [style=dotted];
+    pdf_print ..> save_as [style=dotted];
+    save_as ..> annotations [style=dotted, label="SaveAnnotationsToExistingFile"];
+    extract_images ..> image_collect [style=dotted, label="see resource-management.dot"];
+
+    // Legend
+    subgraph cluster_legend {
+        label="Legend";
+        color="#ccc";
+        ui [label="Print UI", fillcolor="#e3f2fd", style=filled];
+        engine [label="Print Engine", fillcolor="#fce4ec", style=filled];
+        spool_n [label="Spooling", fillcolor="#fff3e0", style=filled];
+        export [label="Export", fillcolor="#f3e5f5", style=filled];
+        md [label="Markdown", fillcolor="#e3f2fd", style=filled];
+        cli [label="CLI", fillcolor="#efebe9", style=filled].
+        engine_m [label="Engine Methods", fillcolor="#eceff1", style=filled].
+    }
+}

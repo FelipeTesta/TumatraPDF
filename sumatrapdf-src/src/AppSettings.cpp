@@ -5,6 +5,7 @@
 #include "base/File.h"
 #include "base/FileWatcher.h"
 #include "base/SquareTreeParser.h"
+#include "base/SettingsUtil.h"
 #include "base/UITask.h"
 #include "base/Win.h"
 #include "base/Dpi.h"
@@ -12,6 +13,7 @@
 
 #include "wingui/UIModels.h"
 
+#define INCLUDE_SETTINGSSTRUCTS_METADATA
 #include "Settings.h"
 #include "Commands.h"
 #include "ReadingStats.h"
@@ -136,6 +138,100 @@ static bool MigrateDocumentColorsFollowThemeSetting(Str prefsData) {
         return true;
     }
     return false;
+}
+
+// FileState names-blob migration (P1-migration).
+//
+// On-disk format writes field[i] under name[i] BY INDEX. The old names blob is
+// missing "FlashcardStudyTimeSec" at index 23, so every name >= 23 holds the
+// NEXT field's value and field 43 (flashcardCardsDone) was dropped:
+//   old name[23]="InvertColors" holds field[23]=flashcardStudyTimeSec value
+//   old name[24..42]="ContrastEnabled".."FlashcardCardsDone" hold fields 25..44
+//   field[43] flashcardCardsDone value dropped entirely
+// New layout: names blob 44, "FlashcardCardsDone" then "FlashcardStudyTimeSec"
+// at the end (indices 42,43). Remap each FileState entry:
+//   new name[k] <- old name[k+1] value (k=23..41), new FlashcardCardsDone <- 0,
+//   new FlashcardStudyTimeSec <- old "InvertColors" value.
+// Clamp ints to [-1e9,1e9]; bools/strings/floats copy as-is (already valid).
+// Snapshotting all sources first is required because dest keys overlap source
+// keys (e.g. dest "ContrastEnabled" is also source key for index 1).
+static const char* kMigSrc[] = {
+    "ContrastEnabled",  "ContrastOpacity",  "MarginTrim",         "TrimTop",
+    "TrimBottom",       "ViewportCropV2",   "ArchScaleFactor",    "ArchScaleAnchorX",
+    "ArchScaleAnchorY", "ArchScaleLineP2x", "ArchScaleLineP2y",   "ArchScaleLineDefined",
+    "ArchScaleLineP1x", "ArchScaleLineP1y", "ArchUnit",           "ArchScaleSet",
+    "ArchMeasurements", "ArchScaleStates",  "FlashcardCardsDone", "InvertColors",
+};
+static const char* kMigDst[] = {
+    "InvertColors",     "ContrastEnabled",  "ContrastOpacity",      "MarginTrim",       "TrimTop",
+    "TrimBottom",       "ViewportCropV2",   "ArchScaleFactor",      "ArchScaleAnchorX", "ArchScaleAnchorY",
+    "ArchScaleLineP2x", "ArchScaleLineP2y", "ArchScaleLineDefined", "ArchScaleLineP1x", "ArchScaleLineP1y",
+    "ArchUnit",         "ArchScaleSet",     "ArchMeasurements",     "ArchScaleStates",  "FlashcardStudyTimeSec",
+};
+
+static bool MigIsIntKey(const char* key) {
+    return str::Eq(key, StrL("ContrastOpacity")) || str::Eq(key, StrL("TrimTop")) || str::Eq(key, StrL("TrimBottom")) ||
+           str::Eq(key, StrL("ArchUnit")) || str::Eq(key, StrL("FlashcardStudyTimeSec"));
+}
+
+static int MigClampInt(Str v) {
+    int x = ParseInt(v);
+    if (x < -1000000000) {
+        x = -1000000000;
+    }
+    if (x > 1000000000) {
+        x = 1000000000;
+    }
+    return x;
+}
+
+// returns generation (1/2/3, 0 = no FileStates) and, via nEntries, how many
+// FileState entries exist; gen3 has FlashcardStudyTimeSec key -> NO-OP skip;
+// gen2 has FlashcardCardsDone but not FlashcardStudyTimeSec -> migrate;
+// gen1 has neither -> migrate with same shift.
+static int MigrateFileStateNames(SquareTreeNode* root, int* nEntries) {
+    *nEntries = 0;
+    SquareTreeNode* fileStates = root ? root->GetChild(StrL("FileStates")) : nullptr;
+    if (!fileStates) {
+        return 0;
+    }
+    bool hasStudyTime = false;
+    bool hasCardsDone = false;
+    int idx = 0;
+    while (SquareTreeNode* entry = fileStates->GetChild(StrL(""), &idx)) {
+        (*nEntries)++;
+        if (!str::IsNull(entry->GetValue(StrL("FlashcardStudyTimeSec")))) {
+            hasStudyTime = true;
+        }
+        if (!str::IsNull(entry->GetValue(StrL("FlashcardCardsDone")))) {
+            hasCardsDone = true;
+        }
+    }
+    if (hasStudyTime) {
+        return 0; // already current format, nothing to do
+    }
+    if (*nEntries == 0) {
+        return 0;
+    }
+    int n = (int)(sizeof(kMigSrc) / sizeof(kMigSrc[0]));
+    // apply remap per FileState entry (snapshot sources before writing dests)
+    idx = 0;
+    while (SquareTreeNode* entry = fileStates->GetChild(StrL(""), &idx)) {
+        StrVec srcVals;
+        for (int i = 0; i < n; i++) {
+            srcVals.Append(str::Dup(entry->GetValue(Str(kMigSrc[i]))));
+        }
+        for (int i = 0; i < n; i++) {
+            Str v = srcVals[i];
+            if (MigIsIntKey(kMigDst[i])) {
+                v = str::Dup(fmt("%d", MigClampInt(v)));
+            }
+            entry->SetValue(Str(kMigDst[i]), v);
+        }
+        // old field 43 flashcardCardsDone value was dropped -> default 0
+        entry->SetValue(StrL("FlashcardCardsDone"), StrL("0"));
+    }
+    return hasCardsDone ? 2 : 1;
 }
 
 // UI fonts are cached per DPI so windows on monitors with different scale
@@ -346,7 +442,24 @@ bool LoadSettings() {
     {
         Str prefsData = file::ReadFile(settingsPath);
 
-        gGlobalPrefs = NewGlobalPrefs(prefsData);
+        // P1-migration: old on-disk settings wrote field[i] under name[i] by
+        // index but the names blob missed "FlashcardStudyTimeSec", shifting
+        // every name >= 23. Remap name/blob pairs on the raw tree before
+        // deserializing, then re-serialize so deserialization reads corrected
+        // names. Bools/strings/floats copy as-is; ints clamped [-1e9,1e9].
+        SquareTreeNode* root = prefsData ? ParseSquareTree(prefsData) : nullptr;
+        if (root) {
+            int migEntries = 0;
+            int gen = MigrateFileStateNames(root, &migEntries);
+            if (gen) {
+                logf("[settings] FileState names-blob migration applied (gen%d, %d entries)\n", gen, migEntries);
+            }
+            TempStr migrated = SerializeSquareTreeNodeTemp(root);
+            gGlobalPrefs = (GlobalPrefs*)DeserializeStruct(&gGlobalPrefsInfo, migrated);
+            delete root;
+        } else {
+            gGlobalPrefs = NewGlobalPrefs(prefsData);
+        }
         ReportIf(!gGlobalPrefs);
         gprefs = gGlobalPrefs;
         migratedDocumentColorsFollowTheme = MigrateDocumentColorsFollowThemeSetting(prefsData);
@@ -516,7 +629,7 @@ static TabState* CloneTabState(const TabState* src) {
     dst->rotation = src->rotation;
     dst->scrollPos = src->scrollPos;
     dst->showToc = src->showToc;
-    dst->tocState = new Vec<int>(*src->tocState);
+    dst->tocState = src->tocState ? new Vec<int>(*src->tocState) : nullptr;
     return dst;
 }
 
@@ -643,6 +756,7 @@ static void RememberSessionState() {
             FileState* fs = NewFileState(fp);
             tab->ctrl->GetDisplayState(fs);
             fs->showToc = tab->showToc;
+            if (!fs->tocState) fs->tocState = new Vec<int>();
             *fs->tocState = tab->tocState;
             TabState* ts = NewTabState(fs);
             windowState->tabStates->Append(ts);

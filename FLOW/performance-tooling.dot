@@ -1,0 +1,143 @@
+digraph PerformanceTooling {
+    rankdir=TB;
+    node [shape=box, style=rounded, fontname="Consolas", fontsize=9];
+    edge [fontname="Consolas", fontsize=8];
+    compound=true;
+
+    // ===================== BUILD TIME PROFILING =====================
+    subgraph cluster_build_perf {
+        label="Build Time Profiling";
+        color="#4285f4";
+        style=filled;
+        fillcolor="#e3f2fd";
+
+        build_times [label="cmd/build-times.ts\n• Parses CL.command.1.tlog\n• Re-runs each TU with /Bt+\n• Ranks slowest TUs\n• Output: out/build-times.txt\n• s36-v baseline: 36s / 238 TUs", fillcolor="#c8e6c9", style=filled);
+        slow_tus [label="Slowest TUs\n• RenderCache.cpp (~2.14s)\n• EngineMupdf.cpp (~1.8s)\n• SumatraPDF.cpp (~1.5s)\n• PCH effective (base/Base.h first)", fillcolor="#bbdefb", style=filled);
+        pch [label="Precompiled Headers\n• base/Base.h = PCH\n• Must be FIRST include\n• Wrong order = 300+ cascade errors\n• Delete stale .pch on premake regen", fillcolor="#e1bee7", style=filled);
+        incremental [label="Incremental Build\n• Edit → build → test ~10s\n• MSBuild /t:TumatraPDF /m\n• bun cmd/build-test.ts (quick)\n• Full release: 15-20min", fillcolor="#fff9c4", style=filled);
+    }
+
+    // ===================== STATIC ANALYSIS =====================
+    subgraph cluster_static {
+        label="Static Analysis (CI + Local)";
+        color="#e91e63";
+        style=filled;
+        fillcolor="#fce4ec";
+
+        clang_tidy [label="cmd/clang-tidy.ts\n• run-clang-tidy.py\n• Checks: modernize, performance,\n  readability, bugprone\n• Output: out/lint/\n• Local: bun cmd/clang-tidy.ts", fillcolor="#c8e6c9", style=filled);
+        cppcheck [label="cmd/cppcheck.ts\n• cppcheck --enable=all\n• Suppressions: missingInclude\n• Output: out/lint/\n• Local: bun cmd/cppcheck.ts", fillcolor="#bbdefb", style=filled);
+        msvc_analyze [label="MSVC /analyze (cmd/analyze.ts)\n• /analyze flag on all TUs\n• Output: out/analyze/\n  msvc-analyze.log\n  warnings-summary.txt\n• Weekly CI: static-analysis.yml", fillcolor="#bbdefb", style=filled);
+        codeql [label="CodeQL (GitHub Actions)\n• .github/workflows/codeql.yml\n• cpp language\n• Push/PR/Weekly\n• Security advisories\n• Never fails (advisory only)", fillcolor="#e1bee7", style=filled);
+    }
+
+    // ===================== RUNTIME PROFILING =====================
+    subgraph cluster_runtime {
+        label="Runtime Profiling";
+        color="#ff9800";
+        style=filled;
+        fillcolor="#fff3e0";
+
+        perf_etw [label="ETW / WPR / xperf\n• NOT DebugView\n• CPU sampling + stack walks\n• GPU/Render pipeline\n• UI thread responsiveness\n• File: .etl → WPA", fillcolor="#c8e6c9", style=filled);
+        debugview [label="DebugView (DbgViewCli)\n• Sysinternals DbgViewCli\n• OutputDebugString capture\n• Tags: [fc] [arch] [autoscroll] [md] [webview] [d6]\n• Filter by PID/process\n• Boot-time logging", fillcolor="#bbdefb", style=filled);
+        log_analysis [label="SumatraLog Analysis\n• %LOCALAPPDATA%\\SumatraPDF\\<hash>\\sumatra-log.txt\n• Rotation >5MB\n• PowerShell Select-String patterns\n• Relayout / toggle / ETA logs", fillcolor="#bbdefb", style=filled);
+        frame_time [label="Frame Time Measurement\n• Autoscroll: 60fps target\n• Cached render ~1ms\n• Non-cached ~23ms\n• WM_TIMER coalescing trap\n• DCP plugin: rtk tool", fillcolor="#e1bee7", style=filled);
+    }
+
+    // ===================== MEMORY PROFILING =====================
+    subgraph cluster_memory {
+        label="Memory Profiling";
+        color="#9c27b0";
+        style=filled;
+        fillcolor="#f3e5f5";
+
+        heap [label="Heap Analysis\n• WinDbg: !heap -s\n• gRenderCache tile count\n• Engine fz_context store\n• VirtualAlloc tracking\n• Leak: iteration growth", fillcolor="#c8e6c9", style=filled);
+        asan_runtime [label="ASan Runtime (BROKEN)\n• build-asan.ts references SumatraPDF.sln\n• Would detect: UAF, buffer overflow\n• Fix: update to TumatraPDF.sln\n• /DEPENDENTLOADFLAG:0xA00 in premake", fillcolor="#ffcdd2", style=filled, shape=note);
+        vmmap [label="VMMap (Sysinternals)\n• Private bytes / Working set\n• Heap fragmentation\n• Image (DLL) load addresses\n• RenderCache bitmap allocations", fillcolor="#bbdefb", style=filled);
+    }
+
+    // ===================== TEST INFRASTRUCTURE =====================
+    subgraph cluster_test_infra {
+        label="Test Infrastructure (tests/)";
+        color="#795548";
+        style=filled;
+        fillcolor="#efebe9";
+
+        unit_tests [label="Unit Tests\n• bun cmd/run-unit-tests.ts -dbg\n• base/test_util work\n• Tests: Str, Vec, Arena, Crypto\n• Targeted only - NEVER full suite", fillcolor="#c8e6c9", style=filled);
+        issue_tests [label="Issue Repro Tests\n• tests/issue-<n>.ts\n• Export async testit()\n• THROWS on failure\n• Standalone runner\n• Good test fails when fix reverted", fillcolor="#bbdefb", style=filled);
+        ad_hoc_tests [label="Ad-hoc Tests\n• tests/ad-hoc-<name>.ts\n• Register in before-release.ts\n• Manual run: bun tests/ad-hoc-<name>.ts\n• Scratch: tests/tmp/ (gitignored)", fillcolor="#bbdefb", style=filled);
+        win_auto [label="Win32 Automation\n• tests/win-automation.ts\n• PostMessage cross-process\n• captureWindowToPng (occluded)\n• Preferred: -dbg-control pipe", fillcolor="#e1bee7", style=filled);
+        dbg_pipe [label="-dbg-control Pipe\n• cmd/control.ts\n• 44 Test* commands\n• Ping/Quit/TestSearch/TestToc\n• TestToolbarButtons/TestAIChat\n• No GUI automation flakiness", fillcolor="#c8e6c9", style=filled);
+    }
+
+    // ===================== BENCHMARKING =====================
+    subgraph cluster_bench {
+        label="Benchmarking";
+        color="#607d8b";
+        style=filled;
+        fillcolor="#eceff1";
+
+        bench_flag [label="-bench Flag\n• Built-in microbenchmarks\n• Render throughput\n• Search speed\n• Startup time\n• Output: stdout + log", fillcolor="#c8e6c9", style=filled);
+        tier_bench [label="Model Benchmarking\n• tier_toggle benchmark-run\n• Arena ELO / avg_ms / vision\n• OpenRouter free models\n• NVIDIA Nemotron 3 Ultra: 1425 ELO\n• Updates: tier_toggle benchmark-update", fillcolor="#bbdefb", style=filled);
+        compare [label="Before/After Compare\n• git stash → bench → pop → bench\n• Metrics: time, memory, FPS\n• Cache hit rate (RenderCache)\n• RelayoutFrame frequency", fillcolor="#e1bee7", style=filled);
+    }
+
+    // ===================== DEBUG TOOLS =====================
+    subgraph cluster_debug_tools {
+        label="Debug Tools";
+        color="#f44336";
+        style=filled;
+        fillcolor="#ffebee";
+
+        windbg [label="WinDbg / WinDbgX\n• windbgx -Q -o -g out/dbg64/TumatraPDF.exe\n• .symfix; .reload\n• !analyze -v on crash\n• bp on ReportIf / TerminateProcess", fillcolor="#c8e6c9", style=filled);
+        gflags [label="GFlags\n• Page heap: gflags /p /enable TumatraPDF.exe /full\n• Stack traces on alloc/free\n• Detects: double-free, corruption", fillcolor="#bbdefb", style=filled);
+        procmon [label="Process Monitor\n• File/Registry/Network/Process\n• Filter: TumatraPDF.exe\n• Debug: settings load/save\n• DDE/COPYDATA tracing", fillcolor="#bbdefb", style=filled);
+        renderdoc [label="RenderDoc\n• GPU capture (if D3D/Vulkan)\n• Not primary (GDI+ only)\n• Useful for WebView2 debugging", fillcolor="#fff9c4", style=filled);
+    }
+
+    // ===================== EDGES =====================
+    build_times -> slow_tus;
+    build_times -> pch;
+    build_times -> incremental;
+
+    clang_tidy -> msvc_analyze [style=dotted];
+    cppcheck -> msvc_analyze [style=dotted];
+    msvc_analyze -> codeql [style=dotted];
+
+    perf_etw -> frame_time [style=dotted];
+    debugview -> log_analysis;
+    log_analysis -> frame_time [style=dotted];
+
+    heap -> asan_runtime [style=dashed];
+    heap -> vmmap;
+
+    unit_tests -> issue_tests [style=dotted];
+    issue_tests -> ad_hoc_tests;
+    ad_hoc_tests -> win_auto;
+    win_auto -> dbg_pipe [style=dashed, label="preferred over"];
+
+    bench_flag -> compare;
+    tier_bench -> compare [style=dotted];
+
+    windbg -> gflags [style=dotted];
+    gflags -> procmon [style=dotted];
+
+    // Cross-refs
+    build_times ..> render_cache [style=dotted, label="RenderCache.cpp slowest"];
+    frame_time ..> autoscroll [style=dotted, label="see autoscroll.dot"];
+    log_analysis ..> toolbar_logs [style=dotted, label="see toolbar-debug-log-analysis.dot"];
+    heap ..> resource_mgmt [style=dotted, label="see resource-management.dot"];
+
+    // Legend
+    subgraph cluster_legend {
+        label="Legend";
+        color="#ccc";
+        build [label="Build Perf", fillcolor="#e3f2fd", style=filled];
+        static [label="Static Analysis", fillcolor="#fce4ec", style=filled];
+        runtime [label="Runtime Profiling", fillcolor="#fff3e0", style=filled];
+        memory [label="Memory", fillcolor="#f3e5f5", style=filled];
+        test [label="Test Infra", fillcolor="#efebe9", style=filled];
+        bench [label="Benchmarking", fillcolor="#eceff1", style=filled];
+        debug [label="Debug Tools", fillcolor="#ffebee", style=filled];
+        broken [label="⚠ Broken", fillcolor="#ffcdd2", style="filled,shape=note"];
+    }
+}

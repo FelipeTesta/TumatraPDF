@@ -14,6 +14,7 @@
 #include "wingui/Layout.h"
 #include "wingui/WinGui.h"
 
+#include "Theme.h"
 #include "PngOptimizer.h"
 #include "ImageSaveCropResize.h"
 
@@ -1739,14 +1740,17 @@ LRESULT CALLBACK WndProcImageEdit(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             HDC hdc = (HDC)wp;
             Rect crc = HwndClientRect(hwnd);
             Rect ctrlRc = {0, ew->imgAreaH, crc.dx, crc.dy - ew->imgAreaH};
-            HdcFillRect(hdc, ctrlRc, GetSysColorBrush(COLOR_BTNFACE));
+            HBRUSH br = CreateSolidBrush(ThemeWindowControlBackgroundColor());
+            HdcFillRect(hdc, ctrlRc, br);
+            DeleteObject(br);
             return 1;
         }
 
         case WM_CTLCOLORSTATIC: {
             HDC hdcStatic = (HDC)wp;
+            SetTextColor(hdcStatic, ThemeWindowTextColor());
             SetBkMode(hdcStatic, TRANSPARENT);
-            return (LRESULT)GetSysColorBrush(COLOR_BTNFACE);
+            return (LRESULT)CreateSolidBrush(ThemeWindowControlBackgroundColor());
         }
 
         case WM_MOUSEMOVE: {
@@ -2133,7 +2137,8 @@ HWND ShowImageEditWindow(HWND parent, ImageEditMode mode, Str filePath, Rendered
     HMODULE h = GetModuleHandleW(nullptr);
     WNDCLASSEX wcex = {};
     FillWndClassEx(wcex, kImageEditWinClassName, WndProcImageEdit);
-    wcex.hbrBackground = GetSysColorBrush(COLOR_BTNFACE);
+    static HBRUSH sImageEditBg = CreateSolidBrush(ThemeWindowControlBackgroundColor());
+    wcex.hbrBackground = sImageEditBg;
     if (gImageEditHost.appIconId) {
         wcex.hIcon = LoadIconW(h, MAKEINTRESOURCEW(gImageEditHost.appIconId));
     }

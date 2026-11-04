@@ -6327,6 +6327,16 @@ LRESULT CALLBACK WndProcCanvas(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             return 1;
         }
 
+        case WM_CTLCOLORLISTBOX: {
+            // FormFields.cpp creates a direct Win32 LISTBOX parented to hwndCanvas;
+            // WM_CTLCOLORLISTBOX is sent to this parent. Theme it so it does not
+            // paint white in dark mode (see FormFields.cpp:239).
+            HDC hdc = (HDC)wp;
+            SetTextColor(hdc, ThemeWindowTextColor());
+            SetBkMode(hdc, TRANSPARENT);
+            return (LRESULT)CreateSolidBrush(ThemeWindowControlBackgroundColor());
+        }
+
         case WM_NCHITTEST: {
             // return HTTRANSPARENT near frame edges so the parent frame
             // can handle resize hit-testing beyond kFrameBorderSize

@@ -1,0 +1,107 @@
+digraph TabSystem {
+    rankdir=TB;
+    node [shape=box, style=rounded, fontname="Consolas", fontsize=9];
+    edge [fontname="Consolas", fontsize=8];
+    compound=true;
+
+    // ===================== BOOT RESTORE =====================
+    subgraph cluster_boot {
+        label="Boot restore — settings restore vs session restore (SumatraStartup.cpp)";
+        color="#607d8b";
+        style=filled;
+        fillcolor="#eceff1";
+
+        boot [label="WinMain → SumatraStartup\n• read settings (ActiveTabGroup, TabGroups, SessionData)\n• Precedence: activeTabGroup non-empty AND group exists with tabFiles > 0\n  ⇒ restoreSession = FALSE, load group files\n• Else: normal session restore (FileHistory)", fillcolor="#c8e6c9", style=filled];
+        suppress [label="SuppressGroupAutoSave around boot restore loop\n• true BEFORE LoadDocument/TabsSelect\n• cleared AFTER TabsSelect (TabGroupsManage.cpp)\n• prevents first auto-save hook clobbering active group\n(SuppressGroupAutoSave true/false)", fillcolor="#bbdefb", style=filled];
+        empty_group [label="Empty active group → suppress session restore\n(TabGroupsManage.cpp:625/267, SumatraStartup.cpp:2679)\nActivateTabGroupInWindow no longer rejects empty tabFiles\n— activates empty group, loads nothing", fillcolor="#bbdefb", style=filled];
+    }
+
+    // ===================== DROPDOWN BUTTON =====================
+    subgraph cluster_button {
+        label="Tab Group dropdown button (owner-draw, SumatraPDF.cpp)";
+        color="#e91e63";
+        style=filled;
+        fillcolor="#fce4ec";
+
+        btn [label="hwndTabGroupBtn (BS_OWNERDRAW), kTabGroupBtnId=8000\nCreated left of tabs (dual-row + single-row branches)\nUpdateTabGroupButton() creates/destroys\nTabsX shifted right by kTabGroupBtnDxBase=28", fillcolor="#c8e6c9", style=filled];
+        draw [label="DrawTabGroupButton() — 2-state glyph\n• SYNCED = filled green disc RGB(46,158,79)\n• UNSYNCED = outline ring, red RGB(224,58,58), width DpiScale(2)\n• circle diameter = min(dx,dy) − 2×DpiScale(5)\n• button-local coords (0,0), fills rcItem fully", fillcolor="#bbdefb", style=filled];
+        erase [label="WM_ERASEBKGND kill white flash\n• TabGroupBtnSubclassProc via SetWindowSubclass\n  (in UpdateTabGroupButton, after dmlib → LIFO first)\n• fill theme-dark + return 1 (suppress COLOR_BTNFACE erase)\n• frame WM_CTLCOLORBTN also returns theme-dark brControlBgColor", fillcolor="#bbdefb", style=filled];
+    }
+
+    // ===================== DROPDOWN MENU =====================
+    subgraph cluster_menu {
+        label="Dropdown menu + options popup (WH_MSGFILTER hook)";
+        color="#9c27b0";
+        style=filled;
+        fillcolor="#f3e5f5";
+
+        build [label="BuildTabGroupMenu() — dynamic popup\n• Unsynced / Session N (M files)\n• Session item: plain MF_STRING, id kTabGroupMenuOpenHereBase+i (8501+)\n• Active group row: ● prefix + MF_CHECKED\n• 'New session…' item", fillcolor="#c8e6c9", style=filled];
+        track [label="ShowTabGroupDropdown()\n• install SetWindowsHookExW(WH_MSGFILTER, TabGroupMenuFilterProc)\n• TrackPopupMenuEx (button screen rect anchor, captured once)\n• unhook → route cmdId → HandleTabGroupMenuCmd\n• single TrackPopupMenuEx call (no reopen loop)", fillcolor="#bbdefb", style=filled];
+        leftclick [label="Left-click session item = Open Here\n• id decodes: Delete (8801+) → Rename (8701+) → OpenNew (8601+) → OpenHere (8501+)\n  check HIGHEST base first (overlap by design)\n• OpenNewWindow: activeTabGroup set AFTER CreateAndShowMainWindow\n  + SuppressGroupAutoSave around creation", fillcolor="#bbdefb", style=filled];
+        rightclick [label="Right-click → options popup via TPM_RECURSE\n• TabGroupMenuFilterProc (WH_MSGFILTER) catches WM_RBUTTONUP\n• MenuItemFromPoint → GetMenuItemID(popup, pos) → cmdId\n• idx: OpenNew 8601+ / Rename 8701+ / Delete 8801+\n• WM_CANCELMODE swallow → TrackPopupMenuEx returns 0\n• options popup at cursor, nested TPM_RECURSE → dropdown stays open\n• gTabGroupDropdownWin/Frame store frame for hook", fillcolor="#e1bee7", style=filled];
+    }
+
+    // ===================== NEW SESSION =====================
+    subgraph cluster_newsession {
+        label="New session (TUMATRA_TAB_GROUP_NAME dialog)";
+        color="#4caf50";
+        style=filled;
+        fillcolor="#e8f5e9";
+
+        dialog [label="Dialog class TUMATRA_TAB_GROUP_NAME (RegisterClassW once)\n• dmlib::setDarkTitleBarEx + setChildCtrlsTheme after CreateWindowExW\n• WM_CTLCOLOREDIT/WM_CTLCOLORBTN (cached CreateSolidBrush, DeleteObject WM_DESTROY)\n• EM_SETLIMITTEXT 20, Enter/Escape → DestroyWindow\n• gForTesting auto-accept 'T1'", fillcolor="#c8e6c9", style=filled];
+        capture [label="Capture current open books: SyncGroupFromWindow(name, win)\nbefore SaveSettings\n• menu path + case 8950 (control-pipe TestTabGroupDialogOpen=54)\n• async dialog: handler posts WM_COMMAND kTabGroupDialogTestCmd=8950,\n  dialog opens on UI thread (pipe thread never modal)", fillcolor="#bbdefb", style=filled];
+    }
+
+    // ===================== RENAME/DELETE/UNSYNCED =====================
+    subgraph cluster_ops {
+        label="Rename / Delete / Unsynced routing";
+        color="#f57c00";
+        style=filled;
+        fillcolor="#fff3e0";
+
+        rename [label="Rename (8701+)\n• str::Dup(g->name) BEFORE dialog (avoid double-free/UAF)\n• str::Free(newName) after dialog\n• logf uses dup'd copy", fillcolor="#c8e6c9", style=filled];
+        delete [label="Delete (8801+)\n• str::Dup(g->name) before str::Free/free(g)\n• logf uses copy (avoid use-after-free)", fillcolor="#c8e6c9", style=filled];
+        unsynced [label="Unsynced windows\n• Ctrl+n (HandleCmdNewWindow): activeTabGroup = \"\"\n• drag-out to new window (MainWindowTabMigration): activeTabGroup = \"\"\n• SetActiveTabGroup syncs only when name non-empty AND has file tabs", fillcolor="#bbdefb", style=filled];
+    }
+
+    // ===================== AUTOSYNC HOOKS =====================
+    subgraph cluster_autosync {
+        label="Auto-sync hooks (TabGroupsManage.cpp)";
+        color="#1565c0";
+        style=filled;
+        fillcolor="#e3f2fd";
+
+        hooks [label="UpdateActiveGroupAutoSave(win) — guard chain\n• (a) shutdown → skip\n• (b1) SuppressGroupAutoSave → skip\n• (b2) draggingTab → skip\n• (c) [DROPPED s36-ck] no document tabs → skip — last-tab close syncs 0 files\n• else SyncGroupFromWindow + SaveSettings", fillcolor="#c8e6c9", style=filled];
+        call_sites [label="Call sites (Tabs.cpp)\n• MainWindowTabSelectionChanging (after SaveCurrentWindowTab)\n• MainWindowTabClosed (after CloseTab)\n• AddTabToWindow (after InsertTab)\n• SetActiveTabGroup: sync only when name non-empty AND has file tabs", fillcolor="#bbdefb", style=filled];
+        lazy [label="Lazy session switch\n• ActivateTabGroupInWindow / OpenNewWindow: args.lazyLoad = true\n  for all-but-first file (first sync → selected tab shows immediately)\n• skip tabs already in destination group (preserves scroll)\n• skip already-open files on load\n• timing logf (GetTickCount) at close/load loop bounds", fillcolor="#e1bee7", style=filled];
+    }
+
+    // ===================== EDGES =====================
+    boot -> suppress;
+    boot -> empty_group;
+    suppress -> btn [style=dotted];
+
+    btn -> draw -> erase;
+    btn -> build [style=dotted];
+    build -> track -> leftclick;
+    track -> rightclick;
+    leftclick -> newsession::dialog [style=dotted, label="session item → new session"];
+    rightclick -> rename;
+    rightclick -> delete;
+    rightclick -> unsynced [style=dotted];
+
+    dialog -> capture;
+    capture -> hooks [style=dotted];
+    hooks -> call_sites;
+    call_sites -> lazy [style=dotted];
+    lazy -> boot [style=dotted, label="loop closes on next boot"];
+
+    // Legend
+    subgraph cluster_legend {
+        label="Legend";
+        color="#ccc";
+        done [label="Done (LOG s36-bu→s36-co)", fillcolor="#c8e6c9", style=filled];
+        plan [label="Open / future", fillcolor="#fff9c4", style=filled];
+        tumatraN [label="[TUMATRA] fork-exclusive", fillcolor="#c8e6c9", style="rounded,filled"];
+    }
+}

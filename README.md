@@ -326,6 +326,22 @@ Time spent reading with **auto-scroll** active is tracked per document and per c
 
 ---
 
+### 12. 💾 Profile Memory / Sync
+
+**Status:** 🟢 Complete (s36-bn/bp/bq)
+
+**What it does:** Single portable user-data file `tumatraPDF-data_<n>.json` consolidates books (SM-2 study states), per-day reading/study stats, per-document time counters — export/sync/import as one unit. Location configurable (`profileDataDir`, default app-data). Legacy per-book JSONs + two stats sidecars keep being written as import/legacy views; profile is authoritative superset. Day rows carry per-machine attribution so two machines sharing via cloud-synced folder sum exactly without double-counting.
+
+**Home page:** `🔁 Sync` button next to "Stats" title → Profile Sync window (dark-themed): format version, file size, last save timestamp, machine, books, reading days, study days, backup count, destination dir (abbreviated).
+
+**Buttons:** Save Now, Open Folder, Backups (9-slot × 8h rolling dialog + restore), Export (primary + backup/ → chosen folder), Import (Replace = backup to `.pre-import` then adopt; Merge = newest-wins adopt-absent), Close.
+
+**File integrity:** MD5 checksum in JSON header; corrupt file → automatic backup-slot recovery / legacy fallback.
+
+**Cloud-safe:** Drive conflicted-copy merge (newer lastWriteTs + per-machine day rows), cloud-revert restore prompt, portable→install auto-import.
+
+---
+
 ### 🗺️ What's new
 
 The per-version changelog (features + bug fixes, newest first) lives in **[CHANGELOG.md](CHANGELOG.md)**.

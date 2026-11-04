@@ -39,6 +39,7 @@ extern "C" {
 #include "EditAnnotations.h"
 #include "Toolbar.h"
 #include "ToolbarLayout.h"
+#include "SvgIcons.h"
 #include "Theme.h"
 #include "AppSettings.h"
 #include "Commands_Edit.h"
@@ -46,6 +47,8 @@ extern "C" {
 // Forward declarations — these are defined in other translation units
 bool IsCurrentDocMarkdown(MainWindow* win);
 bool RelayoutFrame(MainWindow* win, bool updateToolbars, int sidebarDx);
+bool SetToolbarBandToRowHeight(HWND hwndToolbar);
+void ToolbarRewrapAfterSizing(MainWindow* win, HWND hwndToolbar, bool force);
 
 // notify the user with a transient toast anchored to the canvas
 static void EditNotify(MainWindow* win, Str msg) {
@@ -75,31 +78,52 @@ void EditToolbarCreate(MainWindow* win) {
     logf("[edit] EditToolbarCreate - creating secondary toolbar\n");
     HINSTANCE hinst = GetModuleHandle(nullptr);
     HWND hwndParent = win->hwndFrame;
+    bool isRtl = IsUIRtl();
 
-    DWORD style = WS_CHILD | WS_CLIPCHILDREN | RBS_VARHEIGHT | CCS_NODIVIDER | CCS_NOPARENTALIGN;
+    // Same construction order as CreateToolbar2 (Arch Tools) — that order is
+    // what works: rebar subclass + bar info first, theme strip BEFORE the
+    // buttons, WndProcToolbar installed last. Stripping the theme after
+    // TbAddButtons invalidates comctl's per-button layout, which makes
+    // TB_GETITEMRECT fail (ReportIf -> app termination) and paints the band
+    // blank (the "white toolbar with no buttons" report).
+    DWORD style = WS_CHILD | WS_CLIPCHILDREN | WS_CLIPSIBLINGS | RBS_VARHEIGHT;
     if (IsCurrentThemeDefault()) {
         style |= WS_BORDER | RBS_BANDBORDERS;
     }
+    style |= CCS_NODIVIDER | CCS_NOPARENTALIGN;
     DWORD exStyle = WS_EX_TOOLWINDOW;
+    if (isRtl) {
+        exStyle |= WS_EX_LAYOUTRTL;
+    }
     HWND hwndRebar = CreateWindowExW(exStyle, REBARCLASSNAME, nullptr, style, 0, 0, 0, 0, hwndParent,
                                      (HMENU)IDC_EDIT_REBAR, hinst, nullptr);
-
-    REBARINFO rbi{};
-    rbi.cbSize = sizeof(REBARINFO);
-    rbi.fMask = 0;
-    rbi.himl = (HIMAGELIST) nullptr;
-    SendMessageW(hwndRebar, RB_SETBARINFO, 0, (LPARAM)&rbi);
+    ToolbarSetupSecondaryRebar(hwndRebar);
+    // Custom-draw subclass runs AFTER dmlib (LIFO → first). Wipes comctl's
+    // white button face + label for Edit text-only buttons before re-drawing
+    // with theme colors. Without this, TBSTYLE_LIST buttons appear white.
+    ToolbarSubclassSecondaryRebar(win, hwndRebar);
 
     style = WS_CHILD | WS_CLIPSIBLINGS | TBSTYLE_TOOLTIPS | TBSTYLE_FLAT | TBSTYLE_LIST | CCS_NODIVIDER |
             CCS_NOPARENTALIGN | TBSTYLE_WRAPABLE;
     exStyle = 0;
-    bool isRtl = (GetWindowLong(hwndParent, GWL_EXSTYLE) & WS_EX_LAYOUTRTL) != 0;
     if (isRtl) {
         exStyle |= WS_EX_LAYOUTRTL;
     }
     HWND hwndToolbar = CreateWindowExW(exStyle, TOOLBARCLASSNAME, nullptr, style, 0, 0, 0, 0, hwndRebar,
                                        (HMENU)IDC_EDIT_TOOLBAR, hinst, nullptr);
     TbSetButtonStructSize(hwndToolbar, sizeofi(TBBUTTON));
+
+    // TBSTYLE_EX_MIXEDBUTTONS lets comctl center each button's own text under
+    // the button rect, so our POSTPAINT centered re-draw lands on the same
+    // spot instead of ghosting over a left-aligned draw (same combo as the
+    // main toolbar and flashcard toolbar).
+    DWORD tbEx = TbGetExtendedStyle(hwndToolbar);
+    tbEx |= TBSTYLE_EX_MIXEDBUTTONS;
+    TbSetExtendedStyle(hwndToolbar, tbEx);
+
+    // Unconditionally strip comctl32 v6 themes so NM_CUSTOMDRAW clrText/font
+    // are honored under any Windows theme (same as CreateToolbar2)
+    SetWindowTheme(hwndToolbar, L"", L"");
 
     struct ToolbarButtonInfo2 {
         int cmdId;
@@ -118,7 +142,8 @@ void EditToolbarCreate(MainWindow* win) {
         const ToolbarButtonInfo2& bi = gEditToolbarButtons[i];
         TBBUTTON b{};
         b.idCommand = bi.cmdId;
-        b.iBitmap = 0;
+        // text-only buttons: I_IMAGENONE, NOT 0 — the toolbar has no image list
+        b.iBitmap = (int)TbIcon::Text;
         b.fsState = TBSTATE_ENABLED;
         b.fsStyle = BTNS_BUTTON | BTNS_SHOWTEXT | BTNS_AUTOSIZE;
         // Crop is a toggle: needs BTNS_CHECK for the visual checked state
@@ -131,12 +156,13 @@ void EditToolbarCreate(MainWindow* win) {
     }
     TbAddButtons(hwndToolbar, kEditToolbarButtonsCount, tbButtons);
 
+    // Post-add text-button sizing for Edit toolbar buttons (label + pad).
+    PostAddTextButtonSizing(win, hwndToolbar);
+
     int iconSize = DpiScale(hwndParent, gGlobalPrefs->toolbarSize);
     iconSize = RoundUp(iconSize, 4);
     TbSetBitmapSize(hwndToolbar, Size(iconSize, iconSize));
     TbSetButtonSize(hwndToolbar, Size(iconSize, iconSize));
-
-    ToolbarApplyThemeToRebar(hwndRebar, hwndToolbar);
 
     Rect rc = TbGetItemRect(hwndToolbar, 0);
 
@@ -157,18 +183,22 @@ void EditToolbarCreate(MainWindow* win) {
     rbBand.cx = 0;
     SendMessageW(hwndRebar, RB_INSERTBAND, (WPARAM)-1, (LPARAM)&rbBand);
 
-    // size the rebar to the frame width right away (see the same comment in
-    // FlashcardToolbarCreate): at width 0 the toolbar stacks every button on
-    // its own row and the first RelayoutFrame would reserve that height
+    // Size rebar to frame width so the WRAPABLE toolbar sees the real width
+    // when it lays out its buttons.
     {
         Rect rcFrame = HwndClientRect(hwndParent);
         SetWindowPos(hwndRebar, nullptr, 0, 0, rcFrame.dx, rc.dy + (2 * rc.y), SWP_NOZORDER | SWP_NOMOVE);
     }
-
-    ShowWindow(hwndRebar, SW_SHOW);
+    // Second pass after rebar resize once the real wrap width is known.
+    PostAddTextButtonSizing(win, hwndToolbar);
 
     win->editTools.hwndReBarEdit = hwndRebar;
     win->editTools.hwndToolbarEdit = hwndToolbar;
+
+    // Paint subclass runs after comctl paints → wipe white faces, re-draw text
+    ToolbarSubclassPaint(win, hwndToolbar);
+
+    ShowWindow(hwndRebar, SW_SHOW);
 
     logf("[edit] EditToolbarCreate - toolbar created with %d buttons\n", kEditToolbarButtonsCount);
 }

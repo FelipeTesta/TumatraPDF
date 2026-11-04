@@ -16,12 +16,17 @@
 #include "FileHistory.h"
 #include "WindowTab.h"
 #include "MainWindow.h"
+#include "ProfileData.h"
 #include "ReadingStats.h"
 
 struct DailyEntry {
     int dateKey; // YYYYMMDD
     int sec;
 };
+
+// dual-write gate: when false, skip writing the legacy sidecar file but keep
+// streaming day rows into the single-file profile store (unconditional)
+static bool kProfDualWriteSidecars = true;
 
 static struct {
     Vec<DailyEntry> daily; // kept sorted by dateKey
@@ -121,6 +126,7 @@ void ReadingStatsAddSeconds(MainWindow* win, float sec) {
         FileState* fs = gFileHistory.FindByPath(tab->filePath);
         if (fs) {
             fs->readingTimeSec += whole;
+            ProfileDataAddReadingSec(tab->filePath.s, whole);
         }
     }
     ReadingStatsAddDaily((float)whole);
@@ -160,9 +166,17 @@ void ReadingStatsFlush(bool force) {
         sb.Append(fmt("%d %d\r\n", e.dateKey, e.sec));
     }
     Str data = sb.TakeStr();
-    file::WriteFile(ReadingStatsPathTemp(), data);
+    if (kProfDualWriteSidecars) {
+        file::WriteFile(ReadingStatsPathTemp(), data);
+    }
     str::Free(data);
     gReadingStats.dirtySec = 0;
+    // stream the day rows into the profile store too (own-machine rows); the
+    // profile save flushes AFTER, in the same cadence
+    for (int i = 0; i < len(gReadingStats.daily); i++) {
+        ProfileDataUpsertReadingDay(gReadingStats.daily[i].dateKey, gReadingStats.daily[i].sec);
+    }
+    ProfileDataSaveNow();
 }
 
 int ReadingStatsGetDaySec(int dateKey) {

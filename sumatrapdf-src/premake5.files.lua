@@ -701,6 +701,9 @@ function sumatrapdf_files()
     "ToolbarLayout.*",
     "MainWindowCreate.*",
     "ReadingStats.*",
+    "ProfileData.*",
+    "ProfileBackupWnd.*",
+    "ProfileSyncWnd.*",
   })
   filter { "configurations:Debug or DebugFull" }
   files_in_dir("src", {

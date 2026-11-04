@@ -335,6 +335,7 @@ export const commands = [
     "CmdArchRefLine", "Arch: Reference Line",
     "CmdFlashcardStudyTimerToggle", "Toggle Flashcard Study Session Timer",
     "CmdFlashcardStudyTimerEdit", "Edit Flashcard Study Session Timer Duration",
+    "CmdProfileBackups", "Profile: Backups...",
     "CmdNone", "Do nothing",
 ];
 

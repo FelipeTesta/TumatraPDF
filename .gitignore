@@ -61,3 +61,8 @@ Compiled/
 
 # Deprecated informativos + scratch (see TEMP/, contents ignored via TEMP/.gitignore)
 TEMP/
+
+# root-level debug artifacts (ad-hoc test captures; sumatrapdf-src/tests/tmp has its own rule)
+/tests/tmp/
+# rolled root LOG backup
+/LOG.md.old

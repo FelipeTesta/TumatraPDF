@@ -161,6 +161,18 @@ struct FlashcardStudyDocInfo {
 // lastReviewedAt, most recent first). Returns the number of entries.
 int FlashcardStudyListDocs(Vec<FlashcardStudyDocInfo>& out);
 
+// ---- shared JSON helpers (also used by ProfileData.cpp for the profile file,
+// so both storages keep the exact same escaping / parsing behavior) ----
+// write a state object (legacy "<key>": {...} shape)
+void FlashcardStudyWriteJsonValue(FILE* f, const FlashcardStudyState& state);
+// write s as a JSON string literal (escapes backslash / quote / control chars)
+void FlashcardStudyWriteJsonStringLit(FILE* f, Str s);
+// parse the union of the study-state entries of a JSON blob into the doc
+// (finds the "states" section; works on any wrapper JSON holding that shape)
+void FlashcardStudyParseJsonInto(Str json, FlashcardStudyDoc& doc);
+// value of "\"name\": \"...\"" into an owned string (nullptr when absent)
+char* FlashcardStudyParseJsonStringFieldDup(Str json, Str fieldName);
+
 // Evaluate a page-filter expression into a per-page membership vector
 // (pages[i-1] = 1 when page i is included). Returns false when the
 // expression is empty/garbage (caller treats that as "all pages").

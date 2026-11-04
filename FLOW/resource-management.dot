@@ -1,0 +1,201 @@
+digraph ResourceManagement {
+    rankdir=TB;
+    node [shape=box, style=rounded, fontname="Consolas", fontsize=9];
+    edge [fontname="Consolas", fontsize=8];
+    compound=true;
+
+    // ===================== RENDER CACHE =====================
+    subgraph cluster_render_cache {
+        label="RenderCache (sumatrapdf-src/src/RenderCache.cpp)";
+        color="#4caf50";
+        style=filled;
+        fillcolor="#e8f5e9";
+
+        cache_struct [label="RenderCache struct\n• Tile cache: Vec<CachedTile>\n  {key, bitmap, refCount, epoch}\n• Request queue: Vec<RenderRequest>\n• darkModeEpoch (invalidation)\n• gRenderCache global singleton", fillcolor="#c8e6c9", style=filled);
+        tile_lifecycle [label="Tile Lifecycle\n1. Request → RenderVisibleParts\n2. Queue → render thread\n3. Engine renders → bitmap\n4. PutTile() → cache\n5. Paint → BlitPixmap (ref++)\n6. DropCacheEntry → ref--, free if 0\n7. darkModeEpoch++ → mass invalidate", fillcolor="#bbdefb", style=filled);
+        cache_keys [label="Cache Key\n• DisplayModel* (identity)\n• pageNo (virtual for TC2)\n• rotation / zoom / tile rect\n• marginTrimEnabled / trimTop/trimBottom\n• viewportCropV2Active + cropColumn\n• darkModeEpoch", fillcolor="#bbdefb", style=filled);
+        find_optimization [label="Find Optimization (LOG.md:941)\n• Scan NEWEST-FIRST (O(1) hot hit)\n• render thread appends to cache[cacheCount]\n• requests popped from tail\n• Full hash REJECTED:\n  - no STL in base\n  - compaction moves last entry\n  - darkModeEpoch invalidation\n  - ~0.5-1ms win not worth it", fillcolor="#fff9c4", style=filled);
+        trim_cache [label="Trim Integration (LOG.md:3473)\n• ShouldCacheRendering = true (was false)\n• GetTileRectDevice/User: shrink mediabox\n• GetTileRectUser: rect.y += trim.top\n• Cache invalidated on toggle:\n  gRenderCache->FreeForDisplayModel()", fillcolor="#e1bee7", style=filled);
+        tc2_cache [label="TC2 Cache (LOG.md:2161, 2354)\n• renderPageNo = VirtualToPhysical(pageNo)\n• cache key = VIRTUAL pageNo (left/right distinct)\n• GetTileRectDevice/User: route virtual→physical\n• mediabox halved for column\n• colX shift at render coords only", fillcolor="#e3f2fd", style=filled);
+
+        // RenderCache Methods (Serena)
+        cache_methods [label="RenderCache Methods\n• Find / Exists / DropCacheEntry / DropCacheEntryIfNotUsed\n• Add / FreePage / FreeForDisplayModel\n• FreeNotVisible / KeepForDisplayModel / Invalidate\n• GetTileRes / GetMaxTileRes / ReduceTileSize\n• RequestRendering / RequestPredictiveRendering\n• Render / GetRenderDelay / GetNextRequest\n• ClearCurrentRequest / CancelRenderingBlocking\n• IsRenderingFor / AbortRendering / ClearQueueForDisplayModel\n• AbortCurrentRequest / PaintTile / Paint\n• LogCacheSize / SerializeQueueState / UpdateRenderInfo\n• RecordCacheChange / SerializeCacheState / UpdateCacheInfo", fillcolor="#e3f2fd", style=filled);
+        cache_debug [label="Debug Windows\n• DebugTextWnd::ScheduleDelete / LayoutToClient\n• UpdateTheme / SetTextContent / Create / WndProc\n• CreateRenderInfoWindow / ToggleRenderInfoWindow\n• IsRenderInfoWindowVisible / SetRenderInfoTextOnUI\n• CreateCacheInfoWindow / ToggleCacheInfoWindow\n• IsCacheInfoWindowVisible / SetCacheInfoTextOnUI", fillcolor="#fff9c4", style=filled);
+    }
+
+    // ===================== RENDER THREAD =====================
+    subgraph cluster_render_thread {
+        label="Render Thread";
+        color="#ff9800";
+        style=filled;
+        fillcolor="#fff3e0";
+
+        thread [label="Render Thread\n• Single worker thread\n• Processes RenderRequest queue\n• Calls EngineBase::RenderPage()\n• Posts WM_PAINT on completion\n• AbortCookie for interruption", fillcolor="#c8e6c9", style=filled);
+        request_queue [label="RenderRequest Queue\n• Vec<RenderRequest> (LIFO for predictive)\n• GetNextRequest() pops tail\n• Request: {dm, pageNo, rect, rot, zoom, target}\n• Predictive: nearby pages pre-rendered", fillcolor="#bbdefb", style=filled);
+        abort [label="AbortCookie (EngineBase.h:398)\n• Render interruption helper\n• Checked in render loop\n• Set on RelayoutFrame / tab close\n• Prevents stale renders", fillcolor="#fff9c4", style=filled);
+        thread_guard [label="Render Thread Guard (LOG.md:2099)\n• Discards queued requests with invalid pageNo\n• Post-relayout (2N→N page count change)\n• Instead of feeding engine → ReportIf storm", fillcolor="#c8e6c9", style=filled);
+        render_thread_data [label="RenderThreadData class\n• Thread-local render state\n• fz_context for rendering\n• AbortCookie for cancellation\n• Serialized queue state on shutdown", fillcolor="#e3f2fd", style=filled);
+    }
+
+    // ===================== DARK MODE EPOCH =====================
+    subgraph cluster_epoch {
+        label="Dark Mode Epoch Invalidation";
+        color="#607d8b";
+        style=filled;
+        fillcolor="#eceff1";
+
+        epoch_inc [label="DisplayModel::ApplyTheme()\n• Increments darkModeEpoch\n• gRenderCache->FreeAll()\n• Posts WM_THEMECHANGED\n• ~1ms penalty on theme switch", fillcolor="#c8e6c9", style=filled);
+        epoch_check [label="RenderCache::Find\n• Skips entries with stale epoch\n• Entry.epoch != cache.darkModeEpoch\n• Forces re-render with new colors", fillcolor="#bbdefb", style=filled);
+    }
+
+    // ===================== MEMORY ARENAS =====================
+    subgraph cluster_arenas {
+        label="Memory Arenas (base/)";
+        color="#795548";
+        style=filled;
+        fillcolor="#efebe9";
+
+        temp_arena [label="Temp Arena (base/Arena.h)\n• Per-frame / per-function\n• Auto-free on scope exit\n• StrBuilder, fmt(), logf use this\n• No manual free needed", fillcolor="#bbdefb", style=filled);
+        global_arena [label="Global Arena\n• Long-lived allocations\n• Engine, DisplayModel, cache bitmaps\n• Freed on shutdown / doc close", fillcolor="#c8e6c9", style=filled);
+        str [label="Str / WStr (base/Str.h)\n• {char*/wchar_t*, int len}\n• NOT NUL-terminated by default\n• StrL() = compile-time len\n• CStrTemp() → NUL-terminated copy\n• str::Builder sb; sb.AppendChar(); sb.TakeStr()", fillcolor="#bbdefb", style=filled);
+    }
+
+    // ===================== ENGINE RESOURCES =====================
+    subgraph cluster_engine_res {
+        label="Engine Resources (MuPDF)";
+        color="#9c27b0";
+        style=filled;
+        fillcolor="#f3e5f5";
+
+        fz_context [label="fz_context (MuPDF)\n• Per-EngineMupdf instance\n• Allocator / store / device cache\n• fz_new_context / fz_drop_context\n• Thread-safe ref counting\n• Per-thread contexts: gPerThreadContexts / gPerThreadContextsCs\n• GetOrClonePerThreadContext() / ReleasePerThreadContext()", fillcolor="#bbdefb", style=filled);
+        fz_document [label="fz_document\n• fz_open_document / fz_drop_document\n• Page count / TOC / metadata\n• Password handling\n• Reference counted\n• fz_lock_context_cs / fz_unlock_context_cs", fillcolor="#c8e6c9", style=filled);
+        fz_page [label="fz_page\n• fz_load_page / fz_drop_page\n• fz_bound_page → mediabox\n• fz_run_page → render\n• Page cache in fz_context\n• GetOrBuildPageDisplayList()", fillcolor="#bbdefb", style=filled);
+        fz_pixmap [label="fz_pixmap / fz_image\n• Render output → bitmap\n• fz_new_pixmap_from_data\n• Color space conversion\n• Reference counted\n• fz_convert_pixmap2() for RGB", fillcolor="#e1bee7", style=filled);
+        content_bbox [label="fz_content_bbox_device\n• Content bounding box calculation\n• fz_content_bbox_add_rect / walk_*\n• Used for dark mode skip rects\n• BuildPageDarkLegacySkipRects()\n• FzNewContentBBoxDevice()", fillcolor="#fff9c4", style=filled);
+        dark_legacy [label="Dark Mode Legacy Skip\n• DarkLegacySkipHash / KeepLargestArtwork\n• DarkLegacyTileFindRoot / GroupImageTiles\n• DarkLegacySkipKeepLargestArtwork\n• BuildPageDarkLegacySkipRects()\n• EngineMupdfInvalidateDarkMode()", fillcolor="#fff9c4", style=filled);
+        image_collect [label="fz_image_collect_device\n• Collect images from page content\n• fz_img_collect_add / fill_image / clip_*\n• FzCollectImagesFromPageContent()\n• FzFindImageByRect() / FzGetKeptPageImage()\n• FzNewImageCollectDevice()", fillcolor="#e3f2fd", style=filled);
+    }
+
+    // ===================== GDI+ RESOURCES =====================
+    subgraph cluster_gdi {
+        label="GDI+ Resources";
+        color="#e91e63";
+        style=filled;
+        fillcolor="#fce4ec";
+
+        gdi_bitmap [label="Gdiplus::Bitmap\n• RenderCache tile bitmaps\n• 32bpp PARGB (alpha premultiplied)\n• BlitPixmap → GDI DrawImage\n• Cached: ~1ms blit", fillcolor="#c8e6c9", style=filled);
+        gdi_graphics [label="Gdiplus::Graphics\n• FromHDC(hdc) for canvas\n• Text rendering (GDI+ for quality)\n• Contrast overlay: AlphaBlend\n• Invert: ColorMatrix", fillcolor="#bbdefb", style=filled);
+        gdi_brushes [label="GDI Brushes / Pens\n• Cached in DisplayModel\n• Selection / Highlight / Contrast\n• Theme-aware colors\n• Freed on theme change", fillcolor="#bbdefb", style=filled);
+        recolor [label="RecolorPixmap / InvertPixmap\n• RenderCache::Paint cached + non-cached\n• ShouldUpdateBitmapColorsLegacy()\n• 32bpp/24bpp/paletted/GetDIBits paths\n• Per-pixel 255-v (true negative)\n• Images stay legible", fillcolor="#e1bee7", style=filled);
+    }
+
+    // ===================== FILE HANDLES =====================
+    subgraph cluster_files {
+        label="File Handles";
+        color="#1565c0";
+        style=filled;
+        fillcolor="#e3f2fd";
+
+        file_handles [label="File Handles\n• Engine holds file open\n• fz_document → OS handle\n• Closed on Engine release\n• ReloadDocument: close → reopen\n• FzStreamFromData / FzReadFileIfSmall\n• FzOpenOrReadFile()", fillcolor="#bbdefb", style=filled);
+        temp_files [label="Temp Files\n• Flashcard export: %TEMP%\\tumatrapdf-...\n• Image edit: %TEMP%\\tumatrapdf-paintedit-<pid>.png\n• Watch timer cleans up\n• Crash recovery: cleanup on startup\n• File::ReadFile() for unicode paths", fillcolor="#fff9c4", style=filled);
+    }
+
+    // ===================== PER-THREAD CONTEXTS =====================
+    subgraph cluster_thread_ctx {
+        label="Per-Thread Contexts (EngineMupdf.cpp)";
+        color="#1565c0";
+        style=filled;
+        fillcolor="#e3f2fd";
+
+        per_thread [label="gPerThreadContexts / gPerThreadContextsCs\n• Vec<fz_context*> per thread\n• Critical section for access\n• GetOrClonePerThreadContext()\n• ReleasePerThreadContext()\n• ReleaseAllPerThreadContexts()\n• ContextThreadID class for tracking", fillcolor="#c8e6c9", style=filled);
+        context_clone [label="EngineMupdf::Clone()\n• Clones fz_context for thread\n• fz_clone_context()\n• Used for background rendering\n• PasswordCloner for encrypted docs", fillcolor="#bbdefb", style=filled);
+    }
+
+    // ===================== CLEANUP FLOWS =====================
+    subgraph cluster_cleanup {
+        label="Cleanup Flows";
+        color="#f44336";
+        style=filled;
+        fillcolor="#ffebee";
+
+        doc_close [label="Document Close\nTabs.cpp:CloseTab\n• ctrl->Release()\n• delete displayModel\n• gRenderCache->FreeForDisplayModel(dm)\n• FileState saved to history\n• UpdateFileStateForTab() / FillFileStateExtrasFromWindow()", fillcolor="#c8e6c9", style=filled);
+        win_close [label="Window Close\nMainWindow::OnDestroy\n• DestroyToolbar() / DestroyToolbar2()\n• Destroy Flashcard/Edit toolbars\n• SaveSettings()\n• Remove from gWindows\n• WaitForPendingControllerDeletes()", fillcolor="#bbdefb", style=filled);
+        shutdown [label="App Shutdown\nWinMain exit\n• SaveSettings()\n• gRenderCache->FreeAll()\n• EngineMupdf: fz_drop_context\n• ReleaseAllPerThreadContexts()\n• GDI+ shutdown\n• Temp file cleanup\n• DeleteControllerAsync() / WaitForPendingControllerDeletes()", fillcolor="#bbdefb", style=filled);
+        cache_serial [label="Cache Serialization\n• RenderCache::SerializeQueueState\n• SerializeCacheState / SerializeCacheChange\n• SerializePredictive / SerializeRequest / SerializeFinished\n• FormatCacheBytesTemp()\n• UpdateRenderInfo / UpdateCacheInfo / RecordCacheChange", fillcolor="#e3f2fd", style=filled);
+    }
+
+    // ===================== EDGES =====================
+    cache_struct -> tile_lifecycle;
+    cache_struct -> cache_keys;
+    cache_struct -> find_optimization;
+    cache_struct -> trim_cache;
+    cache_struct -> tc2_cache;
+    cache_struct -> cache_methods;
+    cache_struct -> cache_debug;
+
+    tile_lifecycle -> thread [style=dotted, label="render thread"];
+    thread -> request_queue;
+    thread -> abort;
+    thread -> render_thread_data;
+    request_queue -> abort [style=dotted];
+
+    epoch_inc -> epoch_check;
+    epoch_inc -> cache_struct [style=dotted, label="FreeAll()"];
+
+    temp_arena -> str [style=dotted];
+    global_arena -> fz_context [style=dotted];
+    global_arena -> cache_struct [style=dotted];
+    global_arena -> per_thread [style=dotted];
+
+    fz_context -> fz_document;
+    fz_document -> fz_page;
+    fz_page -> fz_pixmap;
+    fz_pixmap -> gdi_bitmap [style=dotted, label="render output"];
+
+    gdi_bitmap -> cache_struct [style=dotted, label="PutTile"];
+    cache_struct -> gdi_bitmap [style=dotted, label="BlitPixmap"];
+
+    fz_context -> per_thread [style=dotted];
+    per_thread -> context_clone [style=dotted];
+    fz_page -> content_bbox [style=dotted];
+    fz_page -> dark_legacy [style=dotted];
+    fz_page -> image_collect [style=dotted];
+
+    content_bbox -> dark_legacy [style=dotted];
+    image_collect -> fz_pixmap [style=dotted];
+
+    recolor -> cache_struct [style=dotted, label="PaintTile"];
+    recolor -> engine_render [style=dotted, label="non-cached Paint"];
+
+    doc_close -> cache_struct [style=dotted, label="FreeForDisplayModel"];
+    doc_close -> fz_document [style=dotted, label="drop_document"];
+    win_close -> doc_close;
+    shutdown -> win_close;
+    shutdown -> cache_struct [style=dotted, label="FreeAll()"];
+    shutdown -> fz_context [style=dotted, label="drop_context"];
+    shutdown -> per_thread [style=dotted, label="ReleaseAllPerThreadContexts"];
+    shutdown -> cache_serial [style=dotted];
+
+    temp_files -> shutdown [style=dotted];
+
+    // Cross-refs
+    trim_cache ..> dm_trim [style=dotted, label="DisplayModel trim fields"];
+    tc2_cache ..> dm_virtual [style=dotted, label="VirtualToPhysical"];
+    thread_guard ..> tc2_cache [style=dotted, label="2N→N page count"];
+    cache_serial ..> cache_debug [style=dotted];
+
+    // Legend
+    subgraph cluster_legend {
+        label="Legend";
+        color="#ccc";
+        cache [label="RenderCache", fillcolor="#e8f5e9", style=filled];
+        thread [label="Render Thread", fillcolor="#fff3e0", style=filled];
+        epoch [label="Dark Mode Epoch", fillcolor="#eceff1", style=filled];
+        arena [label="Memory Arenas", fillcolor="#efebe9", style=filled];
+        engine [label="MuPDF Resources", fillcolor="#f3e5f5", style=filled].
+        gdi [label="GDI+", fillcolor="#fce4ec", style=filled].
+        files [label="File Handles", fillcolor="#e3f2fd", style=filled].
+        cleanup [label="Cleanup", fillcolor="#ffebee", style=filled].
+        per_thread [label="Per-Thread Contexts", fillcolor="#e3f2fd", style=filled].
+    }
+}

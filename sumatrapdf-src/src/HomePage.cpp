@@ -22,6 +22,7 @@
 #include "FileHistory.h"
 #include "GlobalPrefs.h"
 #include "ReadingStats.h"
+#include "ProfileData.h"
 #include "SumatraPDF.h"
 #include "MainWindow.h"
 #include "Commands.h"
@@ -931,6 +932,27 @@ struct HomeHelpBtnWnd : VirtWnd {
     TempStr GetTooltipTemp(Point) override;
 };
 
+// "Sync" text button next to the "Stats" header — opens the Profile Sync
+// dialog. Hover brightens the text; idle matches the Stats title color
+// (slightly dimmer). Hit-testable (clears VirtWndText's vwfNoHitTest).
+static Kind kindHomeSyncBtnWnd = "homeSyncBtnWnd";
+struct HomeSyncBtnWnd : VirtWndText {
+    MainWindow* win = nullptr;
+
+    HomeSyncBtnWnd(Str s, PlatformFont* f) : VirtWndText(s, f) {
+        kind = kindHomeSyncBtnWnd;
+        flags &= ~vwfNoHitTest; // text buttons are hit targets
+        align = VirtWndTextAlign::Center;
+    }
+    ~HomeSyncBtnWnd() override = default;
+
+    void Paint(VirtWndPaintCtx&) override;
+    bool OnMouseDown(VirtWndMouseEvent&) override;
+    bool OnMouseUp(VirtWndMouseEvent&) override;
+    bool OnSetCursor(Point) override;
+    TempStr GetTooltipTemp(Point) override;
+};
+
 struct HomeEntryWnd;
 
 // the pin icon of a list-view row. It is drawn by DrawHomeListRow, so this is a
@@ -1007,11 +1029,15 @@ struct HomeChromeWnd : VirtWnd {
     HomeViewIconWnd* listView = nullptr;
     HomeOpenDocWnd* openDoc = nullptr;
     HomeHelpBtnWnd* helpBtn = nullptr;
+    HomeSyncBtnWnd* syncBtn = nullptr;
 };
 
 static HomeChromeWnd* EnsureHomeChrome(MainWindow* win);
 static HomeEntriesWnd* HomeEntries(MainWindow* win);
 static void HomePageSyncChrome(HomePageLayout& l);
+
+// Profile Sync dialog (ProfileSyncWnd.cpp): opens from the Home "Sync" button.
+void ShowProfileSyncDialog(MainWindow* win);
 
 constexpr int kOpenDocumentYShift = 7;
 constexpr int kThumbsMiddleMargin = 32;
@@ -1477,12 +1503,12 @@ void HomeStatsWnd::Paint(VirtWndPaintCtx& ctx) {
         SYSTEMTIME st{};
         GetLocalTime(&st);
         int todayKey = (int)st.wYear * 10000 + (int)st.wMonth * 100 + (int)st.wDay;
-        int readTodaySec = ReadingStatsGetDaySec(todayKey);
-        int readTotalSec = ReadingStatsGetTotalSec();
-        int fcTodaySec = FlashcardStatsGetDaySec(todayKey);
-        int fcTotalSec = FlashcardStatsGetTotalSec();
-        int fcTodayCards = FlashcardStatsGetDayCards(todayKey);
-        int fcTotalCards = FlashcardStatsGetTotalCards();
+        int readTodaySec = ProfileDataReadingDaySec(todayKey);
+        int readTotalSec = ProfileDataReadingTotalSec();
+        int fcTodaySec = ProfileDataStudyDaySec(todayKey);
+        int fcTotalSec = ProfileDataStudyTotalSec();
+        int fcTodayCards = ProfileDataStudyDayCards(todayKey);
+        int fcTotalCards = ProfileDataStudyTotalCards();
         // user-specified format (2026-10-25):
         // "Flashcards: Today 13 cards / 10m | Total: 100 cards / 8h 20m"
         TempStr totals =
@@ -1613,7 +1639,7 @@ void HomeStatsWnd::Paint(VirtWndPaintCtx& ctx) {
     for (int doy = 1; doy <= daysInYear; doy++) {
         int mm = 0, dd = 0;
         HomeStatsDateFromDayOfYear(year, doy, &mm, &dd, nullptr);
-        int sec = ReadingStatsGetDaySec(year * 10000 + mm * 100 + dd);
+        int sec = ProfileDataReadingDaySec(year * 10000 + mm * 100 + dd);
         int idx = firstCol + doy - 1;
         int row = idx % 7;
         int col = idx / 7;
@@ -1683,8 +1709,8 @@ void HomeStatsWnd::PaintGraph(Gdiplus::Graphics* g, Rect b, int heatX0, int heat
         int mm = 0, dd = 0;
         HomeStatsDateFromDayOfYear(year, doy, &mm, &dd, nullptr);
         int dateKey = year * 10000 + mm * 100 + dd;
-        int readSec = ReadingStatsGetDaySec(dateKey);
-        int fcSec = FlashcardStatsGetDaySec(dateKey);
+        int readSec = ProfileDataReadingDaySec(dateKey);
+        int fcSec = ProfileDataStudyDaySec(dateKey);
         if (readSec > maxSec) maxSec = readSec;
         if (fcSec > maxSec) maxSec = fcSec;
     }
@@ -1712,8 +1738,8 @@ void HomeStatsWnd::PaintGraph(Gdiplus::Graphics* g, Rect b, int heatX0, int heat
         int mm = 0, dd = 0;
         HomeStatsDateFromDayOfYear(year, doy, &mm, &dd, nullptr);
         int dateKey = year * 10000 + mm * 100 + dd;
-        int readSec = ReadingStatsGetDaySec(dateKey);
-        int fcSec = FlashcardStatsGetDaySec(dateKey);
+        int readSec = ProfileDataReadingDaySec(dateKey);
+        int fcSec = ProfileDataStudyDaySec(dateKey);
         float x = (float)rcGrid.x + ((float)(doy - 1) / (float)(daysInYear - 1)) * (float)rcGrid.dx;
         if (readSec > 0) {
             float y = (float)chartBottom - ((float)readSec / (float)maxSec) * (float)chartH;
@@ -1725,7 +1751,8 @@ void HomeStatsWnd::PaintGraph(Gdiplus::Graphics* g, Rect b, int heatX0, int heat
         }
         if (doy == todayDoy) {
             // TODAY marker: small orange cross-hair on the point
-            float yRead = (float)chartBottom - ((float)ReadingStatsGetDaySec(dateKey) / (float)maxSec) * (float)chartH;
+            float yRead =
+                (float)chartBottom - ((float)ProfileDataReadingDaySec(dateKey) / (float)maxSec) * (float)chartH;
             g->DrawLine(&todayPen, x - (float)dpi(4), yRead, x + (float)dpi(4), yRead);
             g->DrawLine(&todayPen, x, yRead - (float)dpi(4), x, yRead + (float)dpi(4));
         }
@@ -1911,8 +1938,8 @@ TempStr HomeStatsWnd::GetTooltipTemp(Point pt) {
         return {};
     }
     int dateKey = year * 10000 + mm * 100 + dd;
-    int readSec = ReadingStatsGetDaySec(dateKey);
-    int fcSec = FlashcardStatsGetDaySec(dateKey);
+    int readSec = ProfileDataReadingDaySec(dateKey);
+    int fcSec = ProfileDataStudyDaySec(dateKey);
     TempStr readT = HomeStatsFormatMinTemp(readSec);
     TempStr fcT = HomeStatsFormatMinTemp(fcSec);
     return fmt("%d-%02d-%02d: Read: %s | Flashcards: %s", year, mm, dd, Str(readT), Str(fcT));
@@ -2260,6 +2287,23 @@ static void LayoutHomePage(HomePageLayout& l) {
     Size txtSize = hdr->GetIdealSize(true);
     Rect rcHdr(thumbsStartX, hdrY, txtSize.dx, txtSize.dy);
     hdr->SetBounds(rcHdr);
+
+    // "Sync" button next to the Stats header — opens the Profile Sync dialog.
+    // Always shown when chrome exists (opens the profile window regardless of
+    // stats presence). Vertical center on rcHdr; RTL mirrors to the left of hdr.
+    HomeSyncBtnWnd* syncBtn = chrome->syncBtn;
+    syncBtn->SetText(_TRA("⟳ Sync"));
+    syncBtn->font = GetPlatformFont(fontText);
+    syncBtn->isRtl = isRtl;
+    Size syncSize = syncBtn->GetIdealSize(true);
+    int syncGap = DpiScale(hdc, 8);
+    Rect rcSync;
+    if (isRtl) {
+        rcSync = {rcHdr.x - syncGap - syncSize.dx, rcHdr.y + (rcHdr.dy - syncSize.dy) / 2, syncSize.dx, syncSize.dy};
+    } else {
+        rcSync = {rcHdr.x + rcHdr.dx + syncGap, rcHdr.y + (rcHdr.dy - syncSize.dy) / 2, syncSize.dx, syncSize.dy};
+    }
+    syncBtn->SetBounds(rcSync);
 
     // --- reading-stats band (FASE B3/D1): its own section under the title,
     // dropped when the remaining space can't fit books + search + thumbs ---
@@ -2854,6 +2898,32 @@ TempStr HomeHelpBtnWnd::GetTooltipTemp(Point) {
     return str::DupTemp(_TRA("Keyboard Shortcuts"));
 }
 
+void HomeSyncBtnWnd::Paint(VirtWndPaintCtx& ctx) {
+    // idle = slightly dimmer than the Stats title; hover = full brightness
+    textColor = HasFlag(vwfHovered) ? ThemeWindowTextColor() : ThemeWindowDarkerTextColor();
+    VirtWndText::Paint(ctx);
+}
+
+bool HomeSyncBtnWnd::OnMouseDown(VirtWndMouseEvent&) {
+    return true; // consume: the click stays on the button
+}
+
+bool HomeSyncBtnWnd::OnMouseUp(VirtWndMouseEvent&) {
+    if (win) {
+        ShowProfileSyncDialog(win);
+    }
+    return true;
+}
+
+bool HomeSyncBtnWnd::OnSetCursor(Point) {
+    SetCursorCached(IDC_HAND);
+    return true;
+}
+
+TempStr HomeSyncBtnWnd::GetTooltipTemp(Point) {
+    return str::DupTemp(_TRA("Sync profile"));
+}
+
 //--- tip links
 
 HomeTipWnd::~HomeTipWnd() {
@@ -3142,6 +3212,10 @@ static HomeChromeWnd* EnsureHomeChrome(MainWindow* win) {
     chrome->helpBtn->win = win;
     chrome->AddChild(chrome->helpBtn);
 
+    chrome->syncBtn = new HomeSyncBtnWnd(StrL("⟳ Sync"), nullptr);
+    chrome->syncBtn->win = win;
+    chrome->AddChild(chrome->syncBtn);
+
     win->homeRoot->SetChild(chrome);
     return chrome;
 }
@@ -3256,6 +3330,9 @@ static void HomePageSyncChrome(HomePageLayout& l) {
 
     chrome->booksHdr->textColor = ThemeWindowTextColor();
     chrome->booksHdr->SetBounds(l.rcBooksHdr);
+
+    // re-apply: the bounds were set before the parent was positioned
+    chrome->syncBtn->SetBounds(chrome->syncBtn->lastBounds);
 
     // one click target covering the icon and the link text
     Rect rcOpen = l.rcIconOpen.Union(l.openDoc->lastBounds);

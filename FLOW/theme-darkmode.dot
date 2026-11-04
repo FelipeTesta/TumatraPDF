@@ -1,0 +1,134 @@
+digraph ThemeDarkMode {
+    rankdir=TB;
+    node [shape=box, style=rounded, fontname="Consolas", fontsize=9];
+    edge [fontname="Consolas", fontsize=8];
+    compound=true;
+
+    // ===================== DMLIB (Dark Mode Lib) =====================
+    subgraph cluster_dmlib {
+        label="dmlib (ext/darkmodelib) — gUseDarkModeLib=true on x64";
+        color="#607d8b";
+        style=filled;
+        fillcolor="#eceff1";
+
+        dmlib_core [label="dmlib::DarkModeLib class\n• Hooks: DwmSetWindowAttribute\n• Subclasses: WNDPROC via SetWindowSubclass\n• Intercepts WM_NCPAINT / WM_ERASEBKGND\n• Paints title bar / borders / scrollbars\n• Per-window: setWindowDarkMode(hwnd, true)", fillcolor="#c8e6c9", style=filled);
+        dmlib_cd [label="dmlib::setWindowNotifyCustomDrawSubclass()\nTheme.cpp:54\n• Intercepts NM_CUSTOMDRAW at WNDPROC level\n• OWNS ITEMPREPAINT / ITEMPOSTPAINT on ReBar\n• LOG s36-bb: only CDDS_POSTPAINT reaches ReBarWndProc\n• Blocks custom draw for our toolbars!", fillcolor="#ffcdd2", style=filled, penwidth=2.0);
+        dmlib_colors [label="Theme colors API\n• ThemeControlBackgroundColor()\n• ThemeWindowTextColor()\n• ThemeHighlightColor()\n• Used by WndProcToolbar WM_CTLCOLOR", fillcolor="#bbdefb", style=filled);
+        dmlib_hooks [label="Hooked Window Classes\n• #32770 (Dialog)\n• ReBarWindow32\n• ToolbarWindow32\n• Edit / Static / Button\n• SysTabControl32\n• WndProcSumatraFrame (custom caption)", fillcolor="#bbdefb", style=filled);
+    }
+
+    // ===================== THEME SWITCHING =====================
+    subgraph cluster_theme_switch {
+        label="Theme Switching";
+        color="#4285f4";
+        style=filled;
+        fillcolor="#e3f2fd";
+
+        theme_enum [label="Theme Mode\n• System (follows OS)\n• Light\n• Dark\n• gGlobalPrefs->theme", fillcolor="#c8e6c9", style=filled);
+        apply_theme [label="DisplayModel::ApplyTheme()\nDisplayModel.cpp\n• Increments darkModeEpoch\n• gRenderCache->FreeAll()\n• Post WM_THEMECHANGED to all windows\n• RelayoutFrame()\n• ApplyDarkModeToInfotip()\n• SetWindowBorderColor() / SetWindowRoundedCorners()\n• UpdateWindowFrameBorderColor()\n• DwmFrameBorderColorForCurrentTheme()", fillcolor="#bbdefb", style=filled);
+        epoch [label="darkModeEpoch (RenderCache)\n• Incremented on theme change\n• RenderCache::Find skips stale entries\n• ~1ms penalty on switch\n• Cached tiles invalidated\n• DebugTextWnd::UpdateTheme()", fillcolor="#fff9c4", style=filled);
+        apply_dark [label="ApplyDarkModeToInfotip()\n• Updates tooltip/theme colors\n• SetWindowRoundedCorners()\n• SetWindowBorderColor()\n• DwmFrameBorderColorForCurrentTheme()", fillcolor="#e3f2fd", style=filled);
+    }
+
+    // ===================== TOOLBAR THEME =====================
+    subgraph cluster_toolbar_theme {
+        label="Toolbar Theme Handling (Critical Fix)";
+        color="#e91e63";
+        style=filled;
+        fillcolor="#fce4ec";
+
+        // The problem
+        prob [label="PROBLEM: dmlib intercepts NM_CUSTOMDRAW\nbefore subclass chain sees it\n→ Secondary toolbars get NO themed draw\n→ Buttons render WHITE/BLANK", fillcolor="#ffcdd2", style=filled, penwidth=2.0);
+
+        // The fix: Flashcard pattern
+        fc_pattern [label="FLASHCARD PATTERN (WORKS)\nFlashcardToolbarCreate:\n1. ToolbarSetupSecondaryRebar(hwndRebar)\n   SetWindowSubclass(ReBarWndProc, ID=42)\n   RB_SETBARINFO + RB_SETBKCOLOR\n   dmlib::setWindowNotifyCustomDrawSubclass\n2. Create toolbar\n3. SetWindowTheme(hwndToolbar, L\"\", L\"\") ← BEFORE buttons\n4. TbAddButtons(iBitmap=TbIcon::Text (-2))\n5. TbSetBitmapSize + TbSetButtonSize\n6. ShowWindow(hwndToolbar, SW_SHOW)\n7. RB_INSERTBAND\n8. ToolbarSubclassSecondaryToolbar(win, hwnd) ← AFTER buttons\n   SetWindowSubclass(WndProcToolbar)\n9. LIFO install order: ours FIRST (after dmlib)", fillcolor="#c8e6c9", style=filled, penwidth=2.0);
+
+        // Arch/Edit fix
+        arch_fix [label="ARCH/EDIT FIX (Replicate Flashcard)\nCreateToolbar2 / EditToolbarCreate:\n1. ToolbarSetupSecondaryRebar(hwndRebar)\n   (shared ReBarWndProc ID=42)\n2. Create toolbar\n3. SetWindowTheme(hwndToolbar, L\"\", L\"\") ← BEFORE TbAddButtons\n4. TbAddButtons(iBitmap=TbIcon::Text)\n5. TbSetBitmapSize + TbSetButtonSize\n6. TbGetItemRect\n7. ShowWindow(hwndToolbar, SW_SHOW)\n8. RB_INSERTBAND\n9. ToolbarSubclassSecondaryToolbar(win, hwnd)\n10. NM_CUSTOMDRAW extended in ReBarWndProc:\n    checks ALL 4 toolbars:\n    hwndToolbar, hwndToolbar2,\n    hwndToolbarFlashcard, hwndToolbarEdit", fillcolor="#c8e6c9", style=filled);
+
+        // Custom draw handling
+        cd_main [label="ReBarWndProc NM_CUSTOMDRAW (Toolbar.cpp:972)\n• Extended check:\n  isToolbarCustomDraw =\n    win->hwndToolbar == chwnd ||\n    win->archTools.hwndToolbar2 == chwnd ||\n    win->flashcard.hwndToolbarFlashcard == chwnd ||\n    win->editTools.hwndToolbarEdit == chwnd;\n• If true: handle custom draw\n• Uses ThemeControlBackgroundColor()\n• Draws centered text (wipes comctl face)", fillcolor="#bbdefb", style=filled);
+
+        cd_flash [label="FlashcardReBarSubclassProc\nFlashcardToolbar.cpp:145\n• Handles NM_CUSTOMDRAW directly\n• ITEMPREPAINT + ITEMPOSTPAINT\n• Wipes comctl face, re-draws centered\n• TBSTYLE_EX_MIXEDBUTTONS set", fillcolor="#fff9c4", style=filled);
+
+        cd_arch [label="ToolbarArchEditRebarSubclassProc\nToolbar.cpp:3191 (SHARED Arch/Edit)\n• NM_CUSTOMDRAW wipe+redraw\n• Uses Theme colors\n• Installed AFTER dmlib (LIFO → first)\n• Handles ITEMPOSTPAINT for checked underline", fillcolor="#e1bee7", style=filled);
+    }
+
+    // ===================== WM_CTLCOLOR =====================
+    subgraph cluster_ctlcolor {
+        label="WM_CTLCOLOR Handling";
+        color="#ff9800";
+        style=filled;
+        fillcolor="#fff3e0";
+
+        ctlcolor [label="WndProcToolbar WM_CTLCOLORSTATIC/EDIT/BTN\nToolbar.cpp:1700\n• Returns ThemeControlBackgroundColor() brush\n• Sets text color: ThemeWindowTextColor()\n• Sets bk mode: TRANSPARENT\n• Applies to child controls (page box, find box)", fillcolor="#c8e6c9", style=filled);
+        rebar_ctlcolor [label="ReBarWndProc WM_CTLCOLOR\n• Same theme colors for bands\n• RB_SETBKCOLOR in ToolbarSetupSecondaryRebar", fillcolor="#bbdefb", style=filled);
+        canvas_ctlcolor [label="Canvas WM_CTLCOLOR\n• OnEraseBkgnd: ThemeControlBackgroundColor()\n• Text color: ThemeWindowTextColor()\n• Selection: ThemeHighlightColor()", fillcolor="#bbdefb", style=filled);
+    }
+
+    // ===================== SETWINDOWTHEME STRIP =====================
+    subgraph cluster_strip {
+        label="SetWindowTheme Strip (CRITICAL ORDER)";
+        color="#f44336";
+        style=filled;
+        fillcolor="#ffebee";
+
+        strip_order [label="CORRECT ORDER (Toolbar.cpp:3062, 2893, 463, 125):\n1. CreateWindowEx(TOOLBARCLASSNAME)\n2. TbSetButtonStructSize()\n3. SetWindowTheme(hwnd, L\"\", L\"\") ← STRIP HERE\n4. TbAddButtons(iBitmap=TbIcon::Text)\n5. TbSetBitmapSize / TbSetButtonSize\n6. TbGetItemRect\n7. ShowWindow(SW_SHOW)\n8. SetWindowLongPtr(WndProcToolbar) ← SUBCLASS AFTER\n\n❌ WRONG: ToolbarApplyThemeToRebar() does\n   SetWindowTheme AFTER buttons\n   → Invalidates comctl layout\n   → TB_GETITEMRECT = 0\n   → ReportIf → exitCode=105", fillcolor="#c8e6c9", style=filled, penwidth=2.0);
+    }
+
+    // ===================== CANVAS / DOCUMENT =====================
+    subgraph cluster_canvas {
+        label="Canvas / Document Theme";
+        color="#795548";
+        style=filled;
+        fillcolor="#efebe9";
+
+        canvas_theme [label="Canvas Background\n• OnEraseBkgnd: ThemeControlBackgroundColor()\n• Text color: ThemeWindowTextColor()\n• Selection: ThemeHighlightColor()", fillcolor="#bbdefb", style=filled);
+        contrast_overlay [label="Contrast Overlay (PDF)\n• WS_EX_LAYERED child window\n• Alpha = opacity%\n• Black veil: pixel × (1-alpha)\n• Per-doc persist\n• CreateContrastOverlay() / RestoreContrastOverlay()\n• AlphaFromOpacity static helper", fillcolor="#e1bee7", style=filled);
+        md_contrast [label="Markdown Contrast (WebView2)\n• CSS filter via MarkdownContrastJs()\n• body bg #FAFAFA/#050505 + gray text\n• opacity scales text gray\n• invert swaps colors\n• Single source (R2 fix)\n• CreateContrastOverlay no-op for MD\n• RestoreContrastOverlay on OnDocumentComplete", fillcolor="#fff9c4", style=filled);
+        invert_colors [label="Invert Colors\n• RecolorPixmap in RenderCache\n• cached + non-cached Paint\n• Per-pixel 255-v (true negative)\n• Images stay legible\n• ShouldUpdateBitmapColorsLegacy()", fillcolor="#e1bee7", style=filled);
+        cad_theme [label="CAD Enhancement Theme\n• EngineMupdf::RunCadDetection()\n• DarkLegacySkipRects / DarkLegacySkipHash\n• DarkLegacyTileFindRoot / GroupImageTiles\n• DarkLegacySkipKeepLargestArtwork", fillcolor="#fff9c4", style=filled);
+    }
+
+    // ===================== EDGES =====================
+    theme_enum -> apply_theme;
+    apply_theme -> epoch;
+    apply_theme -> apply_dark;
+    apply_dark -> relayout [style=dotted];
+
+    dmlib_cd -> prob;
+    prob -> fc_pattern [label="reference"];
+    fc_pattern -> arch_fix [label="replicate"];
+    arch_fix -> cd_main;
+    arch_fix -> cd_flash;
+    arch_fix -> cd_arch;
+    cd_main -> ctlcolor [style=dotted];
+    cd_main -> rebar_ctlcolor [style=dotted];
+
+    strip_order -> prob [style=dashed, label="prevents"];
+
+    epoch -> canvas_theme [style=dotted];
+    epoch -> contrast_overlay [style=dotted];
+    epoch -> invert_colors [style=dotted];
+    epoch -> cad_theme [style=dotted];
+
+    // Cross-refs
+    dmlib_colors -> ctlcolor [style=dotted];
+    dmlib_colors -> canvas_ctlcolor [style=dotted];
+    dmlib_hooks -> cd_main [style=dotted];
+    apply_theme -> cd_main [style=dotted];
+
+    // Legend
+    subgraph cluster_legend {
+        label="Legend";
+        color="#ccc";
+        dmlib_n [label="dmlib", fillcolor="#eceff1", style=filled];
+        switch [label="Theme Switch", fillcolor="#e3f2fd", style=filled];
+        toolbar [label="Toolbar Theme", fillcolor="#fce4ec", style=filled];
+        ctl [label="WM_CTLCOLOR", fillcolor="#fff3e0", style=filled];
+        strip [label="Strip Order", fillcolor="#ffebee", style=filled];
+        canvas [label="Canvas/Doc", fillcolor="#efebe9", style=filled];
+        prob_n [label="⚠ Problem", fillcolor="#ffcdd2", style=filled];
+        fix [label="✅ Fix", fillcolor="#c8e6c9", style=filled];
+    }
+}

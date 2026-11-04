@@ -9,8 +9,7 @@
 - NEVER commit automatically — wait for explicit command.
 - NEVER include `base/Base.h` in `.h` files — causes 300+ redefinition errors.
 - NEVER put prose comments in `.h` files — put them on the definition in `.cpp`.
-- Keep the opencode `TODO` lateral panel updated while working for the user to follow the process.
-- ALWAYS use `Tree-Sitter` tools for mapping.
+- ALWAYS use `Tree-Sitter` and `serena` tools for mapping.
 - ALWAYS use `#ifndef`/`#define` guards, NOT `#pragma once`.
 - ALWAYS run `clang-format` on `.cpp`/`.c`/`.h` files after edits (before build).
 - ALWAYS pass `-for-testing` when launching for ad-hoc testing.
@@ -25,6 +24,7 @@ for tree-sitter BEFORE grep/read-walking.** It indexes the whole tree once
 call, saving huge context and avoiding manual greps.
 
 Rules:
+
 - Register the project once per session: `tree-sitter_register_project_tool(name="tumatrapdf", path="<repo>")`. If `find_usage`/`find_text` return empty or stale, `tree-sitter_clear_cache` + re-`register_project_tool` (scans may be cached from a prior session).
 - To map who calls a function / what a symbol reaches: `tree-sitter_find_usage(symbol, language="cpp")`.
 - To find a code pattern with context: `tree-sitter_find_text(pattern, context_lines=N)`.
@@ -41,19 +41,20 @@ TumatraPDF is a fork of SumatraPDF (upstream baseline ~912ecf2, Aug 2026) — Wi
 
 ## Informativo hierarchy (single source of truth)
 
-| File | Role | Audience |
-|---|---|---|
-| `AGENTS.md` (root) | ONLY governing doc — rules for agents editing code. Wins ALL conflicts | agents |
-| `README.md` (root) | ONLY showcase — TumatraPDF features vs forked SumatraPDF | users/kjk |
-| `BUILD.md` / `MERGE.md` | working docs: build, upstream sync | agents |
-| `LOG.md` / `TODO.md` | changelog (append-only, never rewrite) / active backlog | agents |
-| `CHANGELOG.md` (root) | per-version public changelog (v1.0.x releases, Keep a Changelog style, release checklist) | agents/users |
-| `LICENSE` / `SECURITY.md` / `CONTRIBUTING.md` (root) | GitHub community-health files: GPL-3.0 (verbatim text), vuln reporting, contributor ground rules | users |
-| `update.txt` (root) | update metadata served to running apps (`Latest:` + download URLs) — bumped by the release workflow, do NOT hand-edit except the URL keys | agents |
-| `Design_Guidelines.md` (root) | conventions + known traps distilled from sessions. **§6 / §6.1 = UI rules for Win32 dialogs, panels, toolbar, overlays — read before ANY visible UI change; §6.1 ends with the mandatory screenshot verification loop (dark + light)** | agents |
-| `FLOW/*.dot` | process maps only (never code architecture — §0b) | agents |
-| `TEMP/` | deprecated informativos (gitignored) | — |
-| `sumatrapdf-src/agents.md`, `sumatrapdf-src/docs/**` | upstream SumatraPDF reference, verbatim | upstream |
+| File                                                 | Role                                                                                                                                                                                                                                   | Audience     |
+| ---------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ |
+| `AGENTS.md` (root)                                   | ONLY governing doc — rules for agents editing code. Wins ALL conflicts                                                                                                                                                                 | agents       |
+| `README.md` (root)                                   | ONLY showcase — TumatraPDF features vs forked SumatraPDF                                                                                                                                                                               | users/kjk    |
+| `BUILD.md` / `MERGE.md`                              | working docs: build, upstream sync                                                                                                                                                                                                     | agents       |
+| `LOG.md` / `TODO.md`                                 | changelog (append-only, never rewrite) / active backlog                                                                                                                                                                                | agents       |
+| `CHANGELOG.md` (root)                                | per-version public changelog (v1.0.x releases, Keep a Changelog style, release checklist)                                                                                                                                              | agents/users |
+| `LICENSE` / `SECURITY.md` / `CONTRIBUTING.md` (root) | GitHub community-health files: GPL-3.0 (verbatim text), vuln reporting, contributor ground rules                                                                                                                                       | users        |
+| `update.txt` (root)                                  | update metadata served to running apps (`Latest:` + download URLs) — bumped by the release workflow, do NOT hand-edit except the URL keys                                                                                              | agents       |
+| `Design_Guidelines.md` (root)                        | conventions + known traps distilled from sessions. **§6 / §6.1 = UI rules for Win32 dialogs, panels, toolbar, overlays — read before ANY visible UI change; §6.1 ends with the mandatory screenshot verification loop (dark + light)** | agents       |
+| `DEBUG.md` (root)                                    | Win32 toolbar/UI debugging toolchain — win-automation + control pipe pattern for secondary toolbars (Arch Tools, Edit, Flashcard)                                                                                                      | agents       |
+| `FLOW/*.dot`                                         | process maps only (never code architecture — §0b)                                                                                                                                                                                      | agents       |
+| `TEMP/`                                              | deprecated informativos (gitignored)                                                                                                                                                                                                   | —            |
+| `sumatrapdf-src/agents.md`, `sumatrapdf-src/docs/**` | upstream SumatraPDF reference, verbatim                                                                                                                                                                                                | upstream     |
 
 Any other `.md` in subfolders = deprecated (→ `TEMP/`) or upstream reference. Root `AGENTS.md` overrides anything found in subfolders.
 
@@ -199,6 +200,7 @@ TumatraPDF/                   # repo root
 - **Logging:** `SumatraLog.h/.cpp` auto-log → `%LOCALAPPDATA%\SumatraPDF\<hash>\sumatra-log.txt`, rotation >5MB; tags `[fc]` `[arch]` `[autoscroll]` `[md]` `[webview]`
 
 **Known issues (fix when touched):**
+
 - `cmd/build-asan.ts` references `SumatraPDF.sln`/`SumatraPDF-static` — ASan pipeline broken
 - `.vscode/launch.json`/`tasks.json` target `SumatraPDF-dll.exe`/`SumatraPDF.sln` — no F5 debug in VS Code
 - `-dbg-control` lacks commands for custom feature state (crop rect, trim, autoscroll ETA, contrast/invert)
@@ -273,6 +275,9 @@ _Living document — append patterns/gotchas discovered during development._
   - RULE: before any hit-test, name the space of BOTH operands out loud (local / root / client / page). Mixed = bug.
 - **2026-10-18 (flashcard multi-page grouping)**: a PDF annotation cannot live on two pages, so ANY "one logical thing spanning pages" must be stored as N annotations + an in-file grouping key. Convention used for cross-page clozes: a shared token in the annotation AUTHOR (`TumatraPDF-Flashcard#%08X`, via `pdf_set_annot_author` = MuPDF `/T`, which survives save; other keys are not guaranteed to be written back). Do NOT put such a token in the annotation CONTENT: `RebuildCommentsFromAnnotationsInner` (EngineMupdf.cpp) turns any annot with non-empty contents into a page tooltip/comment. **TRAP**: identity checks on our annotations must use `str::StartsWith(Author(a), StrL("TumatraPDF-Flashcard"))`, never `str::Eq` — exact equality silently drops tagged annots (hit Canvas.cpp ctrl+click→List panel and the EditAnnotations filter that hides flashcard annots). Grouped cards: `Flashcard::extraPages` (secondary pages); primary page fields (`pageNo/bounds/rects`) stay the lowest page so nav/key/sort keep working.
 
+- **2026-11-04**: `MenuItemFromPoint` returns the item POSITION (0-based), never a command id — convert with `GetMenuItemID`. Burned 4 right-click rounds (s36-cg..s36-cl); pattern in Design_Guidelines §6 menus.
+- **2026-11-04**: scratch GUI probes (`tests/snap-*.ts`, `tests/diag-*.ts`, `err.txt`) must live under `tests/tmp/` (gitignored) — never commit or leave untracked in `tests/`; clean at round end.
+
 # 13. Informativos: English + Caveman (MANDATORY)
 
 All project informativos (`README.md`, `LOG.md`, `TODO.md`, `BUILD.md`, `MERGE.md`, `FLOW/*.dot`) are written in **English, caveman-compressed — always**. No Portuguese in new content; translate PT on sight.
@@ -282,3 +287,34 @@ All project informativos (`README.md`, `LOG.md`, `TODO.md`, `BUILD.md`, `MERGE.m
 - Keep `FASE` (not PHASE) as phase identifier — matches LOG.md history.
 - `FLOW/*.dot` = process maps only. Never hand-maintain code-architecture `.dot` — use tree-sitter (§0b).
 - Deprecated informativos live in `TEMP/` (gitignored): `FLASHCARD_IMPLEMENTATION_PLAN.md`, `docs/TumatraPDF2/PLAN.md` (TumatraPDF2 discontinued), `sumatrapdf-src/LOG.md`, `sumatrapdf-src/readme.md`, `diff_sumatra.txt` — reference only, never extend.
+
+# 14. Lemma memory lifecycle (MANDATORY)
+
+- Every new session: lemma `session_start({task_type, technologies, initial_approach})` FIRST → loads relevant guides + preloaded memories
+- Before act: `memory_read`, query = keywords in English
+- After finish: `memory_add` fragment `## Title\n### Context\n...\n### Content\n...`, 30-2000 chars, ENGLISH + `session_end({outcome, final_approach, lessons})`
+- Never ask permission to save. Store fragments in ENGLISH for searchability.
+- Details: `prompts/mcp-shared.md` §Lemma
+
+# 15. context7 MCP (documentation lookup)
+
+- Use when: asking about any library / framework / SDK / API / CLI tool / cloud service — even well-known ones (training data may be outdated, no recent changes)
+- Do NOT use for: refactoring, writing scripts from scratch, debugging business logic, code review, general programming concepts
+- Step 1: `resolve-library-id({libraryName, query})` → library name + full user query → pick best match (name similarity, benchmark score, version specificity, official source over community fork)
+- Step 2: `query-docs({libraryId, query, language?})` → selected library ID + specific topic → up-to-date docs + code snippets
+- Incorporate retrieved info into response; official sources first
+- Details: `mcp_instructions` context7 server description
+
+# 16. sequentialthinking MCP (structured reasoning)
+
+- Tool: `sequentialthinking({thought, nextThoughtNeeded, thoughtNumber, totalThoughts, isRevision?, revisesThought?, branchFromThought?, branchId?, needsMoreThoughts?})`
+- Use when: multi-step dependent tasks, debugging root cause, architecture planning, any task too complex for single-shot reasoning
+- Workflow:
+  1. thoughtNumber=1, totalThoughts=estimated, nextThoughtNeeded=true
+  2. increment thoughtNumber per step
+  3. nextThoughtNeeded=false on final step
+  4. isRevision/revisesThought to correct earlier step
+  5. branchFromThought/branchId to explore alternatives
+- Does NOT execute code — only structures reasoning before action
+- `arquiteto` agent has `sequentialthinking_*` enabled
+- Details: `mcp_instructions` sequentialthinking server description

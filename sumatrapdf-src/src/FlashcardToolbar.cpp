@@ -32,6 +32,11 @@ extern "C" {
 #include "Darkmodelib.h"
 #include "AppSettings.h"
 #include "Flashcard.h"
+#include "ProfileData.h"
+
+// Forward declarations — these are defined in other translation units
+bool SetToolbarBandToRowHeight(HWND hwndToolbar);
+void ToolbarRewrapAfterSizing(MainWindow* win, HWND hwndToolbar, bool force);
 
 // Flashcard secondary toolbar (study controls).
 // Created when flashcard mode is toggled on.
@@ -570,15 +575,13 @@ void FlashcardToolbarCreate(MainWindow* win) {
     rbBand.cx = 0;
     SendMessageW(hwndRebar, RB_INSERTBAND, (WPARAM)-1, (LPARAM)&rbBand);
 
-    // size the rebar to the frame width right away: at width 0 the wrapable
-    // toolbar stacks every button on its own row and the rebar adopts that
-    // huge stacked height, which the first RelayoutFrame then reserves as
-    // toolbar space. With the real width the toolbar wraps correctly and the
-    // band height settles (SetToolbarBandToRowHeight via WndProcToolbar)
-    // before RelayoutFrame measures us.
+    // Size rebar to frame width but only toolbar height initially (v1.0.12 pattern).
+    // This ensures WRAPABLE toolbar sees correct width at button-add time.
     {
         Rect rcFrame = HwndClientRect(hwndParent);
         SetWindowPos(hwndRebar, nullptr, 0, 0, rcFrame.dx, rc.dy + (2 * rc.y), SWP_NOZORDER | SWP_NOMOVE);
+        // Toolbar receives WM_SIZE and wraps naturally; band height updated in RelayoutFrame
+        // via SetToolbarBandToRowHeight when rebar receives WM_SIZE.
     }
 
     ShowWindow(hwndRebar, SW_SHOW);
@@ -1049,6 +1052,10 @@ static void ConfigClearSelected(ConfigDialog* d) {
             FlashcardToolbarUpdateCount(d->win);
             FlashcardToolbarUpdateState(d->win);
             FlashcardSidebarPopulate(d->win); // every card is "new" now
+            // drop the book from the single-file profile store too (no-op if absent)
+            if (info.docPath && len(info.docPath) > 0) {
+                ProfileDataDeleteBook(info.docPath);
+            }
             MainWindowRerender(d->win);
         }
     }
@@ -1058,6 +1065,7 @@ static void ConfigClearSelected(ConfigDialog* d) {
 // delete EVERY study JSON + reset every tab's in-memory history (5s hold)
 static void ConfigClearAll(ConfigDialog* d) {
     int nDeleted = FlashcardDeleteAllStudyFiles();
+    ProfileDataClearStudyDocs(); // drop every book row from the single-file profile store too
     auto tabs = d->win->Tabs();
     for (WindowTab* tab : tabs) {
         tab->flashcard.studyDoc.states.Reset();

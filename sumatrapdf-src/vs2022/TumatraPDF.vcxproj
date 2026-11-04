@@ -1261,6 +1261,9 @@ cd ../out/rel64_prefast_asan &amp; if not exist InstallerData.dat ..\..\bin\Make
     <ClInclude Include="..\src\PdfTools.h" />
     <ClInclude Include="..\src\PngOptimizer.h" />
     <ClInclude Include="..\src\Print.h" />
+    <ClInclude Include="..\src\ProfileBackupWnd.h" />
+    <ClInclude Include="..\src\ProfileData.h" />
+    <ClInclude Include="..\src\ProfileSyncWnd.h" />
     <ClInclude Include="..\src\ProgressUpdateUI.h" />
     <ClInclude Include="..\src\ReadAloudHighlight.h" />
     <ClInclude Include="..\src\ReadAloudPlaybackBar.h" />
@@ -1498,6 +1501,9 @@ cd ../out/rel64_prefast_asan &amp; if not exist InstallerData.dat ..\..\bin\Make
     <ClCompile Include="..\src\PdfTools.cpp" />
     <ClCompile Include="..\src\PngOptimizer.cpp" />
     <ClCompile Include="..\src\Print.cpp" />
+    <ClCompile Include="..\src\ProfileBackupWnd.cpp" />
+    <ClCompile Include="..\src\ProfileData.cpp" />
+    <ClCompile Include="..\src\ProfileSyncWnd.cpp" />
     <ClCompile Include="..\src\ReadAloudHighlight.cpp" />
     <ClCompile Include="..\src\ReadAloudPlaybackBar.cpp" />
     <ClCompile Include="..\src\ReadingStats.cpp" />

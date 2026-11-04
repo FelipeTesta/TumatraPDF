@@ -57,6 +57,7 @@
 #include "SearchAndDDE.h"
 #include "SumatraProperties.h"
 #include "Tabs.h"
+#include "TabGroupsManage.h"
 #include "Translations.h"
 #include "StressTesting.h"
 #include "Version.h"
@@ -68,6 +69,8 @@
 #include "RegistryPreview.h"
 #include "ExternalViewers.h"
 #include "Theme.h"
+#include "ProfileData.h"
+#include "ProfileBackupWnd.h"
 #include "Darkmodelib.h"
 #include "CommandPalette.h"
 #include "SelectTextKeyboard.h"
@@ -393,7 +396,9 @@ void SetTabState(WindowTab* tab, TabState* state) {
         }
     }
 
-    tab->tocState = *state->tocState;
+    if (state->tocState) {
+        tab->tocState = *state->tocState;
+    }
     // sidebar always starts hidden on open (user request): ignore saved showToc
     SetSidebarVisibility(win, false, false);
 
@@ -1336,7 +1341,7 @@ For more information see <a href="%s">Failed to load libsumatrapdf.dll</a>.)",
         flags |= TDF_RTL_LAYOUT;
     }
     dialogConfig.cbSize = sizeof(TASKDIALOGCONFIG);
-    dialogConfig.pszWindowTitle = L"SumatraPDF";
+    dialogConfig.pszWindowTitle = L"TumatraPDF";
     dialogConfig.pszMainInstruction = L"Failed to load libsumatrapdf.dll";
     dialogConfig.pszContent = CWStrTemp(msg);
     dialogConfig.nDefaultButton = IDOK;
@@ -1403,7 +1408,7 @@ Learn more at https://github.com/FelipeTesta/TumatraPDF/blob/main/sumatrapdf-src
         printf("%s", corruptedInstallationConsole.s);
     }
 
-    const auto* title = L"SumatraPDF installer";
+    const auto* title = L"TumatraPDF installer";
     TASKDIALOGCONFIG dialogConfig{};
 
     DWORD flags =
@@ -1469,7 +1474,7 @@ static void ShowInstallerHelp() {
         flags |= TDF_RTL_LAYOUT;
     }
     dialogConfig.cbSize = sizeof(TASKDIALOGCONFIG);
-    dialogConfig.pszWindowTitle = L"SumatraPDF installer usage";
+    dialogConfig.pszWindowTitle = L"TumatraPDF installer usage";
     dialogConfig.pszMainInstruction = CWStrTemp(msg);
     dialogConfig.pszContent =
         LR"(<a href="https://github.com/FelipeTesta/TumatraPDF/blob/main/sumatrapdf-src/docs/md/Installer-cmd-line-arguments.md">Read more on website</a>)";
@@ -2668,6 +2673,39 @@ ContinueOpenWindow:
         SHGetFileInfoW(L".pdf", 0, &sfi, sizeof(sfi), flg);
     }
 
+    // T2: active tab group takes precedence over session restore
+    if (gGlobalPrefs->activeTabGroup.s && *gGlobalPrefs->activeTabGroup.s) {
+        TabGroup* activeGroup = FindTabGroup(gGlobalPrefs->activeTabGroup.s);
+        if (activeGroup && activeGroup->tabFiles) {
+            restoreSession = false; // suppress normal session restore
+            logf("[tabs] startup restore group '%s' (%d files)\n", Str(gGlobalPrefs->activeTabGroup),
+                 len(*activeGroup->tabFiles));
+            // suppress auto-save during boot restore: LoadDocument is async,
+            // TabsSelect would fire UpdateActiveGroupAutoSave with empty/in-progress
+            // tabs and clobber the saved group (#session-data-loss)
+            SuppressGroupAutoSave(true);
+            win = CreateAndShowMainWindow(nullptr, false);
+            if (win) {
+                bool first = true;
+                for (TabFile* tf : *activeGroup->tabFiles) {
+                    if (!tf->path.s) {
+                        continue;
+                    }
+                    LoadArgs args(tf->path, win);
+                    if (!first) {
+                        args.forceReuse = false;
+                    }
+                    LoadDocument(&args);
+                    first = false;
+                }
+                TabsSelect(win, 0);
+                SuppressGroupAutoSave(false);
+                ShowMainWindow(win, WIN_STATE_NORMAL);
+                RefreshTabGroupButton(win);
+            }
+        }
+    }
+
     if (restoreSession) {
         for (SessionData* data : *gInitialSessionData) {
             // create window hidden to avoid flashing the about page
@@ -2811,6 +2849,16 @@ ContinueOpenWindow:
     }
     if (len(flags.fileNames) == 0) {
         FlagsEnterFullscreen(flags, win);
+    }
+
+    // Profile Memory F3: cloud-revert restore prompt (only fires when a backup
+    // slot is strictly newer than the primary profile; skipped when no backups)
+    // skip startup prompt in automated testing runs (-for-testing): still
+    // consume the flag so it is cleared, but don't block automation with a modal
+    bool cloudRevertPending;
+    cloudRevertPending = ProfileDataConsumeCloudRevertPending();
+    if (cloudRevertPending && !gForTesting) {
+        ProfileDataPromptCloudRevert(win, win->hwndFrame);
     }
 
     if (flags.stressTestPath) {

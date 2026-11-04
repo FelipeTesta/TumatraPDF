@@ -95,7 +95,7 @@ void ShowPrintersDialog(bool consoleOnly) {
         }
     }
     if (!consoleOnly) {
-        ShowTextInWindowDialog(_TRA("SumatraPDF - Show Printers"), ToStr(out));
+        ShowTextInWindowDialog(_TRA("TumatraPDF - Show Printers"), ToStr(out));
     }
 #else
     (void)consoleOnly;

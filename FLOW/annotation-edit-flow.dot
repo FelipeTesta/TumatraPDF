@@ -1,0 +1,164 @@
+digraph AnnotationEditFlow {
+    rankdir=TB;
+    node [shape=box, style=rounded, fontname="Consolas", fontsize=9];
+    edge [fontname="Consolas", fontsize=8];
+    compound=true;
+
+    // ===================== ANNOTATION TYPES =====================
+    subgraph cluster_annot_types {
+        label="Annotation Types (Annotation.h)";
+        color="#4285f4";
+        style=filled;
+        fillcolor="#e3f2fd";
+
+        annot_enum [label="enum class AnnotationType\n• Text (sticky note)\n• Link (URI/action)\n• Highlight / Underline / StrikeOut\n• FreeText (typewriter)\n• Line / Square / Circle\n• Stamp / Caret / Ink\n• Widget (form field)\n• FileAttachment\n• Sound / Movie / Screen\n• PRINTMARK / TRAPNET / WATERMARK\n• 3D / Redact / Projection\n• RichMedia / Popup", fillcolor="#bbdefb", style=filled, fontsize=8);
+        annot_struct [label="struct Annotation\n• AnnotationType type\n• Rect bounds (page coords)\n• Str author\n• Str contents\n• Str subject\n• Color color\n• float opacity\n• int flags (print/nozoom/etc)\n• PageNo page\n• void* engineData (MuPDF pdf_annot*)", fillcolor="#c8e6c9", style=filled);
+        widget_cursor [label="WidgetCursorKind enum\n• None / Text / Button\n• For form field hit-test\n• Read-only: Text (I-beam)\n• Button (hand) for checkbox/radio", fillcolor="#fff9c4", style=filled);
+    }
+
+    // ===================== EDIT ANNOTATIONS UI =====================
+    subgraph cluster_edit_ui {
+        label="Edit Annotations UI (EditAnnotations.cpp/h)";
+        color="#e91e63";
+        style=filled;
+        fillcolor="#fce4ec";
+
+        edit_wnd [label="EditAnnotationsWindow\n• hwndList (owner-drawn listbox)\n• hwndToolbar (add/delete/properties)\n• hwndProps (property editor)\n• Modeless, per-tab\n• EditAnnotFocus: Default/Edit\n• InvalidateEditAnnotationsOnEngineChange()", fillcolor="#c8e6c9", style=filled);
+        listbox [label="Owner-Drawn Listbox\n• Columns: Type | Page | Author | Preview\n• Double-click → edit properties\n• Right-click → context menu\n• Delete key → remove\n• Filter hides flashcard annots", fillcolor="#bbdefb", style=filled);
+        props [label="Property Editor\n• Type-specific fields\n• Text: contents (multiline)\n• Link: URI / action\n• Highlight: color / opacity\n• Stamp: image picker\n• Widget: form field props", fillcolor="#bbdefb", style=filled);
+    }
+
+    // ===================== ENGINE ANNOTATION API =====================
+    subgraph cluster_engine_api {
+        label="Engine Annotation API (EngineBase.h / EngineMupdf.cpp)";
+        color="#ff9800";
+        style=filled;
+        fillcolor="#fff3e0";
+
+        engine_virt [label="EngineBase Virtual Methods\n• CreateAnnotation(type, page, rect)\n• DeleteAnnotation(annot)\n• GetAnnotations(pageNo) → Vec<Annotation>\n• SetAnnotationContents(annot, str)\n• SetAnnotationAuthor(annot, str)\n• SetAnnotationColor/Opacity/Flags\n• GetAnnotationAtPos()\n• GetWidgetAtPos()\n• GetAdjacentWidget()\n• SupportsAnnotations()\n• HasUnsavedAnnotations()\n• InvalidateDarkMode()", fillcolor="#bbdefb", style=filled);
+        mupdf_impl [label="EngineMupdf Implementation\n• fz_annot* from pdf_annot*\n• pdf_create_annot(page, type)\n• pdf_set_annot_contents/author/color\n• pdf_set_annot_rect (bounds)\n• pdf_update_annot(page, annot)\n• pdf_delete_annot(page, annot)\n• pdf_set_annot_stamp_image (mupdf bug: only Gray/RGB/CMYK)\n• fz_convert_pixmap → RGB before stamp\n• EngineMupdfGetAnnotations()\n• EngineMupdfGetPageAnnotations()\n• EngineMupdfHasUnsavedAnnotations()\n• EngineMupdfSupportsAnnotations()\n• ValidateAnnotationsInSync()\n• MakeAnnotationWrapper()\n• MakePdfCommentFromPdfAnnot()\n• NewFzComment()", fillcolor="#c8e6c9", style=filled);
+        save_annots [label="SaveAnnotationsToExistingFile()\nSumatraPDF.cpp\n• fz_save_document()\n• Incremental save (preserves IDs)\n• Calls UpdateFileStateForTab()\n• ReloadDocument preserves fork fields\n• MarkNotificationAsModified()", fillcolor="#e1bee7", style=filled);
+        extract_text [label="ExtractPageTextLocked()\nEngineMupdf.cpp\n• fz_new_stext_page_from_page2\n• fz_extract_text()\n• Skips flashcard annots (author filter)\n• Used by search + flashcard load", fillcolor="#e3f2fd", style=filled);
+    }
+
+    // ===================== FLASHCARD ANNOTATIONS =====================
+    subgraph cluster_flashcard {
+        label="Flashcard Annotations (Special Convention)";
+        color="#1565c0";
+        style=filled;
+        fillcolor="#e3f2fd";
+
+        fc_annot [label="Flashcard = MuPDF Highlight\n• Author = \"TumatraPDF-Flashcard#%08X\"\n  (shared token for grouping)\n• Contents = EMPTY (positional mask)\n• Quads = mask rectangles (N per card)\n• Cross-page: one annot PER PAGE\n  same author token = grouped\n• Flashcard::extraPages for secondary", fillcolor="#c8e6c9", style=filled);
+        fc_create [label="CmdFlashcardAdd\nCommands_Flashcard.cpp\n• Selection → quads\n• Alt+drag = multi-select (disjoint)\n• One annot with N quads = ONE card\n• Key = hash(pageNo, bounds) stable\n• SelectionState.altAccum for multi-select\n• Alt+click abort = restore", fillcolor="#bbdefb", style=filled);
+        fc_load [label="FlashcardLoadFromDocument\nFlashcard.cpp\n• Filters by author prefix\n  str::StartsWith(Author, \"TumatraPDF-Flashcard\")\n• NOT by contents prefix\n• Rebuilds FlashcardTabState.cards\n• FlashcardEnsureTabCards / FindTabIndex\n• CollectTabCards / BuildFilteredStudyOrder", fillcolor="#bbdefb", style=filled);
+        fc_filter_ui [label="EditAnnotations FILTER\n• Hides flashcard annots from list\n• Canvas ctrl+click → List panel\n• Both use author prefix check\n• RebuildCommentsFromAnnotationsInner filters", fillcolor="#fff9c4", style=filled);
+        fc_prefetch [label="FlashcardPrefetchRenderUpcoming\nCommands_Flashcard.cpp\n• Prefetches render for upcoming cards\n• FlashcardNavigateToEntry\n• FlashcardApplyStudyOrder\n• HandleFlashcardRate / FlashcardStopSession\n• FlashcardOnTabChanged (per-tab isolation)", fillcolor="#e1bee7", style=filled);
+    }
+
+    // ===================== IMAGE ANNOTATIONS =====================
+    subgraph cluster_image_annot {
+        label="Image Annotations (Stamp/Replace/Edit)";
+        color="#9c27b0";
+        style=filled;
+        fillcolor="#f3e5f5";
+
+        img_create [label="CmdCreateAnnotImageFromClipboard\nCommands_Image.cpp\n• Clipboard → pixmap (BGR8)\n• fz_convert_pixmap → RGB\n• fz_new_image_from_pixmap\n• pdf_set_annot_stamp_image\n• mupdf bug: only Gray/RGB/CMYK\n• fz_new_image_from_buffer (unicode paths)", fillcolor="#c8e6c9", style=filled);
+        img_replace [label="CmdReplaceImage (Context Menu)\nCommands_Image.cpp\n• File picker (images)\n• EngineMupdf::ReplaceImageWithFile\n• pdf_add_image + pdf_dict_put\n• Identity = fz_image* pointer\n• gRenderCache->FreeForDisplayModel()\n• InvalidatePageAfterImageReplace()\n• ReplaceImageByIdx(pageNo, imageIdx, Str)", fillcolor="#bbdefb", style=filled);
+        img_edit [label="CmdEditImagePaint\nCommands_Image.cpp\n• Extract to %TEMP%\\tumatrapdf-paintedit-<pid>.png\n• Launch mspaint.exe\n• 1.2s watch timer (kPaintWatchTimerId)\n• On mtime change → re-import + replace\n• Save PDF manually to persist\n• EditImageDrawRectInStream()", fillcolor="#e1bee7", style=filled);
+        img_crop [label="HandleCmdEditImageCrop\nCommands_Edit.cpp\n• EditToolsImageMouseDown/Move/End\n• EditRectEq / EditBBoxScreenRect\n• EditImageScreenRect / EditGetPreviewBmp\n• EditSaveArgbBitmapAsPng\n• EditApplyImageEdits", fillcolor="#fff9c4", style=filled);
+    }
+
+    // ===================== ANNOTATION REBUILD =====================
+    subgraph cluster_rebuild {
+        label="Rebuild Comments from Annotations";
+        color="#795548";
+        style=filled;
+        fillcolor="#efebe9";
+
+        rebuild [label="RebuildCommentsFromAnnotationsInner\nEngineMupdf.cpp\n• Iterates ALL annots in doc\n• Non-empty contents → page tooltip/comment\n• Author used for flashcard grouping\n• Called on doc load / annot change\n• NewFzComment() / MakePdfCommentFromPdfAnnot()\n• fz_iter_annot() / pdf_annot_content()", fillcolor="#c8e6c9", style=filled);
+        trap [label="⚠ TRAP: Contents vs Author\n• Flashcard uses AUTHOR for token\n• Contents MUST be empty\n• Non-empty contents = page tooltip\n• Identity check: StartsWith(Author)\n  NOT str::Eq (drops tagged annots)\n• Canvas.cpp ctrl+click & EditAnnotations filter", fillcolor="#ffcdd2", style=filled, shape=note);
+        comment_sync [label="Comment Sync\n• pdf_set_annot_content() on edit\n• UpdateFileStateForTab() on save\n• ValidateAnnotationsInSync()\n• EngineMupdfInvalidateDarkMode()", fillcolor="#e1bee7", style=filled);
+    }
+
+    // ===================== SELECTION / HIT-TEST =====================
+    subgraph cluster_selection {
+        label="Selection & Hit-Test (Canvas.cpp)";
+        color="#4caf50";
+        style=filled;
+        fillcolor="#e8f5e9";
+
+        sel_state [label="SelectionState (Canvas.cpp)\n• altAccum: Alt+drag multi-select\n• Alt+click abort = restore\n• Disjoint quads → one annot\n• SelectionDragEdge: resize handles\n• MakeAnnotationsFromSelection()\n• TextSelectExtendFromVk()\n• TryExtendTextSelectionFromKey()", fillcolor="#bbdefb", style=filled);
+        hit_test [label="Canvas Hit-Test\n• GetPageNoByPoint → page\n• GetAnnotationAtPoint → annot\n• GetWidgetAtPos() / GetElementAtPos()\n• Ctrl+click → List panel\n• Drag → move/resize (WidgetCursorKind)\n• GetWidgetAtPos() / GetAdjacentWidget()", fillcolor="#c8e6c9", style=filled);
+        link_hit [label="Link Hit-Test\n• GetPageNoByPoint / GetPageNextToPoint\n• FzGetElementAtPos()\n• FzFindImageAtPos()\n• HandleLinkMupdf() / ResolveLink()\n• NewPageDestinationMupdf()", fillcolor="#e3f2fd", style=filled);
+    }
+
+    // ===================== DARK MODE / VALIDATION =====================
+    subgraph cluster_dark {
+        label="Dark Mode & Validation";
+        color="#607d8b";
+        style=filled;
+        fillcolor="#eceff1";
+
+        dark_inval [label="EngineMupdfInvalidateDarkMode()\n• Called on theme change\n• BuildPageDarkLegacySkipRects()\n• DarkLegacySkipHash / KeepLargestArtwork\n• DarkLegacyTileFindRoot / GroupImageTiles", fillcolor="#bbdefb", style=filled);
+        validation [label="ValidateAnnotationsInSync()\nEngineMupdf.cpp\n• Ensures annotations match saved state\n• Called after SaveAnnotationsToExistingFile\n• SkipAnnotationValidation flag (gSkipAnnotatoinValidation)", fillcolor="#c8e6c9", style=filled);
+    }
+
+    // ===================== EDGES =====================
+    annot_enum -> annot_struct;
+    annot_struct -> widget_cursor [style=dotted];
+    edit_wnd -> listbox;
+    edit_wnd -> props;
+    listbox -> props [style=dashed, label="double-click"];
+
+    engine_virt -> mupdf_impl;
+    mupdf_impl -> save_annots;
+    mupdf_impl -> extract_text [style=dotted];
+    mupdf_impl -> dark_inval [style=dotted];
+    mupdf_impl -> validation [style=dotted];
+
+    fc_create -> fc_annot;
+    fc_annot -> fc_load;
+    fc_load -> fc_filter_ui [style=dotted];
+    fc_filter_ui -> edit_wnd [style=dotted, label="hides from list"];
+    fc_load -> fc_prefetch [style=dotted];
+
+    img_create -> mupdf_impl [style=dotted];
+    img_replace -> mupdf_impl [style=dotted];
+    img_edit -> mupdf_impl [style=dotted];
+    img_crop -> mupdf_impl [style=dotted];
+    img_edit -> save_annots [style=dotted];
+    img_replace -> save_annots [style=dotted];
+
+    rebuild -> fc_annot [style=dotted, label="filters by author"];
+    trap -> fc_annot [style=dashed];
+    trap -> rebuild [style=dashed];
+    rebuild -> comment_sync [style=dotted];
+
+    sel_state -> hit_test;
+    hit_test -> edit_wnd [style=dotted, label="Ctrl+click"];
+    hit_test -> fc_create [style=dotted, label="selection"];
+    hit_test -> link_hit [style=dotted];
+
+    link_hit -> links [style=dotted];
+
+    // Cross-refs
+    save_annots ..> reload [style=dotted, label="ReloadDocument preserves"];
+    fc_load ..> fc_tab [style=dotted, label="FlashcardTabState"];
+    extract_text ..> search [style=dotted, label="SearchText()"];
+    extract_text ..> fc_load [style=dotted, label="skips flashcard annots"];
+
+    // Legend
+    subgraph cluster_legend {
+        label="Legend";
+        color="#ccc";
+        types [label="Types", fillcolor="#e3f2fd", style=filled];
+        ui [label="Edit UI", fillcolor="#fce4ec", style=filled];
+        engine [label="Engine API", fillcolor="#fff3e0", style=filled];
+        fc [label="Flashcard", fillcolor="#e3f2fd", style=filled];
+        img [label="Image", fillcolor="#f3e5f5", style=filled];
+        rebuild_n [label="Rebuild", fillcolor="#efebe9", style=filled].
+        sel [label="Selection", fillcolor="#e8f5e9", style=filled].
+        dark [label="Dark/Validation", fillcolor="#eceff1", style=filled].
+        warn_n [label="⚠ Trap", fillcolor="#ffcdd2", style="filled,shape=note"].
+    }
+}

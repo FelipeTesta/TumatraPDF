@@ -1,0 +1,262 @@
+digraph DocumentLoadFlow {
+    rankdir=TB;
+    node [shape=box, style=rounded, fontname="Consolas", fontsize=9];
+    edge [fontname="Consolas", fontsize=8];
+    compound=true;
+
+    // ===================== ENTRY POINTS (30+ call sites per tree-sitter) =====================
+    subgraph cluster_entry {
+        label="Entry Points → StartLoadDocument / LoadDocument";
+        color="#4285f4";
+
+        cmdline [label="Command Line\nSumatraStartup.cpp:332\nLoadDocument(&args)", fillcolor="#bbdefb", style=filled);
+        dde [label="DDE / COPYDATA\nSearchAndDDE.cpp:2307\nHandleOpenCmd → LoadDocument", fillcolor="#bbdefb", style=filled);
+        dragdrop [label="Drag & Drop\nCanvas.cpp:5951\nStartLoadDocuments(files, win)", fillcolor="#bbdefb", style=filled);
+        menu [label="File → Open\nMenu.cpp:2015\nLoadDocument(&args)", fillcolor="#bbdefb", style=filled);
+        home [label="Home Page\nHomePage.cpp:2980\nStartLoadDocument(&args)", fillcolor="#bbdefb", style=filled);
+        fav [label="Favorites\nFavorites.cpp:735\nLoadDocument(&args)", fillcolor="#bbdefb", style=filled);
+        palette [label="Command Palette\nCommandPalette.cpp:406\nStartLoadDocument(&args)", fillcolor="#bbdefb", style=filled);
+        nav_folder [label="Folder Nav\nNavFilesInFolder.cpp:421/433\nStartLoadDocument(&args)", fillcolor="#bbdefb", style=filled);
+        tab_groups [label="Tab Groups\nTabGroupsManage.cpp:181\nLoadDocument(&args)", fillcolor="#bbdefb", style=filled);
+        tabs [label="Tabs.cpp:294\nLoadDocument(&args)\n(reopen closed tab)", fillcolor="#bbdefb", style=filled);
+        pdf_tools [label="PDF Tools\nPdfTools.cpp:411/587/651/905/1026/1108/1216\nStartLoadDocument(&args)", fillcolor="#bbdefb", style=filled);
+        stress [label="Stress Test\nStressTesting.cpp:597\nLoadDocument(&args)", fillcolor="#bbdefb", style=filled);
+        canvas_link [label="Canvas Link Click\nCanvas.cpp:2956\nLoadDocument(&args)", fillcolor="#bbdefb", style=filled);
+        reload_cmd [label="CmdReloadDocument\nCommands_File.cpp:270\nReloadDocument(win, true, false)", fillcolor="#fff9c4", style=filled);
+        auto_reload [label="Auto-reload (timer)\nCanvas.cpp:5847\nReloadDocument(win, true, false)", fillcolor="#fff9c4", style=filled);
+
+        startup_lazy [label="Startup Lazy Load\nSumatraStartup.cpp:442/446\nStartLoadDocument / LoadDocument", fillcolor="#e1bee7", style=filled);
+        thumbnail [label="Thumbnail Generation\nCreateThumbnailFromFileAsync()\nSumatraPDF.cpp\n• Engine renders page 1\n• Scale to 256x256 PNG\n• Background thread\n• %LOCALAPPDATA%\\SumatraPDF\\<hash>\\thumbs", fillcolor="#e3f2fd", style=filled);
+    }
+
+    // ===================== LOAD ARGS PREPARATION =====================
+    subgraph cluster_args {
+        label="LoadArgs Preparation";
+        color="#4caf50";
+        style=filled;
+        fillcolor="#e8f5e9";
+
+        load_args [label="LoadArgs struct\nSumatraPDF.cpp\n• filePath\n• win (target window, nullable)\n• activateExisting\n• activateExistingInWindow\n• forceReuse\n• noPlaceWindow\n• lazyLoad\n• tabState (restore session)", fillcolor="#c8e6c9", style=filled);
+        password [label="PasswordUI callback\nEngineBase.h\ncanAskForPassword flag\nSearchAndDDE.cpp:2320", fillcolor="#fff9c9", style=filled);
+    }
+
+    // ===================== START LOAD DOCUMENT =====================
+    subgraph cluster_start {
+        label="StartLoadDocument (SumatraPDF.cpp)";
+        color="#ff9800";
+        style=filled;
+        fillcolor="#fff3e0";
+
+        start_load [label="StartLoadDocument(args)\nSumatraPDF.cpp:2400\n• Validates path\n• Handles gIsStartup queue\n• Creates LoadDocumentThreadData\n• Posts WM_APP_LOAD_DOCUMENT", fillcolor="#c8e6c9", style=filled);
+        startup_queue [label="gIsStartup queue\nSearchAndDDE.cpp:2938\nPrevents race on same path\n(cmdline + DDE during password)", fillcolor="#fff9c4", style=filled);
+        thread_data [label="LoadDocumentThreadData\n• path + LoadArgs\n• posted to UI thread\n• freed in LoadDocumentFinish", fillcolor="#bbdefb", style=filled);
+        async_load [label="StartLoadDocumentThread()\nSumatraPDF.cpp\n• Thread proc: LoadDocumentAsync()\n• Creates Engine in background\n• Posts LoadDocumentAsyncFinish\n• OnLoadDocumentThreadFinished()", fillcolor="#e3f2fd", style=filled);
+        dispatch_queued [label="DispatchQueuedDocumentLoads()\nSumatraPDF.cpp\n• Processes gLoadQueue\n• gLoadQueueDispatchPosted flag\n• IsLoadStillWanted() check\n• DiscardFailedAsyncLoad()", fillcolor="#e3f2fd", style=filled);
+    }
+
+    // ===================== LOAD DOCUMENT (UI THREAD) =====================
+    subgraph cluster_load {
+        label="LoadDocument (UI Thread) — SumatraPDF.cpp:2400";
+        color="#e91e63";
+        style=filled;
+        fillcolor="#fce4ec";
+
+        load_doc [label="LoadDocument(args)\n• Find existing window/tab\n  (activateExisting / forceReuse)\n• Create MainWindow if needed\n• Determine FileType\n• Create Engine via EngineCreate()\n• Return MainWindow* (may be null)", fillcolor="#c8e6c9", style=filled);
+        find_existing [label="FindMainWindowByFile()\nSumatraPDF.cpp:848\n• Path match (case-insensitive)\n• Per-window tab search\n• Returns win or null", fillcolor="#bbdefb", style=filled);
+        create_engine [label="EngineCreate(FileType)\nEngineCreate.cpp:179\n• GuessFileType → FileType enum\n• EngineMupdf (PDF/XPS/CBZ)\n• EngineEbook (EPUB/MOBI/FB2)\n• EngineImages (IMG)\n• EngineDjvuDec (DJVU)\n• EngineChm (CHM)\n• WebView2 for MD fallback", fillcolor="#bbdefb", style=filled);
+        engine_init [label="EngineBase::Init()\n• Open file → fz_open_document\n• Password if needed\n• Build TOC\n• Count pages\n• Set kind", fillcolor="#bbdefb", style=filled);
+        maybe_create_win [label="MaybeCreateWindowForFileLoad()\nSumatraPDF.cpp\n• CreateAndShowMainWindow()\n• CreateControllerForMarkdown/Chm/Engine\n• SetFrameTitleForTab()\n• UpdateUiForCurrentTab()", fillcolor="#e3f2fd", style=filled);
+    }
+
+    // ===================== LOAD DOCUMENT FINISH =====================
+    subgraph cluster_finish {
+        label="LoadDocumentFinish (SumatraPDF.cpp:3308)";
+        color="#9c27b0";
+        style=filled;
+        fillcolor="#f3e5f5";
+
+        finish [label="LoadDocumentFinish(threadData)\n• Called on UI thread\n• Creates WindowTab\n• LoadModelIntoTab(win, tab, ctrl)\n• SetInitialViewSettings\n• Restore per-doc state\n• Update UI (toolbar, tabs, title)", fillcolor="#c8e6c9", style=filled);
+        load_model [label="LoadModelIntoTab(win, tab, ctrl)\nMainWindow.cpp:4300\n• tab->ctrl = ctrl\n• tab->displayModel = new DisplayModel(ctrl)\n• DisplayModel ctor:\n  – BuildPagesInfo()\n  – ApplyViewportCropV2 pref\n  – Apply Trim prefs\n• RelayoutFrame()\n• FlashcardOnTabChanged hook", fillcolor="#bbdefb", style=filled);
+        restore_state [label="Restore Per-Doc State\nSumatraPDF.cpp:2039-2045\n• FileState from gFileHistory\n• InvertColors / ContrastEnabled / Opacity\n• AutoScrollSpeedMultiplier\n• MarginTrim / TrimTop / TrimBottom\n• ViewportCropV2Enabled\n• UpdateDocumentColors()", fillcolor="#bbdefb", style=filled);
+        initial_view [label="SetInitialViewSettings()\nDisplayModel.cpp\n• Fit page / Fit width\n• Continuous / Single page\n• PageNo from history / cmdline\n• ScrollTo if needed", fillcolor="#e1bee7", style=filled);
+        ui_update [label="UI Updates\n• CreateToolbar() if first window\n• UpdateToolbarPageText()\n• TabsCtrl add tab\n• RelayoutFrame()\n• ScheduleRepaint()\n• UpdateOverlayScrollbarPositions()", fillcolor="#e1bee7", style=filled);
+        sidebar [label="CreateSidebar()\nSumatraPDF.cpp\n• AI Chat / Flashcard Lista\n• TocBox / FavBox\n• UpdateToolbarSidebarText()", fillcolor="#e3f2fd", style=filled);
+    }
+
+    // ===================== PER-DOC STATE PERSISTENCE =====================
+    subgraph cluster_persist {
+        label="Per-Doc State (FileState + GlobalPrefs)";
+        color="#795548";
+        style=filled;
+        fillcolor="#efebe9";
+
+        file_state [label="FileState (per document)\nSumatraPDF.cpp\n• filePath (key)\n• pageNo\n• zoom / displayMode\n• invertColors / contrastEnabled / contrastOpacity\n• autoScrollSpeedMultiplier\n• marginTrimEnabled / trimTop / trimBottom\n• viewportCropV2Enabled\n• scrollPos (x,y)\n• flashcardStudyTimeSec\n• flashcardCardsDone", fillcolor="#c8e6c9", style=filled);
+        global_prefs [label="GlobalPrefs (gGlobalPrefs)\nSettings.cpp\n• viewportCrop (v3.7)\n• trim (v3.7)\n• autoScrollShowEta\n• filePicker\n• UI preferences\n• theme (system/light/dark)\n• language", fillcolor="#bbdefb", style=filled);
+        history [label="gFileHistory (FileHistory.cpp)\n• Vec<FileState> by path\n• SaveSettings() → registry/AppData\n• LoadSettings() on startup\n• UpdateTabFileDisplayStateForTab()\n• FillFileStateExtrasFromWindow()", fillcolor="#bbdefb", style=filled);
+        reload_preserve [label="ReloadDocument Preservation\nSumatraPDF.cpp:2612 / 870\n• Preserves: invert, contrast, trim, crop\n• FileState saved BEFORE reload\n• Restored AFTER LoadDocumentFinish\n• FillFileStateExtrasFromWindow()", fillcolor="#e1bee7", style=filled);
+        migration [label="Settings Migration (ver3.7)\nSettings.cpp\n• MigrateGlobalPrefs() / MigrateFileState()\n• gFileStateInfo names blob\n• MISSING FlashcardStudyTimeSec (s36-at)\n• Fields ≥24 serialize under NEXT name\n• Upgrade path corrupted for pre-s36-at\n• Rule: append at END of BOTH blobs", fillcolor="#ffcdd2", style=filled, shape=note);
+    }
+
+    // ===================== RELOAD DOCUMENT =====================
+    subgraph cluster_reload {
+        label="ReloadDocument (SumatraPDF.cpp:2612)";
+        color="#f44336";
+        style=filled;
+        fillcolor="#ffebee";
+
+        reload [label="ReloadDocument(win, autoRefresh, canAskForPassword)\n• Saves current FileState (incl. fork fields)\n• Destroys old Engine + DisplayModel\n• Calls LoadDocument() with same path\n• Restores FileState after LoadDocumentFinish\n• Updates UI", fillcolor="#c8e6c9", style=filled);
+        save_state [label="UpdateFileStateForTab()\nSumatraPDF.cpp:829\n• Captures ALL per-doc fields\n• Including TumatraPDF-specific\n• FillFileStateExtrasFromWindow()", fillcolor="#bbdefb", style=filled);
+        destroy_engine [label="Destroy Engine + DisplayModel\n• ctrl->Release()\n• delete tab->displayModel\n• gRenderCache->FreeForDisplayModel()\n• WaitForPendingControllerDeletes()", fillcolor="#bbdefb", style=filled);
+        reload_tab [label="ReloadTab() / ScheduleReloadTab()\nSumatraPDF.cpp\n• AutoReloadResetFileState()\n• AutoReloadFileStillChanging()\n• AdjustPathForMaybeMovedFile()", fillcolor="#e3f2fd", style=filled);
+    }
+
+    // ===================== ENGINE SELECTION =====================
+    subgraph cluster_engine_select {
+        label="Engine Selection (EngineCreate.cpp)";
+        color="#607d8b";
+        style=filled;
+        fillcolor="#eceff1";
+
+        guess_type [label="GuessFileType(path)\nGuessFileType.cpp\n• Extension mapping\n• Content sniff (PDF %PDF-)\n• Returns FileType enum", fillcolor="#bbdefb", style=filled);
+        engine_pdf [label="FileType::PDF → EngineMupdf\nMuPDF backend\n• fz_open_document\n• fz_count_pages\n• fz_load_page", fillcolor="#c8e6c9", style=filled);
+        engine_md [label="FileType::Markdown\n• WebView2 (default) → BrowserDocView\n• MuPDF fallback → EngineMupdf\n• markdownUI.useFixedPageUI flag\n• CreateControllerForMarkdown()", fillcolor="#fff9c4", style=filled);
+        engine_ebook [label="FileType::Epub/Mobi/Fb2\nEngineEbook\n• Gumbo HTML parser\n• cmark-gfm for MD", fillcolor="#bbdefb", style=filled);
+        engine_img [label="FileType::Image\nEngineImages\n• GDI+ / libjpeg / libpng\n• Multi-page TIFF support", fillcolor="#bbdefb", style=filled);
+        engine_chm [label="FileType::CHM\nEngineChm\n• chm_ctx\n• BrowserDocView", fillcolor="#bbdefb", style=filled);
+        create_ctrl [label="CreateControllerForEngineOrFile()\nSumatraPDF.cpp\n• Switch(FileType) → specific Create\n• ShouldUseBrowserView() for MD\n• CreateControllerForMarkdown/Chm", fillcolor="#e3f2fd", style=filled);
+    }
+
+    // ===================== ASYNC LOAD FLOW =====================
+    subgraph cluster_async {
+        label="Async Load Flow (Background Thread)";
+        color="#1565c0";
+        style=filled;
+        fillcolor="#e3f2fd";
+
+        async_start [label="StartLoadDocument()\n→ StartLoadDocumentThread()\n→ LoadDocumentAsync()\n• Creates Engine in background\n• LoadDocumentAsyncFinish()\n• Posted to UI thread"], fillcolor="#c8e6c9", style=filled);
+        async_finish [label="LoadDocumentAsyncFinish()\n• OnLoadDocumentThreadFinished()\n• IsLoadStillWanted() check\n• Creates WindowTab\n• LoadModelIntoTab()\n• RelayoutFrame()"], fillcolor="#bbdefb", style=filled);
+        queue [label="gLoadQueue / gLoadQueueDispatchPosted\n• Queued during startup race\n• DispatchQueuedDocumentLoads()\n• Prevents duplicate loads"], fillcolor="#fff9c4", style=filled);
+        cancel [label="DiscardFailedAsyncLoad()\n• MarkFileFailedToOpen()\n• DeleteOrphanedController()\n• LoadDocumentMarkNotExist()"], fillcolor="#ffcdd2", style=filled);
+    }
+
+    // ===================== CONTROLLER CALLBACK =====================
+    subgraph cluster_callback {
+        label="ControllerCallbackHandler (MainWindow implements)";
+        color="#ff9800";
+        style=filled;
+        fillcolor="#fff3e0";
+
+        cb_handler [label="ControllerCallbackHandler interface\nSumatraPDF.cpp\n• TocChanged()\n• OnAutoScrollBottom()\n• OnAutoScrollProgress()\n• RenderThumbnail()\n• RequestRendering()\n• RequestPredictiveRendering()\n• CleanUp()\n• FocusFrame()\n• SaveDownload()\n• UpdateScrollbars()\n• ZoomChanged()\n• PageNoChanged()", fillcolor="#c8e6c9", style=filled);
+    }
+
+    // ===================== EDGES =====================
+    // Entry points to StartLoadDocument
+    cmdline -> start_load;
+    dde -> start_load;
+    dragdrop -> start_load;
+    menu -> start_load;
+    home -> start_load;
+    fav -> start_load;
+    palette -> start_load;
+    nav_folder -> start_load;
+    tab_groups -> start_load;
+    tabs -> start_load;
+    pdf_tools -> start_load;
+    stress -> start_load;
+    canvas_link -> start_load;
+    thumbnail -> start_load [style=dotted];
+
+    // Reload goes directly to LoadDocument
+    reload_cmd -> load_doc;
+    auto_reload -> load_doc;
+
+    // StartLoadDocument flow
+    start_load -> startup_queue [style=dashed];
+    start_load -> thread_data;
+    start_load -> async_load;
+    thread_data -> load_doc [label="posted to UI thread"];
+    async_load -> async_finish;
+    async_finish -> load_model;
+    queue -> dispatch_queued;
+    dispatch_queued -> load_doc [style=dotted];
+    cancel -> destroy_engine [style=dashed];
+
+    // LoadDocument flow
+    load_doc -> find_existing;
+    load_doc -> create_engine;
+    create_engine -> engine_init;
+    load_doc -> maybe_create_win;
+    find_existing -> load_doc [label="reuse win"];
+    maybe_create_win -> create_engine [style=dotted];
+    load_doc -> finish [label="success"];
+
+    // LoadDocumentFinish flow
+    finish -> load_model;
+    load_model -> restore_state;
+    load_model -> initial_view;
+    finish -> ui_update;
+    finish -> sidebar [style=dotted];
+
+    // State persistence
+    restore_state -> file_state;
+    restore_state -> history;
+    global_prefs -> restore_state [style=dotted];
+    finish -> reload_preserve [style=dotted, label="reload path"];
+    file_state -> migration [style=dotted, label="names blob"];
+
+    // Reload flow
+    reload -> save_state;
+    reload -> destroy_engine;
+    reload -> load_doc [label="recursive"];
+    reload -> reload_tab [style=dotted];
+    load_doc -> finish [label="after reload"];
+    finish -> restore_state [label="restore fork fields"];
+
+    // Engine selection
+    create_engine -> guess_type;
+    create_engine -> create_ctrl;
+    guess_type -> engine_pdf;
+    guess_type -> engine_md;
+    guess_type -> engine_ebook;
+    guess_type -> engine_img;
+    guess_type -> engine_chm;
+    create_ctrl -> engine_pdf [style=dotted];
+    create_ctrl -> engine_md [style=dotted];
+    create_ctrl -> engine_ebook [style=dotted];
+    create_ctrl -> engine_img [style=dotted];
+    create_ctrl -> engine_chm [style=dotted];
+
+    // Password handling
+    engine_init -> password [style=dashed, label="if encrypted"];
+
+    // Async load flow
+    start_load -> async_load [style=dashed];
+    async_load -> async_finish;
+    async_finish -> load_model;
+    queue -> dispatch_queued;
+    cancel -> destroy_engine [style=dashed];
+
+    // Controller callback
+    create_engine -> cb_handler [style=dotted, label="sets callback"];
+    load_model -> cb_handler [style=dotted, label="DisplayModel ctor sets"];
+    finish -> cb_handler [style=dotted, label="calls TocChanged/PageNoChanged"];
+
+    // Cross-references
+    load_model ..> cvt_screen [style=dotted, label="DisplayModel ctor"];
+    initial_view ..> build_pages [style=dotted];
+    async_finish ..> thumbnail [style=dotted, label="may trigger thumb gen"];
+
+    // Legend
+    subgraph cluster_legend {
+        label="Legend";
+        color="#ccc";
+        entry [label="Entry point", fillcolor="#bbdefb", style=filled];
+        async [label="Async (Background)", fillcolor="#e3f2fd", style=filled];
+        sync [label="Sync (UI Thread)", fillcolor="#c8e6c9", style=filled];
+        state [label="State Persistence", fillcolor="#efebe9", style=filled];
+        reload_n [label="Reload Path", fillcolor="#ffebee", style=filled];
+        engine [label="Engine Selection", fillcolor="#eceff1", style=filled];
+        callback [label="ControllerCallbackHandler", fillcolor="#fff3e0", style=filled];
+        warn [label="⚠ Migration Bug", fillcolor="#ffcdd2", style="filled,shape=note"];
+    }
+}

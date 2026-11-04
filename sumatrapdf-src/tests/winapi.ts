@@ -11,6 +11,7 @@
 // handles in practice; do not use these helpers for arbitrary 64-bit pointers.
 
 import { dlopen, FFIType, JSCallback, ptr, toArrayBuffer } from "bun:ffi";
+export { ptr } from "bun:ffi";
 
 const user32 = dlopen("user32.dll", {
   EnumWindows: { args: [FFIType.function, FFIType.i64], returns: FFIType.bool },
@@ -18,8 +19,8 @@ const user32 = dlopen("user32.dll", {
   GetWindow: { args: [FFIType.ptr, FFIType.u32], returns: FFIType.u64 },
   GetClassNameW: { args: [FFIType.ptr, FFIType.ptr, FFIType.i32], returns: FFIType.i32 },
   GetWindowThreadProcessId: { args: [FFIType.ptr, FFIType.ptr], returns: FFIType.u32 },
-  PostMessageW: { args: [FFIType.ptr, FFIType.u32, FFIType.i64, FFIType.i64], returns: FFIType.bool },
-  SendMessageW: { args: [FFIType.ptr, FFIType.u32, FFIType.i64, FFIType.i64], returns: FFIType.i64 },
+  PostMessageW: { args: [FFIType.i64, FFIType.u32, FFIType.i64, FFIType.i64], returns: FFIType.bool },
+  SendMessageW: { args: [FFIType.i64, FFIType.u32, FFIType.i64, FFIType.i64], returns: FFIType.i64 },
   MoveWindow: {
     args: [FFIType.ptr, FFIType.i32, FFIType.i32, FFIType.i32, FFIType.i32, FFIType.bool],
     returns: FFIType.bool,
@@ -44,6 +45,9 @@ const user32 = dlopen("user32.dll", {
   GetWindowDC: { args: [FFIType.ptr], returns: FFIType.u64 },
   ReleaseDC: { args: [FFIType.ptr, FFIType.u64], returns: FFIType.i32 },
   PrintWindow: { args: [FFIType.ptr, FFIType.u64, FFIType.u32], returns: FFIType.bool },
+  FindWindowW: { args: [FFIType.ptr, FFIType.ptr], returns: FFIType.u64 },
+  FindWindowExW: { args: [FFIType.ptr, FFIType.ptr, FFIType.ptr, FFIType.ptr], returns: FFIType.u64 },
+  GetDlgItem: { args: [FFIType.i64, FFIType.i32], returns: FFIType.ptr },
   GetSystemMetrics: { args: [FFIType.i32], returns: FFIType.i32 },
   SetProcessDpiAwarenessContext: { args: [FFIType.i64], returns: FFIType.bool },
   GetGUIThreadInfo: { args: [FFIType.u32, FFIType.ptr], returns: FFIType.bool },
@@ -236,6 +240,8 @@ export const WM_MBUTTONDOWN = 0x0207;
 export const WM_CONTEXTMENU = 0x007b;
 export const WM_COMMAND = 0x0111;
 export const WM_COPYDATA = 0x004a;
+// button messages
+export const BM_CLICK = 0x00f5;
 // virtual-key / mouse-button flags
 export const MK_LBUTTON = 0x0001;
 export const MK_RBUTTON = 0x0002;
@@ -512,16 +518,21 @@ export function getScrollPos(hwnd: number, bar: number = SB_VERT): number {
   return getScrollInfo(hwnd, bar).pos;
 }
 
-export function postMessage(hwnd: number, msg: number, wParam: number, lParam: number): boolean {
-  return user32.symbols.PostMessageW(hwnd, msg, BigInt(wParam), BigInt(lParam));
+export function postMessage(hwnd: number | bigint, msg: number, wParam: number, lParam: number): boolean {
+  return user32.symbols.PostMessageW(BigInt(hwnd), msg, BigInt(wParam), BigInt(lParam));
 }
 
 // SendMessage is synchronous: use it when you need the return value, or need the
 // target window to finish handling the message before reading state. Returns the
 // LRESULT as a bigint -- TreeView messages return HTREEITEM pointers that can
 // exceed 2^53, so they must not be coerced to a JS number.
-export function sendMessage(hwnd: number, msg: number, wParam: number | bigint, lParam: number | bigint): bigint {
-  return user32.symbols.SendMessageW(hwnd, msg, BigInt(wParam), BigInt(lParam)) as bigint;
+export function sendMessage(
+  hwnd: number | bigint,
+  msg: number,
+  wParam: number | bigint,
+  lParam: number | bigint,
+): bigint {
+  return user32.symbols.SendMessageW(BigInt(hwnd), msg, BigInt(wParam), BigInt(lParam)) as bigint;
 }
 
 // Send a null-terminated UTF-16 WM_COPYDATA payload. COPYDATASTRUCT is 24
@@ -582,6 +593,13 @@ export function moveWindow(hwnd: number, x: number, y: number, w: number, h: num
 export const SWP_NOZORDER = 0x0004;
 export const SWP_NOACTIVATE = 0x0010;
 export const SWP_FRAMECHANGED = 0x0020;
+export const SWP_NOMOVE = 0x0002;
+export const SWP_NOSIZE = 0x0001;
+
+// HWND_* special values (as raw pointer numbers for FFI)
+export const HWND_TOPMOST = -1;
+export const HWND_NOTOPMOST = -2;
+
 export const GWL_STYLE = -16;
 export const WS_MAXIMIZE = 0x01000000;
 
@@ -602,6 +620,12 @@ export function setWindowPos(
   flags = SWP_NOZORDER | SWP_NOACTIVATE,
 ): boolean {
   return user32.symbols.SetWindowPos(hwnd, 0, x, y, w, h, flags);
+}
+
+// place window topmost / revert, without moving or resizing
+export function setWindowTopmost(hwnd: number, topmost: boolean): boolean {
+  const insertAfter = topmost ? HWND_TOPMOST : HWND_NOTOPMOST;
+  return user32.symbols.SetWindowPos(hwnd, insertAfter, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 }
 
 export function showWindow(hwnd: number, cmd: number): boolean {
@@ -825,6 +849,34 @@ export function captureWindowPixels(hwnd: number): { w: number; h: number; data:
   user32.symbols.ReleaseDC(0, screenDC);
   return { w, h, data };
 }
+
+// FindWindowW / FindWindowExW -- find top-level / child windows by class name
+export function findWindowW(className: string | null, windowName: string | null): number {
+  const clsPtr = className ? ptr(wideZ(className)) : 0n;
+  const winPtr = windowName ? ptr(wideZ(windowName)) : 0n;
+  return Number(user32.symbols.FindWindowW(clsPtr, winPtr));
+}
+
+export function findWindowExW(
+  parent: number | null,
+  childAfter: number | null,
+  className: string | null,
+  windowName: string | null,
+): number {
+  const parentPtr = parent ? BigInt(parent) : 0n;
+  const childAfterPtr = childAfter ? BigInt(childAfter) : 0n;
+  const clsPtr = className ? ptr(wideZ(className)) : 0n;
+  const winPtr = windowName ? ptr(wideZ(windowName)) : 0n;
+  return Number(user32.symbols.FindWindowExW(parentPtr, childAfterPtr, clsPtr, winPtr));
+}
+
+// GetDlgItem -- fetch a child control by its dialog-template ID (e.g. edit=1001,
+// OK=IDOK). More direct than class-name enumeration; no child-thread walk needed.
+export function getDlgItem(parent: number, id: number): number {
+  return Number(user32.symbols.GetDlgItem(BigInt(parent), id));
+}
+
+export const IDOK = 1;
 
 // set a window's text via WM_SETTEXT (works on edit controls cross-process,
 // unlike SendInput typing). Synchronous, so the wide buffer stays alive.
