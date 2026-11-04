@@ -26,6 +26,9 @@ import { testit as adHocTabMenu } from "./ad-hoc-tab-menu.ts";
 import { testit as adHocTabSessionE2E } from "./ad-hoc-tab-session-e2e.ts";
 import { testit as adHocAnnotSaveIntegrity } from "./ad-hoc-annot-save-integrity.ts";
 import { testit as adHocRestoreNoFileStates } from "./ad-hoc-restore-no-filestates.ts";
+import { testit as adHocPerfStartup } from "./ad-hoc-perf-startup.ts";
+import { testit as adHocPerfCacheBehavior } from "./ad-hoc-perf-cache-behavior.ts";
+import { testit as adHocPerfToggleLatency } from "./ad-hoc-perf-toggle-latency.ts";
 
 const adHocTests: [string, () => void | Promise<void>][] = [
   ["ad-hoc-exif", adHocExif],
@@ -46,6 +49,9 @@ const adHocTests: [string, () => void | Promise<void>][] = [
   ["ad-hoc-tab-session-e2e", adHocTabSessionE2E],
   ["ad-hoc-annot-save-integrity", adHocAnnotSaveIntegrity],
   ["ad-hoc-restore-no-filestates", adHocRestoreNoFileStates],
+  ["ad-hoc-perf-startup", adHocPerfStartup],
+  ["ad-hoc-perf-cache-behavior", adHocPerfCacheBehavior],
+  ["ad-hoc-perf-toggle-latency", adHocPerfToggleLatency],
 ];
 
 export async function testit(): Promise<void> {
