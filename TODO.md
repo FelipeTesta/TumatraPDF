@@ -14,6 +14,18 @@ User-locked order:
 3. **Edit/Align** (spec pointer → `## Edit/` below, PT verbatim).
 4. **Page Counting Format** (spec pointer → `## Page Counting Format` below).
 
+## Performance optimizations (verified 2026-11-04, evidence LOG s38)
+
+Source: external agent's perf map (archived TEMP/performance-code-arch.dot), claims verified against code (LOG s38). Safest first:
+
+- [ ] **OPT-7** coordinate-space guards (START): `#if isDebug` asserts in `DisplayModel::CvtToScreen/CvtFromScreen` + TC2 colX consistency check (debug-only, no behavior change; prerequisite for OPT-3). STATUS: in progress s38-o1.
+- [ ] **OPT-6** perf regression tests: cache hit rate, RelayoutFrame frequency, trim/crop toggle latency; ad-hoc tests, fail on >5% regression. STATUS: baseline tests shipped (startup/cache-behavior/toggle-latency); CI fail-gate metrics (cache hit rate, relayout frequency) need new C++ control cmds — residual open.
+- [x] **OPT-5** WebView2 memory budget flags: cap Chromium baseline (shared env already exists — WebView.cpp gSharedEnvironment). STATUS: flags shipped [--js-flags=--max-old-space-size=256, --disk-cache-size=33554432] at WebView.cpp:1922-1938 AdditionalBrowserArguments (user verify pending).
+- [ ] (DEFER) OPT-1 adaptive cache cap — after OPT-7; needs memory accounting + tests.
+- [ ] (DEFER) OPT-3 partial trim-cache invalidate — real gain (Full FreeForDisplayModel storm, RenderCache.cpp:426) but stale-tile risk on rect.y shift; needs stamping/versioning.
+- [x] (REJECTED) OPT-2 true LRU — hash-rejection reasons sound (no STL base/, compaction invalidates positions).
+- [x] (REJECTED) OPT-4 TC2 tile dedup — premise wrong: left/right render different page halves (colX shift RenderCache.cpp:347-368); dedup would show wrong half.
+
 ## Findings status — audited 2026-11-04
 
 ### Closed (verified)
@@ -136,7 +148,7 @@ Scratch E2E harnesses live in `tests/tmp/` (gitignored): s34-replace/paint/crop/
 
 ## Memory Performance Optimization (from performance.dot analysis 2026-11-04)
 
-**Arquivo de referência:** `FLOW/performance.dot` — mapa completo de arquitetura de memória, CPU hotspots, custos de ferramentas, profiling tooling.
+**Arquivo de referência:** `TEMP/performance-code-arch.dot` — mapa completo de arquitetura de memória, CPU hotspots, custos de ferramentas, profiling tooling.
 
 ### Gargalos Críticos Identificados
 
@@ -168,7 +180,7 @@ Scratch E2E harnesses live in `tests/tmp/` (gitignored): s34-replace/paint/crop/
 - [ ] **WebView2 memory budget** — limitar processos Chromium; `--memory-pressure-off` flags
 - [ ] **Perf regression tests** — `ad-hoc-profile-live-writes.ts` já existe; adicionar métricas cache hit rate, RelayoutFrame freq, working set delta
 
-### Relações Críticas (ver performance.dot)
+### Relações Críticas (ver TEMP/performance-code-arch.dot)
 
 - `RenderCache` → `fz_pixmap` → `Gdiplus::Bitmap` → `BlitPixmap` (cached path ~1ms)
 - `darkModeEpoch` invalida cache em massa → re-render storm

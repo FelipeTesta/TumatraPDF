@@ -6,17 +6,23 @@ history in [LOG.md](LOG.md).
 
 ## Unreleased
 
-- **Disabled toolbar buttons now look disabled.** A button that is visible
-  but inactive (e.g. Save when there is nothing unsaved to write) used to
-  show its icon at full color. It is now dimmed toward the theme background,
-  matching the muted text of other disabled controls.
+## v1.0.16 (2026-11-04)
 
-- **Toolbar tooltips follow the buttons from launch.** The startup width
-  enforcement that makes room for the timer trio and the page-number box
-  shifted buttons after their tooltip rectangles had been snapshotted, so
-  for the first moments a tooltip could pop up over a neighbouring button
-  until the next layout pass re-synced it. Tooltip rectangles are now
-  re-synced after each width-enforcement and toolbar-rebuild pass.
+- **Tab Groups:** Save the open documents of a window as a named tab group (session), restore any group on startup or on demand, and groups auto-sync as tabs are added/removed/closed. A toolbar dropdown lists groups with Open here / Open in new window / Rename / Delete / New session; new windows (`Ctrl+N`) start unsynced. Empty groups are first-class and the last-tab close keeps the group empty instead of wiping it.
+
+- **Profile Memory / Sync:** All reading time, flashcard study data, and per-book state now live in a single `tumatraPDF-data_1.json` file that can be exported, imported, and synced (e.g. via Google Drive). Includes a Home "🔁 Sync" button + Profile Sync window (version, size, last save, machine, book/day counts), cloud-revert detection with restore prompt, 9 rolling local backups (8h slots), a `profileDataDir` setting to point at a synced folder, and portable→install import.
+
+- **Flashcard study time + card counts:** While study mode is on (answer not revealed), time per card is credited (capped at 60s/card) and every rating is counted. Totals live in `flashcard-stats.txt` per-day lines and per-book `FileState`, shown on the Home Flashcards tab, the combined `Flashcards: Today N cards / Xh Ym | Total: …` line, calendar hover labels, and a peru-colored graph line.
+
+- **Dark-mode theme fixes:** Image Save/Crop/Resize dialog, Profile Backup dialog, Profile Sync dialog, and the FormFields listbox now paint with theme background/text colors instead of white in dark themes.
+
+- **WebView2 memory budget:** The shared Chromium environment now passes `--js-flags=--max-old-space-size=256` (cap V8 old-generation heap ~256MB) and `--disk-cache-size=33554432` (cap disk cache 32MB) via `AdditionalBrowserArguments`.
+
+- **Disabled toolbar buttons now look disabled.** A visible-but-inactive button (e.g. Save with nothing unsaved) is dimmed toward the theme background instead of full color.
+
+- **Toolbar tooltips follow the buttons from launch.** Tooltip rectangles are re-synced after each width-enforcement and toolbar-rebuild pass, so a tooltip no longer pops over a neighbour button during the first moments.
+
+- **Bug fixes:** Fixed save corruption under Two Columns (TC2) that could drop page content (virtual→physical pageNo routing + corrupt-annot guard on save); fixed settings names-blob migration for pre-37 settings files (fields ≥23 were shifted); fixed toolbar flicker/infinite re-wrap on narrow windows; fixed boot crash when `FileStates` is empty (NULL `tocState` deref at restore).
 
 ## v1.0.15 (2026-10-26)
 

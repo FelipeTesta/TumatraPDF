@@ -1,4 +1,49 @@
-﻿## 2026-11-04 (s37-d) — Hardening 1b: Test* handlers marshalled to UI thread + 1c TestMarkdownAdapter app-side
+﻿## 2026-11-04 (s38-o3) — OPT-5 WebView2 memory budget flags
+
+### Added
+
+- `src/wingui/WebView.cpp`: `CreateOfflineEnvironmentOptions()` (`CreateCoreWebView2EnvironmentWithOptions` site, line ~1944) now passes memory-advisory Chromium env flags via `AdditionalBrowserArguments` on the single shared env (`gSharedEnvironment`, created once :1944):
+  - `--js-flags=--max-old-space-size=256` — cap V8 old-generation JS heap per renderer (~256MB)
+  - `--disk-cache-size=33554432` — cap Chromium disk cache at 32MB
+- Both are Chromium official, advisory-only flags — zero behavior risk when a flag is unsupported by the runtime.
+- File-local comment block at WebView.cpp:1920 lists each flag + why + Chromium doc basis.
+
+### Notes
+
+- Build 0 err/0 warn; `ad-hoc-tab-session` + `ad-hoc-tab-session-e2e` PASS; live probe: `msedgewebview2` process exists + `[md] doc complete`.
+
+## 2026-11-04 (s38-o2) — OPT-6 perf baselines: 3 ad-hoc tests (no C++)
+
+### Added
+
+- `tests/ad-hoc-perf-startup.ts`: process start -> Ping OK + Ping OK -> first doc load OK wall-clock; PERF output, sanity ceiling only, not a gate.
+- `tests/ad-hoc-perf-cache-behavior.ts`: fixture page-back nav hop latency (avg >=5 hops) via CmdGoToNextPage/CmdGoToPrevPage; PERF output, sanity ceiling only.
+- `tests/ad-hoc-perf-toggle-latency.ts`: CmdMarginTrimToggle x3 cycles avg dispatch latency + top-5 RenderCache sumlog lines as evidence; sanity ceiling only.
+- `tests/before-release.ts`: registered the 3 ad-hoc perf tests (append only, tests/all.ts untouched).
+
+### Notes
+
+- Baseline capture, not CI fail-gate: tolerances loose (machine noise); value now = baseline numbers for future trend comparison.
+- Residual: gate metrics (cache hit rate, relayout frequency) need new C++ control-pipe commands — not added (build lock held by other agent); recorded as open in TODO.md OPT-6 row.
+
+## 2026-11-04 (s38) — performance.dot verified + optimal subset queued
+
+### Verified
+
+- performance.dot audit (archived `TEMP/performance-code-arch.dot`): claims checked against code — **OPT-2 true LRU REJECTED** (hash-rejection reasons sound: no STL base/, compaction invalidates positions); **OPT-4 TC2 tile dedup REJECTED** (premise wrong: left/right render different page halves, colX shift `RenderCache.cpp:347-368`; dedup would show wrong half).
+- Stale claims cleared: ASan `build-asan.ts` targets `TumatraPDF.sln` correctly; v1 crop stack fields removed from `DisplayModel.cpp:443-444` (R5-left blocked on button retirement).
+- WebView2 shared env already exists — `WebView.cpp` gSharedEnvironment — OPT-5 baseline confirmed; only `--memory-pressure-off-style` switches left to investigate.
+
+### Changed
+
+- `FLOW/performance.dot` → `TEMP/performance-code-arch.dot` (TEMP/ gitignored, kept as critical-points reference).
+- TODO.md: added `## Performance optimizations (verified 2026-11-04)` after Execution queue; OPT-7 coordinate-space guards started (STATUS: in progress s38-o1); OPT-1/OPT-3 deferred; OPT-2/OPT-4 rejected.
+
+### Notes
+
+- Hardening-pack commits (2) landed earlier this round: TC2 un-routed engine-> sites audit + Test* UI-thread marshalling / TestMarkdownAdapter (see LOG s37-a/s37-d).
+
+## 2026-11-04 (s37-d) — Hardening 1b: Test* handlers marshalled to UI thread + 1c TestMarkdownAdapter app-side
 
 ### Fixed
 
