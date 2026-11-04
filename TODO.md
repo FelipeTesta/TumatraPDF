@@ -3,91 +3,56 @@
 1. Open work ONLY.
 2. Completed features/fixes live in [LOG.md](LOG.md) (per-session) + [CHANGELOG.md](CHANGELOG.md) (per-release).
 3. User manual-test items = items only the user can validate.
-4. Housekeeping (2026-10-20, s36-ae; re-triaged s36-at): all `[x]` blocks archived — details live in LOG per session entry; this file lists open work only.
+4. Housekeeping (2026-10-20, s36-ae; re-triaged s36-at, s36-cu/cv): all `[x]` blocks archived — details live in LOG per session entry; this file lists open work only.
 
-## Critical Findings from FLOW Analysis (2026-11-01) — MUST FIX
+## Execution queue — top 5 (effort/gain)
 
-### 1. Toolbar Critical Ordering — `SetWindowTheme` MUST run BEFORE `TbAddButtons`
+User-locked order:
 
-**Problem**: `ToolbarApplyThemeToRebar()` calls `SetWindowTheme` AFTER buttons are added → invalidates comctl32 per-button layout → `TB_GETITEMRECT` returns 0 → `ReportIf` triggers `TerminateProcess(exitCode=105)` → toolbar band paints BLANK (white buttons).
-**Why it's a problem**: This is the root cause of the "white/blank buttons" bug on secondary toolbars (Arch/Edit). The fix is replicating the Flashcard pattern: `SetWindowTheme(hwndToolbar, L"", L"")` **before** `TbAddButtons(iBitmap=TbIcon::Text)`. Affected: `CreateToolbar2()`, `EditToolbarCreate()`.
-**Status**: Partially fixed in s36-ax for Arch/Edit; verify all 4 toolbars follow this pattern.
+1. **HARDENING PACK** (do before any new feature):
+   - (a) TC2 un-routed `engine->` sites — `Commands_Edit.cpp:726` `GetElements(pageNo)`, `Commands_Flashcard.cpp:324` `GetFzPageInfo(card.pageNo)`, `RenderCache.cpp:506` `GetTileRes` (comment claims routing, body unverified), `RenderCache.cpp:1212` non-cache Paint.
+   - (b) Test* control handlers marshal `TB__`/`TTM__` queries to UI thread — `SumatraControl.cpp:938` → `Toolbar.cpp:2747` sends from control pipe thread; AV risk, LOG s36-az.
+   - (c) WebView2 adapter open part — create `docs/md/WebView2-Adapter-Pattern.md` (adapter `MarkdownModel.cpp:181` verified forwarding all 9 `HtmlWindowCallback` virtuals — document pattern + list) + add `TestMarkdownAdapter` to `cmd/control.ts`.
+2. **Capture tool** Shift+S (spec pointer → `## Capture tool` below).
+3. **Bookmarks Improve** (spec pointer → `## Bookmarks Improve` below).
+4. **Edit/Align** (spec pointer → `## Edit/` below, PT verbatim).
+5. **Page Counting Format** (spec pointer → `## Page Counting Format` below).
 
-### 2. Coordinate Space Mismatch — Recurring Bug Class (AGENTS.md §12)
+## Findings status — audited 2026-11-04
 
-**Problem**: Mixing coordinate spaces silently breaks features. Convention:
+### Closed (verified)
 
-- `DisplayModel::CvtToScreen/CvtFromScreen`: PAGE coords ↔ CANVAS-CLIENT coords (includes scroll+zoom)
-- `VirtWnd` tree: `ev.pt` after `BubbleMouse` = LOCAL to target bounds; `ctx.bounds`/`VirtWnd::bounds` = ROOT-relative
-- E2E posted coords may arrive DPI-virtualized ×1.25 (non-deterministic)
-  **Why it's a problem**: Silent coordinate mixing caused TrimConfigDialog to use wrong mediabox under TC2 (even pages = wrong box), TC2 render freeze (virtual pageNo passed to engine → `ReportIf` storm), and drag-line math duplication. Rule: before any hit-test, name the space of BOTH operands out loud (local/root/client/page). Mixed = bug.
+- Toolbar critical ordering — all 4 toolbars strip theme before `TbAddButtons` (`Toolbar.cpp:2907/:3076`, `FlashcardToolbar.cpp:465`, `Commands_Edit.cpp:126`). s36-ax lineage.
+- Dark Mode Epoch legacy path dead — `ToolbarApplyThemeToRebar` (`Toolbar.cpp:3181`) uncalled; epoch bumped by `ApplyThemeColorsToDarkMode` (`Theme.cpp`).
+- ASan `build-asan.ts` targets `TumatraPDF.sln` correctly.
+- Settings names-blob migration fixed (s36-br, commit `6df3dc3`).
+- dmlib rebar interception fixed (`ToolbarArchEditRebarSubclassProc` + `TBSTYLE_EX_MIXEDBUTTONs`, user-verified s36-bb lineage).
+- Flashcard annotation author-token rule → AGENTS.md §12 (2026-10-18).
 
-### 3. Dark Mode Epoch Invalidation — `darkModeEpoch` in RenderCache
+### Open (live)
 
-**Problem**: Theme change increments `darkModeEpoch` → `RenderCache::Find` skips stale entries → forces re-render with new colors (~1ms penalty). But `ToolbarApplyThemeToRebar` (legacy) doesn't trigger this properly.
-**Why it's a problem**: Inconsistent theme switching. The correct path is `DisplayModel::ApplyTheme()` → `darkModeEpoch++` → `gRenderCache->FreeAll()` → `WM_THEMECHANGED` → `RelayoutFrame()`. Legacy code paths bypass this, causing visual glitches on theme toggle.
-
-### 4. WebView2 Adapter Trap — Silent Feature Death
-
-**Problem**: JS notify → `BrowserDocView::OnJsNotifyCb` → `MarkdownHtmlWindowHandler` (adapter, MarkdownModel.cpp:179) → `MarkdownModel` → `ControllerCallbackHandler`. Adapter **MUST** forward every new `HtmlWindowCallback` method. No-op default = feature silently dead.
-**Why it's a problem**: Autoscroll ETA for Markdown was stuck because the adapter didn't forward `autoscrollProgress` notifications. Contrast adapter had 3 divergent JS copies. Every new feature needing WebView2 communication MUST update the adapter, or it works in PDF but silently fails in Markdown.
-
-- Create `docs/md/WebView2-Adapter-Pattern.md`: adapter location `MarkdownModel.cpp:179`, required forwards (`appKey`, `autoscrollProgress`, `autoscrollBottom`, `scrollPos`, `linkClick`, `imageClick`), pattern `virtual void OnXxx() { callback->OnXxx(); }`.
-- Add `TestMarkdownAdapter` to `cmd/control.ts`.
-- Compile-time/static check: all `HtmlWindowCallback` methods have adapter impl.
-
-### 5. Flashcard Annotation Convention — Author Token vs Contents
-
-**Problem**: Flashcards use `Author = "TumatraPDF-Flashcard#%08X"` for grouping (cross-page), `Contents = EMPTY`. Identity check MUST use `str::StartsWith(Author, "TumatraPDF-Flashcard")`, NOT `str::Eq`.
-**Why it's a problem**: `RebuildCommentsFromAnnotationsInner` turns ANY annot with non-empty contents into a page tooltip. If flashcard used contents for token, it would pollute the comments list. `str::Eq` silently drops tagged annots (breaks Canvas ctrl+click List panel and EditAnnotations filter). This convention is fragile and undocumented in code.
-
-### 6. ASan Build Broken — `build-asan.ts` references `SumatraPDF.sln`
-
-**Problem**: `cmd/build-asan.ts` references upstream `SumatraPDF.sln` / `SumatraPDF-static` which don't exist in fork. ASan pipeline cannot run.
-**Why it's a problem**: No AddressSanitizer CI → memory bugs (UAF, buffer overflow) only caught in production. Premake encodes ASan `/DEPENDENTLOADFLAG:0xA00` exception but build script is stale. Fix: update `build-asan.ts` to use `TumatraPDF.sln` and `TumatraPDF` target.
-
-### 7. Settings Migration Off-by-One — `gFileStateInfo` names blob missing `FlashcardStudyTimeSec`
-
-**Problem**: The `gFileStateInfo` names blob (serialized settings) is missing `FlashcardStudyTimeSec` (s36-at omission) → every FileState field ≥ 24 serializes under the NEXT field's name. Round-trip is index-consistent (data survives restarts) but names in settings file + AdvancedSettingsDialog lie. Pre-s36-at settings files read one-off (upgrade path corrupted).
-**Why it's a problem**: Inserting the missing name NOW would shift every read by one → needs a one-time migration. Rule: new FileState fields MUST append at the END of the table AND both blobs. This is a ticking time bomb for settings corruption on upgrade.
-
-### 8. dmlib Intercepts NM_CUSTOMDRAW Before Subclass Chain
-
-**Problem**: `dmlib::setWindowNotifyCustomDrawSubclass()` intercepts `NM_CUSTOMDRAW` at window-proc level. Only `CDDS_POSTPAINT` reaches `ReBarWndProc`. Secondary toolbars (Arch/Edit) get NO custom draw → default comctl32 rendering = WHITE/BLANK buttons.
-**Why it's a problem**: The fix requires replicating Flashcard pattern: install rebar subclass **AFTER** dmlib (LIFO → first), handle `NM_CUSTOMDRAW` with wipe+redraw in `ITEMPOSTPAINT`, add `TBSTYLE_EX_MIXEDBUTTONS`, extend `ReBarWndProc` check to ALL 4 toolbars. This is a systemic issue affecting any custom-draw toolbar.
-
-### 9. TC2 (Two Columns v2) Virtual→Physical Routing — Every Engine Call Must Route
-
-**Problem**: Under TC2, `PageCount() = VirtualPageCount (2N)`. Every engine call (`PageMediaBox`, `Transform`, `HasClipOptimizations`, `RenderPage`) must receive `VirtualToPhysical(pageNo)`. Missed one = `ReportIf(pageNo > pageCount)` = debug report storm + callstack **per paint** → UI freeze.
-**Why it's a problem**: Multiple sites missed routing (GetTileRes, TrimConfigDialog, non-cache Paint). The fix is systematic: grep for `engine->` calls in render path, ensure all get `dm->VirtualToPhysical(pageNo)`. Render cache key = VIRTUAL pageNo (left/right distinct), but engine calls = PHYSICAL.
-
-### 10. ReloadDocument Must Preserve ALL Fork Fields
-
-**Problem**: `SaveAnnotationsToExistingFile` → `ReloadDocument` built a FRESH `FileState` and never copied fork's per-doc color fields → restore path reset them to defaults (invert/contrast/trim/crop lost on save).
-**Why it's a problem**: Fixed in LOG s36-az: `ReloadDocument` now carries `fs->invertColors/contrastEnabled/contrastOpacity/trimTop/trimBottom/viewportCropV2Enabled/autoScrollSpeedMultiplier` (same fields `UpdateFileState` persists). But this is a pattern: ANY new per-doc field must be added to BOTH `UpdateFileStateForTab` (save) AND `ReloadDocument` (restore). Missing one = silent data loss on save/reload.
-
-- `FORK_FIELD` macro/automation parked as tech debt (NOT low-risk verified): ReloadDocument currently preserves fork fields in-place; single source of truth via field-attribute macro + static assertion/test deferred.
+- Coordinate space mismatch — convention: `DisplayModel::CvtToScreen/CvtFromScreen` = PAGE ↔ CANVAS-CLIENT; `VirtWnd` `ev.pt` = LOCAL vs `ctx.bounds` = ROOT-relative; E2E posted coords may arrive DPI-virtualized ×1.25. Rule: before any hit-test, name the space of BOTH operands (local/root/client/page). Mixed = bug.
+- WebView2 adapter — open part moved to Execution queue item 1c.
+- TC2 virtual→physical routing — un-routed evidence at Execution queue item 1a; cache-path sites verified fixed; uia `PageProvider` MVP-acceptable.
+- ReloadDocument / FORK_FIELD — no `FORK_FIELD` macro in source; manual copy persists `SumatraPDF.cpp:882-898`. Any new per-doc field must update both `UpdateFileStateForTab` (save) and `ReloadDocument` (restore) — pattern trap.
 
 ## Dev tooling / analysis — open items
 
-- [ ] **B6-left** clang-tidy: only the 8 `clang-diagnostic-error` TUs remain (flag/std gap vs MSVC; platform-suffix files excluded) + the ~24k stylistic bulk (signed-bitwise, macro-to-enum, named-parameter, designated-initializers, redundant-parentheses, concise-preprocessor-directives, explicit-constructor) — a separate policy decision, not a defect list. Waves 1-5 closed: switch-default 128→0, narrowing 81→4 vendored, roundings 17→0, unchecked-conv 7→0 (1 justified NOLINT); analyzer 42 all triaged. Baseline: `out/lint/clang-tidy-summary.txt` (LOG s36-r/ac/ad/ag/ak/al).
+- [ ] **B6-left** clang-tidy: only the 8 `clang-diagnostic-error` TUs remain (flag/std gap vs MSVC; platform-suffix files excluded) + the ~24k stylistic bulk (signed-bitwise, macro-to-enum, named-parameter, designated-initializers, redundant-parentheses, concise-preprocessor-directives, explicit-constructor) — a separate policy decision, not a defect list. Waves 1-5 closed: switch-default 128→0, narrowing 81→4 vendored, roundings 17→0, unchecked-conv 7→0 (1 justified NOLINT); analyzer 42 all triaged. Baseline: `out/lint/clang-tidy-summary.txt` (LOG s36-r/ac/ad/ag/ak/al) — **baseline file ABSENT (regenerate before comparing)**.
 
 ## Dependency updates — open items
 
-- [x] **Suite baseline (pre-existing, NOT caused by the dependency batch) — RESOLVED (s36-au/ay/ba/bb), 0 entries fail.** History: `exit 5` shutdown group (9 tests, s36-au — deliberate debug-build exit after atexit-time GDI+ statics crash, NOT an access violation), issue-5869 (s36-ay — stale test parse + toolbar tooltip-rect re-sync; re-fixed s36-bb for the v1.0.15 startup relayout storm), the whole `-unit-tests exit 1` group (issue-5840, issue-5842, issue-5846, parse-tip-brackets, s36-ba — one stale Help/-link URL expectation after the fork-URL switch 22dc208), and the UI/timing group (s36-bb — issue-1914: DPI-virtualized `clickAt` missed the pushbutton, fix `setProcessDpiAware`; issue-5866: sampled before the first chrome paint settled, fix bounded stability poll; issue-5792: passes as-is). See LOG.
+- [x] **Suite baseline (pre-existing, NOT caused by the dependency batch) — RESOLVED (s36-au/ay/ba/bb), 0 entries fail.** History in LOG s36-au/ay/ba/bb (shutdown group, issue-5869, unit-tests exit 1, UI/timing). See LOG.
 - [ ] If a real dependency regression appears: bisect by patch group (the 27 patches in `ext/patches/` are the only local delta over pristine mupdf 1.28.5; reverse-apply state: 22 applied / 19 absent / 6 conflict).
-- [ ] Bun `1.3.14 → 1.4.3` (build/test scripts only) after re-running the suite.
+- [ ] Bun `1.3.14 → 1.4.3` (build/test scripts only) after re-running the suite. Bun version not pinned in repo files (`cmd/package.json` has no version).
 - [ ] **F6 — explicitly deferred**: harfbuzz/freetype only when mupdf bumps its pins (mupdf 1.28.5 pins exactly our versions — upgrading independently diverges from the combination Artifex tests). UnRAR metadata drift: `ext/versions.txt` says 7.1.6 but `ext/unrar/version.hpp` reports RARVER 7.11.0 — verify against rarlab before any change.
 
 ## Refactoring backlog (tree-sitter audits; completed R1/R2/R4, 16A-D, C2-C5/F6, R-P1..R-P3 → LOG)
 
 - [ ] **R3-left**: unify TrimRect math (TrimRectPage/Inverse) — sites semantics differ (mediabox shrink vs area/pt shift); forcing a helper = render-path risk. Only with a rendering regression test.
-- [ ] **R5-left**: remove v1 crop stack (`DisplayModel.h` viewportCrop v1 fields) — BLOCKED: v1 button (Scan View) still live. Do when/if v1 is retired.
+- [ ] **R5-left**: remove v1 crop stack — BLOCKED: v1 fields REMOVED from `DisplayModel.cpp:443-444` but `CmdViewportCropToggle` Scan Mode button + call-sites still live (`Toolbar.cpp:106`, `Menu.cpp:630`, `SumatraPDF.cpp:9954/10004/11599`). Do when/if v1 button is retired.
 - [ ] **R7 / 16C-next**: continue god-file extraction — SumatraPDF.cpp (~14.2k lines, target ~10k), then Canvas.cpp (~5.7k; needs a dependency MAP first — mouse/keyboard interleaved with rendering, no established pattern), EngineMupdf.cpp (~6.7k, decouple rendering helpers per format).
 - [ ] **16D**: typed `gGlobalPrefs` accessors (152 accesses in SumatraPDF.cpp) — only when tests exist.
-- [ ] **TC2 leftovers**: uia `PageProvider` + legacy tile math not routed virtual→physical (non-cache path diverts; MVP-acceptable).
-- Non-cache Paint path: audit remaining `engine->` calls in `RenderCache.cpp`/`DisplayModel.cpp`/`Canvas.cpp`/`Commands_Edit.cpp`/`TrimConfigDialog.cpp` for virtual→physical routing (cache-path sites verified fixed).
-- [x] **Settings migration (names-blob off-by-one)** (fix s36-br): the `gFileStateInfo` names blob is missing `FlashcardStudyTimeSec` (s36-at omission) → every FileState field ≥ 24 serializes under the NEXT field's name. Round-trip is index-consistent (data survives restarts intact — user's file proven), but the names in the settings file + AdvancedSettingsDialog lie, and pre-s36-at settings files read one-off (upgrade path corrupted). Inserting the missing name NOW would shift every read by one → needs a one-time migration. Rule (noted in Settings.h): new FileState fields MUST append at the END of the table AND both blobs (s36-az followed it for `flashcardCardsDone`).
 
 ## Two Columns v2 — pending USER live-confirmations (code complete, all E2E-verified)
 
@@ -132,7 +97,7 @@ Replace / Edit With Paint / top-level Copy Image shipped s31; s34 E2E covers the
 
 ## Design rules — implementation pending
 
-- [ ] Buttons/inputs must center content (text/icons) horizontally AND vertically (ToolbarLayout controls, timer/speed inputs, new UI elements). Rule defined 2026-09-08. Flashcard toolbar done (s36-ax, custom-draw POSTPAINT centering); main toolbar autoscroll button label done; rest pending.
+- [ ] Buttons/inputs must center content (text/icons) horizontally AND vertically (ToolbarLayout controls, timer/speed inputs, new UI elements). Rule defined 2026-09-08. Flashcard toolbar done (s36-ax, custom-draw POSTPAINT centering); main toolbar autoscroll button label done; rest pending. PARTIAL — TBSTYLE_EX_MIXEDBUTTONS (`Toolbar.cpp:2931/:3072`, `FlashcardToolbar.cpp:482`) + custom-draw POSTPAINT centering shipped; visual verify pending.
 
 ## Theme Colors Compliance (P2.5) — dark-mode white controls
 
@@ -140,22 +105,22 @@ Dialog frame dark via `dmlib::setDarkWndSafe()` but child controls (edit/static/
 
 Scan 2026-11-04 (full src sweep, LOG s36-cs):
 
-| Priority | Dialog/Window            | File                                                                | Fix pattern                                                                                                                     |
-| -------- | ------------------------ | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| 1        | Password Dialog          | `SumatraDialogs.cpp:178` `Dialog_GetPassword_Proc`                  | `WM_CTLCOLOREDIT/STATIC/BTN` handling                                                                                           |
-| 2        | Go to Page Dialog        | `SumatraDialogs.cpp:282` `Dialog_GoToPage_Proc`                     | `WM_CTLCOLOREDIT/STATIC` handling                                                                                               |
-| 3        | Find Window              | `FindWindow.cpp`                                                    | `WM_CTLCOLOREDIT/STATIC/LISTBOX` handling                                                                                       |
-| 4        | Find Bar                 | `FindBar.cpp`                                                       | `WM_CTLCOLOREDIT` handling                                                                                                      |
-| 5        | Advanced Settings Dialog | `AdvancedSettingsDialog.cpp`                                        | Verify wingui controls use theme colors                                                                                         |
-| 6        | Trim Config Dialog       | `TrimConfigDialog.cpp`                                              | Verify wingui Edit controls use theme colors                                                                                    |
-| 7        | Print/Page Setup Dialogs | `PrintDialog.cpp`                                                   | `dmlib::setDarkWndSafe` + `WM_CTLCOLOR`                                                                                         |
-| 1/HIGH   | Image save/crop/resize   | `ImageSaveCropResize.cpp:1735-1743/:1746-1749/:2136`                | `GetSysColorBrush(COLOR_BTNFACE)` erase+brush+class bg → theme color; STATUS: FIXED 2026-11-04 (user verify pending)            |
-| 2/MED    | Profile Backups dialog   | `ProfileBackupWnd.cpp:55/:264/:91/:196/:324`                        | FillRect COLOR_WINDOW + brushes → theme bg; STATUS: FIXED 2026-11-04 (user verify pending)                                      |
-| 2/MED    | Profile Sync dialog      | `ProfileSyncWnd.cpp:380/:305-308`                                   | hbrBackground COLOR_WINDOW+1 default → theme; CTLCOLORSTATIC/BTN partial exists; STATUS: FIXED 2026-11-04 (user verify pending) |
-| 3/MED    | SumatraDialogs (9 procs) | `SumatraDialogs.cpp:364/:474/:715/:772/:883/:997/:1056/:1209/:1512` | no CTLCOLOR handlers (setDarkWndSafe only GetPassword `:187`); audit wingui self-theme first; STATUS: audit-first               |
-| 3/LOW    | FormFields listbox       | `FormFields.cpp:239` direct `LISTBOX`                               | add `WM_CTLCOLORLISTBOX`; STATUS: open                                                                                          |
+| Priority | Dialog/Window            | File                                                                | Fix pattern                                                                                                                                                                                                          |
+| -------- | ------------------------ | ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1        | Password Dialog          | `SumatraDialogs.cpp:178` `Dialog_GetPassword_Proc`                  | `WM_CTLCOLOREDIT/STATIC/BTN` handling                                                                                                                                                                                |
+| 2        | Go to Page Dialog        | `SumatraDialogs.cpp:282` `Dialog_GoToPage_Proc`                     | `WM_CTLCOLOREDIT/STATIC` handling                                                                                                                                                                                    |
+| 3        | Find Window              | `FindWindow.cpp`                                                    | `WM_CTLCOLOREDIT/STATIC/LISTBOX` handling                                                                                                                                                                            |
+| 4        | Find Bar                 | `FindBar.cpp`                                                       | `WM_CTLCOLOREDIT` handling                                                                                                                                                                                           |
+| 5        | Advanced Settings Dialog | `AdvancedSettingsDialog.cpp`                                        | Verify wingui controls use theme colors                                                                                                                                                                              |
+| 6        | Trim Config Dialog       | `TrimConfigDialog.cpp`                                              | Verify wingui Edit controls use theme colors                                                                                                                                                                         |
+| 7        | Print/Page Setup Dialogs | `PrintDialog.cpp`                                                   | `dmlib::setDarkWndSafe` + `WM_CTLCOLOR`                                                                                                                                                                              |
+| 1/HIGH   | Image save/crop/resize   | `ImageSaveCropResize.cpp:1735-1743/:1746-1749/:2136`                | `GetSysColorBrush(COLOR_BTNFACE)` erase+brush+class bg → theme color; STATUS: FIXED 2026-11-04 (user verify pending)                                                                                                 |
+| 2/MED    | Profile Backups dialog   | `ProfileBackupWnd.cpp:55/:264/:91/:196/:324`                        | FillRect COLOR_WINDOW + brushes → theme bg; STATUS: FIXED 2026-11-04 (user verify pending)                                                                                                                           |
+| 2/MED    | Profile Sync dialog      | `ProfileSyncWnd.cpp:380/:305-308`                                   | hbrBackground COLOR_WINDOW+1 default → theme; CTLCOLORSTATIC/BTN partial exists; STATUS: FIXED 2026-11-04 (user verify pending)                                                                                      |
+| 3/MED    | SumatraDialogs (9 procs) | `SumatraDialogs.cpp:364/:474/:715/:772/:883/:997/:1056/:1209/:1512` | NO-FIX: every proc calls `dmlib::setDarkWndSafe(hDlg)` in WM_INITDIALOG (dmlib `setWindowCtlColorSubclass` themes EDIT/STATIC/LISTBOX/BTN children); no WM_CTLCOLOR handler needed; STATUS: NO-FIX (audit-confirmed) |
+| 3/LOW    | FormFields listbox       | `FormFields.cpp:239` direct `LISTBOX`                               | parented to `hwndCanvas`; `WM_CTLCOLORLISTBOX` sent to canvas parent → added handler in `Canvas.cpp WndProcCanvas` (theme bg + text); STATUS: FIXED 2026-11-04                                                       |
 
-status as of scan: ImageSaveCropResize, Profile Backup and Profile Sync fixed 2026-11-04 (user verify pending); SumatraDialogs (9 procs) audit-first; FormFields open; original 7 rows unchanged.
+status as of scan: ImageSaveCropResize, Profile Backup, Profile Sync, FormFields fixed 2026-11-04 (user verify pending); SumatraDialogs 9 procs NO-FIX (dmlib setDarkWndSafe covers child controls :187/:291/:373/:490/:724/:776/:892/:1005/:1065/:1214/:1524); original 7 P2.5 rows previously verified.
 
 OS-limited (not fixable): GetOpen/SaveFileNameW sites (`EditAnnotations.cpp:1216`, `ImageSaveCropResize.cpp:1143`, `PdfTools.cpp:78`, `SumatraPDF.cpp:4744/5344/5614/5709`, `WindowTab.cpp:260`) + `TaskDialogIndirect` (`AIChatCommon.cpp:274`, `Installer.cpp:753/1495/2295`, `SumatraPDF.cpp:4847`, `SumatraStartup.cpp:1354/1431/1487`, `UpdateCheck.cpp:388/614/658`).
 
@@ -167,11 +132,7 @@ Scratch E2E harnesses live in `tests/tmp/` (gitignored): s34-replace/paint/crop/
 
 ### Regression tests wanted (NEXT_STEPS P4)
 
-- Coordinate-space mixing (TC2 + Trim + Autoscroll)
-- Settings migration pre-s36-at → post
-- WebView2 adapter completeness
-- ReloadDocument fork field preservation
-- Toolbar critical ordering (all 4 toolbars)
+2/5 exist: `ad-hoc-b4-coordinate-invariants.ts` + `ad-hoc-settings-migration.ts` (registered in `tests/before-release.ts:40/:42`). Missing: WebView2 adapter completeness, ReloadDocument fork field preservation, toolbar-ordering verdict.
 
 ## Research (low priority)
 
@@ -224,42 +185,13 @@ Shift+S: draw a rectangle that captures the image inside it at the document's DP
 
 [ ] Bug7 (s36-bz): save corrupts PDF under TC2 — root cause verified + fix deployed (VirtualToPhysical pageNo in Selection.cpp FromRectangle + corrupt-annot guard in EngineMupdfSaveUpdated); user revalidation pending.
 
-[x] Toolbars Flickering — FIXED (s36-bl): causa raiz = chave de histerese lastPackedAvailDx ficou órfã quando as tabelas de estado foram divididas (sToolbarPackStates @1302 / sToolbarRewrapStates @1632); guard do timer 200ms nunca convergia → re-wrap infinito quando wraps mudam (janela estreita). Fix: escrever em ambas as tabelas (Toolbar.cpp ~1446). Verificação: PNG probes byte-idênticos durante estático pós-resize; valida final: usuário.
+[x] Toolbars Flickering — FIXED (s36-bl): lastPackedAvailDx histerese key orphaned when state tables split (sToolbarPackStates @1302 / sToolbarRewrapStates @1632); guard timer 200ms never converged → infinite re-wrap on narrow window. Fix: write to both tables (Toolbar.cpp ~1446). Verification: PNG probes byte-identical after resize; user validation pending. LOG s36-bl.
 
 - [ ] **BUG-3** right-click image context menu: s34 E2E confirmed Replace/Paint/Crop work + submenu visibility fixed; s36-ao live-checked the rest — `Image > Save` works (editor → `<book>_page_1.png`), menus filter correctly, and the silent null-bitmap returns now show a notification (fdcafde). No repro for the "non-image items dead" claim: those items are removed by design (link/comment/attachment). REMAINING: user's exact steps (file + item) to reproduce anything still dead.
 - [ ] **BUG-4** Contrast × Trim Config ONE-SHOT vanish (first trim-config open after launch). Fix v2 (`EnsureContrastOverlayState` invariant + self-healing) deployed 2026-09-22 — awaiting user confirmation of the exact flow; `[contrast]` breadcrumbs in debug build. NOTE (s36-az): the "contrast parou de funcionar" report of 2026-10-25 was root-caused to the save-reload state wipe (FIXED — ReloadDocument now preserves extras; LOG s36-az); if BUG-4's one-shot vanish still reproduces after that fix, it is a separate flow.
 - [ ] **Ctrl+click flashcard highlight opens List** — implemented s34-b (Canvas ctrl+click detects /T author TumatraPDF-Flashcard → FlashcardSidebarShow; turns flashcard mode on if off). USER live-test pending (needs a book with flashcard highlights).
 - [ ] **s34-g user validation pending**: Arch Measure Radius + Ref Line UX, resize-enlarge on a real book, flicker-free drag confirm (shipped + E2E 2026-10-11).
-- [ ] **ARCH/EDIT secondary toolbars white/blank buttons** (user: "continua branco sem botões"):
-
-  ### Root cause
-  - dmlib (gUseDarkModeLib=true on x64) intercepts NM_CUSTOMDRAW at window-proc level before subclass chain sees it (LOG s36-bb: only CDDS_POSTPAINT reaches ReBarWndProc)
-  - Missing TBSTYLE_EX_MIXEDBUTTONs so comctl doesn't center button text under button rect
-  - Flashcard toolbar works because FlashcardReBarSubclassProc installed after dmlib (LIFO→first) handles NM_CUSTOMDRAW directly + has TBSTYLE_EX_MIXEDBUTTONs
-
-  ### Fix implemented (replicate flashcard pattern)
-  - [x] Add TBSTYLE_EX_MIXEDBUTTONs to both toolbars (comctl centers text under button rect)
-  - [x] Install dedicated rebar subclass (ToolbarArchEditRebarSubclassProc, unique ID 42) handling NM_CUSTOMDRAW with wipe+redraw in ITEMPOSTPAINT, installed AFTER dmlib (LIFO→first)
-  - [x] Keep ToolbarSubclassPaint on toolbar HWND for WM_PAINT bypass (dmlib intercepts WM_NOTIFY but not WM_PAINT on toolbar HWND)
-  - [x] Remove conflicting SetWindowSubclass(ReBarWndProc, ID 0) from Arch rebar (our ID-42 subclass runs first via LIFO)
-  - [x] Build: 0 errors, 0 warnings
-
-  ### Verification
-  - [x] Internal TB_BUTTONCOUNT=7 confirms Arch toolbar buttons exist internally
-  - [x] Code matches proven flashcard pattern (LOG s36-ax: 14/14 and 17/17 probe PASS)
-  - [x] Automated pixel scan: INCONCLUSIVE — DWM makes GetPixel return CLR_INVALID under DWM (LOG s36-bb); captureWindowDCRegionToPng fails after sleep; cross-process TB_BUTTONCOUNT returns 0 (DPI virtualization)
-  - [x] Manual visual confirmation: launch app, toggle Arch Tools + Edit Tools, verify buttons render with dark theme colors and visible text
-
-  ### Files changed
-  - src/Toolbar.cpp: ToolbarArchEditRebarSubclassProc, ToolbarSubclassSecondaryRebar, TBSTYLE_EX_MIXEDBUTTONs in CreateToolbar2, removed SetWindowSubclass(ReBarWndProc) ID 0
-  - src/Toolbar.h: declarations for ToolbarSubclassSecondaryRebar, ToolbarSubclassPaint
-  - src/Commands_Edit.cpp: ToolbarSubclassSecondaryRebar, TBSTYLE_EX_MIXEDBUTTONs, SetWindowTheme before buttons, ToolbarSubclassPaint
-
-  ### Dot file
-  - FLOW/toolbar-system.dot: complete system map (Flashcard working, Arch/Edit fixed, dmlib interception, shared infrastructure)
-
-  ### Status
-  - All done: crashes fixed (heap + stack overflow), labels full (PostAddTextButtonSizing helper), user-verified dark theme + full labels.
+      [x] ARCH/EDIT secondary toolbars white/blank buttons — FIXED (s36-bb/s36-ax lineage): root cause dmlib intercepts NM_CUSTOMDRAW before subclass chain (LOG s36-bb: only CDDS_POSTPAINT reaches ReBarWndProc); missing TBSTYLE_EX_MIXEDBUTTONs; fix replicated Flashcard pattern — dedicated rebar subclass (ToolbarArchEditRebarSubclassProc, ID 42) installed AFTER dmlib (LIFO→first) handles NM_CUSTOMDRAW wipe+redraw in ITEMPOSTPAINT, TBSTYLE_EX_MIXEDBUTTONs both toolbars, removed conflicting SetWindowSubclass(ReBarWndProc) ID 0; build 0/0; user-verified dark theme + full labels. LOG s36-bb/s36-ax/s36-bl.
 
 ## Profile Memory
 

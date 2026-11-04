@@ -1,4 +1,25 @@
-﻿## 2026-11-04 (s36-ct) — Theme fixes: ImageSaveCropResize + Profile Backup/Sync dialogs dark
+﻿## 2026-11-04 (s36-cv) — TODO.md reformat: execution queue top-5 + findings audit
+
+- New Execution queue top-5 (hardening pack = TC2 un-routed sites + Test* UI-thread marshalling + WebView2 adapter doc/TestMarkdownAdapter; then Capture tool, Bookmarks Improve, Edit/Align, Page Counting Format — user-locked order)
+- Findings audit: 18 claims verified — 6 closed (toolbar ordering ×4 verified, darkModeEpoch legacy path dead, ASan script ok, settings migration fixed, dmlib rebar fixed, flashcard author-token → AGENTS §12), 4 open live (coordinate convention, WebView2 open part, TC2 partial un-routed, ReloadDocument/FORK_FIELD manual)
+- Residues polished in s36-cw (dup 16D, stale [x] migration block, non-cache-Paint dup line)
+
+## 2026-11-04 (s36-cu) — Theme P3 audit-and-fix: SumatraDialogs procs + FormFields listbox
+
+### Fixed
+
+- `src/Canvas.cpp`: added `WM_CTLCOLORLISTBOX` case in `WndProcCanvas` — FormFields.cpp:239 creates a direct Win32 LISTBOX parented to `hwndCanvas`; `WndProcFormCtrl` (FormFields.cpp:105) does not handle `WM_CTLCOLORLISTBOX` (sent to parent), so it painted white in dark mode. Handler sets `ThemeWindowTextColor()`/`ThemeWindowControlBackgroundColor()` brush (ArchScaleDialog.cpp:278-288 canon).
+- clang-format applied; `bun cmd/build.ts` 0 err/0 warn, deployed to `Compiled\TumatraPDF.exe`. Guard `bun tests/ad-hoc-tab-session.ts --no-build` PASS.
+
+### Audit (NO-FIX, dmlib self-theme confirmed)
+
+- SumatraDialogs.cpp: all 9 procs call `dmlib::setDarkWndSafe(hDlg)` in WM_INITDIALOG → dmlib `setWindowCtlColorSubclass` themes EDIT/STATIC/LISTBOX/BTN children + dialog frame, no app-side WM_CTLCOLOR handler needed:
+  - Dialog_Find_Proc :373, Dialog_ChangeLanguage_Proc :490, Dialog_CustomZoom_Proc :724, Dialog_ChangeScrollbar_Proc :776, Dialog_Settings_Proc :892, Dialog_SetInverseSearch_Proc :1005, Sheet_Print_Advanced_Proc :1065, Dialog_AddFav_Proc :1214, Dialog_ChangeBgColor_Proc :1524 (plus Dialog_GetPassword_Proc :187 already catalogued).
+- No raw/default-bg child controls left in the 9 procs; residual audit clean.
+
+commit: (see git log)
+
+## 2026-11-04 (s36-ct) — Theme fixes: ImageSaveCropResize + Profile Backup/Sync dialogs dark
 
 ### Fixed
 
