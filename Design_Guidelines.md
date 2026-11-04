@@ -154,6 +154,23 @@ Code smells to avoid (refactoring.guru):
 - **Feedback**: every mutation → log line + count update + (if list open)
   list refresh. Silent state change = bug factory.
 
+### 6.2 Menu popup patterns (TrackPopupMenuEx)
+
+Right-click context INSIDE a TrackPopupMenuEx menu (tab-group dropdown right-click → options popup):
+
+- Install `WH_MSGFILTER` hook (`SetWindowsHookExW(WH_MSGFILTER, proc, nullptr, GetCurrentThreadId())`) around the track; unhook on ALL paths (success/cancel/options).
+- On WM_RBUTTONUP: `MenuItemFromPoint` returns ITEM POSITION (0-based), NOT a command id → convert `GetMenuItemID(menu, pos)` → id → route.
+- Nested second popup = `TPM_RECURSE` opened INSIDE the hook at cursor; first menu keeps tracking.
+- Hook `return 1` swallows the message.
+
+Traps burned 4 rounds (s36-ch..s36-cl):
+
+- Subclass of #32768 via WM_INITMENUPOPUP unreliable (timing — menu window not yet there).
+- Reopen-after-teardown loop fails silently on real machines (2nd TrackPopupMenuEx after cancel never shows).
+- Comparing `MenuItemFromPoint` return directly against id base never matches (position vs id).
+
+Owner-draw button dark pattern: BS_OWNERDRAW class erases COLOR_BTNFACE before WM_DRAWITEM → subclass button (`SetWindowSubclass`) WM_ERASEBKGND fill `ThemeWindowControlBackgroundColor()` + return 1, PLUS frame `WM_CTLCOLORBTN` returning theme brush (both cheap). Reference: SumatraPDF.cpp `TabGroupBtnSubclassProc` (tab-group button, s36-cm/cn). Cross-ref LOG s36-cl/cm/cn/co.
+
 ### 6.1 Visual system for fork-authored UI (added 2026-10-16, design-canon audit)
 
 Scope: OWN UI (autoscroll toolbar/overlay, contrast overlay, flashcard dialogs +

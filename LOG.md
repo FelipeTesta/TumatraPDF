@@ -1,4 +1,14 @@
-﻿## 2026-11-04 (s36-cr) — Toolbar Save icon: classic device-floppy SVG (tabler) stroke 2 — REVERTED same session
+﻿## 2026-11-04 (s36-cs) — Theme scan plan + Design_Guidelines menu patterns
+
+### Added
+
+- TODO.md `## Theme Colors Compliance (P2.5)` extended: scan intro line `Scan 2026-11-04 (full src sweep, LOG s36-cs)`, 4 new table rows (ImageSaveCropResize P1/HIGH, ProfileBackupWnd P2/MED, ProfileSyncWnd P2/MED, SumatraDialogs P3/MED audit-first, FormFields P3/LOW), note `status as of scan: all 7 open`, OS-limited list (GetOpen/SaveFileNameW sites + TaskDialogIndirect).
+- Design_Guidelines.md §6.2 Menu popup patterns (TrackPopupMenuEx): WH_MSGFILTER hook around track, MenuItemFromPoint=POSITION→GetMenuItemID conversion, nested TPM_RECURSE popup, traps burned in s36-ch..s36-cl; owner-draw button dark pattern (WM_ERASEBKGND subclass + frame WM_CTLCOLORBTN). Cross-ref LOG s36-cl/cm/cn/co.
+- Root AGENTS.md §12 Project Learnings: 2 bullets (MenuItemFromPoint position-not-id; scratch probes under tests/tmp/ gitignored).
+
+commit: (see git log)
+
+## 2026-11-04 (s36-cr) — Toolbar Save icon: classic device-floppy SVG (tabler) stroke 2 — REVERTED same session
 
 ### Fixed
 

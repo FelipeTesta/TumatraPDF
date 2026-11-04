@@ -24,6 +24,7 @@ for tree-sitter BEFORE grep/read-walking.** It indexes the whole tree once
 call, saving huge context and avoiding manual greps.
 
 Rules:
+
 - Register the project once per session: `tree-sitter_register_project_tool(name="tumatrapdf", path="<repo>")`. If `find_usage`/`find_text` return empty or stale, `tree-sitter_clear_cache` + re-`register_project_tool` (scans may be cached from a prior session).
 - To map who calls a function / what a symbol reaches: `tree-sitter_find_usage(symbol, language="cpp")`.
 - To find a code pattern with context: `tree-sitter_find_text(pattern, context_lines=N)`.
@@ -40,20 +41,20 @@ TumatraPDF is a fork of SumatraPDF (upstream baseline ~912ecf2, Aug 2026) — Wi
 
 ## Informativo hierarchy (single source of truth)
 
-| File | Role | Audience |
-|---|---|---|
-| `AGENTS.md` (root) | ONLY governing doc — rules for agents editing code. Wins ALL conflicts | agents |
-| `README.md` (root) | ONLY showcase — TumatraPDF features vs forked SumatraPDF | users/kjk |
-| `BUILD.md` / `MERGE.md` | working docs: build, upstream sync | agents |
-| `LOG.md` / `TODO.md` | changelog (append-only, never rewrite) / active backlog | agents |
-| `CHANGELOG.md` (root) | per-version public changelog (v1.0.x releases, Keep a Changelog style, release checklist) | agents/users |
-| `LICENSE` / `SECURITY.md` / `CONTRIBUTING.md` (root) | GitHub community-health files: GPL-3.0 (verbatim text), vuln reporting, contributor ground rules | users |
-| `update.txt` (root) | update metadata served to running apps (`Latest:` + download URLs) — bumped by the release workflow, do NOT hand-edit except the URL keys | agents |
-| `Design_Guidelines.md` (root) | conventions + known traps distilled from sessions. **§6 / §6.1 = UI rules for Win32 dialogs, panels, toolbar, overlays — read before ANY visible UI change; §6.1 ends with the mandatory screenshot verification loop (dark + light)** | agents |
-| `DEBUG.md` (root) | Win32 toolbar/UI debugging toolchain — win-automation + control pipe pattern for secondary toolbars (Arch Tools, Edit, Flashcard) | agents |
-| `FLOW/*.dot` | process maps only (never code architecture — §0b) | agents |
-| `TEMP/` | deprecated informativos (gitignored) | — |
-| `sumatrapdf-src/agents.md`, `sumatrapdf-src/docs/**` | upstream SumatraPDF reference, verbatim | upstream |
+| File                                                 | Role                                                                                                                                                                                                                                   | Audience     |
+| ---------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ |
+| `AGENTS.md` (root)                                   | ONLY governing doc — rules for agents editing code. Wins ALL conflicts                                                                                                                                                                 | agents       |
+| `README.md` (root)                                   | ONLY showcase — TumatraPDF features vs forked SumatraPDF                                                                                                                                                                               | users/kjk    |
+| `BUILD.md` / `MERGE.md`                              | working docs: build, upstream sync                                                                                                                                                                                                     | agents       |
+| `LOG.md` / `TODO.md`                                 | changelog (append-only, never rewrite) / active backlog                                                                                                                                                                                | agents       |
+| `CHANGELOG.md` (root)                                | per-version public changelog (v1.0.x releases, Keep a Changelog style, release checklist)                                                                                                                                              | agents/users |
+| `LICENSE` / `SECURITY.md` / `CONTRIBUTING.md` (root) | GitHub community-health files: GPL-3.0 (verbatim text), vuln reporting, contributor ground rules                                                                                                                                       | users        |
+| `update.txt` (root)                                  | update metadata served to running apps (`Latest:` + download URLs) — bumped by the release workflow, do NOT hand-edit except the URL keys                                                                                              | agents       |
+| `Design_Guidelines.md` (root)                        | conventions + known traps distilled from sessions. **§6 / §6.1 = UI rules for Win32 dialogs, panels, toolbar, overlays — read before ANY visible UI change; §6.1 ends with the mandatory screenshot verification loop (dark + light)** | agents       |
+| `DEBUG.md` (root)                                    | Win32 toolbar/UI debugging toolchain — win-automation + control pipe pattern for secondary toolbars (Arch Tools, Edit, Flashcard)                                                                                                      | agents       |
+| `FLOW/*.dot`                                         | process maps only (never code architecture — §0b)                                                                                                                                                                                      | agents       |
+| `TEMP/`                                              | deprecated informativos (gitignored)                                                                                                                                                                                                   | —            |
+| `sumatrapdf-src/agents.md`, `sumatrapdf-src/docs/**` | upstream SumatraPDF reference, verbatim                                                                                                                                                                                                | upstream     |
 
 Any other `.md` in subfolders = deprecated (→ `TEMP/`) or upstream reference. Root `AGENTS.md` overrides anything found in subfolders.
 
@@ -199,6 +200,7 @@ TumatraPDF/                   # repo root
 - **Logging:** `SumatraLog.h/.cpp` auto-log → `%LOCALAPPDATA%\SumatraPDF\<hash>\sumatra-log.txt`, rotation >5MB; tags `[fc]` `[arch]` `[autoscroll]` `[md]` `[webview]`
 
 **Known issues (fix when touched):**
+
 - `cmd/build-asan.ts` references `SumatraPDF.sln`/`SumatraPDF-static` — ASan pipeline broken
 - `.vscode/launch.json`/`tasks.json` target `SumatraPDF-dll.exe`/`SumatraPDF.sln` — no F5 debug in VS Code
 - `-dbg-control` lacks commands for custom feature state (crop rect, trim, autoscroll ETA, contrast/invert)
@@ -272,6 +274,9 @@ _Living document — append patterns/gotchas discovered during development._
   - E2E posted coords may arrive DPI-virtualized ×1.25 (non-deterministic) — verify with page-top-border invariants, not assumed raw pixels.
   - RULE: before any hit-test, name the space of BOTH operands out loud (local / root / client / page). Mixed = bug.
 - **2026-10-18 (flashcard multi-page grouping)**: a PDF annotation cannot live on two pages, so ANY "one logical thing spanning pages" must be stored as N annotations + an in-file grouping key. Convention used for cross-page clozes: a shared token in the annotation AUTHOR (`TumatraPDF-Flashcard#%08X`, via `pdf_set_annot_author` = MuPDF `/T`, which survives save; other keys are not guaranteed to be written back). Do NOT put such a token in the annotation CONTENT: `RebuildCommentsFromAnnotationsInner` (EngineMupdf.cpp) turns any annot with non-empty contents into a page tooltip/comment. **TRAP**: identity checks on our annotations must use `str::StartsWith(Author(a), StrL("TumatraPDF-Flashcard"))`, never `str::Eq` — exact equality silently drops tagged annots (hit Canvas.cpp ctrl+click→List panel and the EditAnnotations filter that hides flashcard annots). Grouped cards: `Flashcard::extraPages` (secondary pages); primary page fields (`pageNo/bounds/rects`) stay the lowest page so nav/key/sort keep working.
+
+- **2026-11-04**: `MenuItemFromPoint` returns the item POSITION (0-based), never a command id — convert with `GetMenuItemID`. Burned 4 right-click rounds (s36-cg..s36-cl); pattern in Design_Guidelines §6 menus.
+- **2026-11-04**: scratch GUI probes (`tests/snap-*.ts`, `tests/diag-*.ts`, `err.txt`) must live under `tests/tmp/` (gitignored) — never commit or leave untracked in `tests/`; clean at round end.
 
 # 13. Informativos: English + Caveman (MANDATORY)
 

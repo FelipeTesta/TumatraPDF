@@ -138,15 +138,26 @@ Replace / Edit With Paint / top-level Copy Image shipped s31; s34 E2E covers the
 
 Dialog frame dark via `dmlib::setDarkWndSafe()` but child controls (edit/static/listbox/button) paint white in dark mode — missing `WM_CTLCOLOR` handling. Fix pattern = `ArchScaleDialog.cpp:278-288` (`WM_CTLCOLORDLG/STATIC` + `SetBkColor`/`SetTextColor` + `BackgroundBrush()`; theme API `ThemeWindowControlBackgroundColor()`/`ThemeWindowTextColor()`/`ThemeHighlightColor()`). Verify: launch dark, open each dialog, all controls dark bg + readable text.
 
-| Priority | Dialog/Window            | File                                               | Fix pattern                                  |
-| -------- | ------------------------ | -------------------------------------------------- | -------------------------------------------- |
-| 1        | Password Dialog          | `SumatraDialogs.cpp:178` `Dialog_GetPassword_Proc` | `WM_CTLCOLOREDIT/STATIC/BTN` handling        |
-| 2        | Go to Page Dialog        | `SumatraDialogs.cpp:282` `Dialog_GoToPage_Proc`    | `WM_CTLCOLOREDIT/STATIC` handling            |
-| 3        | Find Window              | `FindWindow.cpp`                                   | `WM_CTLCOLOREDIT/STATIC/LISTBOX` handling    |
-| 4        | Find Bar                 | `FindBar.cpp`                                      | `WM_CTLCOLOREDIT` handling                   |
-| 5        | Advanced Settings Dialog | `AdvancedSettingsDialog.cpp`                       | Verify wingui controls use theme colors      |
-| 6        | Trim Config Dialog       | `TrimConfigDialog.cpp`                             | Verify wingui Edit controls use theme colors |
-| 7        | Print/Page Setup Dialogs | `PrintDialog.cpp`                                  | `dmlib::setDarkWndSafe` + `WM_CTLCOLOR`      |
+Scan 2026-11-04 (full src sweep, LOG s36-cs):
+
+| Priority | Dialog/Window            | File                                                                | Fix pattern                                                                                                       |
+| -------- | ------------------------ | ------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| 1        | Password Dialog          | `SumatraDialogs.cpp:178` `Dialog_GetPassword_Proc`                  | `WM_CTLCOLOREDIT/STATIC/BTN` handling                                                                             |
+| 2        | Go to Page Dialog        | `SumatraDialogs.cpp:282` `Dialog_GoToPage_Proc`                     | `WM_CTLCOLOREDIT/STATIC` handling                                                                                 |
+| 3        | Find Window              | `FindWindow.cpp`                                                    | `WM_CTLCOLOREDIT/STATIC/LISTBOX` handling                                                                         |
+| 4        | Find Bar                 | `FindBar.cpp`                                                       | `WM_CTLCOLOREDIT` handling                                                                                        |
+| 5        | Advanced Settings Dialog | `AdvancedSettingsDialog.cpp`                                        | Verify wingui controls use theme colors                                                                           |
+| 6        | Trim Config Dialog       | `TrimConfigDialog.cpp`                                              | Verify wingui Edit controls use theme colors                                                                      |
+| 7        | Print/Page Setup Dialogs | `PrintDialog.cpp`                                                   | `dmlib::setDarkWndSafe` + `WM_CTLCOLOR`                                                                           |
+| 1/HIGH   | Image save/crop/resize   | `ImageSaveCropResize.cpp:1735-1743/:1746-1749/:2136`                | `GetSysColorBrush(COLOR_BTNFACE)` erase+brush+class bg → theme color; STATUS: open, fix NEXT                      |
+| 2/MED    | Profile Backups dialog   | `ProfileBackupWnd.cpp:55/:264/:91/:196/:324`                        | FillRect COLOR_WINDOW + brushes → theme bg; STATUS: open                                                          |
+| 2/MED    | Profile Sync dialog      | `ProfileSyncWnd.cpp:380/:305-308`                                   | hbrBackground COLOR_WINDOW+1 default → theme; CTLCOLORSTATIC/BTN partial exists; STATUS: open                     |
+| 3/MED    | SumatraDialogs (9 procs) | `SumatraDialogs.cpp:364/:474/:715/:772/:883/:997/:1056/:1209/:1512` | no CTLCOLOR handlers (setDarkWndSafe only GetPassword `:187`); audit wingui self-theme first; STATUS: audit-first |
+| 3/LOW    | FormFields listbox       | `FormFields.cpp:239` direct `LISTBOX`                               | add `WM_CTLCOLORLISTBOX`; STATUS: open                                                                            |
+
+status as of scan: all 7 original rows open; new rows open/audit-first.
+
+OS-limited (not fixable): GetOpen/SaveFileNameW sites (`EditAnnotations.cpp:1216`, `ImageSaveCropResize.cpp:1143`, `PdfTools.cpp:78`, `SumatraPDF.cpp:4744/5344/5614/5709`, `WindowTab.cpp:260`) + `TaskDialogIndirect` (`AIChatCommon.cpp:274`, `Installer.cpp:753/1495/2295`, `SumatraPDF.cpp:4847`, `SumatraStartup.cpp:1354/1431/1487`, `UpdateCheck.cpp:388/614/658`).
 
 ## Test harnesses (tests/tmp/ — scratch, E2E-class until promoted to ad-hoc)
 
