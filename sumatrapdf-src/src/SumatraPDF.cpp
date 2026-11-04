@@ -14579,6 +14579,18 @@ LRESULT CALLBACK WndProcSumatraFrame(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) 
             }
             return 0;
 
+        case WM_APP + 0x430: {
+            // marshalled Test* handler: run fn(ctx) on the UI thread so any
+            // TB_/TTM_* HWND calls happen on the UI thread (direct SendMessage,
+            // no cross-thread race); return fn's int to the blocking caller.
+            auto* fn = (int (*)(void*))wp;
+            void* ctx = (void*)lp;
+            if (!fn) {
+                return (LRESULT)-1;
+            }
+            return (LRESULT)fn(ctx);
+        }
+
         case WM_GETMINMAXINFO:
             return OnFrameGetMinMaxInfo((MINMAXINFO*)lp);
 

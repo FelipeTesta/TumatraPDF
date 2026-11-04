@@ -27,6 +27,8 @@
 #include "HomePage.h"
 #include "AIChatCommon.h"
 #include "TabGroupsManage.h"
+#include "MarkdownModel.h"
+#include "wingui/BrowserDocView.h"
 #include "AppSettings.h"
 #include "Tabs.h"
 
@@ -365,6 +367,7 @@ enum class ControlCmd : u16 {
     TestTabGroupOpenNew = 52,
     TestTabGroupMenuCmd = 53,
     TestTabGroupDialogOpen = 54,
+    TestMarkdownAdapter = 55,
 };
 
 enum class ControlArgType : u16 {
@@ -601,6 +604,41 @@ static void AppendTestResult(ControlRequest* req, int exitCode, Str result) {
     AppendArgInt(req->results, exitCode);
     AppendArgString(req->results, result);
     AppendArgEnd(req->results);
+}
+
+// Cross-thread marshal for Test* control-pipe handlers that touch UI HWNDs.
+// TestToolbarButtons ran on the background control-pipe thread and issued
+// TB_/TTM_* SendMessageW calls against comctl toolbars — a cross-thread race
+// (LOG s36-az: WndProcToolbar fallthrough -> comctl32 write to dangling ptr;
+// inter-thread SendMessage delivered mid-pump during comctl rebanding). This
+// sends a synchronous message to the frame WndProc so fn(ctx) runs on the UI
+// thread; the control thread blocks during the tiny call (acceptable, responses
+// are small). Same-thread SendMessage on the UI thread = direct call, so the
+// TB_/TTM_ calls inside ResultTemp are safe (no deadlock). The client already
+// has timeouts (cmd/control.ts ControlClient.connect default 10s), so no
+// server-side deadline guard is needed.
+// NOTE: WM_APP + 0x430 is handled by a matching case in WndProcSumatraFrame
+// (src/SumatraPDF.cpp) — keep the two values in sync.
+static const UINT kUiThreadTestExecMsg = WM_APP + 0x430;
+
+static int RunOnUIThread(MainWindow* win, int (*fn)(void* ctx), void* ctx) {
+    if (!win || !win->hwndFrame || !fn) {
+        return -1;
+    }
+    return (int)SendMessageW(win->hwndFrame, kUiThreadTestExecMsg, (WPARAM)fn, (LPARAM)ctx);
+}
+
+// Shuttled between control-pipe thread and UI thread for a marshalled handler.
+// fn fills result + exitCode; RunOnUIThread returns exitCode to the caller.
+struct UiTestCtx {
+    Str result;
+    int exitCode = -1;
+};
+
+static int ToolbarButtonsOnUiThread(void* p) {
+    auto* c = (UiTestCtx*)p;
+    c->result = ToolbarButtonsResultTemp(&c->exitCode);
+    return c->exitCode;
 }
 
 static void ExecuteControlRequest(ControlRequest* req) {
@@ -936,9 +974,15 @@ static void ExecuteControlRequest(ControlRequest* req) {
         }
 
         case ControlCmd::TestToolbarButtons: {
-            int exitCode = 0;
-            Str res = ToolbarButtonsResultTemp(&exitCode);
-            AppendTestResult(req, exitCode, res);
+            UiTestCtx ctx;
+            MainWindow* win = len(gWindows) == 0 ? nullptr : gWindows[0];
+            int code = RunOnUIThread(win, ToolbarButtonsOnUiThread, &ctx);
+            Str res = ctx.result.len ? ctx.result : StrL("ERROR no-frame\n");
+            if (code < 0) {
+                code = 1;
+                res = StrL("ERROR no-frame\n");
+            }
+            AppendTestResult(req, code, res);
             break;
         }
 
@@ -1068,6 +1112,33 @@ static void ExecuteControlRequest(ControlRequest* req) {
             int exitCode = 0;
             Str res = TabGroupDialogOpenResultTemp(name, &exitCode);
             AppendTestResult(req, exitCode, res);
+            break;
+        }
+
+        case ControlCmd::TestMarkdownAdapter: {
+            // Exercise the Markdown adapter chain: locate the first MainWindow
+            // whose doc controller is a MarkdownModel with a live BrowserDocView,
+            // then run a read-only, no-arg adapter query (GetScrollPos) off it.
+            // If no markdown view is open, return an error marker shaped like
+            // neighboring test handlers (AppendError => i32 -1 + message).
+            MarkdownModel* mm = nullptr;
+            for (MainWindow* w : gWindows) {
+                if (w && w->ctrl) {
+                    mm = w->ctrl->AsMarkdown();
+                    if (mm && mm->docView) {
+                        break;
+                    }
+                    mm = nullptr;
+                }
+            }
+            if (!mm || !mm->docView) {
+                AppendError(req, "TestMarkdownAdapter no-markdown-view");
+                break;
+            }
+            Point p = mm->docView->GetScrollPos();
+            logf("[md] adapter ok scroll=%d,%d\n", p.x, p.y);
+            Str res = fmt("OK markdown-adapter scroll=%d,%d\n", p.x, p.y);
+            AppendTestResult(req, 0, res);
             break;
         }
 
