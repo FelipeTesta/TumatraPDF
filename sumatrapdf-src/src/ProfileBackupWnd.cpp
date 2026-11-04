@@ -52,7 +52,9 @@ static void BackupPaint(ProfileBackupDialog* d) {
     HDC hdc = BeginPaint(d->hwnd, &ps);
     RECT rc;
     GetClientRect(d->hwnd, &rc);
-    FillRect(hdc, &rc, GetSysColorBrush(COLOR_WINDOW));
+    HBRUSH br = CreateSolidBrush(ThemeWindowControlBackgroundColor());
+    FillRect(hdc, &rc, br);
+    DeleteObject(br);
 
     HFONT font = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
     HFONT oldFont = (HFONT)SelectObject(hdc, font);
@@ -88,9 +90,9 @@ static void BackupPaint(ProfileBackupDialog* d) {
         bool isHolding = d->holdingSlot == i;
         RECT rcBtnInner = rcBtn;
         InflateRect(&rcBtnInner, -2, -2);
-        HBRUSH br = CreateSolidBrush(isHolding ? RGB(255, 200, 200) : GetSysColor(COLOR_BTNFACE));
-        FillRect(hdc, &rcBtn, br);
-        DeleteObject(br);
+        HBRUSH brBtn = CreateSolidBrush(isHolding ? RGB(255, 200, 200) : ThemeWindowControlBackgroundColor());
+        FillRect(hdc, &rcBtn, brBtn);
+        DeleteObject(brBtn);
         FrameRect(hdc, &rcBtn, (HBRUSH)GetStockObject(BLACK_BRUSH));
         wchar_t btnText[64];
         if (isHolding) {
@@ -193,7 +195,8 @@ void ShowProfileBackupsDialog(MainWindow* win) {
     wc.hInstance = GetModuleHandle(nullptr);
     wc.lpszClassName = className;
     wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
-    wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
+    static HBRUSH sBackupBg = CreateSolidBrush(ThemeWindowControlBackgroundColor());
+    wc.hbrBackground = sBackupBg;
     RegisterClassW(&wc);
 
     int w = DpiScale(win->hwndFrame, 420);
@@ -261,7 +264,9 @@ static LRESULT CALLBACK CloudRevertWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARA
             HDC hdc = BeginPaint(d->hwnd, &ps);
             RECT rc;
             GetClientRect(d->hwnd, &rc);
-            FillRect(hdc, &rc, GetSysColorBrush(COLOR_WINDOW));
+            HBRUSH br = CreateSolidBrush(ThemeWindowControlBackgroundColor());
+            FillRect(hdc, &rc, br);
+            DeleteObject(br);
 
             HFONT font = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
             HFONT oldFont = (HFONT)SelectObject(hdc, font);
@@ -321,7 +326,8 @@ void ProfileDataPromptCloudRevert(MainWindow* win, HWND hwndParent) {
     wc.hInstance = GetModuleHandle(nullptr);
     wc.lpszClassName = className;
     wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
-    wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
+    static HBRUSH sCloudRevertBg = CreateSolidBrush(ThemeWindowControlBackgroundColor());
+    wc.hbrBackground = sCloudRevertBg;
     RegisterClassW(&wc);
 
     int w = DpiScale(hwndParent, 380);

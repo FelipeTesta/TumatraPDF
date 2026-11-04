@@ -377,7 +377,8 @@ static LRESULT CALLBACK SyncWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 wc.hInstance = GetModuleHandle(nullptr);
                 wc.lpszClassName = promptClass;
                 wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
-                wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
+                static HBRUSH sImportPromptBg = CreateSolidBrush(ThemeWindowControlBackgroundColor());
+                wc.hbrBackground = sImportPromptBg;
                 RegisterClassW(&wc);
                 int w = DpiScale(hwnd, 360);
                 int h = DpiScale(hwnd, 180);

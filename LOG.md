@@ -1,4 +1,16 @@
-﻿## 2026-11-04 (s36-cs) — Theme scan plan + Design_Guidelines menu patterns
+﻿## 2026-11-04 (s36-ct) — Theme fixes: ImageSaveCropResize + Profile Backup/Sync dialogs dark
+
+### Fixed
+
+- `src/ImageSaveCropResize.cpp`: WM_ERASEBKGND `:1735-1743` + WM_CTLCOLORSTATIC `:1746-1749` + class `wcex.hbrBackground`:2136 all switched from `GetSysColorBrush(COLOR_BTNFACE)` to `ThemeWindowControlBackgroundColor()`; `WM_CTLCOLORSTATIC` also sets `ThemeWindowTextColor()`. Added `#include "Theme.h"`.
+- `src/ProfileBackupWnd.cpp`: `BackupPaint` FillRect `:55` + `CloudRevert` paint FillRect `:264` + holding-button brush `:91` + both class `hbrBackground` `:196/:324` switched from `COLOR_WINDOW`/`COLOR_BTNFACE`/`(HBRUSH)(COLOR_WINDOW+1)` to `ThemeWindowControlBackgroundColor()`.
+- `src/ProfileSyncWnd.cpp`: ImportPromptProc class `hbrBackground`:380 switched from `(HBRUSH)(COLOR_WINDOW+1)` to `ThemeWindowControlBackgroundColor()`. SyncWndProc WM_ERASEBKGND/CTLCOLOR already themed.
+- clang-format applied; `bun cmd/build.ts` 0 err/0 warn, deployed to `Compiled\TumatraPDF.exe`. Guard `bun tests/ad-hoc-tab-session.ts --no-build` PASS.
+- Residual audit: zero remaining `GetSysColor`/`COLOR_WINDOW`/`COLOR_BTNFACE` in the 3 fixed files. SumatraDialogs (9 procs) + FormFields left open/audit-first.
+
+commit: (see git log)
+
+## 2026-11-04 (s36-cs) — Theme scan plan + Design_Guidelines menu patterns
 
 ### Added
 
