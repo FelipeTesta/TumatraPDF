@@ -1917,6 +1917,15 @@ static void OnSharedEnvironmentReady(HRESULT res, ICoreWebView2Environment* env)
     }
 }
 
+// Memory-advisory Chromium env flags, applied via AdditionalBrowserArguments at the
+// single shared-environment creation site (WebView.cpp:1944). All are advisory to
+// Chromium — zero behavior risk when a flag is unsupported by the runtime.
+//   --js-flags=--max-old-space-size=256   cap V8 old-generation JS heap per renderer (~256MB).
+//                                         Chromium official: passes --max-old-space-size through to V8.
+//   --disk-cache-size=33554432            cap Chromium disk cache at 32MB.
+//                                         Chromium official: max disk cache in bytes.
+// Each shared env (~1 Chromium process across all MD tabs) is ~100-300MB baseline;
+// these flags bound the JS-heap and disk-cache components of that baseline.
 static Microsoft::WRL::ComPtr<CoreWebView2EnvironmentOptions> CreateOfflineEnvironmentOptions() {
     auto options = Microsoft::WRL::Make<CoreWebView2EnvironmentOptions>();
     options->put_AdditionalBrowserArguments(
@@ -1933,7 +1942,9 @@ static Microsoft::WRL::ComPtr<CoreWebView2EnvironmentOptions> CreateOfflineEnvir
         L"--disable-features=AutofillServerCommunication,MediaRouter,OptimizationHints,Translate,"
         L"CertificateTransparencyComponentUpdater "
         L"--metrics-recording-only "
-        L"--no-pings");
+        L"--no-pings "
+        L"--js-flags=--max-old-space-size=256 "
+        L"--disk-cache-size=33554432 ");
     return options;
 }
 
