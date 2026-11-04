@@ -6479,6 +6479,55 @@ bool EngineMupdfSaveUpdated(EngineBase* engine, Str path, const ShowErrorCb& sho
         save_opts.do_garbage = 1;
     }
 
+    // Save guard: drop annotations whose pdf_annot_page is nil or targets a
+    // page outside the physical page range. Such corrupt annots (e.g. written
+    // with a virtual pageNo under two-column v2 before the routing fix) can
+    // make pdf_save_document drop page content. Remove them before saving so
+    // the save stays healthy and corruption can never silently drop page content.
+    int dropped = 0;
+    {
+        ScopedRecursiveMutex cs(&epdf->docLock);
+        fz_try(ctx) {
+            for (int pageNo = 1; pageNo <= epdf->pageCount; pageNo++) {
+                FzPageInfo* pageInfo = epdf->pages[pageNo - 1];
+                if (!pageInfo) {
+                    continue;
+                }
+                // iterate in reverse so removals don't invalidate indices
+                for (int a = len(pageInfo->annotations) - 1; a >= 0; a--) {
+                    Annotation* annot = pageInfo->annotations[a];
+                    pdf_annot* p = annot ? annot->pdfannot : nullptr;
+                    if (!p) {
+                        continue;
+                    }
+                    pdf_page* apage = pdf_annot_page(ctx, p);
+                    bool valid = false;
+                    if (apage) {
+                        for (int pn = 1; pn <= epdf->pageCount && !valid; pn++) {
+                            FzPageInfo* pi = epdf->pages[pn - 1];
+                            if (!pi || !pi->page) {
+                                continue;
+                            }
+                            pdf_page* pdfp = pdf_page_from_fz_page(ctx, pi->page);
+                            valid = pdfp == apage;
+                        }
+                    }
+                    if (!valid) {
+                        MarkNotificationAsModified(epdf, annot, AnnotationChange::Remove);
+                        delete annot;
+                        dropped++;
+                    }
+                }
+            }
+        }
+        fz_catch(ctx) {
+            fz_report_error(ctx);
+        }
+    }
+    if (dropped > 0) {
+        logf("[save] dropped %d corrupt annot(s) targeting invalid pages\n", dropped);
+    }
+
     bool ok = false;
     fz_var(ok);
     fz_try(ctx) {

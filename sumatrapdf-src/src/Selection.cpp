@@ -73,7 +73,11 @@ Vec<SelectionOnPage>* SelectionOnPage::FromRectangle(DisplayModel* dm, Rect rect
 
         /* selection intersects with a page <pageNo> on the screen */
         RectF isectD = dm->CvtFromScreen(intersect, pageNo);
-        sel->Append(SelectionOnPage(pageNo, &isectD));
+        // pageNo here is VIRTUAL (we iterated PageCount()=VirtualPageCount under TC2).
+        // Engine-bound callers (FlashcardCreateHighlightAnnot, MakeAnnotationsFromSelection,
+        // GetTextInRegion, PhysicalToVirtualForRect) all expect PHYSICAL pageNo — convert
+        // here so SelectionOnPage.pageNo is physical regardless of how the selection was made.
+        sel->Append(SelectionOnPage(dm->VirtualToPhysical(pageNo), &isectD));
     }
     VecReverse(*sel);
 
