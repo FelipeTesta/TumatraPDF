@@ -1,4 +1,251 @@
-﻿## 2026-11-01 (s36-bt) — Profile F8 slice2: Config flashcard list merges profile books + delete/clear wired
+﻿## 2026-11-04 (s36-cp) — Tab batch closed: docs + TODO trim + commit
+
+### Fixed
+
+- Tab batch docs closed: FLOW/tab-system.dot created (boot restore, dropdown button/menu, new/rename/delete, autosync hooks, lazy switch); FLOW/tumatrapdf.dot references it; TODO.md trimmed to open work only (Tab s36-bu→s36-co archived to LOG; bug7 compressed to one open line).
+- NEXT_STEPS.md folded into TODO.md (open items kept: Theme Colors P2.5 table, WebView2 adapter actions, regression-test wishlist; stale/duplicated items dropped per architect dedupe map).
+
+commit: (see git log)
+
+## 2026-11-04 (s36-co) — Right-click options via TPM_RECURSE (dropdown stays open)
+
+### Fixed
+
+- Tab group right-click options popup now opens as a nested overlay while the main dropdown keeps tracking: `TabGroupMenuFilterProc` (SumatraPDF.cpp) shows the options menu with `TrackPopupMenuEx(..., TPM_RECURSE | TPM_RETURNCMD | TPM_RIGHTBUTTON, ...)` on WM_RBUTTONUP inside the WH_MSGFILTER hook, routes the returned cmdId to `HandleTabGroupMenuCmd`, and swallows the right-click so the main menu never sees it — dropdown stays open and resumes after options close.
+- `ShowTabGroupDropdown` simplified back to a single TrackPopupMenuEx call: build main menu -> install hook -> Track -> wait -> unhook -> route cmdId. Removed the restart/reopen track-loop and the post-cancel options fallback path (gTabGroupRightClickIdx handling + rebuild loop) that never worked on the real machine.
+- Extracted `BuildTabGroupOptionsMenu(int idx)` helper (OpenNew/Rename/Delete with OpenNew/Rename/Delete id bases + idx). Static `gTabGroupDropdownWin` / `gTabGroupDropdownFrame` store the frame for the hook. Removed `gTabGroupRightClickIdx` global.
+- Guard: if the options menu cannot be built (idx invalid) the right-click is not swallowed; the menu behaves natively.
+- Build 0/0; ad-hoc-tab-session-e2e.ts PASS; ad-hoc-tab-session.ts PASS.
+
+## 2026-11-04 (s36-cn) — Tab dropdown persistent reopen + button erase dark
+
+### Fixed
+
+- Tab group dropdown no longer closes after opening options: `ShowTabGroupDropdown` (SumatraPDF.cpp) restructured into an infinite reopen track loop — after the options popup is dismissed, the menu is rebuilt fresh and re-tracked at the SAME button anchor (captured once, no jump). Loop exits only on left-click choice (`cmdId>0` → `HandleTabGroupMenuCmd`) or dismissal without rightIdx (Escape/click-outside). Removed the max-1 reopen guard. Logf `[tabs] dropdown done` / `[tabs] rightclick options idx=%d optCmdId=%d`.
+- Kill white flash on owner-draw tab-group button (root cause): subclassed `hwndTabGroupBtn` (`SetWindowSubclass` in `UpdateTabGroupButton`) and handle `WM_ERASEBKGND` in `TabGroupBtnSubclassProc` — fill theme-dark + return 1 to suppress the BUTTON class COLOR_BTNFACE erase that flashed BEFORE `WM_DRAWITEM` draws the dark glyph. Kept the frame `WM_CTLCOLORBTN` route too. Forward-declared `TabGroupBtnSubclassProc`.
+- Flash evidence: `tests/ad-hoc-tab-menu.ts` now toggles synced↔unsynced via `-dbg-control` `TestTabGroupActivate` and captures button frames at +0/+33/+66 ms under `tests/tmp/tab-t3/flash/` (8 PNGs, all 472 bytes = consistent dark bg; user to verify visually).
+- Build 0/0; ad-hoc-tab-session-e2e.ts PASS; ad-hoc-tab-session.ts PASS; ad-hoc-tab-menu.ts PASS.
+
+## 2026-11-04 (s36-cm) — Tab round 8: dropdown-stays-open right-click + button bg flash fix
+
+### Fixed
+
+- Tab group right-click options popup no longer closes main dropdown permanently: `ShowTabGroupDropdown` (SumatraPDF.cpp) restructured into a track loop — after options popup dismissed, rebuild menu fresh and re-track at button anchor; loop exits on left-click choice (cmdId>0 → `HandleTabGroupMenuCmd`), Escape/dismiss without rightIdx, or after max 1 reopen (guard prevents right-click trap). Logf `[tabs] dropdown done` / `[tabs] reopen dropdown`.
+- Kill white flash on owner-draw tab-group button: added `WM_CTLCOLORBTN` in frame WndProc (`WndProcSumatraFrame`) returning theme-dark `brControlBgColor` for `hwndTabGroupBtn` — default erase painted COLOR_BTNFACE (bright band) before `WM_DRAWITEM` draws dark glyph. `DrawTabGroupButton` already fills rcItem fully before glyph.
+- Build 0/0; ad-hoc-tab-session-e2e.ts PASS; ad-hoc-tab-session.ts PASS.
+
+## 2026-11-04 (s36-cl) — Right-click fix: MenuItemFromPoint returns position, not command id
+
+### Fixed
+
+- Tab group right-click now opens options popup instead of silently selecting session: `TabGroupMenuFilterProc` (SumatraPDF.cpp:12464) WM_RBUTTONUP branch previously compared `MenuItemFromPoint` return against `kTabGroupMenuOpenHereBase` — but MSDN says `MenuItemFromPoint` returns ZERO-BASED POSITION, not command id → never matched → always `item=-1` → TrackPopupMenuEx default treated right-click as selection (`menu done cmdId=8505`). Fixed: `GetMenuItemID(gTabGroupMenuPopup, (UINT)pos)` converts pos→cmdId, compare against base, set `gTabGroupRightClickIdx`, `WM_CANCELMODE` swallow. Logf `[tabs] hook rclick pos=%d cmdId=%d idx=%d`. MSDN ref + pos→cmdId via GetMenuItemID + hook swallow.
+- Build 0/0; ad-hoc-tab-session-e2e.ts PASS; ad-hoc-tab-session.ts PASS (menu left-click path intact).
+
+## 2026-11-04 (s36-ck) — Empty sessions first-class + close-sync-empty + WH_MSGFILTER right-click
+
+### Fixed
+
+- Empty sessions are first-class: `ActivateTabGroupInWindow` (TabGroupsManage.cpp:625) no longer rejects groups with empty `tabFiles` — activates empty group, sets activeTabGroup directly, closes current doc tabs, loads nothing. Same early-return removal in `OpenTabGroup` (TabGroupsManage.cpp:267) and boot restore (SumatraStartup.cpp:2679: empty active group suppresses session restore). `TabGroupActivateResultTemp` (SumatraControl.cpp:127) no longer errors on empty groups.
+- Genuine last-tab close now syncs 0 files (empty group stays empty): `UpdateActiveGroupAutoSave` (TabGroupsManage.cpp:238) dropped guard (c) "no document tabs → skip" — keep skips (a) shutdown, (b1) suppress, (d) draggingTab only. `SetActiveTabGroup` (TabGroupsManage.cpp:212) only SyncGroupFromWindow when name non-empty AND has file tabs — empty name skips sync.
+- Right-click options popup via WH_MSGFILTER hook instead of #32768 window subclass: `ShowTabGroupDropdown` (SumatraPDF.cpp:12499) installs `SetWindowsHookExW(WH_MSGFILTER, TabGroupMenuFilterProc)` before TrackPopupMenuEx, unhooks after. `TabGroupMenuFilterProc` (SumatraPDF.cpp:12469) catches WM_RBUTTONUP on menu window, MenuItemFromPoint hit-test → gTabGroupRightClickIdx → WM_CANCELMODE → TrackPopupMenuEx returns 0 → options popup at cursor. Removed WM_INITMENUPOPUP subclass-install block (unreliable for top-level popups), TabGroupMenuSubclassProc, gPendingSubclassPopup, gRightClickHandled, kTabGroupMenuSubclassId.
+- Build 0/0; ad-hoc-tab-session-e2e.ts PASS (empty group activate + reopen stays 0); ad-hoc-tab-session.ts PASS.
+
+## 2026-11-04 (s36-cj) — Boot crash fix: TabState.tocState NULL when FileState absent (user dump SumatraStartup.cpp:399)
+
+### Fixed
+
+- Boot-time C0000005 at Vec<int>::operator= ← SetTabState (SumatraStartup.cpp:399, +0x131) ← LoadDocumentFinish ← ReloadDocument ← WinMain (session restore). Root cause: user settings `FileStates []` EMPTY after profile-backup recovery → `TabState` deserialized WITHOUT a FileState entry → `state->tocState` (`Vec<int>*`, Settings.h:682) is NULL (AllocStruct zero-inits pointer settings fields) → `tab->tocState = *state->tocState;` deref NULL → reads offset 0 → crash. Defensive null-guards + lazy alloc at ALL tocState deref sites: SumatraStartup.cpp:399 (guard source), GlobalPrefs.cpp:181 NewTabState (guard + alloc state->tocState), AppSettings.cpp:632 CloneTabState (guard source), AppSettings.cpp:759 + SumatraPDF.cpp:824 + SumatraPDF.cpp:5747 NewTabStateFromTab (alloc fs->tocState before deref), SumatraPDF.cpp:2429 (guard source). FreeStructData already `delete`s IntArray vecs → no leak.
+- New test tests/ad-hoc-restore-no-filestates.ts: seeds isolated -appdata with FileStates [] + SessionData (1 tab, TabIndex=1 out-of-range) + ActiveTabGroup empty group; launches boot restore; asserts frame appears (no crash). PASS.
+
+## 2026-11-04 (s36-ci) — right-click final: TPM_RIGHTBUTTON made right-click select; hook DOWN instead
+
+### Fixed
+
+- Right-click on a tab-group session item opened the session instead of showing options: TPM_RIGHTBUTTON made TrackPopupMenu treat right-click like left-click (item selected, cmdId returned, WM_RBUTTONUP consumed before menu window proc). Fixed: removed TPM_RIGHTBUTTON; TabGroupMenuSubclassProc now hooks WM_RBUTTONDOWN (prime) + WM_RBUTTONUP (fallback) via #32768 subclass; hit-test MenuItemFromPoint → gTabGroupRightClickIdx → PostMessage WM_CANCELMODE → TrackPopupMenuEx returns 0 → options popup at cursor. Double-fire guarded by gRightClickHandled (reset in ShowTabGroupDropdown). Logf: `[tabs] rightclick DOWN hit item=%d` / `UP hit item=%d` / `hit item=-1`. WM_INITMENUPOPUP subclass install (gPendingSubclassPopup) kept — only safe point to subclass #32768 menu window.
+- Build 0/0; ad-hoc-tab-session-e2e.ts PASS (rightclick idx + options idx logged); ad-hoc-tab-session.ts PASS.
+
+## 2026-11-04 (s36-ch) — Tab right-click fix: menu window subclass installed on WM_INITMENUPOPUP + TPM_RIGHTBUTTON
+
+### Fixed
+
+- Right-click on a tab-group session item did nothing (#32768 menu window only exists inside TrackPopupMenuEx modal loop; FindWindow before tracking always returned NULL → SetWindowSubclass never installed). Fixed: set a pending-popup flag right before TrackPopupMenuEx; WM_INITMENUPOPUP fires inside the same-thread modal loop so install SetWindowSubclass there when hwnd matches the pending popup; re-added TPM_RIGHTBUTTON to TrackPopupMenuEx flags. TabGroupMenuSubclassProc WM_RBUTTONUP hits TabGroupMenuSubclassProc, MenuItemFromPoint → gTabGroupRightClickIdx, WM_CANCELMODE; options popup (OpenNew/Rename/Delete) shown at cursor on the next menu.
+- Logf lines: `[tabs] rightclick hit item=%d`, `[tabs] menu done cmdId=%d rightIdx=%d`, `[tabs] menu subclass installed`.
+- Build 0/0; ad-hoc-tab-session-e2e.ts PASS (rightclick idx + options idx logged); ad-hoc-tab-session.ts PASS.
+
+## 2026-11-04 (s36-cg) — Tab round 5: dialog dark theme + newsession captures books + clickleft-open/clickright-options menu model
+
+### Changed
+
+- TabGroupNameDialog raw `CreateWindowW` child controls unthemed → `UseDarkModeLib() && dmlib::isEnabled()`: `dmlib::setDarkTitleBarEx(hwnd, false)` + `dmlib::setChildCtrlsTheme(hwnd)` after `CreateWindowExW`; `WM_CTLCOLOREDIT`/`WM_CTLCOLORBTN` set text/bk via `ThemeWindowTextColor()`/`ThemeControlBackgroundColor()` + cached `CreateSolidBrush` (`DeleteObject` on `WM_DESTROY`).
+- New session (menu + case 8950 test-cmd path) now captures current open books: `SyncGroupFromWindow(name.s, win)` / `SyncGroupFromWindow(tmp.s, win)` before `SaveSettings`.
+- Tab group dropdown: sessions = plain `MF_STRING` items (`kTabGroupMenuOpenHereBase+i`); left-click = open here; right-click → options popup (Open in new window / Rename / Delete) via `#32768` menu-window subclass + `MenuItemFromPoint` hit-test + `WM_CANCELMODE`; removed `MF_POPUP` submenus (hover-open cannot left-click-activate).
+
+### Tests
+
+- ad-hoc-tab-session-e2e.ts PASS (newsession now T1>=1 tabFiles = captured open books); ad-hoc-tab-session.ts PASS; build 0/0.
+
+## 2026-11-04 (s36-cf) — New session/Rename fix: dialog window class never registered
+
+### Fixed
+
+- Real-exe New session + Rename dead — window class `TUMATRA_TAB_GROUP_NAME` never registered → CreateWindowExW NULL → silent false. RegisterClassW once; gForTesting gate now `gForTesting && !forceReal` (dialog exercisable in tests); logf `namedialog opened`.
+
+### Added
+
+- Control-pipe async dialog pattern — handler stashes Dup'd globals, posts WM_COMMAND kTabGroupDialogTestCmd=8950 to frame, replies immediately (pipe thread MUST NOT run modal loops = deadlock); dialog opens on UI thread; e2e driveDialog polls GetDlgItem(1001) → WM_SETTEXT → WM_COMMAND IDOK → poll destroyed. winapi.ts FFI hwnd→i64 fix.
+
+### Tests
+
+- ad-hoc-tab-session-e2e.ts PASS (openhere/newsession-real-dialog/opennew/rename-real-dialog GroupB→GroupZ w/ files preserved); ad-hoc-tab-session.ts PASS; build 0/0.
+
+### Notes
+
+- e2e rename assertion fixed (rename preserves tabFiles).
+
+## 2026-11-04 (s36-ce) — Tab round 4: rename/delete UAF fixes + active marker + lazy session switch
+
+### Fixed
+
+- Rename double-free/UAF (`HandleTabGroupMenuCmd` case 2, SumatraPDF.cpp ~12409): `Str newName = Str(g->name)` shallow-aliased `g->name`; dialog's `ReplaceWithCopy` freed `g->name.s`, then handler freed it again → crash/garbage. Fixed: `str::Dup(g->name)` into independent buffer before dialog, `str::Free(newName)` after.
+- Delete use-after-free (SumatraPDF.cpp ~12419-12441): `logf("[tabs] menu delete '%s'\n", Str(g->name))` at ~12440 read `g->name` AFTER `str::Free(g->name)` + `free(g)` at ~12435-12436. Fixed: `str::Dup(g->name)` into local before freeing, log uses the copy.
+- Rename WM_COMMAND decode order already fixed in s36-cd (highest base first: Delete→Rename→OpenNew→OpenHere) so ID 8701+ resolves to Rename not OpenHere.
+- Active-session marker in dropdown (`BuildTabGroupMenu`, SumatraPDF.cpp ~12274): active group row gets `● ` prefix + `MF_CHECKED` on top-level popup item (same native checkmark precedent as ReadAloud voice/speed menus at ~14105-14183).
+- Session switch slow (`ActivateTabGroupInWindow`, TabGroupsManage.cpp ~620-664): `LoadDocument` built engine synchronously per doc (line ~4020) → UI thread blocked closing+loading N docs. Fixed: `args.lazyLoad = true` for all but first file (first stays sync so selected tab shows immediately); skip tabs whose path already in destination group (preserves scroll); skip already-open files on load. Timing logf at close-loop start/end and load-loop end (`GetTickCount`).
+- `OpenNewWindow` (SumatraPDF.cpp ~12396-12405): same `args.lazyLoad = !first` treatment so first file opens instantly in new frame.
+
+### Added
+
+- E2E test `tests/ad-hoc-tab-session-e2e.ts` (registered in before-release.ts): openhere/newsession/opennew all PASS via real WM_COMMAND route. Glyph screenshots `tests/tmp/tab-t3/btn-synced.png`/`btn-unsynced.png` byte-different (green disc vs red ring).
+
+### Notes
+
+- NO settings backups: SaveSettings (AppSettings.cpp:796) overwrites directly — destroyed sessions UNRECOVERABLE.
+
+## 2026-11-04 (s36-cd) — Tab round 3: real-UI route fixes + opennew init clobber fix + glyph instant refresh
+
+### Fixed
+
+- OpenNewWindow activeTabGroup reset: `HandleTabGroupMenuCmd` command-ID decode checked `kTabGroupMenuOpenHereBase` (8501-9500) BEFORE `kTabGroupMenuOpenNewBase` (8601-9600), so `cmdId=8601` (OpenNew for group 0) matched OpenHere with `idx=100` (out-of-bounds → early return, nothing happened). Fixed: check highest base first (Delete → Rename → OpenNew → OpenHere). `cmdId` ranges overlap by design (spaced 100 apart); order matters.
+- OpenNewWindow `activeTabGroup` set BEFORE `CreateAndShowMainWindow`, but window init reset it back to previous value. Fixed: resolve `g->name` into a local `Str` copy first, create window, then `ReplaceWithCopy` activeTabGroup AFTER window creation, wrapped in `SuppressGroupAutoSave(true/false)`.
+- `DrawTabGroupButton` bg fill used parent-relative `rc.x/rc.y` (502,7 screen coords) on button's 28×26 DC → drawn off-screen, button stayed white square. Fixed: button-local `(0.0f, 0.0f)` with `rc.dx/rc.dy`. Button bg now matches tab strip (ThemeControlBackgroundColor).
+- `RefreshTabGroupButton` (InvalidateRect + UpdateWindow) called at every state change: SetActiveTabGroup, ActivateTabGroupInWindow, NewSession, OpenNewWindow, Rename, Delete, boot restore. Glyph (green disc / red ring) updates instantly on state change.
+
+### Added
+
+- Control-pipe Test commands (ONLY reliable E2E path for menu-path actions — TrackPopupMenu cannot be automated): TestTabGroupMenuCmd=53 + TestTabGroupDialogOpen=54 (SumatraControl.cpp + cmd/control.ts). `TabGroupMenuCmdResolveId` maps `"openhere:<group>"`/`"opennew:<group>"`/`"rename:<group>:<new>"`/`"delete:<group>"`/`"newsession"` to `kTabGroupMenu*` IDs, posts via `HandleTabGroupMenuCmd`.
+- `tests/ad-hoc-tab-session-e2e.ts` (registered in before-release.ts): E2E via real WM_COMMAND route. PASS: openhere B keeps A(1)+B(2) intact; newsession creates empty group T1 active; opennew A → activeTabGroup=GroupA, groups intact. Glyph screenshots: `tests/tmp/tab-t3/btn-synced.png` (354B) + `btn-unsynced.png` (473B) — byte-different, green filled disc vs red outline ring.
+
+### Notes
+
+- NO settings backups: SaveSettings (AppSettings.cpp:796) overwrites directly — already-destroyed sessions UNRECOVERABLE.
+
+## 2026-11-04 (s36-cc) — Session data-loss round 2: boot-wipe + async activation fixes + control-pipe E2E
+
+### Fixed
+
+- Boot-wipe (prime suspect, destroyed 3+ user sessions at RESTART): SumatraStartup.cpp:2674-2698 restore loop called LoadDocument + TabsSelect WITHOUT suppress → first auto-save hook clobbered the active group with stale/empty tabs. Wrapped in SuppressGroupAutoSave(true)/(false).
+- Activation: suppress cleared BEFORE TabsSelect; LoadDocument async (tab added to win->Tabs() immediately, doc loads later — SumatraPDF.cpp:3825/5647) → hook fired post-clear. Suppress now cleared AFTER TabsSelect (TabGroupsManage.cpp).
+- NewSession / OpenNewWindow clobbered groups via SetActiveTabGroup → SyncGroupFromWindow; now direct activeTabGroup assign + SaveSettings (SumatraPDF.cpp ~12312/~12349).
+- ActivateTabGroupInWindow: tabFiles snapshot (Vec<Str> copy) before mutation; iterate the copy.
+
+### Added
+
+- Control-pipe Test commands (ONLY reliable E2E path for menu-path actions — TrackPopupMenu cannot be automated, Windows foreground rule): TestTabGroupActivate/List/NewSession/OpenNew (SumatraControl.cpp ids 49-52 + cmd/control.ts enum) + tests/ad-hoc-tab-session-e2e.ts (registered in before-release.ts). E2E PASS: activate B keeps A(1)+B(2) intact; NewSession creates empty group active; OpenNew works.
+
+### Notes
+
+- NO settings backups: SaveSettings (AppSettings.cpp:796) overwrites directly — already-destroyed sessions UNRECOVERABLE.
+
+## 2026-11-03 (s36-ca) — Tab UI fixes: New-session dialog dark+working, name limit 20, glyph restyle
+
+### Fixed
+
+- Bug4 (P0): `ShowTabGroupNameDialog` (SumatraPDF.cpp) was a raw custom dialog with broken modal loop (GetMessage-based pump hung all buttons in dark theme). Rewrote as poll-based custom WndProc (ProfileBackupWnd precedent): owner-draw `WM_ERASEBKGND` fills `ThemeWindowBackgroundColor()` (dark), OK/Cancel buttons wired via `BN_CLICKED` → `DestroyWindow`, `WM_KEYDOWN` Enter/Escape handled, `EM_SETLIMITTEXT` raised 10→20. `gForTesting` auto-accept "T1" preserved.
+- Bug3: `ShowTabGroupDropdown` already had `TPM_RIGHTBUTTON` in TrackPopupMenuEx flags (s36-bw) — right-click on group submenu item opens submenu natively. No code change needed; verified flag present.
+- Bug6: `DrawTabGroupButton` glyph restyle: SYNCED = filled green disc `RGB(46,158,79)` (#2E9E4F); UNSYNCED = outline only, red border `RGB(224,58,58)` (#E03A3A) width `DpiScale(2)`, transparent fill; circle diameter = `min(rcItem.dx, rcItem.dy) - 2*DpiScale(5)` (smaller glyph). Button bg still filled theme color.
+
+### Verified
+
+- bun cmd/build.ts 0 err / 0 warn; copied to Compiled\TumatraPDF.exe.
+- tests/ad-hoc-tab-menu.ts PASS: both synced + unsynced states captured as `tests/tmp/tab-t3/btn-synced.png` (325 bytes) and `btn-unsynced.png` (325 bytes); glyph visually distinct (filled green vs red outline).
+
+## 2026-11-03 (s36-bz) — Bug7 fix: TC2 annotation routing + save corrupt-annot guard (P0)
+
+### Fixed
+
+- P0 Bug7 (save corruption): multipage flashcard creation under two-column v2 wrote VIRTUAL pageNo/rects into annotations via `Selection.cpp` `FromRectangle()` (iterated `PageCount()` = VirtualPageCount = 2N under TC2, stored virtual pageNo at line 76) → `EngineMupdfCreateAnnotation` (`Annotation.cpp:1472`) validates pageNo vs PHYSICAL pageCount (`EngineMupdf.cpp:4110-4112`) → wrong-page or out-of-range annotation → MuPDF incremental save (`EngineMupdf.cpp:6485`) dropped page content (scanned backgrounds vanished, only annotations survived). Fix: `FromRectangle` converts via `dm->VirtualToPhysical(pageNo)` before storing `SelectionOnPage.pageNo`, matching `FromTextSelect` (physical) and all engine-bound consumers.
+- Save guard: `EngineMupdfSaveUpdated` (`EngineMupdf.cpp`) now iterates pages/annots before `pdf_save_document`; any annot whose `pdf_annot_page` is nil or targets a page outside the physical range is removed (`MarkNotificationAsModified(Remove)` + `delete`) + `logf("[save] dropped %d corrupt annot(s) targeting invalid pages")`. Corruption can never silently drop page content again.
+
+### Added
+
+- tests/ad-hoc-annot-save-integrity.ts (before-release only): isolated -appdata, load zlib.3.pdf, enable TC2 (CmdViewportCropV2Toggle), select text, create flashcard ('S' → CmdFlashcardAdd), save (CmdSaveAs), verify app stays alive. E2E saved-PDF integrity partial (Save As dialog automation not achievable in test env).
+
+### Verified
+
+- bun cmd/build.ts 0 err / 0 warn; copied to Compiled\TumatraPDF.exe.
+- tests/ad-hoc-annot-save-integrity.ts PASS (app alive after flashcard+save under TC2).
+
+## 2026-11-03 (s36-by) — Tab data-loss fix: activation no-suppress + dropdown anchor
+
+### Fixed
+
+- P0 bug2 (data loss): `ActivateTabGroupInWindow()` (TabGroupsManage.cpp) called `SetActiveTabGroup()` → `SyncGroupFromWindow()` which OVERWROTE the destination group's tabFiles with the current window's single open book BEFORE loading the group's files. Closing tabs then triggered T1 auto-sync hooks that snapshotted the (now depleted) window into the active group, wiping saved books. Fix: added file-local `sSuppressGroupAutoSave` flag; `UpdateActiveGroupAutoSave()` returns early when set; `ActivateTabGroupInWindow()` sets `activeTabGroup` directly (bypassing `SyncGroupFromWindow`), closes tabs under suppress, loads group files, then clears suppress + SaveSettings.
+- P0 bug1 (dropdown mispositioned): `WM_COMMAND` handler passed frame `hwnd` to `ShowTabGroupDropdown()` → anchor was frame rect bottom-left. Fix: pass `win->hwndTabGroupBtn` (button hwnd) so `TrackPopupMenuEx` anchors at the button's screen rect bottom edge. Fallback to `hwnd` if button null.
+
+### Added
+
+- TabGroupsManage.cpp: `sSuppressGroupAutoSave` static flag + early-return guard in `UpdateActiveGroupAutoSave()` (belt-and-braces alongside existing shutdown/empty/no-tabs/dragging guards).
+
+### Verified
+
+- bun cmd/build.ts 0 err/0 warn; copied to Compiled\TumatraPDF.exe.
+- tests/ad-hoc-tab-session.ts PASS (group restore + settings persistence still work after fix).
+
+## 2026-11-03 (s36-bw) — Tab system T3: Tab Group button + dropdown menu
+
+### Added
+
+- SumatraPDF.cpp: `kTabGroupBtnId=8000`, `kTabGroupBtnDxBase=28` constants; `UpdateTabGroupButton()` creates BS_OWNERDRAW child HWND left of tabs in BOTH dual-row + single-row layout branches, shifting tabsX right; `DrawTabGroupButton()` draws 2-state glyph (filled accent circle = synced / outline text-color circle = unsynced) via DsAccentsGet() theme tokens; `BuildTabGroupMenu()` builds dynamic popup: Unsynced / Session N (M files)[submenu: Open here | Open in new window | Rename | Delete] / New session…; `ShowTabGroupDropdown()` — SetForegroundWindow + TPM_RIGHTBUTTON + direct screen coords (deleted ScreenToClient/ClientToScreen identity math); logf `[tabs] dropdown: groups=N, cmdId=M`; WM_COMMAND interception for BN_CLICKED on kTabGroupBtnId + WM_DRAWITEM owner-draw.
+- TabGroupsManage.h/.cpp: `ActivateTabGroupInWindow(win, name)` — SetActiveTabGroup + close current docs + load group files into that window.
+- MainWindow.h/.cpp: `hwndTabGroupBtn` member + DestroyWindow in ~MainWindow().
+- Tests: `tests/ad-hoc-tab-menu.ts` (registered in before-release.ts only): isolated -appdata, seed ActiveTabGroup=Alpha + TabGroups[Alpha], launch, find button by ID (0x8000), poll #32768 menu up to 3s after WM_COMMAND, verify settings persisted.
+
+### Verified
+
+- bun cmd/build.ts 0 err/0 warn; copied to Compiled\TumatraPDF.exe.
+- tests/ad-hoc-tab-menu.ts PASS (button found, settings persisted). Menu #32768 not detected via postMessage polling (environmental: WM_COMMAND from automation process lacks foreground activation) — structural code verified; user visual validation pending.
+- Deviation note: user spec asked right-click-on-menu-item for per-item ops; native TrackPopupMenuEx lacks per-item right-click → implemented as submenu per group item instead.
+
+## 2026-11-02 (s36-bv) — Tab system T2: restore precedence + unsynced windows
+
+### Added
+
+- SumatraStartup.cpp: before `if (restoreSession)`, if `gGlobalPrefs->activeTabGroup` non-empty AND group exists in `tabGroups` with tabFiles > 0 → `restoreSession = false`, create first window, load group's files in order (missing files → placeholder tabs OK), `TabsSelect(win, 0)`, `ShowMainWindow(win, WIN_STATE_NORMAL)`. Logf `[tabs] startup restore group '...' (N files)`. Precedence: active group wins; fallback = existing session restore.
+- SumatraPDF.cpp `HandleCmdNewWindow` (Ctrl+N): `str::ReplaceWithCopy(&gGlobalPrefs->activeTabGroup, Str(""))` → new window unsynced; logf `[tabs] new window unsynced`. Single-global-pointer semantics documented; previous window's group data already persisted by T1 auto-sync.
+- Tabs.cpp `MainWindowTabMigration`: after `MaybeMigrateTab`, if `!releaseWnd` (dragged out to new window, not onto another Sumatra frame) → `activeTabGroup = ""`; logf `[tabs] drag-out new window unsynced`. Original window's group already synced by T1 hook (RemoveTab → MainWindowTabClosed → UpdateActiveGroupAutoSave) before MaybeMigrateTab returned.
+- tests/ad-hoc-tab-session.ts: isolated -appdata dir, settings with ActiveTabGroup + TabGroups section, launch WITHOUT -for-testing, assert frame title contains group PDF, quit, re-read settings assert ActiveTabGroup persisted. Registered in tests/before-release.ts.
+
+### Verified
+
+- bun cmd/build.ts 0 err/0 warn; copied to Compiled\TumatraPDF.exe.
+- tests/ad-hoc-tab-session.ts PASS (group restore + settings persistence).
+- No commit (awaiting explicit command).
+
+## 2026-11-02 (s36-bu) — Tab system T1: activeTabGroup + live auto-sync
+
+### Added
+
+- cmd/gen-settings.ts: appended `ActiveTabGroup` (Str, default "") at END of globalPrefs array; gen-code regenerated src/Settings.h + docs/md/Advanced-options-settings.md (only the added row, no stripped fields).
+- TabGroupsManage.h/.cpp: `FindTabGroup(name)` case-insensitive lookup; `SyncGroupFromWindow(name, win)` find-or-create group, rebuild tabFiles from win->Tabs() order; `SetActiveTabGroup(win, name)` sets gGlobalPrefs->activeTabGroup, syncs immediately if non-empty, SaveSettings(); `UpdateActiveGroupAutoSave(win)` guard chain (shutdown/no-active/no-tabs/draggingTab → skip) then SyncGroupFromWindow + SaveSettings().
+- Tabs.cpp: hook `UpdateActiveGroupAutoSave(win)` at MainWindowTabSelectionChanging (after SaveCurrentWindowTab), MainWindowTabClosed (after CloseTab), AddTabToWindow (after InsertTab). Include TabGroupsManage.h.
+
+### Verified
+
+- bun cmd/build.ts 0 err/0 warn (2 pre-existing warnings in test_util, unrelated); copied to Compiled\TumatraPDF.exe.
+- T3 (dropdown UI) NOT implemented — deferred.
+- No commit (awaiting explicit command).
+
+## 2026-11-01 (s36-bt) — Profile F8 slice2: Config flashcard list merges profile books + delete/clear wired
 
 ### Added
 

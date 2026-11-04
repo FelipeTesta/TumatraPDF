@@ -5,17 +5,6 @@
 3. User manual-test items = items only the user can validate.
 4. Housekeeping (2026-10-20, s36-ae; re-triaged s36-at): all `[x]` blocks archived — details live in LOG per session entry; this file lists open work only.
 
-## 📋 NEXT_STEPS.md — Detailed Action Plan (Reference)
-
-**See [NEXT_STEPS.md](NEXT_STEPS.md)** for full prioritized action plan derived from FLOW analysis (tree-sitter + Serena) and critical findings below. Contains:
-
-- Priority 1: Blockers (ASan, Settings Migration, WebView2 Adapter)
-- Priority 2: Systemic Fixes (Coordinate Space Audit, Toolbar Ordering, ReloadDocument)
-- Priority 2.5: Theme Colors Compliance (Dark Mode White Controls in Dialogs)
-- Priority 3: Tech Debt (TrimConfigDialog, R3/R5/R7, God File Extraction)
-- Priority 4: Quality (Clang-Tidy, Bun Upgrade, Regression Tests)
-- Execution order by week + cross-reference table
-
 ## Critical Findings from FLOW Analysis (2026-11-01) — MUST FIX
 
 ### 1. Toolbar Critical Ordering — `SetWindowTheme` MUST run BEFORE `TbAddButtons`
@@ -42,6 +31,10 @@
 
 **Problem**: JS notify → `BrowserDocView::OnJsNotifyCb` → `MarkdownHtmlWindowHandler` (adapter, MarkdownModel.cpp:179) → `MarkdownModel` → `ControllerCallbackHandler`. Adapter **MUST** forward every new `HtmlWindowCallback` method. No-op default = feature silently dead.
 **Why it's a problem**: Autoscroll ETA for Markdown was stuck because the adapter didn't forward `autoscrollProgress` notifications. Contrast adapter had 3 divergent JS copies. Every new feature needing WebView2 communication MUST update the adapter, or it works in PDF but silently fails in Markdown.
+
+- Create `docs/md/WebView2-Adapter-Pattern.md`: adapter location `MarkdownModel.cpp:179`, required forwards (`appKey`, `autoscrollProgress`, `autoscrollBottom`, `scrollPos`, `linkClick`, `imageClick`), pattern `virtual void OnXxx() { callback->OnXxx(); }`.
+- Add `TestMarkdownAdapter` to `cmd/control.ts`.
+- Compile-time/static check: all `HtmlWindowCallback` methods have adapter impl.
 
 ### 5. Flashcard Annotation Convention — Author Token vs Contents
 
@@ -73,6 +66,8 @@
 **Problem**: `SaveAnnotationsToExistingFile` → `ReloadDocument` built a FRESH `FileState` and never copied fork's per-doc color fields → restore path reset them to defaults (invert/contrast/trim/crop lost on save).
 **Why it's a problem**: Fixed in LOG s36-az: `ReloadDocument` now carries `fs->invertColors/contrastEnabled/contrastOpacity/trimTop/trimBottom/viewportCropV2Enabled/autoScrollSpeedMultiplier` (same fields `UpdateFileState` persists). But this is a pattern: ANY new per-doc field must be added to BOTH `UpdateFileStateForTab` (save) AND `ReloadDocument` (restore). Missing one = silent data loss on save/reload.
 
+- `FORK_FIELD` macro/automation parked as tech debt (NOT low-risk verified): ReloadDocument currently preserves fork fields in-place; single source of truth via field-attribute macro + static assertion/test deferred.
+
 ## Dev tooling / analysis — open items
 
 - [ ] **B6-left** clang-tidy: only the 8 `clang-diagnostic-error` TUs remain (flag/std gap vs MSVC; platform-suffix files excluded) + the ~24k stylistic bulk (signed-bitwise, macro-to-enum, named-parameter, designated-initializers, redundant-parentheses, concise-preprocessor-directives, explicit-constructor) — a separate policy decision, not a defect list. Waves 1-5 closed: switch-default 128→0, narrowing 81→4 vendored, roundings 17→0, unchecked-conv 7→0 (1 justified NOLINT); analyzer 42 all triaged. Baseline: `out/lint/clang-tidy-summary.txt` (LOG s36-r/ac/ad/ag/ak/al).
@@ -91,6 +86,7 @@
 - [ ] **R7 / 16C-next**: continue god-file extraction — SumatraPDF.cpp (~14.2k lines, target ~10k), then Canvas.cpp (~5.7k; needs a dependency MAP first — mouse/keyboard interleaved with rendering, no established pattern), EngineMupdf.cpp (~6.7k, decouple rendering helpers per format).
 - [ ] **16D**: typed `gGlobalPrefs` accessors (152 accesses in SumatraPDF.cpp) — only when tests exist.
 - [ ] **TC2 leftovers**: uia `PageProvider` + legacy tile math not routed virtual→physical (non-cache path diverts; MVP-acceptable).
+- Non-cache Paint path: audit remaining `engine->` calls in `RenderCache.cpp`/`DisplayModel.cpp`/`Canvas.cpp`/`Commands_Edit.cpp`/`TrimConfigDialog.cpp` for virtual→physical routing (cache-path sites verified fixed).
 - [x] **Settings migration (names-blob off-by-one)** (fix s36-br): the `gFileStateInfo` names blob is missing `FlashcardStudyTimeSec` (s36-at omission) → every FileState field ≥ 24 serializes under the NEXT field's name. Round-trip is index-consistent (data survives restarts intact — user's file proven), but the names in the settings file + AdvancedSettingsDialog lie, and pre-s36-at settings files read one-off (upgrade path corrupted). Inserting the missing name NOW would shift every read by one → needs a one-time migration. Rule (noted in Settings.h): new FileState fields MUST append at the END of the table AND both blobs (s36-az followed it for `flashcardCardsDone`).
 
 ## Two Columns v2 — pending USER live-confirmations (code complete, all E2E-verified)
@@ -138,11 +134,33 @@ Replace / Edit With Paint / top-level Copy Image shipped s31; s34 E2E covers the
 
 - [ ] Buttons/inputs must center content (text/icons) horizontally AND vertically (ToolbarLayout controls, timer/speed inputs, new UI elements). Rule defined 2026-09-08. Flashcard toolbar done (s36-ax, custom-draw POSTPAINT centering); main toolbar autoscroll button label done; rest pending.
 
+## Theme Colors Compliance (P2.5) — dark-mode white controls
+
+Dialog frame dark via `dmlib::setDarkWndSafe()` but child controls (edit/static/listbox/button) paint white in dark mode — missing `WM_CTLCOLOR` handling. Fix pattern = `ArchScaleDialog.cpp:278-288` (`WM_CTLCOLORDLG/STATIC` + `SetBkColor`/`SetTextColor` + `BackgroundBrush()`; theme API `ThemeWindowControlBackgroundColor()`/`ThemeWindowTextColor()`/`ThemeHighlightColor()`). Verify: launch dark, open each dialog, all controls dark bg + readable text.
+
+| Priority | Dialog/Window            | File                                               | Fix pattern                                  |
+| -------- | ------------------------ | -------------------------------------------------- | -------------------------------------------- |
+| 1        | Password Dialog          | `SumatraDialogs.cpp:178` `Dialog_GetPassword_Proc` | `WM_CTLCOLOREDIT/STATIC/BTN` handling        |
+| 2        | Go to Page Dialog        | `SumatraDialogs.cpp:282` `Dialog_GoToPage_Proc`    | `WM_CTLCOLOREDIT/STATIC` handling            |
+| 3        | Find Window              | `FindWindow.cpp`                                   | `WM_CTLCOLOREDIT/STATIC/LISTBOX` handling    |
+| 4        | Find Bar                 | `FindBar.cpp`                                      | `WM_CTLCOLOREDIT` handling                   |
+| 5        | Advanced Settings Dialog | `AdvancedSettingsDialog.cpp`                       | Verify wingui controls use theme colors      |
+| 6        | Trim Config Dialog       | `TrimConfigDialog.cpp`                             | Verify wingui Edit controls use theme colors |
+| 7        | Print/Page Setup Dialogs | `PrintDialog.cpp`                                  | `dmlib::setDarkWndSafe` + `WM_CTLCOLOR`      |
+
 ## Test harnesses (tests/tmp/ — scratch, E2E-class until promoted to ad-hoc)
 
 Scratch E2E harnesses live in `tests/tmp/` (gitignored): s34-replace/paint/crop/edit-e2e, s34-reload-colors, s34c-inpage-e2e, s34e-doubletoggle, s34g-findcrash, s34c-tb-probe, s35-tc2-auto, s35-tc2-sel, s33-arch-repro, s36pa1-paint (PA1 mask paint cost), ad-hoc-pa2-strip-scroll (promoted to tests/), s36ax-fctb (fc toolbar + trio + home cycle, 17/17), s36az-scroll (strip-under-fc), s36az-cards (cards sidecar), s36az-imagedrag (scan-vs-figure drag), s36ay-batch (contrast/save-reload/trim/speed — D-stage arch/edit asserts still unproven: the old comctl crash hit before them; re-run now that band-90 is fixed). Reusable helpers: `tests/winapi.ts`, `tests/win-automation.ts`; DPI + postMessage traps documented in lemma (m9fa780f3cf0b, m5317f7f3eb3d). Probe-writing rules: tumatrapdf-e2e guide (lemma id 34) — in-proc oracles only (sumlog witnesses, TestToolbarButtons dump, window-class enum); NEVER cross-proc TB_* scalars (wrong WM_USER offsets poison the toolbar) or PrintWindow on a comctl toolbar (re-entrant render → wedge/AV).
 
 - [ ] **Control-server UI marshalling**: Test* handlers (TestToolbarButtons etc.) run TB__/TTM__ queries on the BACKGROUND control thread against UI-owned toolbars — inter-thread sends delivered mid-pump; combined with comctl rebanding/custom draw this reproducibly AVs (two s36-az crash runs, stack: WndProcToolbar fallthrough → comctl write to a dangling ptr). Proper fix = marshal Test* execution to the UI thread (SendMessage to a UI-owned window). The deterministic trigger (toolbar2 stacked band) is fixed; remaining risk documented in LOG s36-az.
+
+### Regression tests wanted (NEXT_STEPS P4)
+
+- Coordinate-space mixing (TC2 + Trim + Autoscroll)
+- Settings migration pre-s36-at → post
+- WebView2 adapter completeness
+- ReloadDocument fork field preservation
+- Toolbar critical ordering (all 4 toolbars)
 
 ## Research (low priority)
 
@@ -192,6 +210,8 @@ Shift+S: draw a rectangle that captures the image inside it at the document's DP
   ```
 
 # Bugs open
+
+[ ] Bug7 (s36-bz): save corrupts PDF under TC2 — root cause verified + fix deployed (VirtualToPhysical pageNo in Selection.cpp FromRectangle + corrupt-annot guard in EngineMupdfSaveUpdated); user revalidation pending.
 
 [x] Toolbars Flickering — FIXED (s36-bl): causa raiz = chave de histerese lastPackedAvailDx ficou órfã quando as tabelas de estado foram divididas (sToolbarPackStates @1302 / sToolbarRewrapStates @1632); guard do timer 200ms nunca convergia → re-wrap infinito quando wraps mudam (janela estreita). Fix: escrever em ambas as tabelas (Toolbar.cpp ~1446). Verificação: PNG probes byte-idênticos durante estático pós-resize; valida final: usuário.
 
@@ -310,6 +330,10 @@ Vamos incluir do lado direito do botão principal no topo da janela, antes de in
 abrir o app sempre restaura o último tab group usado pelo usuário; se não houver, abrir `new`;
 
 'Ctrl+n' abre uma janela com um tab group `New`, ou seja, não sincronizado; nesse caso, se o usuário quiser salvar essa sessão como uma tab group, vamos incluir um botão na lista dropdown `Save`, ao clicar abre um editor/input de texto para nomear o grupo, imediatamente depois disso, o grupo deve sincronizar automaticamente ao fechar ou incluir documentos na sessão; arrastar um documento para fora de uma sessão automaticamente o exclui desse group aberto e inclui em um tab group `new` não sincronizado;
+
+- [ ] Open (user action): TAB SYSTEM — all dev done s36-bu→s36-co (LOG), awaiting user revalidation on real book. Build 0/0; ad-hoc-tab-session.ts + ad-hoc-tab-session-e2e.ts + ad-hoc-tab-menu.ts PASS.
+
+- [ ] FUTURE (user spec 2026-11-01): per-session reading/flashcard totals on Home tab — sum sessions' aggregated reading/flashcard time per group, independent of books; BIG feature, plan separately.
 
 ## Sumatra → Tumatra — labels UI (DONE)
 
