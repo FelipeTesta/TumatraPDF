@@ -5,18 +5,14 @@
 3. User manual-test items = items only the user can validate.
 4. Housekeeping (2026-10-20, s36-ae; re-triaged s36-at, s36-cu/cv): all `[x]` blocks archived — details live in LOG per session entry; this file lists open work only.
 
-## Execution queue — top 5 (effort/gain)
+## Execution queue (effort/gain)
 
 User-locked order:
 
-1. **HARDENING PACK** (do before any new feature):
-   - (a) TC2 un-routed `engine->` sites — `Commands_Edit.cpp:726` `GetElements(pageNo)`, `Commands_Flashcard.cpp:324` `GetFzPageInfo(card.pageNo)`, `RenderCache.cpp:506` `GetTileRes` (comment claims routing, body unverified), `RenderCache.cpp:1212` non-cache Paint.
-   - (b) Test* control handlers marshal `TB__`/`TTM__` queries to UI thread — `SumatraControl.cpp:938` → `Toolbar.cpp:2747` sends from control pipe thread; AV risk, LOG s36-az.
-   - (c) WebView2 adapter open part — create `docs/md/WebView2-Adapter-Pattern.md` (adapter `MarkdownModel.cpp:181` verified forwarding all 9 `HtmlWindowCallback` virtuals — document pattern + list) + add `TestMarkdownAdapter` to `cmd/control.ts`.
-2. **Capture tool** Shift+S (spec pointer → `## Capture tool` below).
-3. **Bookmarks Improve** (spec pointer → `## Bookmarks Improve` below).
-4. **Edit/Align** (spec pointer → `## Edit/` below, PT verbatim).
-5. **Page Counting Format** (spec pointer → `## Page Counting Format` below).
+1. **Capture tool** Shift+S (spec pointer → `## Capture tool` below).
+2. **Bookmarks Improve** (spec pointer → `## Bookmarks Improve` below).
+3. **Edit/Align** (spec pointer → `## Edit/` below, PT verbatim).
+4. **Page Counting Format** (spec pointer → `## Page Counting Format` below).
 
 ## Findings status — audited 2026-11-04
 
@@ -28,12 +24,12 @@ User-locked order:
 - Settings names-blob migration fixed (s36-br, commit `6df3dc3`).
 - dmlib rebar interception fixed (`ToolbarArchEditRebarSubclassProc` + `TBSTYLE_EX_MIXEDBUTTONs`, user-verified s36-bb lineage).
 - Flashcard annotation author-token rule → AGENTS.md §12 (2026-10-18).
+- TC2 un-routed engine-> sites all verified physical, zero edits — Commands_Edit.cpp:726, Commands_Flashcard.cpp:324, RenderCache.cpp:506, RenderCache.cpp:1212 (LOG s37-a).
+- WebView2 adapter — complete: `docs/md/WebView2-Adapter-Pattern.md` + `TestMarkdownAdapter=55` wired in `cmd/control.ts`/`SumatraControl.cpp` (LOG s37-c/s37-d); read-side residual noted (no mutation path exercised).
 
 ### Open (live)
 
 - Coordinate space mismatch — convention: `DisplayModel::CvtToScreen/CvtFromScreen` = PAGE ↔ CANVAS-CLIENT; `VirtWnd` `ev.pt` = LOCAL vs `ctx.bounds` = ROOT-relative; E2E posted coords may arrive DPI-virtualized ×1.25. Rule: before any hit-test, name the space of BOTH operands (local/root/client/page). Mixed = bug.
-- WebView2 adapter — open part moved to Execution queue item 1c.
-- TC2 virtual→physical routing — un-routed evidence at Execution queue item 1a; cache-path sites verified fixed; uia `PageProvider` MVP-acceptable.
 - ReloadDocument / FORK_FIELD — no `FORK_FIELD` macro in source; manual copy persists `SumatraPDF.cpp:882-898`. Any new per-doc field must update both `UpdateFileStateForTab` (save) and `ReloadDocument` (restore) — pattern trap.
 
 ## Dev tooling / analysis — open items
@@ -137,6 +133,50 @@ Scratch E2E harnesses live in `tests/tmp/` (gitignored): s34-replace/paint/crop/
 ## Research (low priority)
 
 - [ ] **OCR image** (right-click on image → OCR text): upstream vendors tesseract 5.5.2 (Artifex fork) for `mutool draw -F ocr.*` — cheapest path for the fork; decide separately (binary size cost). Lightweight near-zero-dependency alternatives also acceptable.
+
+## Memory Performance Optimization (from performance.dot analysis 2026-11-04)
+
+**Arquivo de referência:** `FLOW/performance.dot` — mapa completo de arquitetura de memória, CPU hotspots, custos de ferramentas, profiling tooling.
+
+### Gargalos Críticos Identificados
+
+| #   | Componente              | Consumo                        | Causa Raiz                                                                                                                    |
+| --- | ----------------------- | ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
+| 1   | **RenderCache tiles**   | 128 × 1–4 MB = **~512 MB máx** | Cache primário; Gdiplus::Bitmap 32bpp PARGB; TC2 dobra chaves (virtual pages left/right); Trim/Crop invalidam cache no toggle |
+| 2   | **MuPDF `fz_context`**  | 10–50 MB/engine                | Allocator/store/device cache + page cache; per-thread pool clona contextos                                                    |
+| 3   | **WebView2 (Markdown)** | 100–300 MB processo separado   | Chromium isolado; Contrast/auto-scroll usam JS/CSS overlay                                                                    |
+| 4   | **GDI+ bitmaps órfãos** | Vaza se cleanup falhar         | Ref-count em `PutTile`/`DropCacheEntry`/`BlitPixmap`; `darkModeEpoch` invalidação em massa                                    |
+
+### Impacto das Ferramentas do Toolbar no Consumo
+
+| Ferramenta        | Efeito Memória                                                                      | CPU                                 |
+| ----------------- | ----------------------------------------------------------------------------------- | ----------------------------------- |
+| **Contrast**      | PDF: layered child (WS_EX_LAYERED) ~0; MD: CSS filter 0                             | Baixo                               |
+| **Crop v2 (TC2)** | Dobra virtual pages → chaves cache duplicadas left/right; `colGap` overlap          | Médio (roteamento virtual↔physical) |
+| **Trim**          | `ShouldCacheRendering=true`; `FreeForDisplayModel()` no toggle → re-render completo | Alto no toggle                      |
+| **Flashcards**    | MuPDF highlight annots + opaque mask GDI+ alpha blend; JSON per-doc                 | Baixo                               |
+| **Arch Tools**    | Vetores page coords (pequeno); SVG export aloca temp                                | Baixo                               |
+| **AutoScroll**    | Timer tick → cached blit ~1ms/frame; ETA overlay layered window                     | 60fps target = 16.6ms budget        |
+| **Tabs**          | `VirtWnd` por aba; Home pinned idx 0 → ≥2 tabs/doc; tab groups live-sync            | Baixo                               |
+
+### Pontos de Otimização Direta (para agente futuro)
+
+- [ ] **Reduzir `MAX_BITMAPS_CACHED` (128 fixo)** → tornar adaptativo por VRAM/working set
+- [ ] **Cache eviction policy** — hoje newest-first O(1) hit; LRU real exigiria hash table (rejeitado: sem STL, compaction, darkModeEpoch)
+- [ ] **Trim/Crop cache preservation** — evitar `FreeForDisplayModel()` full no toggle; invalidar só tiles afetados
+- [ ] **TC2 cache sharing** — left/right columns compartilham mediabox físico; deduplicar tiles idênticos
+- [ ] **WebView2 memory budget** — limitar processos Chromium; `--memory-pressure-off` flags
+- [ ] **Perf regression tests** — `ad-hoc-profile-live-writes.ts` já existe; adicionar métricas cache hit rate, RelayoutFrame freq, working set delta
+
+### Relações Críticas (ver performance.dot)
+
+- `RenderCache` → `fz_pixmap` → `Gdiplus::Bitmap` → `BlitPixmap` (cached path ~1ms)
+- `darkModeEpoch` invalida cache em massa → re-render storm
+- `TrimConfigDialog` TEMP TRIM: snapshot + force OFF enquanto dialog aberto → cache livre mid-dialog
+- `AutoScroll` usa cached blit; non-cached = 23ms SYNC engine render
+- Coordinate space mismatches (PAGE/VIRTUAL/CANVAS-CLIENT/SCREEN) = bug class recorrente
+
+---
 
 ## Edit/
 

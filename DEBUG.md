@@ -2,18 +2,19 @@
 
 ## Toolchain Overview
 
-| Tool | Purpose | Location | Key APIs |
-|------|---------|----------|----------|
-| **winapi.ts** | Raw Win32 FFI bindings | `tests/winapi.ts` | `dlopen("user32")`, `SendMessage`, `PostMessage`, `GetWindowRect`, `PrintWindow` |
-| **win-automation.ts** | High-level GUI actions | `tests/win-automation.ts` | `launchSumatra`, `waitForFrame`, `sendCommand`, `captureWindowToPng` |
-| **control.ts** | In-process debug commands | `cmd/control.ts` | `withControlledSumatra`, `ControlCommand.TestToolbarButtons` |
-| **util.ts** | Shared test helpers | `tests/util.ts` | `EXE`, `cmdId`, `runStandalone`, `tmpPath` |
+| Tool                  | Purpose                   | Location                  | Key APIs                                                                         |
+| --------------------- | ------------------------- | ------------------------- | -------------------------------------------------------------------------------- |
+| **winapi.ts**         | Raw Win32 FFI bindings    | `tests/winapi.ts`         | `dlopen("user32")`, `SendMessage`, `PostMessage`, `GetWindowRect`, `PrintWindow` |
+| **win-automation.ts** | High-level GUI actions    | `tests/win-automation.ts` | `launchSumatra`, `waitForFrame`, `sendCommand`, `captureWindowToPng`             |
+| **control.ts**        | In-process debug commands | `cmd/control.ts`          | `withControlledSumatra`, `ControlCommand.TestToolbarButtons`                     |
+| **util.ts**           | Shared test helpers       | `tests/util.ts`           | `EXE`, `cmdId`, `runStandalone`, `tmpPath`                                       |
 
 ---
 
 ## Debugging Secondary Toolbars (Arch Tools, Edit, Flashcard)
 
 ### The Core Problem
+
 - **Main toolbar** = rebar1 + toolbar1 (always present)
 - **Secondary toolbars** = separate rebar+toolbar pairs created on-demand:
   - Arch Tools: rebar2 (`IDC_ARCH_REBAR=1115`) + toolbar2 (`IDC_ARCH_TOOLBAR=1116`)
@@ -42,10 +43,14 @@ const png = captureWindowToPng(frame); // BitBlt from DWM surface
 writeFileSync("debug-toolbar.png", png);
 
 // 4. STATE VERIFICATION via control pipe (separate instance)
-const dump = await withControlledSumatra(EXE, async (client) => {
-  const res = await client.request(ControlCommand.TestToolbarButtons, []);
-  return String(res[1] ?? "");
-}, ["-for-testing", pdfPath]);
+const dump = await withControlledSumatra(
+  EXE,
+  async (client) => {
+    const res = await client.request(ControlCommand.TestToolbarButtons, []);
+    return String(res[1] ?? "");
+  },
+  ["-for-testing", pdfPath],
+);
 // Parses main toolbar state + band height
 
 // 5. Cleanup
@@ -58,7 +63,7 @@ proc.kill();
 
 ```
 CmdArchToolsToggle = 493
-CmdFlashcardToggle = 498  
+CmdFlashcardToggle = 498
 CmdEditToggle = 518
 CmdViewportCropV2Toggle = 487
 CmdMarginTrimToggle = 488
@@ -81,24 +86,24 @@ tool=<i> uid=<cmd> rect=<l,t,r,b>
 
 ### Key Metrics
 
-| Metric | Meaning | Healthy Value | Broken Value |
-|--------|---------|---------------|--------------|
-| **band** | Current rebar band height (px) | Main: ~30px, Arch: ~30-60px | Arch: 90px (stacked) |
-| **toolbarDy** | Toolbar window height | Matches band | >band (overflow) |
-| **rebarWinDy** | Rebar window height | Matches band | >band |
-| **packRows** | Comctl wrap row count | 1-3 | -1 (not wrapped) |
-| **marks** | Wrap break indices | Valid indices | -1,-1,-1,-1 |
+| Metric         | Meaning                        | Healthy Value               | Broken Value         |
+| -------------- | ------------------------------ | --------------------------- | -------------------- |
+| **band**       | Current rebar band height (px) | Main: ~30px, Arch: ~30-60px | Arch: 90px (stacked) |
+| **toolbarDy**  | Toolbar window height          | Matches band                | >band (overflow)     |
+| **rebarWinDy** | Rebar window height            | Matches band                | >band                |
+| **packRows**   | Comctl wrap row count          | 1-3                         | -1 (not wrapped)     |
+| **marks**      | Wrap break indices             | Valid indices               | -1,-1,-1,-1          |
 
 ---
 
 ### Common Failure Modes
 
-| Symptom | Root Cause | Fix |
-|---------|------------|-----|
-| Band height 90px | Toolbar created at width 0, comctl stacked buttons, never re-wrapped | Size rebar to frame width AFTER `RB_INSERTBAND` (FlashcardToolbarCreate recipe) |
-| White band / no buttons | `TBSTYLE_TRANSPARENT` on non-default theme | Remove `TBSTYLE_TRANSPARENT` from all rebar-hosted toolbars |
-| Buttons missing | ID collision (Arch rebar used same ID as main) | Unique IDs (`IDC_ARCH_REBAR=1115`, `IDC_ARCH_TOOLBAR=1116`) |
-| Dim overlay accumulation | GDI+ POSTPAINT dim on every repaint | Removed `DrawToolbarDisabledOverlay` / `DimDisabledToolbarButtons` |
+| Symptom                  | Root Cause                                                           | Fix                                                                             |
+| ------------------------ | -------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| Band height 90px         | Toolbar created at width 0, comctl stacked buttons, never re-wrapped | Size rebar to frame width AFTER `RB_INSERTBAND` (FlashcardToolbarCreate recipe) |
+| White band / no buttons  | `TBSTYLE_TRANSPARENT` on non-default theme                           | Remove `TBSTYLE_TRANSPARENT` from all rebar-hosted toolbars                     |
+| Buttons missing          | ID collision (Arch rebar used same ID as main)                       | Unique IDs (`IDC_ARCH_REBAR=1115`, `IDC_ARCH_TOOLBAR=1116`)                     |
+| Dim overlay accumulation | GDI+ POSTPAINT dim on every repaint                                  | Removed `DrawToolbarDisabledOverlay` / `DimDisabledToolbarButtons`              |
 
 ---
 
@@ -114,12 +119,12 @@ tool=<i> uid=<cmd> rect=<l,t,r,b>
 
 ### Verified Probes
 
-| Probe | Purpose | Method |
-|-------|---------|--------|
-| `tests/ad-hoc-toolbar-fix4.ts` | Arch Tools visual verification | `captureWindowToPng` + toggle command |
-| `tests/issue-5869.ts` | Main toolbar tooltip rects | `dumpUntilStable` polling |
-| `tests/issue-5866.ts` | Chrome strip stability | `topChromePixels` + `countDifferingPixels` |
-| `tests/s36ax-fctb.ts` | Flashcard toolbar | `captureWindowToPng` + `BM_CLICK` + sumlog witness |
+| Probe                          | Purpose                        | Method                                             |
+| ------------------------------ | ------------------------------ | -------------------------------------------------- |
+| `tests/ad-hoc-toolbar-fix4.ts` | Arch Tools visual verification | `captureWindowToPng` + toggle command              |
+| `tests/issue-5869.ts`          | Main toolbar tooltip rects     | `dumpUntilStable` polling                          |
+| `tests/issue-5866.ts`          | Chrome strip stability         | `topChromePixels` + `countDifferingPixels`         |
+| `tests/s36ax-fctb.ts`          | Flashcard toolbar              | `captureWindowToPng` + `BM_CLICK` + sumlog witness |
 
 ---
 
@@ -129,3 +134,35 @@ tool=<i> uid=<cmd> rect=<l,t,r,b>
 2. Verify secondary toolbar appears in screenshot (below main toolbar)
 3. Check band height in dump (should be 30px main, NOT 90px)
 4. If screenshot shows Arch toolbar but dump doesn't → control pipe limitation confirmed
+
+---
+
+## App crash dumps (crashinfo)
+
+### Location
+
+- `%LOCALAPPDATA%\SumatraPDF-data\<6-hex-hash>\crashinfo\sumatrapdfcrash.txt` + matching `.dmp`.
+- One hash dir per app instance; settings + log dirs keyed by same hash.
+
+### File head format
+
+- `Type` line
+- `Cond: <expr> @ <file>:<line>`
+- callstack
+- log tail
+
+### Triage recipe (proven 2026-11-04, bug7)
+
+```
+Get-ChildItem "$env:LOCALAPPDATA\SumatraPDF-data\*\crashinfo\*.txt" | Select-String -Pattern '<condition-signature>' -List
+```
+
+- Finds which instance dumped what.
+- Check dir mtime for date.
+- Dev-probe stacks (`TestExtractPage`/`Tests.cpp` via `WinMain`) = self-inflicted test crashes, not user evidence.
+- Silent file-corruption bugs never produce dumps → N/A verdict for bug7 (fix shipped 3125a62).
+
+### Note
+
+- TumatraPDF's OWN dump writer (not WER).
+- ~130 dirs accumulated Oct 2026; housekeeping optional.

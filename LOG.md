@@ -1,4 +1,42 @@
-﻿## 2026-11-04 (s36-cv) — TODO.md reformat: execution queue top-5 + findings audit
+﻿## 2026-11-04 (s37-d) — Hardening 1b: Test* handlers marshalled to UI thread + 1c TestMarkdownAdapter app-side
+
+### Fixed
+
+- `SumatraControl.cpp`: `RunOnUIThread(MainWindow*, int (*fn)(void*), void*)` — marshals via `SendMessageW(hwndFrame, WM_APP+0x430, fn, ctx)`; frame WndProc case runs fn same-thread; no deadlock — control thread blocks, client timeout 10s.
+- Routed to UI thread: TestToolbarButtons (`ToolbarButtonsOnUiThread` adapter + `UiTestCtx`), TestStatsToggleGraph.
+- Unrouted by design: remaining Test* handlers touch only DisplayModel (no HWND) — safe without marshal. Rule: only HWND-touching handlers need marshal; DisplayModel-only handlers safe.
+- `TestMarkdownAdapter = 55` in ControlCmd enum (mirrors `cmd/control.ts`): handler finds first Markdown docView (`gWindows` → `AsMarkdown()`), read-only `GetScrollPos()` probe, `[md] adapter ok scroll=` logf; no-view → `AppendError`. Read-side residual noted — no mutation path exercised.
+
+### Notes
+
+- Build 0 err/0 warn; `ad-hoc-tab-session` + e2e PASS.
+
+## 2026-11-04 (s37-c) — WebView2 adapter doc + client-side TestMarkdownAdapter
+
+### Added
+
+- `docs/md/WebView2-Adapter-Pattern.md` — adapter pattern doc (`MarkdownModel.cpp:181` forwards all 9 `HtmlWindowCallback` virtuals; pattern + list).
+- `cmd/control.ts`: client decl `TestMarkdownAdapter=55`.
+
+### Notes
+
+- Read-side residual noted (no mutation path exercised).
+
+## 2026-11-04 (s37-a) — Hardening 1a: TC2 un-routed engine-> sites audited — all verified physical, zero edits
+
+- Commands_Edit.cpp:726 GetElements(pageNo): pageNo = ed.pageNo = pg = pel->pageNo = PHYSICAL (EngineMupdf.cpp:1863/1942); GetElements → GetFzPageInfoFast pages[pageNo-1] expects physical (EngineMupdf.cpp:5172).
+- Commands_Flashcard.cpp:324 card.pageNo physical (pageIdx+1 from fz_count_pages, Flashcard.cpp:121-172; loads only via FlashcardLoadFromDocument Flashcard.cpp:95/635).
+- RenderCache.cpp:506 GetTileRes: line 514 renderPageNo = dm->VirtualToPhysical(pageNo); all engine calls routed.
+- RenderCache.cpp:1212 non-cache Paint: line 1235 VirtualToPhysical; Transform/PageMediabox/RenderPage routed.
+- Build 0 err; ad-hoc-tab-session + ad-hoc-b4-coordinate-invariants PASS.
+
+## 2026-11-04 (s37-docs) — crashinfo triage recipe documented + scratch cleanup
+
+- `DEBUG.md`: added `## App crash dumps (crashinfo)` section — location `%LOCALAPPDATA%\SumatraPDF-data\<6-hex-hash>\crashinfo\sumatrapdfcrash.txt` + `.dmp`, head `Type`/`Cond: <expr> @ <file>:<line>`/callstack/log tail, triage recipe, WER note.
+- bug7: N/A — silent file-corruption never produces dumps; fix shipped 3125a62.
+- Scratch cleanup: `diag-tab-glyph.ts`, `snap-tab-menu.ts`, `snap-tab-t3-strip.ts`, `snap-tab-t3.ts` → `tests/tmp/` (gitignored); `err.txt` deleted.
+
+## 2026-11-04 (s36-cv) — TODO.md reformat: execution queue top-5 + findings audit
 
 - New Execution queue top-5 (hardening pack = TC2 un-routed sites + Test* UI-thread marshalling + WebView2 adapter doc/TestMarkdownAdapter; then Capture tool, Bookmarks Improve, Edit/Align, Page Counting Format — user-locked order)
 - Findings audit: 18 claims verified — 6 closed (toolbar ordering ×4 verified, darkModeEpoch legacy path dead, ASan script ok, settings migration fixed, dmlib rebar fixed, flashcard author-token → AGENTS §12), 4 open live (coordinate convention, WebView2 open part, TC2 partial un-routed, ReloadDocument/FORK_FIELD manual)
