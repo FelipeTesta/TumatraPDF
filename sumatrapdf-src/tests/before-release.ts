@@ -29,6 +29,13 @@ import { testit as adHocRestoreNoFileStates } from "./ad-hoc-restore-no-filestat
 import { testit as adHocPerfStartup } from "./ad-hoc-perf-startup.ts";
 import { testit as adHocPerfCacheBehavior } from "./ad-hoc-perf-cache-behavior.ts";
 import { testit as adHocPerfToggleLatency } from "./ad-hoc-perf-toggle-latency.ts";
+import { testit as adHocCaptureTool } from "./ad-hoc-capture-tool.ts";
+import { testit as adHocRepairReplace } from "./ad-hoc-repair-replace.ts";
+import { testit as adHocBookmarkEdit } from "./ad-hoc-bookmark-edit.ts";
+import { testit as adHocBookmarkPersist } from "./ad-hoc-bookmark-persist.ts";
+import { testit as adHocBookmarkReorder } from "./ad-hoc-bookmark-reorder.ts";
+import { testit as adHocTabSessionSync } from "./ad-hoc-tab-session-sync.ts";
+import { testit as adHocTabSessionSync2 } from "./ad-hoc-tab-session-sync2.ts";
 
 const adHocTests: [string, () => void | Promise<void>][] = [
   ["ad-hoc-exif", adHocExif],
@@ -45,6 +52,8 @@ const adHocTests: [string, () => void | Promise<void>][] = [
   ["ad-hoc-settings-migration", adHocSettingsMigration],
   ["ad-hoc-profile-live-writes", adHocProfileLiveWrites],
   ["ad-hoc-tab-session", adHocTabSession],
+  ["ad-hoc-tab-session-sync", adHocTabSessionSync],
+  ["ad-hoc-tab-session-sync2", adHocTabSessionSync2],
   ["ad-hoc-tab-menu", adHocTabMenu],
   ["ad-hoc-tab-session-e2e", adHocTabSessionE2E],
   ["ad-hoc-annot-save-integrity", adHocAnnotSaveIntegrity],
@@ -52,6 +61,10 @@ const adHocTests: [string, () => void | Promise<void>][] = [
   ["ad-hoc-perf-startup", adHocPerfStartup],
   ["ad-hoc-perf-cache-behavior", adHocPerfCacheBehavior],
   ["ad-hoc-perf-toggle-latency", adHocPerfToggleLatency],
+  ["ad-hoc-capture-tool", adHocCaptureTool],
+  ["ad-hoc-repair-replace", adHocRepairReplace],
+  ["ad-hoc-bookmark-edit", adHocBookmarkEdit],
+  ["ad-hoc-bookmark-persist", adHocBookmarkPersist],
 ];
 
 export async function testit(): Promise<void> {

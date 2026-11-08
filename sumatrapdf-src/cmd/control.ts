@@ -47,12 +47,15 @@ export enum ControlCommand {
   TestTabGroupOpenNew = 52,
   TestTabGroupMenuCmd = 53,
   TestTabGroupDialogOpen = 54,
-  // TestMarkdownAdapter = 55: client-side declaration only. App-side C++ handler
-  // in SumatraControl.cpp is DEFERRED (residual hardening-pack 1c pawn) — no
-  // existing control-pipe path reaches the MarkdownHtmlWindowHandler adapter
-  // chain without C++ wiring. Do not add app-side C++ here (build lock held by
-  // other agent).
   TestMarkdownAdapter = 55,
+  TestProfileImportPrompt = 56,
+  TestProfileCloudRevert = 57,
+  TestGetEngineErrors = 58,
+  TestBookmarkAdd = 59,
+  TestBookmarkDirty = 60,
+  TestBookmarkToc = 61,
+  TestBookmarkSave = 62,
+  TestBookmarkMove = 63,
 }
 
 export type ControlArg = number | string | Uint8Array | ControlArg[];

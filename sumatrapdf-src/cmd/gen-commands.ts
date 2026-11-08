@@ -336,6 +336,12 @@ export const commands = [
     "CmdFlashcardStudyTimerToggle", "Toggle Flashcard Study Session Timer",
     "CmdFlashcardStudyTimerEdit", "Edit Flashcard Study Session Timer Duration",
     "CmdProfileBackups", "Profile: Backups...",
+    "CmdCaptureTool", "Capture Region to Clipboard",
+    "CmdRepairDocumentFile", "Repair Document File",
+    "CmdBookmarkAdd", "Add Bookmark",
+    "CmdBookmarkDelete", "Delete Bookmark",
+    "CmdBookmarkUpdate", "Update Bookmark Page",
+    "CmdBookmarkRename", "Rename Bookmark",
     "CmdNone", "Do nothing",
 ];
 

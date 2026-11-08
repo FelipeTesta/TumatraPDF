@@ -2,15 +2,26 @@
    License: GPLv3 */
 
 #include "base/Base.h"
+#include "base/File.h"
 #include "base/UITask.h"
 #include "base/Win.h"
 
 #include "Settings.h"
 #include "GlobalPrefs.h"
 #include "Flags.h"
+#include "AppTools.h"
+#include "ProfileSyncWnd.h"
+#include "ProfileBackupWnd.h"
 #include "SumatraTest.h"
 #include "SumatraPDF.h"
 #include "DocController.h"
+#include "TreeModel.h"
+#include "EngineBase.h"
+#include "Annotation.h"
+extern "C" {
+#include <mupdf/pdf.h>
+}
+#include "EngineMupdf.h"
 #include "MainWindow.h"
 #include "WindowTab.h"
 #include "FileHistory.h"
@@ -18,6 +29,7 @@
 #include "SelectionTranslate.h"
 #include "ImageSaveCropResize.h"
 #include "base/GuessFileType.h"
+#include "EngineAll.h"
 #include "Commands.h"
 #include "FindWindow.h"
 #include "Menu.h"
@@ -60,6 +72,15 @@ static void AddFavoriteSilent(MainWindow* win, int pageNo) {
     bool needsLabel = pageLabel && !str::Eq(plainLabel, pageLabel);
     Str pl = needsLabel ? pageLabel : Str{};
     fs->favorites->Append(NewFavorite(pageNo, {}, pl));
+}
+
+// Dev-only wrapper: ProfileDataPromptCloudRevert takes 2 args but MkFunc0
+// supports only 1. Thin adapter so the control-pipe handler can fire it via
+// uitask::Post on the UI thread.
+static void TestLaunchCloudRevert(MainWindow* win) {
+    if (win) {
+        ProfileDataPromptCloudRevert(win, win->hwndFrame);
+    }
 }
 
 // Drive favorites on the already-open document for tests/issue-3744.ts.
@@ -368,6 +389,14 @@ enum class ControlCmd : u16 {
     TestTabGroupMenuCmd = 53,
     TestTabGroupDialogOpen = 54,
     TestMarkdownAdapter = 55,
+    TestProfileImportPrompt = 56,
+    TestProfileCloudRevert = 57,
+    TestGetEngineErrors = 58,
+    TestBookmarkAdd = 59,
+    TestBookmarkDirty = 60,
+    TestBookmarkToc = 61,
+    TestBookmarkSave = 62,
+    TestBookmarkMove = 63,
 };
 
 enum class ControlArgType : u16 {
@@ -639,6 +668,16 @@ static int ToolbarButtonsOnUiThread(void* p) {
     auto* c = (UiTestCtx*)p;
     c->result = ToolbarButtonsResultTemp(&c->exitCode);
     return c->exitCode;
+}
+
+// walk a TocItem chain and append "title|page=N|depth=D\n" lines (recursive).
+static void AppendBookmarkToc(str::Builder& out, TocItem* item, int depth = 0) {
+    for (; item; item = item->next) {
+        if (item->title) {
+            out.Append(fmt("%s|page=%d|depth=%d\n", item->title, item->pageNo, depth));
+        }
+        AppendBookmarkToc(out, item->child, depth + 1);
+    }
 }
 
 static void ExecuteControlRequest(ControlRequest* req) {
@@ -1139,6 +1178,185 @@ static void ExecuteControlRequest(ControlRequest* req) {
             logf("[md] adapter ok scroll=%d,%d\n", p.x, p.y);
             Str res = fmt("OK markdown-adapter scroll=%d,%d\n", p.x, p.y);
             AppendTestResult(req, 0, res);
+            break;
+        }
+
+        case ControlCmd::TestProfileImportPrompt: {
+            // Dev-only: force-launch the profile import prompt, bypassing the
+            // -for-testing skip in SyncWndProc. Runs asynchronously on the UI
+            // thread so the control pipe returns immediately; the dialog stays
+            // open until dismissed (or until the app quits).
+            if (len(gWindows) == 0) {
+                AppendError(req, "TestProfileImportPrompt no-window");
+                break;
+            }
+            MainWindow* win = gWindows[0];
+            uitask::Post(MkFunc0(TestLaunchImportPrompt, win), "TestProfileImportPrompt");
+            AppendTestResult(req, 0, StrL("OK posted\n"));
+            break;
+        }
+
+        case ControlCmd::TestProfileCloudRevert: {
+            // Dev-only: force-launch the cloud-revert prompt with fabricated
+            // profile data under a temp scratch dir (appdata override).
+            // Creates primary + one backup slot with backupTs > primaryTs so
+            // the dialog renders a real revert scenario.
+            if (len(gWindows) == 0) {
+                AppendError(req, "TestProfileCloudRevert no-window");
+                break;
+            }
+            MainWindow* win = gWindows[0];
+
+            // Build a temp appdata dir: <tmp>/s40v-cloudrevert/
+            TempStr tmpRoot = GetTempFilePathTemp(StrL("s40v-cloudrevert"));
+            dir::CreateAll(Str(tmpRoot));
+            TempStr primaryPath = path::JoinTemp(Str(tmpRoot), StrL("tumatraPDF-data_1.json"));
+            TempStr backupDir = path::JoinTemp(Str(tmpRoot), StrL("backup"));
+            TempStr slotDir = path::JoinTemp(Str(backupDir), StrL("00"));
+            dir::CreateAll(Str(slotDir));
+            TempStr slotPath = path::JoinTemp(Str(slotDir), StrL("tumatraPDF-data_1.json"));
+
+            // primary: older timestamp
+            file::WriteFile(Str(primaryPath), StrL("{\"lastWriteTs\": 1000}"));
+            // backup slot 0: newer timestamp -> triggers cloud revert
+            file::WriteFile(Str(slotPath), StrL("{\"lastWriteTs\": 2000}"));
+
+            // Override the profile data dir so reads go to our scratch dir.
+            str::FreePtr(&gGlobalPrefs->profileDataDir);
+            gGlobalPrefs->profileDataDir = str::Dup(tmpRoot);
+
+            // Launch asynchronously on the UI thread.
+            uitask::Post(MkFunc0(TestLaunchCloudRevert, win), "TestProfileCloudRevert");
+            AppendTestResult(req, 0, StrL("OK posted\n"));
+            break;
+        }
+
+        case ControlCmd::TestGetEngineErrors: {
+            // Returns [exitCode = error count, error text] for the current
+            // tab's engine, so -dbg-control tests can assert damage was
+            // detected and that a repair cleared it.
+            int count = -1;
+            Str text;
+            if (len(gWindows) > 0) {
+                MainWindow* win = gWindows[0];
+                if (auto* tab = win->CurrentTab()) {
+                    if (auto* engine = tab->GetEngine()) {
+                        count = engine->ErrorCount();
+                        text = engine->GetErrorsTextTemp();
+                    }
+                }
+            }
+            AppendTestResult(req, count, text);
+            break;
+        }
+
+        case ControlCmd::TestBookmarkAdd: {
+            i32 pageNo = 0;
+            Str title = StringArg(req, 1);
+            if (!IntArg(req, 0, pageNo) || !title) {
+                AppendError(req, "TestBookmarkAdd expects int pageNo, string title");
+                break;
+            }
+            if (len(gWindows) == 0) {
+                AppendError(req, "TestBookmarkAdd no-window");
+                break;
+            }
+            MainWindow* win = gWindows[0];
+            auto* engine = win->CurrentTab() ? win->CurrentTab()->GetEngine() : nullptr;
+            if (!engine || !engine->OutlineEdit(1, 0, StrL(""), title, pageNo)) {
+                AppendError(req, "TestBookmarkAdd failed");
+                break;
+            }
+            AppendTestResult(req, 0, StrL("OK\n"));
+            break;
+        }
+
+        case ControlCmd::TestBookmarkDirty: {
+            int dirty = 0;
+            if (len(gWindows) > 0) {
+                MainWindow* win = gWindows[0];
+                if (auto* tab = win->CurrentTab()) {
+                    if (auto* engine = tab->GetEngine()) {
+                        dirty = engine->HasUnsavedOutline() ? 1 : 0;
+                    }
+                }
+            }
+            AppendTestResult(req, dirty, dirty ? StrL("dirty\n") : StrL("clean\n"));
+            break;
+        }
+
+        case ControlCmd::TestBookmarkToc: {
+            str::Builder out;
+            int n = 0;
+            if (len(gWindows) > 0) {
+                MainWindow* win = gWindows[0];
+                if (auto* tab = win->CurrentTab()) {
+                    if (auto* engine = tab->GetEngine()) {
+                        if (auto* toc = engine->GetToc()) {
+                            auto* r = (TocItem*)toc->Root();
+                            n = (r ? 1 : 0);
+                            AppendBookmarkToc(out, r ? r->child : nullptr);
+                        } else {
+                            out.Append("toc-null\n");
+                        }
+                    } else {
+                        out.Append("engine-null\n");
+                    }
+                } else {
+                    out.Append("tab-null\n");
+                }
+            } else {
+                out.Append("nowindow\n");
+            }
+            out.Append(fmt("count=%d\n", n));
+            AppendTestResult(req, 0, ToStrTemp(out));
+            break;
+        }
+
+        case ControlCmd::TestBookmarkSave: {
+            if (len(gWindows) == 0) {
+                AppendError(req, "TestBookmarkSave no-window");
+                break;
+            }
+            MainWindow* win = gWindows[0];
+            auto* engine = win->CurrentTab() ? win->CurrentTab()->GetEngine() : nullptr;
+            if (!engine) {
+                AppendError(req, "TestBookmarkSave no-engine");
+                break;
+            }
+            bool ok = EngineMupdfSaveUpdated(engine, nullptr, Func1<Str>{}, nullptr, false);
+            AppendTestResult(req, ok ? 0 : 1, ok ? StrL("saved\n") : StrL("save-failed\n"));
+            break;
+        }
+
+        case ControlCmd::TestBookmarkMove: {
+            i32 sourcePageNo = 0;
+            i32 newParentPageNo = 0;
+            i32 moveBeforePageNo = 0;
+            Str sourceTitle = StringArg(req, 1);
+            Str newParentTitle = StringArg(req, 3);
+            Str moveBeforeTitle = StringArg(req, 5);
+            if (!IntArg(req, 0, sourcePageNo) || !sourceTitle || !IntArg(req, 2, newParentPageNo) ||
+                !IntArg(req, 4, moveBeforePageNo)) {
+                AppendError(
+                    req,
+                    "TestBookmarkMove expects int sourcePageNo, string sourceTitle, int newParentPageNo(-1=top), "
+                    "string newParentTitle, int moveBeforePageNo, string moveBeforeTitle");
+                break;
+            }
+            if (len(gWindows) == 0) {
+                AppendError(req, "TestBookmarkMove no-window");
+                break;
+            }
+            MainWindow* win = gWindows[0];
+            auto* engine = win->CurrentTab() ? win->CurrentTab()->GetEngine() : nullptr;
+            if (!engine ||
+                !engine->OutlineEdit(5, sourcePageNo, sourceTitle, newParentPageNo < 0 ? StrL("") : newParentTitle,
+                                     newParentPageNo < 0 ? 0 : newParentPageNo, moveBeforePageNo, moveBeforeTitle)) {
+                AppendError(req, "TestBookmarkMove failed");
+                break;
+            }
+            AppendTestResult(req, 0, StrL("OK\n"));
             break;
         }
 

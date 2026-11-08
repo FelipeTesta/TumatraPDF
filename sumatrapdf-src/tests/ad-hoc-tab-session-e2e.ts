@@ -264,6 +264,19 @@ export async function testit(): Promise<void> {
         });
         console.log(`after reopen E: active=${GROUP_E}, ${GROUP_E}=0 files, ${GROUP_A}=1 file (unchanged)`);
 
+        // Step 8: rename the ACTIVE group (E) → GroupY via dialog (site 2). activeTabGroup
+        // must track the rename (no ghost). E is active here, so wasActive=true.
+        const GROUP_Y = "GroupY";
+        await client.request(ControlCommand.TestTabGroupDialogOpen, [GROUP_E]);
+        await driveDialog(GROUP_Y);
+        await pollList((groups, active) => {
+          if (groups[GROUP_E] !== undefined) return `group ${GROUP_E} still exists`;
+          if (groups[GROUP_Y] !== 0) return `group ${GROUP_Y} has ${groups[GROUP_Y]} tabFiles, expected 0`;
+          if (active !== GROUP_Y) return `active is ${active}, expected ${GROUP_Y}`;
+          return true;
+        });
+        console.log(`after rename active E→${GROUP_Y}: active=${GROUP_Y}`);
+
         return "all assertions passed";
       },
       ["-appdata", appdata, "-log"],

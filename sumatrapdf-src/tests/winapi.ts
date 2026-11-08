@@ -72,7 +72,30 @@ const user32 = dlopen("user32.dll", {
     returns: FFIType.bool,
   },
   FillRect: { args: [FFIType.u64, FFIType.ptr, FFIType.u64], returns: FFIType.i32 },
+  OpenClipboard: { args: [FFIType.ptr], returns: FFIType.bool },
+  GetClipboardData: { args: [FFIType.u32], returns: FFIType.ptr },
+  CloseClipboard: { args: [], returns: FFIType.bool },
 });
+
+export const CF_BITMAP = 2;
+
+export function clipboardHasBitmap(): boolean {
+  try {
+    if (!user32.symbols.OpenClipboard(0)) return false;
+    const h = user32.symbols.GetClipboardData(CF_BITMAP);
+    let ok = false;
+    if (h !== 0) {
+      // BITMAP: bmType(0) bmWidth(4) bmHeight(8) ... read bmWidth at offset 4
+      const buf = new Int32Array(8);
+      const cb = gdi32.symbols.GetObjectW(h, buf.byteLength, ptr(buf));
+      ok = cb > 0 && buf[1] > 0;
+    }
+    user32.symbols.CloseClipboard();
+    return ok;
+  } catch {
+    return false;
+  }
+}
 
 // GDI + GDI+ for capturing a window to a PNG (see captureWindowToPng). Capturing
 // via PrintWindow works even when the window is occluded or not foreground,
@@ -82,6 +105,7 @@ const user32 = dlopen("user32.dll", {
 // type sign-extends a 32-bit GDI handle whose high bit is set into a bogus
 // 64-bit value, so the handle round-trips wrong and the calls fail intermittently.
 const gdi32 = dlopen("gdi32.dll", {
+  GetObjectW: { args: [FFIType.ptr, FFIType.i32, FFIType.ptr], returns: FFIType.i32 },
   CreateCompatibleDC: { args: [FFIType.u64], returns: FFIType.u64 },
   CreateCompatibleBitmap: { args: [FFIType.u64, FFIType.i32, FFIType.i32], returns: FFIType.u64 },
   SelectObject: { args: [FFIType.u64, FFIType.u64], returns: FFIType.u64 },
