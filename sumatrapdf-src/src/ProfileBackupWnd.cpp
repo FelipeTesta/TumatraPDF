@@ -6,6 +6,10 @@
 #include "Theme.h"
 #include "ProfileBackupWnd.h"
 
+// DWM attribute for immersive dark title bar (DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
+// not declared in older SDK headers, so the literal is used directly)
+#include <dwmapi.h>
+
 // Simple profile backups window: 9 slots, stamp, restore with 5s hold
 
 struct ProfileBackupDialog {
@@ -216,6 +220,10 @@ void ShowProfileBackupsDialog(MainWindow* win) {
         return;
     }
     dlg.hwnd = hwnd;
+    // dark title bar via DWM (mirrors ProfileSyncWnd :501-502)
+    BOOL darkTitle = TRUE;
+    DwmSetWindowAttribute(hwnd, 20, &darkTitle, sizeof(darkTitle));
+
     // run modal message loop
     MSG msg;
     while (GetMessage(&msg, nullptr, 0, 0)) {
@@ -259,12 +267,28 @@ static LRESULT CALLBACK CloudRevertWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARA
         return DefWindowProcW(hwnd, msg, wp, lp);
     }
     switch (msg) {
+        case WM_ERASEBKGND: {
+            HDC hdc = (HDC)wp;
+            RECT rc;
+            GetClientRect(hwnd, &rc);
+            HBRUSH br = CreateSolidBrush(ThemeWindowBackgroundColor());
+            FillRect(hdc, &rc, br);
+            DeleteObject(br);
+            return TRUE;
+        }
+        case WM_CTLCOLORSTATIC:
+        case WM_CTLCOLORBTN: {
+            HDC hdc = (HDC)wp;
+            SetTextColor(hdc, ThemeWindowTextColor());
+            SetBkMode(hdc, TRANSPARENT);
+            return (LRESULT)CreateSolidBrush(ThemeWindowBackgroundColor());
+        }
         case WM_PAINT: {
             PAINTSTRUCT ps;
             HDC hdc = BeginPaint(d->hwnd, &ps);
             RECT rc;
             GetClientRect(d->hwnd, &rc);
-            HBRUSH br = CreateSolidBrush(ThemeWindowControlBackgroundColor());
+            HBRUSH br = CreateSolidBrush(ThemeWindowBackgroundColor());
             FillRect(hdc, &rc, br);
             DeleteObject(br);
 
@@ -355,11 +379,18 @@ void ProfileDataPromptCloudRevert(MainWindow* win, HWND hwndParent) {
     int btnW = DpiScale(hwnd, 100);
     int btnH = DpiScale(hwnd, 28);
     int bx = w - pad - btnW;
-    int by = h - pad - btnH;
-    CreateWindowW(L"BUTTON", L"Keep", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON, bx - btnW - DpiScale(hwnd, 8),
-                  by, btnW, btnH, hwnd, (HMENU)2, GetModuleHandle(nullptr), nullptr);
-    CreateWindowW(L"BUTTON", L"Restore", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON, bx, by, btnW, btnH,
-                  hwnd, (HMENU)1, GetModuleHandle(nullptr), nullptr);
+    // position buttons from CLIENT height (not outer h), else they fall below the client area
+    RECT rcPrompt{};
+    GetClientRect(hwnd, &rcPrompt);
+    int by = rcPrompt.bottom - pad - btnH;
+    HWND btnKeep =
+        CreateWindowW(L"BUTTON", L"Keep", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON,
+                      bx - btnW - DpiScale(hwnd, 8), by, btnW, btnH, hwnd, (HMENU)2, GetModuleHandle(nullptr), nullptr);
+    HWND btnRestore = CreateWindowW(L"BUTTON", L"Restore", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON, bx,
+                                    by, btnW, btnH, hwnd, (HMENU)1, GetModuleHandle(nullptr), nullptr);
+    // disable Windows visual styles on buttons so WM_CTLCOLORBTN theming applies (same pattern as SyncWndProc :535-542)
+    SetWindowTheme(btnKeep, L"", L"");
+    SetWindowTheme(btnRestore, L"", L"");
 
     // run modal message loop
     MSG msg;

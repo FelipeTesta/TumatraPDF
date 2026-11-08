@@ -886,7 +886,27 @@ bool ProfileDataImportFromJson(const char* srcJsonPath, bool replace) {
         logf("[profile] import: replaced primary from '%s', reloaded\n", Str(srcJsonPath));
         return true;
     }
-    // merge: adopt absent book keys + absent (dateKey, machine) day-row pairs
+    // merge: newest-wins per item.
+    // The profile format has NO per-item timestamp (books/day-rows carry none).
+    // Chosen comparison key: the file-level "lastWriteTs" (unix seconds) stored
+    // inside the exported JSON; if absent (old-format file), fall back to the
+    // exported file's LastWriteTime converted to unix seconds.
+    // importWins = importedTs > current profile lastWriteTs.
+    // Per item: absent -> adopt; present && importWins -> replace with import;
+    // present && !importWins -> keep current. Absent items are always adopted
+    // (we don't have them yet) regardless of timestamp; only conflicts use the
+    // timestamp comparison. No fields beyond the format are invented.
+    i64 importedTs = ProfNumField(srcJson, "lastWriteTs", 0);
+    if (importedTs == 0) {
+        FILETIME ft = file::GetModificationTime(Str(srcJsonPath));
+        ULARGE_INTEGER ul{};
+        ul.LowPart = ft.dwLowDateTime;
+        ul.HighPart = ft.dwHighDateTime;
+        // FILETIME = 100-ns intervals since 1601-01-01 -> unix seconds since 1970-01-01
+        importedTs = (i64)(ul.QuadPart / 10000000) - 11644473600LL;
+    }
+    i64 currentTs = gProfile.lastWriteTs;
+    bool importWins = importedTs > currentTs;
     int addedBooks = 0;
     int addedDayRows = 0;
     // books
@@ -896,17 +916,32 @@ bool ProfileDataImportFromJson(const char* srcJsonPath, bool replace) {
             if (!isObj) {
                 return;
             }
-            if (ProfFindBook(rawKey)) {
+            ProfileBook* b = ProfFindBook(rawKey);
+            if (!b) {
+                // absent -> adopt
+                ProfileBook nb;
+                nb.streamKey = ProfUnescapeKeyDup(rawKey);
+                nb.docName = FlashcardStudyParseJsonStringFieldDup(interior, StrL("docName"));
+                nb.docPath = FlashcardStudyParseJsonStringFieldDup(interior, StrL("docPath"));
+                FlashcardStudyParseJsonInto(interior, nb.study);
+                gProfile.books.Append(nb);
+                addedBooks++;
+                gProfile.dirty = true;
                 return;
             }
-            ProfileBook b;
-            b.streamKey = ProfUnescapeKeyDup(rawKey);
-            b.docName = FlashcardStudyParseJsonStringFieldDup(interior, StrL("docName"));
-            b.docPath = FlashcardStudyParseJsonStringFieldDup(interior, StrL("docPath"));
-            FlashcardStudyParseJsonInto(interior, b.study);
-            gProfile.books.Append(b);
-            addedBooks++;
-            gProfile.dirty = true;
+            if (importWins) {
+                // replace existing book with import data (newest wins)
+                ::free(b->docName);
+                ::free(b->docPath);
+                b->docName = FlashcardStudyParseJsonStringFieldDup(interior, StrL("docName"));
+                b->docPath = FlashcardStudyParseJsonStringFieldDup(interior, StrL("docPath"));
+                b->study.states.Clear();
+                FlashcardStudyParseJsonInto(interior, b->study);
+                addedBooks++;
+                gProfile.dirty = true;
+                return;
+            }
+            // else: current is newer or equal -> keep current, do nothing
         });
     }
     // day rows: readingStats + fcStats
@@ -916,19 +951,27 @@ bool ProfileDataImportFromJson(const char* srcJsonPath, bool replace) {
         Vec<ProfDayMachine>& target = (secName[0] == 'r') ? gProfile.readingDaily : gProfile.studyDaily;
         for (int i = 0; i < len(tempDays); i++) {
             ProfDayMachine& e = tempDays[i];
-            bool have = false;
+            int foundIdx = -1;
             for (int j = 0; j < len(target); j++) {
                 if (target[j].dateKey == e.dateKey && str::EqI(Str(target[j].machine), Str(e.machine))) {
-                    have = true;
+                    foundIdx = j;
                     break;
                 }
             }
-            if (!have) {
+            if (foundIdx < 0) {
+                // absent -> adopt
                 target.Append(e);
                 e.machine = nullptr; // ownership transferred
                 addedDayRows++;
                 gProfile.dirty = true;
+            } else if (importWins) {
+                // replace existing row with import data (newest wins)
+                target[foundIdx].sec = e.sec;
+                target[foundIdx].cards = e.cards;
+                addedDayRows++;
+                gProfile.dirty = true;
             }
+            // else: current is newer or equal -> keep current, do nothing
         }
         ProfFreeDays(tempDays);
     }

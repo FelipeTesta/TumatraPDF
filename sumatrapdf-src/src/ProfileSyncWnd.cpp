@@ -21,6 +21,42 @@ extern bool gForTesting;
 static int gImportChoice = IDCANCEL;
 static LRESULT CALLBACK ImportPromptProc(HWND h, UINT m, WPARAM wp, LPARAM lp) {
     switch (m) {
+        case WM_ERASEBKGND: {
+            HDC hdc = (HDC)wp;
+            RECT rc;
+            GetClientRect(h, &rc);
+            HBRUSH br = CreateSolidBrush(ThemeWindowBackgroundColor());
+            FillRect(hdc, &rc, br);
+            DeleteObject(br);
+            return TRUE;
+        }
+        case WM_CTLCOLORSTATIC:
+        case WM_CTLCOLORBTN: {
+            HDC hdc = (HDC)wp;
+            SetTextColor(hdc, ThemeWindowTextColor());
+            SetBkMode(hdc, TRANSPARENT);
+            return (LRESULT)CreateSolidBrush(ThemeWindowBackgroundColor());
+        }
+        case WM_PAINT: {
+            PAINTSTRUCT ps;
+            HDC hdc = BeginPaint(h, &ps);
+            RECT rc;
+            GetClientRect(h, &rc);
+            HBRUSH br = CreateSolidBrush(ThemeWindowBackgroundColor());
+            FillRect(hdc, &rc, br);
+            DeleteObject(br);
+            HFONT font = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
+            HFONT oldFont = (HFONT)SelectObject(hdc, font);
+            SetBkMode(hdc, TRANSPARENT);
+            SetTextColor(hdc, ThemeWindowTextColor());
+            wchar_t caption[64]{};
+            GetWindowTextW(h, caption, dimof(caption));
+            RECT trc{DpiScale(h, 16), DpiScale(h, 14), rc.right - DpiScale(h, 16), DpiScale(h, 14) + DpiScale(h, 22)};
+            DrawTextW(hdc, caption, -1, &trc, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+            SelectObject(hdc, oldFont);
+            EndPaint(h, &ps);
+            return 0;
+        }
         case WM_COMMAND:
             if (LOWORD(wp) == 1) {
                 gImportChoice = IDOK;
@@ -71,6 +107,27 @@ struct ProfileSyncDialog {
 static ProfileSyncDialog* gSyncDialog = nullptr;
 
 static int gap8(HWND hwnd);
+
+// button width sized to its label extent + padding (physical px, matches
+// CreateWindowW coords). Measures using a compatible DC with the prompt's font
+// so long labels ("Replace local data", "Merge (newest-wins)") are not truncated.
+static int BtnTextW(HWND hwnd, WStr label) {
+    // screen DC always available; measure with the prompt's font (or default)
+    HDC hdc = GetDC(nullptr);
+    if (!hdc) {
+        return (int)len(label) * 10; // conservative fallback so nothing clips
+    }
+    HFONT font = (HFONT)SendMessageW(hwnd, WM_GETFONT, 0, 0);
+    if (!font) {
+        font = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
+    }
+    HFONT oldFont = (HFONT)SelectObject(hdc, font);
+    SIZE sz{};
+    GetTextExtentPoint32W(hdc, label.s, len(label), &sz);
+    SelectObject(hdc, oldFont);
+    ReleaseDC(nullptr, hdc);
+    return sz.cx;
+}
 
 // folder picker (IFileDialog in pick-folders mode) — same pattern as FlashcardToolbar::FcPickFolder
 static bool SyncPickFolder(HWND hwndOwner, TempStr& outPath) {
@@ -343,14 +400,6 @@ static LRESULT CALLBACK SyncWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 if (!SyncPickFolder(hwnd, destDir)) {
                     return 0; // cancelled or picker failed
                 }
-                TempStr destPrimary = path::JoinTemp(Str(destDir), StrL("tumatraPDF-data_1.json"));
-                if (file::Exists(Str(destPrimary))) {
-                    int mb = MessageBoxW(hwnd, L"Destino já contém um perfil — exportar substitui?", L"Profile Sync",
-                                         MB_OKCANCEL | MB_ICONQUESTION);
-                    if (mb != IDOK) {
-                        return 0;
-                    }
-                }
                 if (ProfileDataExportToDir(Str(destDir).s)) {
                     logf("[profile] export: OK to '%s'\n", Str(destDir));
                     SyncRefreshRows(d);
@@ -392,18 +441,67 @@ static LRESULT CALLBACK SyncWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 if (!phwnd) {
                     return 0;
                 }
-                int pad = DpiScale(hwnd, 16);
-                int btnW = DpiScale(hwnd, 100);
+                int pad = DpiScale(hwnd, 4);
                 int btnH = DpiScale(hwnd, 28);
-                int by = h - pad - btnH;
-                CreateWindowW(L"BUTTON", L"Replace local data", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON, pad,
-                              by, btnW, btnH, phwnd, (HMENU)1, GetModuleHandle(nullptr), nullptr);
-                CreateWindowW(L"BUTTON", L"Merge (newest-wins)", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON,
-                              pad + btnW + DpiScale(hwnd, 8), by, btnW, btnH, phwnd, (HMENU)2, GetModuleHandle(nullptr),
-                              nullptr);
-                CreateWindowW(L"BUTTON", L"Cancel", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
-                              pad + 2 * (btnW + DpiScale(hwnd, 8)), by, btnW, btnH, phwnd, (HMENU)3,
-                              GetModuleHandle(nullptr), nullptr);
+                int g = DpiScale(hwnd, 4);
+                // size each button to its label extent so long labels are not truncated
+                WStr lblReplace = WStrL(L"Replace local data");
+                WStr lblMerge = WStrL(L"Merge (newest-wins)");
+                WStr lblCancel = WStrL(L"Cancel");
+                int tr = BtnTextW(phwnd, lblReplace);
+                int tm = BtnTextW(phwnd, lblMerge);
+                int tc = BtnTextW(phwnd, lblCancel);
+                int wReplace, wMerge, wCancel;
+                // per-button width = text extent + horizontal padding; never truncate labels.
+                // Shrink gaps first, then reduce padding (floor = text width) to fit client width.
+                int btnPadX = DpiScale(phwnd, 40);
+                wReplace = tr + btnPadX;
+                wMerge = tm + btnPadX;
+                wCancel = tc + btnPadX;
+                // keep all three buttons inside client width
+                RECT rcPrompt{};
+                GetClientRect(phwnd, &rcPrompt);
+                int clientW = rcPrompt.right;
+                int totalW = 2 * pad + wReplace + 2 * g + wMerge + wCancel;
+                int overflow = totalW - clientW;
+                if (overflow > 0) {
+                    // shrink gaps first
+                    int gapShrink = overflow < 2 * g ? overflow : 2 * g;
+                    g -= gapShrink / 2;
+                    overflow -= gapShrink;
+                    totalW = 2 * pad + wReplace + 2 * g + wMerge + wCancel;
+                }
+                if (overflow > 0) {
+                    // reduce per-button padding, floor at text width (no truncation)
+                    int minPadX = DpiScale(phwnd, 32);
+                    int curPad = wReplace - tr; // same padding for all buttons
+                    int newPad = curPad - (overflow < curPad - minPadX ? overflow : curPad - minPadX);
+                    if (newPad < minPadX) {
+                        newPad = minPadX;
+                    }
+                    wReplace = tr + newPad;
+                    wMerge = tm + newPad;
+                    wCancel = tc + newPad;
+                }
+                // position buttons from CLIENT height (not outer h), else they fall below the
+                // client area and get clipped (ground truth s40-p: bottom edge 164 vs clientH 142)
+                int by = rcPrompt.bottom - pad - btnH;
+                int x = pad;
+                HWND btnReplace =
+                    CreateWindowW(L"BUTTON", lblReplace.s, WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON, x, by,
+                                  wReplace, btnH, phwnd, (HMENU)1, GetModuleHandle(nullptr), nullptr);
+                x += wReplace + g;
+                HWND btnMerge = CreateWindowW(L"BUTTON", lblMerge.s, WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON,
+                                              x, by, wMerge, btnH, phwnd, (HMENU)2, GetModuleHandle(nullptr), nullptr);
+                x += wMerge + g;
+                HWND btnCancel =
+                    CreateWindowW(L"BUTTON", lblCancel.s, WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON, x, by,
+                                  wCancel, btnH, phwnd, (HMENU)3, GetModuleHandle(nullptr), nullptr);
+                // disable Windows visual styles on buttons so WM_CTLCOLORBTN theming applies (same pattern as
+                // SyncWndProc :535-542)
+                SetWindowTheme(btnReplace, L"", L"");
+                SetWindowTheme(btnMerge, L"", L"");
+                SetWindowTheme(btnCancel, L"", L"");
                 // modal loop for the prompt
                 MSG pmsg;
                 while (GetMessage(&pmsg, nullptr, 0, 0)) {
@@ -549,6 +647,116 @@ void ShowProfileSyncDialog(MainWindow* win) {
             DispatchMessage(&msg);
         }
         if (gSyncDialog == nullptr) {
+            break;
+        }
+    }
+}
+
+// Dev-only: force-launch the profile import prompt.
+// Mirrors the Import case in SyncWndProc (:371-444) but bypasses the -for-testing
+// skip and uses a fabricated temp JSON path instead of SyncPickJsonFile.
+// Runs a modal GetMessage loop; returns when the prompt window is destroyed.
+void TestLaunchImportPrompt(MainWindow* owner) {
+    if (!owner) {
+        return;
+    }
+
+    // Fabricate a temp JSON file so the dialog renders a real path.
+    TempStr srcPath = GetTempFilePathTemp(StrL("profile-import"));
+    file::WriteFile(Str(srcPath), StrL("{}"));
+
+    gImportChoice = IDCANCEL;
+    static const wchar_t* promptClass = L"TUMATRA_PROFILE_IMPORT";
+    WNDCLASSW wc{};
+    wc.lpfnWndProc = ImportPromptProc;
+    wc.hInstance = GetModuleHandle(nullptr);
+    wc.lpszClassName = promptClass;
+    wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
+    static HBRUSH sImportPromptBg = CreateSolidBrush(ThemeWindowControlBackgroundColor());
+    wc.hbrBackground = sImportPromptBg;
+    RegisterClassW(&wc);
+
+    int w = DpiScale(owner->hwndFrame, 360);
+    int h = DpiScale(owner->hwndFrame, 180);
+    RECT rcParent;
+    GetWindowRect(owner->hwndFrame, &rcParent);
+    int px = rcParent.left + (rcParent.right - rcParent.left - w) / 2;
+    int py = rcParent.top + (rcParent.bottom - rcParent.top - h) / 2;
+    HWND phwnd =
+        CreateWindowExW(0, promptClass, L"Import profile", WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_VISIBLE, px, py,
+                        w, h, owner->hwndFrame, nullptr, GetModuleHandle(nullptr), nullptr);
+    if (!phwnd) {
+        return;
+    }
+
+    int pad = DpiScale(phwnd, 4);
+    int btnH = DpiScale(phwnd, 28);
+    int g = DpiScale(phwnd, 4);
+    // size each button to its label extent so long labels are not truncated
+    WStr lblReplace = WStrL(L"Replace local data");
+    WStr lblMerge = WStrL(L"Merge (newest-wins)");
+    WStr lblCancel = WStrL(L"Cancel");
+    int tr = BtnTextW(phwnd, lblReplace);
+    int tm = BtnTextW(phwnd, lblMerge);
+    int tc = BtnTextW(phwnd, lblCancel);
+    int wReplace, wMerge, wCancel;
+    // per-button width = text extent + horizontal padding; never truncate labels.
+    // Shrink gaps first, then reduce padding (floor = text width) to fit client width.
+    int btnPadX = DpiScale(phwnd, 40);
+    wReplace = tr + btnPadX;
+    wMerge = tm + btnPadX;
+    wCancel = tc + btnPadX;
+    // keep all three buttons inside client width
+    RECT rcPrompt{};
+    GetClientRect(phwnd, &rcPrompt);
+    int clientW = rcPrompt.right;
+    int totalW = 2 * pad + wReplace + 2 * g + wMerge + wCancel;
+    int overflow = totalW - clientW;
+    if (overflow > 0) {
+        // shrink gaps first
+        int gapShrink = overflow < 2 * g ? overflow : 2 * g;
+        g -= gapShrink / 2;
+        overflow -= gapShrink;
+        totalW = 2 * pad + wReplace + 2 * g + wMerge + wCancel;
+    }
+    if (overflow > 0) {
+        // reduce per-button padding, floor at text width (no truncation)
+        int minPadX = DpiScale(phwnd, 32);
+        int curPad = wReplace - tr; // same padding for all buttons
+        int newPad = curPad - (overflow < curPad - minPadX ? overflow : curPad - minPadX);
+        if (newPad < minPadX) {
+            newPad = minPadX;
+        }
+        wReplace = tr + newPad;
+        wMerge = tm + newPad;
+        wCancel = tc + newPad;
+    }
+    // position buttons from CLIENT height (not outer h), else they fall below the client area
+    int by = rcPrompt.bottom - pad - btnH;
+    int x = pad;
+    HWND btnReplace = CreateWindowW(L"BUTTON", lblReplace.s, WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON, x, by,
+                                    wReplace, btnH, phwnd, (HMENU)1, GetModuleHandle(nullptr), nullptr);
+    x += wReplace + g;
+    HWND btnMerge = CreateWindowW(L"BUTTON", lblMerge.s, WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON, x, by,
+                                  wMerge, btnH, phwnd, (HMENU)2, GetModuleHandle(nullptr), nullptr);
+    x += wMerge + g;
+    HWND btnCancel = CreateWindowW(L"BUTTON", lblCancel.s, WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON, x, by,
+                                   wCancel, btnH, phwnd, (HMENU)3, GetModuleHandle(nullptr), nullptr);
+    SetWindowTheme(btnReplace, L"", L"");
+    SetWindowTheme(btnMerge, L"", L"");
+    SetWindowTheme(btnCancel, L"", L"");
+
+    // log the fabricated path so the test can see it
+    logf("[profile] test import prompt: path='%s'\n", Str(srcPath));
+
+    // modal loop for the prompt
+    MSG pmsg;
+    while (GetMessage(&pmsg, nullptr, 0, 0)) {
+        if (!IsDialogMessage(phwnd, &pmsg)) {
+            TranslateMessage(&pmsg);
+            DispatchMessage(&pmsg);
+        }
+        if (!IsWindow(phwnd)) {
             break;
         }
     }
