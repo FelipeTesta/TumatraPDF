@@ -1012,6 +1012,108 @@ static void HandleCmdEditToolsToggle(MainWindow* win) {
     ScheduleRepaint(win, 0);
 }
 
+// "Repair Document File": re-serialize the current PDF to a temp file in the
+// same directory with mupdf garbage-collect + clean options (full rewrite,
+// non-incremental), verify the engine error count does not increase, then
+// atomically swap the temp over the original and reload the tab (same page +
+// scroll via ReloadDocument's FileState restore). Original is left untouched
+// unless every step succeeds.
+static void RepairSaveErrorCb(Str msg) {
+    logf("[repair] mupdf save error: %s\n", msg);
+}
+
+static void HandleCmdRepairDocumentFile(MainWindow* win) {
+    WindowTab* tab = win->CurrentTab();
+    if (!tab || !tab->IsDocLoaded()) {
+        return;
+    }
+    DisplayModel* dm = win->AsFixed();
+    if (!dm) {
+        return;
+    }
+    EngineBase* engine = dm->GetEngine();
+    if (!engine || engine->kind != kindEngineMupdf) {
+        return;
+    }
+    Str path = engine->FilePath();
+    if (len(path) == 0) {
+        return;
+    }
+    if (!engine->HasErrors()) {
+        EditNotify(win, StrL("No document errors to repair"));
+        return;
+    }
+
+    int beforeCount = engine->ErrorCount();
+
+    // temp file in the same directory (same volume -> atomic move later)
+    TempStr dir = path::GetDirTemp(path);
+    TempStr base = path::GetBaseNameTemp(path);
+    TempStr tmpPath = path::JoinTemp(dir, fmt("%s.repair-tmp", base));
+    int dup = 1;
+    while (file::Exists(tmpPath)) {
+        tmpPath = path::JoinTemp(dir, fmt("%s.repair-tmp.%d", base, dup++));
+    }
+
+    // full structural repair: non-incremental rewrite + garbage collect + clean
+    pdf_write_options repairOpts = {};
+    repairOpts.do_incremental = 0;
+    repairOpts.do_compress = 1;
+    repairOpts.do_compress_images = 1;
+    repairOpts.do_compress_fonts = 1;
+    repairOpts.do_garbage = 2;   // renumber objects
+    repairOpts.do_clean = 1;     // clean content streams
+
+    auto fn = MkFunc1Void(RepairSaveErrorCb);
+    bool ok = EngineMupdfSaveUpdated(engine, tmpPath, fn, &repairOpts, true);
+    if (!ok) {
+        file::Delete(tmpPath);
+        EditNotify(win, StrL("Repair failed: could not write corrected file"));
+        return;
+    }
+
+    // keep the temp file hidden while it sits next to the original
+    file::SetAttributes(tmpPath, FILE_ATTRIBUTE_HIDDEN);
+
+    // Verify: re-open the temp and confirm the error count did not increase.
+    int afterCount = -1;
+    {
+        EngineBase* verify = CreateEngineFromFile(tmpPath, nullptr, false);
+        if (verify) {
+            afterCount = verify->ErrorCount();
+            verify->Release();
+        }
+    }
+    if (afterCount < 0 || afterCount > beforeCount) {
+        file::Delete(tmpPath);
+        EditNotify(win, StrL("Repair failed: corrected file has more errors"));
+        return;
+    }
+
+    // Atomic swap (same volume). On sharing/access violation, abort gracefully
+    // leaving the original untouched.
+    file::SetAttributes(tmpPath, FILE_ATTRIBUTE_NORMAL);
+    if (!MoveFileExW(CWStrTemp(tmpPath), CWStrTemp(path), MOVEFILE_REPLACE_EXISTING)) {
+        DWORD err = GetLastError();
+        file::Delete(tmpPath);
+        if (err == ERROR_SHARING_VIOLATION || err == ERROR_ACCESS_DENIED) {
+            MessageBoxW(win->hwndFrame,
+                L"Repair Document File\n\n"
+                L"The original file could not be replaced because it is open in "
+                L"another program or access was denied.\n\n"
+                L"The original file was not modified.",
+                L"Repair Document File",
+                MB_OK | MB_ICONWARNING | MB_TASKMODAL);
+        } else {
+            EditNotify(win, StrL("Repair failed: could not replace original file"));
+        }
+        return;
+    }
+
+    tab->ignoreNextAutoReload = true;
+    ReloadDocument(win, false);
+}
+
 bool HandleCommandEdit(MainWindow* win, int cmd) {
     switch (cmd) {
         case CmdEditToolsToggle:
@@ -1044,6 +1146,9 @@ bool HandleCommandEdit(MainWindow* win, int cmd) {
                 return true;
             }
             EditApplyImageEdits(win);
+            return true;
+        case CmdRepairDocumentFile:
+            HandleCmdRepairDocumentFile(win);
             return true;
         default:
             break;
