@@ -2700,6 +2700,10 @@ ContinueOpenWindow:
                 }
                 TabsSelect(win, 0);
                 SuppressGroupAutoSave(false);
+                // persist the restored group now so failed/missing loads are
+                // dropped from tabFiles on disk (fix: boot restore never
+                // re-saved, leaving stale entries).
+                SaveSettings();
                 ShowMainWindow(win, WIN_STATE_NORMAL);
                 RefreshTabGroupButton(win);
             }

@@ -152,6 +152,8 @@ void UpdateTabWidth(MainWindow* win) {
     }
 }
 
+static void SyncActiveGroupToEmpty(MainWindow* win);
+
 void RemoveTab(WindowTab* tab) {
     UpdateTabFileDisplayStateForTab(tab);
     MainWindow* win = tab->win;
@@ -159,6 +161,15 @@ void RemoveTab(WindowTab* tab) {
     win->ArchClearMeasurementsForPath(tab->filePath);
     win->tabSelectionHistory->Remove(tab);
     int idx = win->GetTabIdx(tab);
+    // Last-document-tab removal empties the tab list: persist an empty group
+    // NOW (before Removal + any caller SaveSettings) so the group on disk is
+    // not left stale listing the closed book. Covers the programmatic close
+    // path (SumatraPDF.cpp::CloseTab -> RemoveTab) that MainWindowTabClosed's
+    // s45 pre-sync (mouse path) does not reach. Suppression during a group
+    // switch still blocks this, matching UpdateActiveGroupAutoSave.
+    if (!IsGroupAutoSaveSuppressed() && win->TabCount() <= 1) {
+        SyncActiveGroupToEmpty(win);
+    }
     WindowTab* tab2 = win->tabsCtrl->RemoveTab<WindowTab*>(idx);
     ReportIf(tab != tab2);
     bool closedCurrentTab = (tab == win->CurrentTab());
@@ -587,9 +598,48 @@ static void TabsContextMenu(ContextMenuEvent* ev) {
     HwndSendCommand(win->hwndFrame, cmdId);
 }
 
+// Called from MainWindowTabClosed when the last document tab of a tab-group
+// session is being closed. Clears the active group's tabFiles (in memory) so
+// that CloseWindow->SaveSettings() (SumatraPDF.cpp:5173) persists an empty
+// session (0 entries) instead of the stale group listing the closed book.
+// The group itself survives as an empty session.
+// SyncGroupFromWindow can't be used here: win->Tabs() still contains the
+// closing tab, so it would sync 1 file. The tabFiles are cleared directly,
+// mirroring the str::Free/free pattern in SyncGroupFromWindow.
+// Idempotent: the post-close UpdateActiveGroupAutoSave() re-syncs to 0 files
+// once TabsOnCloseWindow has cleared win->Tabs().
+static void SyncActiveGroupToEmpty(MainWindow* win) {
+    // group switch (ActivateTabGroupInWindow) suppresses auto-save so the
+    // destination group's tabFiles are not wiped by a close/empty sync.
+    if (IsGroupAutoSaveSuppressed()) {
+        return;
+    }
+    if (!gGlobalPrefs || !gGlobalPrefs->activeTabGroup.s || !*gGlobalPrefs->activeTabGroup.s) {
+        return;
+    }
+    TabGroup* group = FindTabGroup(gGlobalPrefs->activeTabGroup.s);
+    if (!group || !group->tabFiles) {
+        return;
+    }
+    for (auto* tf : *group->tabFiles) {
+        str::Free(tf->path);
+        free(tf);
+    }
+    delete group->tabFiles;
+    group->tabFiles = new Vec<TabFile*>();
+}
+
 static void MainWindowTabClosed(MainWindow* win, TabsCtrl::ClosedEvent* ev) {
     int closedTabIdx = ev->tabIdx;
     WindowTab* tab = win->GetTab(closedTabIdx);
+    // Last document tab of a tab-group session: sync the group to 0 files
+    // BEFORE CloseTab closes the window. Otherwise CloseWindow->SaveSettings()
+    // (SumatraPDF.cpp:5173) persists the STALE group (still listing the closed
+    // book), because on the last-tab path RemoveTab/MainWindowTabClosed's own
+    // post-close sync runs after the window teardown has already saved.
+    if (win->TabCount() <= 1) {
+        SyncActiveGroupToEmpty(win);
+    }
     CloseTab(tab, false);
     UpdateActiveGroupAutoSave(win);
 }
@@ -868,7 +918,14 @@ void MoveTab(MainWindow* win, int dir) {
     if (newIdx >= nTabs) {
         return;
     }
+    // refuse to move pinned tabs (Home etc.), mirroring TabsCtrl::CanDragTab
+    if (TabInfo* ti = win->tabsCtrl->GetTab(idx)) {
+        if (ti->isPinned) {
+            return;
+        }
+    }
     win->tabsCtrl->SwapTabs(idx, newIdx);
     win->tabsCtrl->SetSelected(newIdx);
     win->tabsCtrl->LayoutTabs();
+    UpdateActiveGroupAutoSave(win);
 }

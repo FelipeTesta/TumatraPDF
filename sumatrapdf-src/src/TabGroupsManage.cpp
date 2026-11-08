@@ -35,6 +35,10 @@ void SuppressGroupAutoSave(bool suppress) {
     sSuppressGroupAutoSave = suppress;
 }
 
+bool IsGroupAutoSaveSuppressed() {
+    return sSuppressGroupAutoSave;
+}
+
 enum class TabGroupDialogMode {
     Save,
     Open,
