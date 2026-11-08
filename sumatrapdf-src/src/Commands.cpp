@@ -343,6 +343,12 @@ static SeqStrings gCommandNames =
     "CmdFlashcardStudyTimerToggle\0"
     "CmdFlashcardStudyTimerEdit\0"
     "CmdProfileBackups\0"
+    "CmdCaptureTool\0"
+    "CmdRepairDocumentFile\0"
+    "CmdBookmarkAdd\0"
+    "CmdBookmarkDelete\0"
+    "CmdBookmarkUpdate\0"
+    "CmdBookmarkRename\0"
     "CmdNone\0"
     "\0";
 
@@ -674,6 +680,12 @@ static i32 gCommandIds[] = {
     CmdFlashcardStudyTimerToggle,
     CmdFlashcardStudyTimerEdit,
     CmdProfileBackups,
+    CmdCaptureTool,
+    CmdRepairDocumentFile,
+    CmdBookmarkAdd,
+    CmdBookmarkDelete,
+    CmdBookmarkUpdate,
+    CmdBookmarkRename,
     CmdNone,
 };
 
@@ -1005,6 +1017,12 @@ SeqStrings gCommandDescriptions =
     "Toggle Flashcard Study Session Timer\0"
     "Edit Flashcard Study Session Timer Duration\0"
     "Profile: Backups...\0"
+    "Capture Region to Clipboard\0"
+    "Repair Document File\0"
+    "Add Bookmark\0"
+    "Delete Bookmark\0"
+    "Update Bookmark Page\0"
+    "Rename Bookmark\0"
     "Do nothing\0"
     "\0";
 // clang-format on

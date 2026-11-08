@@ -51,3 +51,7 @@ void UpdateContrastOverlayOpacity(MainWindow* win);
 void EnsureContrastOverlayState(MainWindow* win);
 
 void SetCanvasCursor(MainWindow* win, LPWSTR cursorId);
+
+// Capture tool: render the dragged page-rect at doc DPI and copy to clipboard,
+// then auto-exit capture mode. Defined in SumatraPDF.cpp.
+void CaptureToolExecute(MainWindow* win);

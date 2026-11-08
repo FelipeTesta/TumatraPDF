@@ -1513,6 +1513,7 @@ static RectF CalculateResizedRect(MainWindow* win, int x, int y);
 static void FinalizeArchMeasurement(MainWindow* win, DisplayModel* dm, int pageNo);
 static void FinalizeArchRadius(MainWindow* win, int pageNo);
 static void FinalizeArchReferenceLine(MainWindow* win, int pageNo);
+// CaptureToolExecute is declared in Canvas.h and defined in SumatraPDF.cpp.
 
 // --- touch text selection (issue #538) --------------------------------------
 // Everything here logs under "touch:" so a session on a real touchscreen can be
@@ -1740,6 +1741,25 @@ static int TrimCollectVisibleLines(MainWindow* win, DisplayModel* dm, TrimLineCa
 static void OnMouseMove(MainWindow* win, int x, int y, WPARAM key) {
     // Track mouse position for erase mode overlay
     win->archTools.mousePos = Point{x, y};
+
+    // Capture tool: live-update the drag rect in PAGE coords while dragging,
+    // so the preview survives pan/zoom (point1/point2 arch semantics).
+    if (win->captureTool.on && win->mouseAction == MouseAction::Dragging && win->AsFixed()) {
+        DisplayModel* dm = win->AsFixed();
+        int pageNo = win->captureTool.pageNo; // rect belongs to the page it started on
+        if (!dm->ValidPageNo(pageNo)) pageNo = dm->CurrentPageNo();
+        if (dm->ValidPageNo(pageNo)) {
+            PointF p1page = dm->CvtFromScreen(win->captureTool.dragStart, pageNo);
+            PointF p2page = dm->CvtFromScreen(Point{x, y}, pageNo);
+            float x0 = std::min(p1page.x, p2page.x);
+            float y0 = std::min(p1page.y, p2page.y);
+            float x1 = std::max(p1page.x, p2page.x);
+            float y1 = std::max(p1page.y, p2page.y);
+            win->captureTool.pageRect = RectF{x0, y0, x1 - x0, y1 - y0};
+            ScheduleRepaint(win, 0);
+            return;
+        }
+    }
 
     // Edit mode: live bbox drag on the selected image
     if (win->editTools.dragEditIdx >= 0) {
@@ -2261,6 +2281,26 @@ static void OnMouseLeftButtonDown(MainWindow* win, int x, int y, WPARAM key) {
         }
     }
 
+    // Capture tool: start a region drag in PAGE coords when capture mode is on.
+    // page coords (survive pan/zoom) are cloned from arch tools; converting
+    // screen->page here (not screen->screen) avoids the pan/zoom rect bug.
+    if (win->captureTool.on && win->AsFixed()) {
+        DisplayModel* dm = win->AsFixed();
+        int pageNo = dm->CurrentPageNo();
+        if (dm->ValidPageNo(pageNo)) {
+            win->captureTool.pageNo = pageNo; // remember the page the rect is on
+            Point screenPt{x, y};
+            PointF pagePt = dm->CvtFromScreen(screenPt, pageNo);
+            win->captureTool.dragStart = Point{x, y};
+            win->captureTool.pageRect = RectF{pagePt.x, pagePt.y, 0, 0};
+            SetCapture(win->hwndCanvas);
+            win->mouseAction = MouseAction::Dragging;
+            SetCanvasCursor(win, IDC_CROSS);
+            ScheduleRepaint(win, 0);
+            return;
+        }
+    }
+
     // Edit mode: an armed clipboard image is placed by the next left-click
     // on a page (click-to-place; +Img or Ctrl+V arms it)
     if (win->editTools.on && win->editTools.pendingImage) {
@@ -2711,6 +2751,24 @@ static void FinalizeArchMeasurement(MainWindow* win, DisplayModel* /*dm*/, int p
 }
 
 static void OnMouseLeftButtonUp(MainWindow* win, int x, int y, WPARAM key) {
+    // Capture tool: finish a region drag -> copy to clipboard at doc DPI,
+    // then auto-exit capture mode.
+    if (win->captureTool.on && win->mouseAction == MouseAction::Dragging && win->AsFixed() &&
+        GetCapture() == win->hwndCanvas) {
+        ReleaseCapture();
+        win->mouseAction = MouseAction::None;
+        if (IsDragDistance(x, win->captureTool.dragStart.x, y, win->captureTool.dragStart.y)) {
+            CaptureToolExecute(win); // renders + copies + auto-exits + repaints
+        } else {
+            // click-like: no capture, just exit mode
+            win->captureTool.on = false;
+            win->captureTool.pageRect = RectF{};
+            SetCanvasCursor(win, IDC_ARROW);
+            ScheduleRepaint(win, 0);
+        }
+        return;
+    }
+
     // Edit mode: finish the image bbox drag
     if (win->editTools.dragEditIdx >= 0) {
         if (GetCapture() == win->hwndCanvas) {
@@ -4188,7 +4246,7 @@ static void OnPaintDocument(MainWindow* win) {
                 // page, no in-progress line, no erase crosshair) skip Graphics
                 // and all GDI+ object construction entirely
                 bool nothingToDraw = !scaleState.scaleSet && !hasMeasurementOnPage && win->archTools.dragLine <= 0 &&
-                                     !win->archTools.eraseMode;
+                                     !win->archTools.eraseMode && !win->captureTool.on;
                 if (!nothingToDraw) {
                     HDC bufHdc = win->buffer->GetDC();
                     Gdiplus::Graphics gs(bufHdc);
@@ -4339,6 +4397,16 @@ static void OnPaintDocument(MainWindow* win) {
                         int sz = 16;
                         gs.DrawLine(&erasePen, cx - sz, cy, cx + sz, cy);
                         gs.DrawLine(&erasePen, cx, cy - sz, cx, cy + sz);
+                    }
+
+                    // Capture tool: stroke the captured/in-progress rect (page coords -> screen coords),
+                    // dashed 1px accent, only on the page it was captured on.
+                    if (win->captureTool.on && win->captureTool.pageRect.dx > 0 && win->captureTool.pageRect.dy > 0 &&
+                        dm->ValidPageNo(curPageNo) && curPageNo == win->captureTool.pageNo) {
+                        Rect r = dm->CvtToScreen(curPageNo, win->captureTool.pageRect);
+                        static Gdiplus::Pen capPen(Gdiplus::Color(255, 0, 120, 215), 1); // Win accent
+                        capPen.SetDashStyle(Gdiplus::DashStyleDash);
+                        gs.DrawRectangle(&capPen, (float)r.x, (float)r.y, (float)r.dx, (float)r.dy);
                     }
                 }
             }

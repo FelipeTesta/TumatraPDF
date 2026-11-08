@@ -4498,6 +4498,9 @@ static void CloseDocumentInCurrentTab(MainWindow* win, bool keepUIEnabled, bool 
     AbortFinding(win, true);
 
     ClearMouseState(win);
+    win->captureTool.on = false;
+    win->captureTool.pageRect = RectF{};
+    win->captureTool.pageNo = 0;
     win->annotationUnderCursor = nullptr;
     win->annotationBeingDragged = nullptr;
     win->annotationBeingResized = false;
@@ -8170,6 +8173,18 @@ static bool FrameOnKeydown(MainWindow* win, WPARAM key, LPARAM lp) {
     }
 
     if (VK_ESCAPE == key) {
+        // Capture tool: ESC cancels an in-progress drag or exits capture mode
+        if (win->captureTool.on) {
+            CancelDrag(win);
+            win->captureTool.on = false;
+            win->captureTool.pageRect = RectF{};
+            win->captureTool.pageNo = 0;
+            win->mouseAction = MouseAction::None;
+            SetCanvasCursor(win, IDC_ARROW);
+            ScheduleRepaint(win, 0);
+            logf("[capture] cancelled");
+            return true;
+        }
         // Arch Tools: ESC cancels draw mode or closes floating Scale dialog
         if (gGlobalPrefs->archToolsEnabled && win->archTools.toolMode != 0) {
             if (win->archTools.hwndArchScaleDialog && IsWindowVisible(win->archTools.hwndArchScaleDialog)) {
@@ -9933,6 +9948,82 @@ static void HandleCmdCreateShortcutToFile(MainWindow* win) {
     CreateLnkShortcut(win);
 }
 
+// Capture tool: render the dragged page-rect at doc DPI (1:1 zoom, RenderTarget::Export)
+// and copy the result to the clipboard, then auto-exit capture mode.
+void CaptureToolExecute(MainWindow* win) {
+    if (!win || !win->captureTool.on) return;
+    DisplayModel* dm = win->AsFixed();
+    RenderedBitmap* rbmp = nullptr;
+    if (!dm || !dm->ValidPageNo(win->captureTool.pageNo)) {
+        win->captureTool.on = false;
+        win->captureTool.pageRect = RectF{};
+        win->captureTool.pageNo = 0;
+        if (GetCapture() == win->hwndCanvas) ReleaseCapture();
+        win->mouseAction = MouseAction::None;
+        SetCanvasCursor(win, IDC_ARROW);
+        ScheduleRepaint(win, 0);
+        return;
+    }
+    RectF pageRect = win->captureTool.pageRect;
+    if (pageRect.dx <= 0 || pageRect.dy <= 0) {
+        // nothing captured: just exit silently
+        win->captureTool.on = false;
+        win->captureTool.pageRect = RectF{};
+        win->captureTool.pageNo = 0;
+        if (GetCapture() == win->hwndCanvas) ReleaseCapture();
+        win->mouseAction = MouseAction::None;
+        SetCanvasCursor(win, IDC_ARROW);
+        ScheduleRepaint(win, 0);
+        return;
+    }
+    // clamp the rect to the page media box (page coords of the virtual pageNo)
+    RectF mb = dm->PageMediaBox(win->captureTool.pageNo);
+    float x0 = std::max(pageRect.x, mb.x);
+    float y0 = std::max(pageRect.y, mb.y);
+    float x1 = std::min(pageRect.x + pageRect.dx, mb.x + mb.dx);
+    float y1 = std::min(pageRect.y + pageRect.dy, mb.y + mb.dy);
+    if (x1 <= x0 || y1 <= y0) {
+        win->captureTool.on = false;
+        win->captureTool.pageRect = RectF{};
+        win->captureTool.pageNo = 0;
+        if (GetCapture() == win->hwndCanvas) ReleaseCapture();
+        win->mouseAction = MouseAction::None;
+        SetCanvasCursor(win, IDC_ARROW);
+        ScheduleRepaint(win, 0);
+        return;
+    }
+    pageRect = RectF{x0, y0, x1 - x0, y1 - y0};
+
+    int physPageNo = dm->VirtualToPhysical(win->captureTool.pageNo);
+    RenderPageArgs args(physPageNo, 1.0f, dm->GetRotation(), &pageRect, RenderTarget::Export);
+    Pixmap* bmp = dm->GetEngine()->RenderPage(args);
+    if (!bmp) {
+        logf("[capture] RenderPage(page %d) failed", physPageNo);
+        goto captureExit;
+    }
+    rbmp = RenderedBitmapFromPixmap(bmp);
+    if (!rbmp) {
+        logf("[capture] RenderedBitmapFromPixmap() failed (page %d)", physPageNo);
+        goto captureExit;
+    }
+    if (!CopyImageToClipboard(rbmp->GetBitmap(), false)) {
+        logf("[capture] CopyImageToClipboard() failed (page %d)", physPageNo);
+    }
+    delete rbmp;
+    logf("[capture] copied page=%d rect=(%0.fx%0f)%dx%d px", physPageNo, pageRect.x, pageRect.y, (int)pageRect.dx,
+         (int)pageRect.dy);
+
+captureExit:
+    // auto-exit capture mode
+    win->captureTool.on = false;
+    win->captureTool.pageRect = RectF{};
+    win->captureTool.pageNo = 0;
+    if (GetCapture() == win->hwndCanvas) ReleaseCapture();
+    win->mouseAction = MouseAction::None;
+    SetCanvasCursor(win, IDC_ARROW);
+    ScheduleRepaint(win, 0);
+}
+
 static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     int cmdId = LOWORD(wp);
     bool openAnnotationEdit = false;
@@ -10772,6 +10863,20 @@ static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, L
         case CmdArchToolsToggle:
             HandleCmdArchToolsToggle(win);
             break;
+
+        case CmdCaptureTool: {
+            if (!win->IsDocLoaded()) return 0;
+            win->captureTool.on = !win->captureTool.on;
+            if (win->captureTool.on) {
+                SetCanvasCursor(win, IDC_CROSS);
+            } else {
+                win->captureTool.pageRect = RectF{};
+                win->captureTool.pageNo = 0;
+                SetCanvasCursor(win, IDC_ARROW);
+                ScheduleRepaint(win, 0);
+            }
+            break;
+        }
 
         case CmdScrollUpHalfPage: {
             if (win->IsCurrentTabAbout()) {
@@ -12439,8 +12544,18 @@ void HandleTabGroupMenuCmd(MainWindow* win, int cmdId) {
             // deep-copy original name BEFORE dialog: dialog's ReplaceWithCopy frees
             // d->nameOut.s which aliases g->name.s via shallow copy -> double-free/UAF
             Str newName = str::Dup(g->name);
+            // TUMATRA-FORK(s49): remember if this is the active group BEFORE we
+            // clobber g->name (upstream re-apply: gate activeTabGroup update on
+            // old-name equality, not post-rename g->name).
+            bool wasActive = gGlobalPrefs->activeTabGroup.s && str::EqI(g->name, gGlobalPrefs->activeTabGroup);
             if (ShowTabGroupNameDialog(win, &newName, true)) {
                 str::ReplaceWithCopy(&g->name, newName.s);
+                // TUMATRA-FORK(s49): keep activeTabGroup pointing at the renamed
+                // group so it stays valid (no ghost). Upstream re-apply note:
+                // same gate at both rename call sites (menu + dialog test).
+                if (wasActive) {
+                    str::ReplaceWithCopy(&gGlobalPrefs->activeTabGroup, newName.s);
+                }
                 SaveSettings();
                 RefreshTabGroupButton(win);
                 logf("[tabs] menu rename '%s' -> '%s'\n", Str(g->name), Str(newName));
@@ -12487,6 +12602,29 @@ void HandleTabGroupMenuCmd(MainWindow* win, int cmdId) {
 static HMENU gTabGroupMenuPopup = nullptr;
 static MainWindow* gTabGroupDropdownWin = nullptr;
 static HWND gTabGroupDropdownFrame = nullptr;
+
+// TUMATRA-FORK(s49): tab-group dropdown right-click command deferral
+// Root cause: HandleTabGroupMenuCmd ran synchronously inside the WH_MSGFILTER hook
+// during the outer TrackPopupMenuEx modal loop -> triple modal loop (menu hook ->
+// options popup menu -> rename/delete dialog). The dialog's GetMessage loop fought
+// the menu filter hook, freezing the dialog (cannot confirm/cancel/close).
+// Fix: do NOT call HandleTabGroupMenuCmd in the hook. Store the command id + owner
+// window, return 1 to keep the main menu tracking, and run the command AFTER the
+// outer TrackPopupMenuEx returns (menu closed), breaking the modal-loop conflict.
+// Upstream-diff summary: upstream SumatraPDF has no gPendingTabGroupCmdId /
+// gPendingTabGroupWin and calls HandleTabGroupMenuCmd synchronously at the hook site.
+// To re-apply after a future upstream sync/merge of this file:
+//   1. add the two statics below near the other gTabGroupDropdown* statics
+//   2. replace the hook's synchronous HandleTabGroupMenuCmd(...) call with:
+//        gPendingTabGroupCmdId = optCmdId; gPendingTabGroupWin = gTabGroupDropdownWin;
+//   3. after outer TrackPopupMenuEx returns, before UnhookWindowsHookEx, run:
+//        if (gPendingTabGroupCmdId && gPendingTabGroupWin) {
+//            HandleTabGroupMenuCmd(gPendingTabGroupWin, gPendingTabGroupCmdId);
+//            gPendingTabGroupCmdId = 0; gPendingTabGroupWin = nullptr;
+//        }
+// Keep deltas minimal & self-contained; touch only the tab-group dropdown area.
+static int gPendingTabGroupCmdId = 0;
+static MainWindow* gPendingTabGroupWin = nullptr;
 
 // Tab system T3: build the right-click options menu (Open in new window / Rename / Delete)
 // for a group index. Items reuse the OpenNew/Rename/Delete command-id bases + idx so
@@ -12542,11 +12680,29 @@ static LRESULT CALLBACK TabGroupMenuFilterProc(int code, WPARAM wp, LPARAM lp) {
                     DestroyMenu(opts);
                     logf("[tabs] hook rclick idx=%d optCmdId=%d\n", idx, optCmdId);
                     if (optCmdId > 0) {
-                        // Rename opens a modal dialog during tracking — TPM_RECURSE supports
-                        // nested modals. Swallow the right-click so the main menu never sees it.
-                        HandleTabGroupMenuCmd(gTabGroupDropdownWin, optCmdId);
+                        // TUMATRA-FORK(s49): defer tab-group command handling to avoid triple modal loop.
+                        // Do NOT call HandleTabGroupMenuCmd here: it runs a modal dialog (rename/delete)
+                        // while the outer TrackPopupMenuEx menu modal loop is still active and the
+                        // WH_MSGFILTER hook is installed -> dialog's GetMessage fights menu filters -> freeze.
+                        // Instead store the command id + owner window; ShowTabGroupDropdown runs the command
+                        // after the outer menu closes.
+                        gPendingTabGroupCmdId = optCmdId;
+                        gPendingTabGroupWin = gTabGroupDropdownWin;
+                        // TUMATRA-FORK(s49-c): end the outer dropdown tracking NOW so the deferred handler
+                        // (rename / delete MessageBox / open-new-window) runs immediately instead of waiting
+                        // for the user to dismiss the dropdown. EndMenu() ends the active TrackPopupMenuEx
+                        // tracking and makes it return 0; ShowTabGroupDropdown then flushes
+                        // gPendingTabGroupCmdId right away (block at ~12741, before unhook and before the
+                        // cmdId==0 skip). Left-click items are untouched: they reach the post-loop
+                        // HandleTabGroupMenuCmd normally and never set pending, so EndMenu is only called
+                        // for a chosen right-click option. Escape-without-choice leaves pending == 0
+                        // (optCmdId == 0), so nothing is deferred and the dropdown behaves as before.
+                        EndMenu();
                     }
-                    return 1; // swallow: main menu keeps tracking (dropdown stays open)
+                    return 1; // swallow the WM_RBUTTONUP. When a pending option was chosen, EndMenu() above
+                              // already ended outer tracking so the dropdown closes and the deferred handler
+                              // runs; when the user escaped (optCmdId == 0, pending == 0) the dropdown stays
+                              // open as before.
                 }
                 logf("[tabs] hook rclick pos=%d cmdId=%u no-session\n", pos, cmdId);
             }
@@ -12588,6 +12744,18 @@ static void ShowTabGroupDropdown(MainWindow* win, HWND btnHwnd) {
     int cmdId = TrackPopupMenuEx(popup, TPM_RETURNCMD | TPM_LEFTALIGN | TPM_TOPALIGN | TPM_VERTICAL, anchorRc.x,
                                  anchorRc.y + anchorRc.dy, win->hwndFrame, nullptr);
     logf("[tabs] menu done cmdId=%d\n", cmdId);
+
+    // TUMATRA-FORK(s49): run deferred tab-group command now that the outer menu modal loop ended.
+    // This breaks the freeze: rename/delete dialog no longer races the menu hook filter.
+    // Pending is only set by the right-click options path (hook); left-click items reach here via
+    // the post-loop HandleTabGroupMenuCmd at the end of this fn (untouched) and never set pending.
+    // No early-return path in ShowTabGroupDropdown can skip this block after pending is settable,
+    // because pending is only written during tracking (after the outer TrackPopupMenuEx call).
+    if (gPendingTabGroupCmdId && gPendingTabGroupWin) {
+        HandleTabGroupMenuCmd(gPendingTabGroupWin, gPendingTabGroupCmdId);
+        gPendingTabGroupCmdId = 0;
+        gPendingTabGroupWin = nullptr;
+    }
 
     if (hMenuHook) {
         UnhookWindowsHookEx(hMenuHook);
@@ -14686,9 +14854,14 @@ LRESULT CALLBACK WndProcSumatraFrame(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) 
                 extern bool gTestDialogIsRename;
                 extern Str gTestDialogName;
                 Str tmp;
+                bool wasActive = false;
                 if (gTestDialogIsRename) {
                     // prefill with the group's current name (like the rename menu case)
                     TabGroup* g = FindTabGroup(gTestDialogName.s);
+                    // TUMATRA-FORK(s49): remember if this is the active group BEFORE
+                    // we clobber g->name (upstream re-apply: gate activeTabGroup
+                    // update on old-name equality, not post-rename g->name).
+                    wasActive = g && gGlobalPrefs->activeTabGroup.s && str::EqI(g->name, gGlobalPrefs->activeTabGroup);
                     tmp = (g && g->name) ? str::Dup(g->name) : str::Dup(gTestDialogName);
                 } else {
                     tmp = str::Dup(gTestDialogName);
@@ -14699,6 +14872,11 @@ LRESULT CALLBACK WndProcSumatraFrame(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) 
                         TabGroup* g = FindTabGroup(gTestDialogName.s);
                         if (g) {
                             str::ReplaceWithCopy(&g->name, tmp);
+                            // TUMATRA-FORK(s49): keep activeTabGroup pointing at the
+                            // renamed group so it stays valid (no ghost).
+                            if (wasActive) {
+                                str::ReplaceWithCopy(&gGlobalPrefs->activeTabGroup, Str(tmp.s));
+                            }
                             SaveSettings();
                             RefreshTabGroupButton(win);
                             logf("[tabs] dialog rename '%s' -> '%s'\n", Str(gTestDialogName), Str(g->name));

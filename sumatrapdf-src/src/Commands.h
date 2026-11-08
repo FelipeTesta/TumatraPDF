@@ -336,7 +336,13 @@ enum {
     CmdFlashcardStudyTimerToggle = 525,
     CmdFlashcardStudyTimerEdit = 526,
     CmdProfileBackups = 527,
-    CmdNone = 528,
+    CmdCaptureTool = 528,
+    CmdRepairDocumentFile = 529,
+    CmdBookmarkAdd = 530,
+    CmdBookmarkDelete = 531,
+    CmdBookmarkUpdate = 532,
+    CmdBookmarkRename = 533,
+    CmdNone = 534,
 
     /* range for file history */
     CmdFileHistoryFirst,

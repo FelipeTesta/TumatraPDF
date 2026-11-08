@@ -602,6 +602,13 @@ CommandVisibility GetCommandVisibility(int cmdId, const AppCommandCtx& ctx, Comm
         return CommandVisibility::Hide;
     }
 
+    if (cmdId == CmdRepairDocumentFile) {
+        // only meaningful for a loaded PDF that the engine flagged errors on
+        EngineBase* engine = ctx.tab ? ctx.tab->GetEngine() : nullptr;
+        bool canRepair = ctx.isPdf && engine && engine->HasErrors();
+        return canRepair ? CommandVisibility::Show : CommandVisibility::Disable;
+    }
+
     if (cmdId == CmdShowGeneratedHTML && !ctx.isMarkdown) {
         return CommandVisibility::Hide;
     }
@@ -782,7 +789,16 @@ CommandVisibility GetCommandVisibility(int cmdId, const AppCommandCtx& ctx, Comm
     if (!ctx.cursorOnImage && (cmdId == CmdCopyImage || cmdId == CmdReplaceImage || cmdId == CmdEditImagePaint)) {
         return CommandVisibility::Hide;
     }
+    // capture tool needs a document loaded (it renders a page at doc DPI)
+    if (cmdId == CmdCaptureTool && !ctx.isDocLoaded) {
+        return CommandVisibility::Hide;
+    }
     if ((cmdId == CmdToggleBookmarks) || (cmdId == CmdToggleTableOfContents)) {
+        return ctx.hasToc ? CommandVisibility::Show : CommandVisibility::Hide;
+    }
+    // bookmark edit commands need a TOC-capable document
+    if ((cmdId == CmdBookmarkAdd) || (cmdId == CmdBookmarkDelete) ||
+        (cmdId == CmdBookmarkUpdate) || (cmdId == CmdBookmarkRename)) {
         return ctx.hasToc ? CommandVisibility::Show : CommandVisibility::Hide;
     }
 
