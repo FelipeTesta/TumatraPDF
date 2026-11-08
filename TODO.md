@@ -9,10 +9,28 @@
 
 User-locked order:
 
-1. **Capture tool** Shift+S (spec pointer → `## Capture tool` below).
-2. **Bookmarks Improve** (spec pointer → `## Bookmarks Improve` below).
-3. **Edit/Align** (spec pointer → `## Edit/` below, PT verbatim).
-4. **Page Counting Format** (spec pointer → `## Page Counting Format` below).
+1. **Bookmarks Improve** (spec pointer → `## Bookmarks Improve` below).
+2. **Edit/Align** (spec pointer → `## Edit/` below, PT verbatim).
+3. **Page Counting Format** (spec pointer → `## Page Counting Format` below).
+
+4. USER validation queue: capture tool Shift+S (s39, documented §Capture tool), Repair Document File (s42, steps in its section below), Profile Sync dark cascade (s40: import/cloud-revert windows).
+
+## Lista vertical de abas
+
+Do lado esquerdo do botão minimizar, vamos incluir um botão `🧾`, a ideia é exibir a lista de abas abertas em formato de lista vertical, ou seja:
+
+```
+Aba1
+Aba2
+Aba3
+```
+
+Dessa forma melhorando a leitura dos nomes dos arquivos grandes. Clicar na aba da lista redireciona a aba ativa para a aba clicada.
+
+## OTHER FEATURES
+
+[ ] - Incluir no settings una opção para desabilitar o botão `scan mode` do toolbar; garantir a adaptação dos outros botões no espaço ao fazer isso;
+[ ] - Revisar README para constar todas novas funcionalidades, mapear tudo pelo LOG; aproveitar e caveman-compress os conteúdos para ficarem bem objetivos, baixa verbosidade;
 
 ## Performance optimizations (verified 2026-11-04, evidence LOG s38)
 
@@ -195,16 +213,34 @@ Scratch E2E harnesses live in `tests/tmp/` (gitignored): s34-replace/paint/crop/
 - [ ] Crop
 - [ ] Align: Similar ao draw line do measure (archtools), vamos desenhar uma linha com dois pontos, e a partir dessa linha, realinhar a página removendo a distorção para que o alinhamento referente a linha que acabamos de desenhar fique 100% vertical ou horizontal; vamos recortar o excesso de página mantendo a mesma proporção original da página; após recortar, o usuário precisa salvar a alteração no documento para aplicar;
 
-## Bookmarks Improve
+## Bookmarks Improve — shipped [v1] s43-b (2026-11-06)
 
-1. Button 'Reorder' on/off: allows click:hold and repositioning bookmark order.
-   - Dropping a bookmark onto another includes it as 1 indent level; dropping at the far left removes it from the level;
-   - Show a dynamic horizontal line representing where the bookmark will land on drop, depending on cursor position.
-2. Right-Click →'Rename'
-3. Right-Click →'Delete'
-4. Button 'Add': creates a bookmark at the end of the list for the CURRENT page.
-5. Right-Click →'Update': changes the clicked bookmark to the current page.
-   All changes must be saved into the document to persist.
+Done s43-a (engine + UI shell):
+
+- Button 'Add' at TOP of TOC panel: creates "Page N" bookmark at end of list for CURRENT page (TocAddBookmark → EngineMupdf::OutlineEdit add → tocAdded overlay).
+- Right-Click context menu: 'Delete' (item+subtree), 'Update' (clicked bookmark pageNo := current page), 'Rename' (noop placeholder → s43-b).
+- Engine edit layer: EngineBase::HasUnsavedOutline() + OutlineEdit(op,...); modifiedOutline flag + tocAdded overlay; GetToc shows overlay even on outline-less PDFs; dirty state mirrors annotation pipeline → EngineMupdfSaveUpdated triggers Ctrl+S/close-save flow; resets on save/doc-close/FinishLoading.
+- Commands CmdBookmarkAdd=530/Delete=531/Update=532/Rename=533 via gen-commands.ts+gen-code; gated via ctx.hasToc.
+- Tests: ad-hoc-bookmark-edit.ts (2-page outline-less PDF: add → TOC contains entry → dirty=1), registered in before-release.ts. Build 0 err/0 warn; probe PASS.
+
+Done s43-b (reorder + rename + persist):
+
+- Right-Click 'Rename': real modal dialog (ShowBookmarkRenameDialog, local to TableOfContents.cpp) → OutlineEdit op=4 rename → tocTree invalidate + dirty. CmdBookmarkRename=533 wired.
+- Drag-reorder on TOC tree (WndProcTocTree subclass): click-hold past drag threshold arms drag; drop ON item body → 1 indent level deeper (child of target); drop on far-left strip → remove indent level (sibling at target's level); dynamic horizontal WHITE drop-guide line (dragGuideY) painted during drag; WM_LBUTTONUP copies `isDragging` local before ReleaseCapture (TabsCtrl capture-trap). Keyboard tree nav untouched.
+- Outline PDF-write persist: EngineMupdf::outlineEdits serialized edit log replayed into PDF via pdf_new_outline_iterator + fz_outline_iterator_insert/update/delete at save (EngineMupdfSaveUpdated). libsumatrapdf.def exports the iterator symbols so PdfFilter/PdfPreview build 0/0 (s43-a blocker resolved). Ctrl+S / close-prompt save writes bookmarks to disk; reopen shows them. Verified E2E: add 2 → save → reopen → outline present.
+- TestBookmarkSave=62 control command; tests/ad-hoc-bookmark-persist.ts (add → save → reopen → assert persisted) registered in before-release.ts. PASS.
+- Build 0 err/0 warn all 3 targets (TumatraPDF, PdfFilter, PdfPreview). ad-hoc-bookmark-edit.ts PASS (regression).
+
+Done s43-c (reorder/indent persist on disk):
+
+- op=5 reorder-move now written to PDF: PersistOutlineEdits deletes source(targetTitle) then re-inserts under newParent (append as last child) / before moveBefore sibling (far-left unindent) / top-level end via fz_outline_iterator vtable; OutlineEditEntry + OutlineEdit signature carry moveBeforePageNo/moveBeforeTitle; TableOfContents::MoveTocItem passes farLeft target as moveBefore.
+- TestBookmarkMove=63 control cmd (calls same OutlineEdit(5,...) path the drag uses — bypasses posted mouse, honest test-only).
+- tests/ad-hoc-bookmark-reorder.ts: add 3 → reorder+indent → dirty=1 → TestBookmarkSave → dirty=0 → TestGetToc on saved file shows Chapter A(d0)/Chapter C(d1)/Chapter B(d0) persisted + reopen. Registered in before-release.ts. PASS.
+- Build 0 err/0 warn all 3 targets (TumatraPDF, PdfFilter, PdfPreview). Regressions ad-hoc-bookmark-edit.ts + ad-hoc-repair-replace.ts PASS.
+
+Remaining:
+
+- Posted-mouse reorder E2E test + guide-line PNG visual confirmation (needs item-rect exposure via control pipe / live GUI; DPI ×1.25 trap; child-hwnd GetPixel = black void). op=5 persist itself is verified via control-pipe E2E; only the live visual drag needs real-user GUI validation. Drag loop + guide line implemented and compile-clean (WndProcTocTree WM_PAINT white line at target item rc.y).
 
 ## Page Counting Format
 
@@ -212,9 +248,20 @@ The app already displays pages in other counting formats; we need a TOOL to chan
 
 Example: pages 1-50 counted in roman, from page 51 on in decimal → page 51 becomes the new page 1. Typing 1 in the page field lands on physical page 51, making the book/page match exact. We can also create an ABSOLUTE page function to ignore cosmetic counting; in this example: `1` → page 51; `(1)` → page 1.
 
-## Capture tool
+## Capture tool — shipped [x] v1 (s39)
 
 Shift+S: draw a rectangle that captures the image inside it at the document's DPI → copy to clipboard.
+
+Residuals (open): no content-pixel verify (clipboard bitmap size only in test), no save-to-file. Capture tool v1 complete: rect in page coords, RenderPageArgs Export at doc DPI, clipboard copy, auto-exit, ESC cancel, doc-close reset, command availability gate.
+
+## Repair document file — shipped [x] v1 (s42, user validate pending)
+
+Context menu (right-click on document) → "Repair Document File" (below Show Errors): engine-corrected in-place save.
+Mechanism: serialize healed copy to `<original>.repair-tmp` same dir → REOPEN temp and verify error count (parent tree / Optional Content / layer config clear; total must not increase) → atomic `MoveFileExW(REPLACE_EXISTING)` swap (Commands_Edit.cpp:1096) → tab reloads in-place keeping page+scroll. Fail/locked file = MessageBox, original untouched, temp cleaned. NO duplicates left behind.
+Menu gated on: PDF + engine has recorded errors.
+Fixable: structural (xref, parent tree, OC/layers) — cleared by write options (garbage+clean+compress). NOT fixable: `items left on stack` (unbalanced q/Q content stream — page stays broken; regenerate at source).
+USER TEST steps: (1) open a PDF flagged "document with errors" (footer badge); (2) right-click → Repair Document File; (3) expect: flag gone on corrected doc, same filename, no `-corrected`/`.repair-tmp` leftovers; (4) reopen file → still opens fine, warnings absent. If badge persists → report which warnings survive (Show Errors).
+Evidence: tests/ad-hoc-repair-replace.ts (damaged PDF on the fly: load errors → repair → 0 errors, no leftovers) PASS architect-rerun. LOG s42.
 
 ## Stats — open (shipped s35-c; design rounds s35-d..s36 archived to LOG)
 
@@ -234,6 +281,8 @@ Shift+S: draw a rectangle that captures the image inside it at the document's DP
   ```
 
 # Bugs open
+
+[ ] Session Tabs: sessions not updating the book list correctly — created a new session, opened some books, then closed them, but closed books were not correctly removed from the session; — [s45] Tabs.cpp MainWindowTabClosed pre-syncs active group to 0 files on last-tab close; build 0/0, ad-hoc-tab-session(-sync/-e2e) PASS — awaiting USER validation (keep [ ]). [s46] audited: 7 latent sync bugs fixed (RemoveTab choke point + suppression guard + MoveTab pinned guard + drag/reorder sync + boot-restore SaveSettings + SyncActiveGroupToEmpty suppression); #8 missing-file-at-restore = pending design decision (skip vs error).
 
 [ ] Bug7 (s36-bz): save corrupts PDF under TC2 — root cause verified + fix deployed (VirtualToPhysical pageNo in Selection.cpp FromRectangle + corrupt-annot guard in EngineMupdfSaveUpdated); user revalidation pending.
 

@@ -1,4 +1,333 @@
-﻿## 2026-11-04 (s38-o3) — OPT-5 WebView2 memory budget flags
+﻿## 2026-11-08 (s49-c) — pending right-click action now flushes immediately
+
+### Fixed
+- src/SumatraPDF.cpp: TabGroupMenuFilterProc hook (right-click option chosen in tab-group dropdown) now calls EndMenu() right after storing gPendingTabGroupCmdId/gPendingTabGroupWin, ending the outer TrackPopupMenuEx tracking at once so the dropdown closes immediately. ShowTabGroupDropdown post-loop flush (~12741) then runs HandleTabGroupMenuCmd for the pending id right away (rename dialog / Delete MessageBox / Open in new window) instead of waiting for the user to dismiss the dropdown. Marked `// TUMATRA-FORK(s49-c): ...` with upstream re-apply note.
+- Left-click items untouched: hook only fires on WM_RBUTTONUP; left-click reaches post-loop HandleTabGroupMenuCmd normally and never sets pending. Escape-without-choice leaves pending==0 (optCmdId==0), dropdown behaves as before.
+
+### Verified
+- build 0 err / 0 warn, deployed to Compiled/TumatraPDF.exe.
+- 4 regression tests PASS (--no-build, fresh dbg64 exe): ad-hoc-tab-session, ad-hoc-tab-session-e2e, ad-hoc-tab-session-sync, ad-hoc-tab-session-sync2.
+- E2E probe tests/tmp/s49c/probe.ts: WM_COMMAND(8000) opens #32768 dropdown (hook installed), Escape dismisses it, TestTabGroupMenuCmd rename handler OK. Driving nested options items via posted coords not reliably drivable (honest limit) — attempted, not claimed as pass.
+
+### Notes
+- EndMenu() chosen over PostMessage(WM_CANCELMODE): synchronous + documented classic pattern; WM_CANCELMODE via PostMessage is async (menu closes later, not immediate). One EndMenu() call suffices — inner TPM_RECURSE options popup already returned optCmdId before pending is stored, so only outer tracking is active.
+- AUTH EXCEPTION: src/SumatraPDF.cpp read-only ban lifted for this fix only. Marker + re-apply note on every delta for a future upstream sync/merge.
+
+## 2026-11-08 (s49-b) — tab-group rename: activeTabGroup now tracks new name (no ghost)
+
+### Fixed
+- src/SumatraPDF.cpp:12543-12558 (menu path, HandleTabGroupMenuCmd case 2 rename): gate `wasActive = activeTabGroup.s && str::EqI(g->name, activeTabGroup)` BEFORE `str::ReplaceWithCopy(&g->name, newName.s)`; if renamed group == active group, `str::ReplaceWithCopy(&gGlobalPrefs->activeTabGroup, newName.s)` after rename so pointer tracks new name, no ghost.
+- src/SumatraPDF.cpp:14836-14865 (dialog-test path, kTabGroupDialogTestCmd 8950 rename): same gate before `str::ReplaceWithCopy(&g->name, tmp)`; if active, `str::ReplaceWithCopy(&gGlobalPrefs->activeTabGroup, Str(tmp.s))`.
+- Non-active rename untouched (no update needed — matches delete-case precedent at 12561-12563).
+- Both deltas marked `// TUMATRA-FORK(s49): ...` with upstream re-apply notes. No central rename helper exists (rename is inline at both call sites), so two call edits.
+- SaveSettings()/RefreshTabGroupButton() call order unchanged; MaybeSaveAnnotations / annotation-save integrity untouched (no save-flow reorder).
+
+### Verified
+- build 0 err / 0 warn (clang-format applied on SumatraPDF.cpp), deployed to Compiled/TumatraPDF.exe.
+- 4 regression tests PASS (--no-build, fresh dbg64 exe): ad-hoc-tab-session, ad-hoc-tab-session-sync, ad-hoc-tab-session-sync2, ad-hoc-tab-session-e2e.
+- E2E extended: ad-hoc-tab-session-e2e.ts step 8 renames active group E→GroupY via real dialog, asserts active=GroupY (ghost eliminated). Non-active rename (GroupB→GroupZ, active stays GroupA) still passes.
+
+### Notes
+- AUTH EXCEPTION: src/SumatraPDF.cpp read-only ban lifted for this fix only (user @57). Marker + re-apply note on every delta for a future upstream sync/merge.
+- TabGroupsManage.cpp audited: ShowSaveTabGroupDialog (~605)/SaveTabGroup (~122)/SetActiveTabGroup (211) create/set active group by name but do NOT rename an existing group — out of scope, no activeTabGroup update needed there.
+
+## 2026-11-08 (s49) — tab-group dropdown dialogs frozen (triple modal loops) → deferral fix (auth exception)
+
+### Fixed
+- src/SumatraPDF.cpp: tab-group dropdown right-click (Rename / Delete / Open in new window) froze because HandleTabGroupMenuCmd ran synchronously inside the WH_MSGFILTER hook during the outer TrackPopupMenuEx modal loop -> triple modal loop (menu hook -> options popup -> rename/delete dialog). Dialog's GetMessage loop fought the menu filter hook -> could not confirm/cancel/close.
+- Fix: deferral — store gPendingTabGroupCmdId + gPendingTabGroupWin in the hook (return 1, keep main menu tracking), run HandleTabGroupMenuCmd AFTER the outer TrackPopupMenuEx returns, before UnhookWindowsHookEx. Three touch points, all marked `// TUMATRA-FORK(s49): ...` with re-apply instructions. Left-click post-loop HandleTabGroupMenuCmd call untouched.
+
+### Verified
+- build 0 err / 0 warn (clang-format applied on SumatraPDF.cpp).
+- 4 regression tests PASS: ad-hoc-tab-session, ad-hoc-tab-session-e2e, ad-hoc-tab-session-sync, ad-hoc-tab-session-sync2 (--no-build, fresh dbg64 exe).
+- E2E honest result (real menu path, NO -for-testing): WM_COMMAND(8000) opens the #32768 dropdown; right-click hook fires (options popup #32768 appears). Full right-click->Rename->dialog->IDOK chain not reliably drivable via posted coords (two #32768 windows, item-height estimation) — recorded as attempted, not claimed as pass.
+
+### Notes
+- AUTH EXCEPTION: src/SumatraPDF.cpp read-only ban lifted for this fix only (user @57). Heavy inline fork-delta documentation with re-apply instructions for a future upstream sync/merge of this file. Delta minimal & self-contained; touches only the tab-group dropdown area.
+- TODO.md §Bugs: no "rename-buttons" entry exists (verified) — nothing to remove/annotate.
+- Control-pipe async test path (8950 via SumatraControl.cpp:340 / SumatraPDF.cpp:14790) unaffected, as expected.
+
+## 2026-11-08 (s48) — tab-group session rename: no crash via control pipe
+
+### Verified
+
+- build 0 err/0 warn, deployed out/dbg64/TumatraPDF.exe
+- control-pipe E2E: LIST(50), NEWSESSION(51), ACTIVATE(49), OPENNEW(52), MenuCmd(53) openhere/rename/delete, DialogOpen(54)
+- all menu-cmd paths return OK, no crash: openhere activates; rename no-ops in -for-testing (auto-accept same name); delete blocked by MessageBox (not automatable via pipe)
+- DIALOGOPEN(54) opens real rename dialog; winapi BM_CLICK on OK renames group OK; Save dialog (WM_COMMAND 404) + BM_CLICK Save creates group OK
+- TabGroupsWnd Save/Delete buttons respond to BM_CLICK, no crash
+- 4 regression tests PASS: ad-hoc-tab-session, ad-hoc-tab-session-e2e, ad-hoc-tab-session-sync, ad-hoc-tab-session-sync2
+
+### Notes
+
+- user crash ("rename buttons crash app") NOT reproducible via control pipe (mouse banned); likely needs real right-click or modal dialog interaction not drivable here
+- latent bug: after rename (menu case 2 or dialog forceReal), gGlobalPrefs->activeTabGroup NOT updated to new name -> points to non-existent group; consistency issue only, no crash
+- root cause of crash: not located; SumatraPDF.cpp read-only ban not triggered
+
+## 2026-11-07 (s46) — tab/group state sync hardening
+
+### Fixed
+
+- src/Tabs.cpp RemoveTab (free fn): single choke point — calls UpdateActiveGroupAutoSave(win) after tab removal from TabsCtrl but before any caller SaveSettings; last-tab removal (TabCount()<=1) pre-syncs active group to 0 files BEFORE removal so both mouse (MainWindowTabClosed s45) and programmatic (CloseTab->RemoveTab) close paths leave a consistent group on disk.
+- src/TabGroupsManage.cpp SyncActiveGroupToEmpty: routed through the same SuppressGroupAutoSave guard as UpdateActiveGroupAutoSave so a group switch (ActivateTabGroupInWindow) can't wipe the destination group. Added IsGroupAutoSaveSuppressed() accessor (sSuppressGroupAutoSave was file-static).
+- src/Tabs.cpp MoveTab: refuses moving isPinned tabs (mirrors TabsCtrl::CanDragTab) and calls UpdateActiveGroupAutoSave after SwapTabs; Ctrl+Shift+PgUp/PgDn unchanged for non-pinned.
+- src/wingui/TabsCtrl.cpp UpdateAfterDrag: calls UpdateActiveGroupAutoSave after a committed drag reorder (suppressed mid-drag via draggingTab guard; group-switch suppression respected).
+- src/SumatraStartup.cpp boot restore: calls SaveSettings() once after SuppressGroupAutoSave(false)+load completes so failed/missing loads are dropped from tabFiles on disk.
+- src/SumatraPDF.cpp:3970 direct SetSelected: NOT edited (read-only ban). Selection-change sync bypass remains a design limitation — no clean hook found that avoids touching SumatraPDF.cpp:3970.
+
+### Added
+
+- tests/ad-hoc-tab-session-sync2.ts: settings-file asserts (group with 2 docs -> boot-restore order + group survives on disk). Registered in tests/before-release.ts. Honest gaps noted: no MoveTab/CloseTab control-pipe command; injected input dropped; RemoveTab programmatic close, last-tab SyncActiveGroupToEmpty, pinned Home MoveTab-reject not drivable here.
+
+### Verified
+
+- build 0 err/0 warn, deployed out/dbg64/TumatraPDF.exe.
+- tests/ad-hoc-tab-session.ts PASS; tests/ad-hoc-tab-session-e2e.ts PASS; tests/ad-hoc-tab-session-sync.ts PASS; tests/ad-hoc-tab-session-sync2.ts PASS.
+
+### Notes
+
+- LOG s45 §Notes claim "non-last path stays handled by existing rebuild" was WRONG — RemoveTab never synced; fixed now (RemoveTab is the new choke point).
+- Programmatic last-tab close (CloseTab:4950->CloseWindow:4996, SumatraPDF.cpp read-only) still bypasses RemoveTab; not fixed without editing SumatraPDF.cpp.
+
+## 2026-11-06 (s45) — tab-group session sync on last-tab close
+
+### Fixed
+
+- Closing the last document of a tab-group session left the closed books in the saved group's tabFiles.
+
+### Root cause
+
+- src/SumatraPDF.cpp:4993-4997 CloseTab() early-returns on the last tab via CloseWindow(5079)->SaveSettings(5173) with STALE gGlobalPrefs->tabGroups; TabsOnCloseWindow(5188) deletes tabs. RemoveTab/MainWindowTabClosed/UpdateActiveGroupAutoSave never run on this path, so the group is never synced to 0 files. (SumatraPDF.cpp is read-only for this fix.)
+
+### Fix
+
+- src/Tabs.cpp:590-595 MainWindowTabClosed(): when win->TabCount() <= 1 (last doc), clear the active group's tabFiles in memory via new SyncActiveGroupToEmpty() BEFORE CloseTab(), so CloseWindow's SaveSettings(5173) persists an empty (0-entry) group; the group itself survives. The existing post-close UpdateActiveGroupAutoSave(594) re-syncs to 0 once TabsOnCloseWindow cleared win->Tabs() — idempotent (SyncGroupFromWindow is a full rebuild). No use-after-free: pre-sync touches prefs + tab list while win is still valid (CloseWindow for lastWindow&&!quitIfLast does not destroy win).
+
+### Added
+
+- tests/ad-hoc-tab-session-sync.ts: seeds a named 2-doc group, launches (restore), quits, re-reads TumatraPDF-settings.txt, asserts the group survives. Registered in tests/before-release.ts.
+
+### Verified
+
+- build 0 err/0 warn, deployed out/dbg64/TumatraPDF.exe.
+- tests/ad-hoc-tab-session-sync.ts PASS; tests/ad-hoc-tab-session.ts PASS; tests/ad-hoc-tab-session-e2e.ts PASS.
+
+### Notes
+
+- Closing individual tabs via posted GUI input is not automatable in this environment, so the last-tab-close GUI path could not be driven end-to-end here. The non-last-tab path stays handled by the existing post-close SyncGroupFromWindow rebuild. CloseCurrentTab/WM_CLOSE bypass MainWindowTabClosed and remain out of scope (SumatraPDF.cpp read-only).
+
+## 2026-11-06 (s43-c) — bookmark reorder/indent persist on disk
+
+### Added
+
+- src/EngineMupdf.cpp: PersistOutlineEdits op=5 reorder-move writes to PDF: delete source(targetTitle) then re-insert under newParent (append as last child) / before moveBefore sibling (far-left unindent) / top-level end, via fz_outline_iterator vtable (next/down/insert/delete); moveBeforePageNo/moveBeforeTitle carried on OutlineEditEntry.
+- src/EngineMupdf.h: OutlineEditEntry gains moveBeforePageNo/moveBeforeTitle; OutlineEdit signature gains moveBeforePageNo=0 / moveBeforeTitle=StrL(""); base EngineBase.h stub unused-params removed.
+- src/TableOfContents.cpp: MoveTocItem passes farLeft unindent's target as moveBefore into OutlineEdit op=5.
+- src/SumatraControl.cpp + cmd/control.ts: TestBookmarkMove=63 control cmd calls the SAME OutlineEdit(5,...) path the drag uses — bypasses posted mouse, honest test-only.
+- tests/ad-hoc-bookmark-reorder.ts: add 3 bookmarks → reorder+indent (Chapter C under Chapter A) → dirty=1 → TestBookmarkSave → dirty=0 → TestGetToc on saved file shows Chapter A(d0)/Chapter C(d1)/Chapter B(d0) persisted + reopen. Registered in tests/before-release.ts.
+- op=1 add now appends at top-level end (insertion order preserved); OutlineIteratorFind checks the first item (was skipped); fz_outline_iterator_down called via iterator vtable (static in mupdf, unresolved in PdfFilter/PdfPreview otherwise).
+
+### Verified
+
+- build 0 err/0 warn all 3 targets (TumatraPDF, PdfFilter, PdfPreview), deployed out/dbg64/TumatraPDF.exe.
+- tests/ad-hoc-bookmark-reorder.ts PASS (reorder+indent saved, order+depth persisted+reopen, dirty clears).
+- tests/ad-hoc-bookmark-edit.ts PASS + tests/ad-hoc-repair-replace.ts PASS (regressions).
+
+### Notes
+
+- Real-mouse posted-drag guide-line PNG NOT captured here (TreeView hit-test/threshold/repaint timing fragile via posted messages); guide-line method documented (WndProcTocTree WM_PAINT draws white RGB(255,255,255) full-width line at target item's rc.y during drag). Remaining gap: live GUI reorder validation by user.
+- op=5 reorder now persisted (was the s43-b GAP); s43-b note "op=5 not yet written to PDF" superseded by s43-c.
+
+## 2026-11-06 (s43-b) — bookmarks reorder/rename/persist
+
+### Added
+
+- src/TableOfContents.cpp: real 'Rename bookmark' modal dialog (ShowBookmarkRenameDialog, local to TableOfContents.cpp, not SumatraPDF.cpp) → OutlineEdit op=4 rename → tocTree invalidate + dirty.
+- src/TableOfContents.cpp: bookmark drag-reorder on the TOC tree (WndProcTocTree subclass + tocDragItem/tocDragGuideY/tocDragStart state on MainWindow). click-hold past drag threshold arms drag; WM_MOUSEMOVE computes drop target + indent delta (drop ON item body = child/indent +1 via newParent=target; drop in far-left strip = sibling/unindent via newParent=target->parent); dragGuideY + ScheduleRepaint; WM_PAINT draws white horizontal guide line across the tree. WM_LBUTTONUP copies `isDragging` local BEFORE ReleaseCapture (TabsCtrl capture-trap pattern). Keyboard tree nav untouched.
+- src/EngineMupdf.h: OutlineEditEntry {op,targetPageNo,targetTitle,newValue,newPageNo} + Vec<OutlineEditEntry> outlineEdits (serialized edit log, source of truth for outline persistence).
+- src/EngineMupdf.cpp: OutlineEdit appends all ops to outlineEdits (still keeps tocAdded overlay for op=1 add so GetToc shows in-session adds), marks modifiedOutline + invalidates tocTree. New static PersistOutlineEdits() replays outlineEdits into the PDF via pdf_new_outline_iterator + fz_outline_iterator_insert/update/delete at save time; op=1 sets uri="#page=<n>" so page survives reload. Called from EngineMupdfSaveUpdated before pdf_save_document; outlineEdits reset on save.
+- src/libsumatrapdf.def: export fz_outline_iterator_{insert,update,delete,next,item}, fz_drop_outline_iterator, pdf_new_outline_iterator so PdfFilter/PdfPreview (recompile EngineMupdf.cpp, link libsumatrapdf.lib not mupdf.lib) can link. Resolves s43-a blocker: outline write now builds 0/0 for TumatraPDF + PdfFilter + PdfPreview.
+- src/SumatraControl.cpp + cmd/control.ts: TestBookmarkSave=62 → EngineMupdfSaveUpdated (Ctrl+S equivalent).
+- tests/ad-hoc-bookmark-persist.ts: add 2 bookmarks → TestBookmarkToc contains them → dirty=1 → TestBookmarkSave → dirty=0 → quit → reopen same PDF via TestGetToc → entries present on disk. Registered in tests/before-release.ts.
+
+### Verified
+
+- build 0 err/0 warn all 3 targets (TumatraPDF, PdfFilter, PdfPreview), deployed out/dbg64/TumatraPDF.exe.
+- tests/ad-hoc-bookmark-persist.ts PASS (add+save+reopen).
+- tests/ad-hoc-bookmark-edit.ts PASS (s43-a regression).
+
+### Notes
+
+- Rename/op=4 and reorder/op=5 persistence deferred (op=5 reorder not yet written to PDF; op=4 rename writes title). Indent model: drop ON body → child of target; drop far-left strip (first 30 DPI-scaled px) → sibling at target's level (target->parent).
+- Posted-mouse reorder E2E + guide-line PNG evidence NOT yet verifiable here (no item-rect exposure via control pipe; DPI ×1.25 trap; child-hwnd GetPixel = black void). Reorder drag loop compiles; guide line paints white horizontal line on drag. Needs live GUI verification.
+- OutlineEdit op=1 now writes to tocAdded AND outlineEdits (redundant but consistent).
+
+## 2026-11-06 (s44) — tab drag white insertion guide line
+
+### Added
+
+- src/wingui/WinGui.h: TabsCtrl gains `int dragGuideX = -1` member (root-local x of white insertion guide; -1 = hide).
+- src/wingui/TabsCtrl.cpp: WM_MOUSEMOVE drag path computes insert boundary (dstIdx from TabStateFromMousePosition + inRightHalf, mirrors LBUTTONUP logic; left edge of insert-before tab or right edge of last tab when after-all), sets dragGuideX + ScheduleRepaint() on change.
+- src/wingui/TabsCtrl.cpp: TabWnd::Paint draws white vertical line (DpiScale 2px, full tab-bar height) at dragGuideX when draggingTab && dragGuideX>=0, clamped to the owning tab's bounds; same white brush pattern as active underline.
+- src/wingui/TabsCtrl.cpp: WM_LBUTTONUP and WM_CAPTURECHANGED reset dragGuideX=-1 + ScheduleRepaint + ImageList_EndDrag.
+
+### Verified
+
+- build 0 err/0 warn TumatraPDF (`taskkill /IM TumatraPDF.exe /F; bun cmd/build.ts`), deployed out/dbg64/TumatraPDF.exe. EngineMupdf untouched so no PdfFilter/PdfPreview rebuild needed.
+- tests/ad-hoc-tab-session.ts --no-build PASS (regression).
+- E2E probe tests/tmp/s44/drag.ts: launches 3 PDFs, posts LButtonDown tab0 + MMove right-half tab1/tab2 to drive drag, captures tab-bar PNGs tests/tmp/tab-drag-guide.png + tab-drag-guide2.png, posts LBUTTONUP, pixel-scans tab bar mid-height.
+
+### Notes
+
+- Test env is light theme: tab-bar background is uniform white, so the white guide line is pixel-indistinguishable from background; cannot visually confirm line presence from pixels alone (no vision tool). Honesty: do not claim PNG shows the line.
+- Insert-shift reorder logic already existed (UpdateAfterDrag); this change adds only the visual feedback.
+- probe v2 (s44b): full-window PrintWindow + light-theme magenta-guide evidence (dark toggle no-op on tabs); PNGs tests/tmp/s44/tab-drag-full.png + tab-drag-full2.png. Magenta guide visible during drag (n=1 px at x=394), hidden after LBUTTONUP (n=0). Frame title before/after both "zlib.3.pdf - TumatraPDF" (3 identical PDFs, inconclusive on insert semantics; guide visibility decisive). VirtWnd custom tab bar reads blank on tab-hwnd GetPixel/BitBlt (GDI+ double-buffer) — full-frame PrintWindow is the working capture path.
+
+### Fixed
+
+- src/wingui/TabsCtrl.cpp:740: WM_LBUTTONUP checked `draggingTab` member AFTER `ReleaseCapture()`; the s44-added WM_CAPTURECHANGED handler runs synchronously inside ReleaseCapture() and sets `draggingTab=false`, so LBUTTONUP took the early-return and skipped `UpdateAfterDrag` — drag guide showed but drop never reordered tabs. Fix: use `isDragging` local (captured before ReleaseCapture) instead of `draggingTab` member.
+- Guide line behavior preserved: appears during drag at insert boundary, hidden on drop (dragGuideX reset on LBUTTONUP + WM_CAPTURECHANGED).
+
+### Verified
+
+- build 0 err/0 warn (`taskkill /IM TumatraPDF.exe /F; bun cmd/build.ts`), deployed out/dbg64/TumatraPDF.exe.
+- E2E proof tests/tmp/s44c/s44c-tab-drag-e2e.ts: launches 3 distinct PDFs (alpha.pdf, beta.pdf, gamma.pdf), posted LButtonDown tab0 → MMove over tab1 right-half → MMove (dragGuideX update) → capture full-height white guide cols (n=4 during drag) → LBUTTONUP → capture (n=0 after drop) → title: gamma.pdf→alpha.pdf; click tab0 → beta.pdf (was alpha before drag) proves reorder.
+- tests/ad-hoc-tab-session.ts --no-build PASS (regression).
+
+### Added
+
+- EngineBase.h: virtual HasUnsavedOutline() + OutlineEdit(op,targetPageNo,targetTitle,newValue,newPageNo); EngineMupdf.h/.cpp: modifiedOutline flag + tocAdded Vec<TocAddedEntry> overlay; OutlineEdit op=1 add pushes overlay + sets modifiedOutline + invalidates tocTree; op 2/3/4 set modifiedOutline+invalidate (persist deferred, s43-b).
+- GetToc builds tree incl. tocAdded overlay even when PDF has no outline (new outline creatable on outline-less docs).
+- EngineMupdfSaveUpdated: dirty condition requires !epdf->modifiedOutline; on save resets modifiedOutline=false. Reset on doc close/FinishLoading.
+- CmdBookmarkAdd=530 / Delete=531 / Update=532 / Rename=533 via cmd/gen-commands.ts + gen-code; CommandAvailability gated via ctx.hasToc.
+- TableOfContents.cpp: top-of-panel button row [Add bookmark] [Reorder(s43-b, disabled)]; TocAddBookmark calls OutlineEdit add "Page N" at current page; TocContextMenu Delete/Update/Rename items added (Rename noop s43-b).
+- SumatraControl.cpp: TestBookmarkAdd=59/TestBookmarkDirty=60/TestBookmarkToc=61 control-pipe cmds; cmd/control.ts mirrored.
+- tests/ad-hoc-bookmark-edit.ts: 2-page outline-less PDF; asserts TestGetToc no-toc→add→TOC contains entry→dirty=1; registered in tests/before-release.ts.
+
+### Verified
+
+- build 0 err/0 warn TumatraPDF+PdfFilter+PdfPreview.
+- probe: TestBookmarkAdd OK; TestBookmarkToc "Page 1|page=1\ncount=1\n"; TestBookmarkDirty 1 dirty.
+
+### Notes
+
+- Outline PDF-write (insert/update/delete via mupdf fz_outline_iterator) EXISTS in vendored mupdf/pdf/pdf-outline.c + include/mupdf/fitz/outline.h but NOT wired into EngineMupdf.cpp (breaks PdfFilter/PdfPreview builds — they recompile EngineMupdf.cpp without mupdf.lib), so persist-to-PDF deferred to s43-b blocker; save-persist NOT verified in s43-a.
+
+## 2026-11-05 (s42) — Repair document file: engine-corrected in-place save (validate→atomic swap)
+
+### Added
+
+- CmdRepairDocumentFile: "Repair Document File" right-click context menu item (next to Show Errors); gated on loaded PDF with engine errors (CommandAvailability.cpp)
+- handler in src/Commands_Edit.cpp: re-serialize PDF to `<dir>/<name>.repair-tmp` (unique, hidden) via EngineMupdfSaveUpdated with garbage=2 + clean=1 + non-incremental full rewrite; verify re-opened temp error count <= before count; MoveFileExW MOVEFILE_REPLACE_EXISTING swap over original; on ERROR_SHARING_VIOLATION/access denied → message box, delete temp, abort, original untouched; then ReloadDocument keeps page+scroll
+- EngineBase::ErrorCount(); EngineMupdfSaveUpdated gains const void* saveOpts + forceSave (defaulted, existing callers unchanged)
+- TestGetEngineErrors control-pipe cmd (src/SumatraControl.cpp + cmd/control.ts) for tests
+
+### Verified
+
+- build 0 err/0 warn (`taskkill /IM TumatraPDF.exe /F; bun cmd/build.ts`)
+- tests/ad-hoc-repair-replace.ts PASS: damaged PDF has ≥1 load error, after repair 0 errors, original path intact, no .repair-tmp/corrected leftovers
+- tests/ad-hoc-profile-live-writes.ts --no-build PASS (regression)
+
+### Notes
+
+- no Edit menubar exists in this fork; placed next to Show Errors in right-click context menu
+
+## 2026-11-05 (s40-r) — import buttons sized by label extent
+
+### Fixed
+
+- `src/ProfileSyncWnd.cpp` Import prompt buttons truncated labels ("Replace local data" → "…place local dat", "Merge (newest-wins)" → "…erge (newest-wi"). Root: fixed-width sizing (< label extent) under classic-button centered clipping. Fix: `BtnTextW()` measures label extent via `GetTextExtentPoint32W` on screen DC with button font (`WM_GETFONT`), sizes each button = text + padding, lays out x positions cumulatively; shrinks gaps first then reduces padding (floor = text width, never truncates). Same fix in `TestLaunchImportPrompt` control-pipe path. Iterations: 3 (padding tuned 24→40 after PNG read showed ~6px classic-border clipping; final padX=40/minPadX=32 fits all 3 inside 345px client width).
+
+### Verified
+
+- Build 0 err/0 warn (`taskkill /IM TumatraPDF.exe /F; bun cmd/build.ts`), deployed out/dbg64/TumatraPDF.exe.
+- Ground-truth `tests/tmp/s40p/ground-truth.ts`: import-full.png (450x225 physical) labels COMPLETE ("Replace local data", "Merge (newest-wins)", "Cancel"), buttons inside dark margins.
+- `bun tests/ad-hoc-profile-live-writes.ts --no-build` PASS.
+
+### Notes
+
+- cloudrevert-full.png + backups-full.png ALL PASS — untouched.
+
+## 2026-11-05 (s40-p) — profile cascade layout ground truth + fixes
+
+### Fixed
+
+- `src/ProfileSyncWnd.cpp` Import prompt (TestLaunchImportPrompt + SyncWndProc import case): buttons positioned with outer window height `h` instead of client height → fell below client area, clipped. Ground truth: bottom edge 164 vs clientH 142. Fix: `GetClientRect(phwnd)` → `by = rc.bottom - pad - btnH`; now bottom edge 126 ≤ 142, inside=true.
+- `src/ProfileBackupWnd.cpp` CloudRevert (ProfileDataPromptCloudRevert): same outer-vs-client button Y bug → bottom edge 204 vs clientH 182. Fix: `GetClientRect(hwnd)` → `by = rc.bottom - pad - btnH`; now bottom edge 166 ≤ 182, inside=true.
+
+### Verified
+
+- Build 0 err/0 warn (`taskkill /IM TumatraPDF.exe /F; bun cmd/build.ts`).
+- Ground-truth driver `tests/tmp/s40p/ground-truth.ts` + `backups-probe.ts`: GetWindowRect vs GetClientRect vs EnumChildWindows per dialog; full-window PrintWindow PNG matches window rect (import 360x180, cloudrevert 380x220, backups 420x520).
+- Import + CloudRevert buttons inside client after fix; Backups Restore right edge = clientW−16=389 < clientW 405 (16px margin) → capture artifact only, no fix.
+
+### Notes
+
+- Backups "Res…" clip (prior s40v PNG 359x576) = capture crop artifact, not layout: window 420x520 > crop width 359 cut right side.
+
+## 2026-11-05 (s40-t) — Import prompt dark body: add WM_PAINT title text (was void black)
+
+### Fixed
+
+- `src/ProfileSyncWnd.cpp` `ImportPromptProc`: body rendered void black in dark theme because nothing drew any text; added `WM_PAINT` painting the window caption in `ThemeWindowTextColor()` on `ThemeWindowBackgroundColor()`, mirroring `SyncWndProc`. Unified `WM_ERASEBKGND`/`WM_CTLCOLORSTATIC`/`WM_CTLCOLORBTN`/`WM_PAINT` fill to `ThemeWindowBackgroundColor()`+`ThemeWindowTextColor()` in both `ImportPromptProc` and `CloudRevertWndProc`; buttons keep `SetWindowTheme(btn,L"",L"")`.
+
+## 2026-11-05 (s40v) — dark-only cascade verification: Import + CloudRevert force-launch Test cmds
+
+### Verified
+
+- Build 0 err/0 warn (`taskkill /IM TumatraPDF.exe /F; bun cmd/build.ts`); `ad-hoc-profile-live-writes.ts --no-build` PASS.
+- Force-launched `TestProfileImportPrompt` (cmd 56) + `TestProfileCloudRevert` (cmd 57) via `-dbg-control` pipe + Backups via WM_COMMAND 527; captured `tests/tmp/s40v/{import-dark,cloudrevert-dark,backups-dark2}.png`; all surfaces DARK (pixel luminance 0/1/23).
+- Backups Restore "Res…" clip = capture artifact only: layout math fits client (button right edge = clientW−16=389 < clientW 405, 16px margin), no overflow → no layout fix needed; light-theme loop dropped per user.
+
+## 2026-11-05 (s40) — Profile Sync cascade fix round: theme P1 + true newest-wins merge
+
+### Fixed
+
+- `src/ProfileSyncWnd.cpp` `ImportPromptProc`: dark theme on import prompt — WM_ERASEBKGND + WM_CTLCOLORSTATIC/BTN answering `ThemeWindowControlBackgroundColor()`/`ThemeWindowTextColor()`, `SetWindowTheme(btn, L"", L"")` on Replace/Merge/Cancel buttons (reuses SyncWndProc :535-542 pattern).
+- `src/ProfileBackupWnd.cpp` `CloudRevertWndProc`: same dark treatment (WM_ERASEBKGND/CTLCOLOR + SetWindowTheme on Keep/Restore buttons).
+- `src/ProfileBackupWnd.cpp` `ShowProfileBackupsDialog`: caption bar dark via `DwmSetWindowAttribute(hwnd, 20, ...)` mirroring ProfileSyncWnd :501-502; added `#include <dwmapi.h>`.
+- `src/ProfileSyncWnd.cpp` `:347-353`: removed redundant export dest-exists pre-check (Portuguese MessageBox removed with it); deeper check in `ProfileDataExportToDir` kept.
+- `src/ProfileData.cpp` merge routine (`ProfileDataImportFromJson`, replace=false): true newest-wins per item vs adopt-absent. Comparison key = exported JSON file-level `lastWriteTs` (unix seconds); falls back to exported file LastWriteTime→unix seconds when `lastWriteTs` absent. Per item: absent→adopt; present && importTs > currentTs → replace; present && !importTs → keep current. No fields invented; documented in .cpp comment.
+
+### Changed
+
+- `src/ProfileSyncWnd.cpp` `:348`: Portuguese export MessageBox gone (subsumed by pre-check removal).
+
+### Verified
+
+- Build 0 err/0 warn (`taskkill /IM TumatraPDF.exe /F; bun cmd/build.ts`).
+- `ad-hoc-profile-live-writes` PASS; `ad-hoc-profile-checksum` PASS; `ad-hoc-profile-backups-open` PASS; `ad-hoc-profile-sync-visual` PASS (13/13).
+- Visual loop: captured `tests/tmp/s40-fix/{sync-dark,backups-dark,sync-light,backups-light}.png` via two-instance dark→light flip (theme persisted across relaunch).
+- Restore-text clipping: none observed in `BackupWndProc`/`BackupPaint` (120x24 restore button fits "Restore"; stamp uses DT_END_ELLIPSIS).
+
+### Notes
+
+- Residuals: Import prompt not capturable in `-for-testing` (Import skipped at ProfileSyncWnd.cpp:364-370; no command to force-launch; never hand-edited src to expose it). Cloud revert not deterministically reachable. HOLD-restore abort-on-release-outside (`ProfileBackupWnd.cpp:165-175`) kept as-is (intentional safety pattern).
+- `src/SumatraPDF.cpp` NOT edited (HARD BAN — carries uncommitted capture-tool delta).
+
+## 2026-11-05 (s39) — Capture tool v1: Shift+S rect → clipboard at doc DPI
+
+### Added
+
+- `src/MainWindow.h`: `CaptureToolState` gains `int pageNo` — rect kept in PAGE coords of the page drag started on.
+- `src/Canvas.h`: declare `CaptureToolExecute(MainWindow*)` (defined in SumatraPDF.cpp).
+- `src/Canvas.cpp`: LButtonDown starts capture drag (saves pageNo, SetCapture, cross cursor); OnMouseMove updates pageRect in page coords; OnMouseLeftButtonUp releases capture, runs CaptureToolExecute beyond drag threshold else exits; paint overlay strokes dashed 1px Win-accent rect (pageRect → CvtToScreen) only on the captured page.
+- `src/SumatraPDF.cpp`: `CaptureToolExecute` clamps rect to PageMediaBox, renders `RenderPageArgs(VirtualToPhysical(pageNo), 1.0f, GetRotation(), &rect, RenderTarget::Export)`, `RenderedBitmapFromPixmap` + `CopyImageToClipboard(..., false)`, logs `[capture] copied page=%d rect=(...)`, auto-exits (arrow cursor + repaint). FrameOnCommand `CmdCaptureTool` toggles capture (cross/arrow cursor). FrameOnKeydown VK_ESCAPE cancels capture before arch handling. CloseDocumentInCurrentTab resets capture state.
+- `src/CommandAvailability.cpp`: `CmdCaptureTool` hidden when no doc loaded.
+- `tests/ad-hoc-capture-tool.ts`: new ad-hoc test — launch `-for-testing -dbg-control -log`, post CmdCaptureTool + mouse drag on canvas, verify `[capture] copied` in sumlog + clipboard CF_BITMAP bitmap. Registered in `tests/before-release.ts`.
+- `tests/winapi.ts`: clipboard FFI (OpenClipboard/GetClipboardData/CloseClipboard) + `clipboardHasBitmap()` + `CF_BITMAP`.
+
+### Verified
+
+- Build 0 err/0 warn (`bun cmd/build.ts`).
+- `ad-hoc-capture-tool` PASS: clipboard bitmap present + `[capture] copied` in sumlog.
+- `ad-hoc-tab-session` + `ad-hoc-tab-session-e2e` PASS (no regression).
+
+### Notes
+
+- Residuals: no content-pixel verify (clipboard bitmap size only), no save-to-file; Escape mid-drag cancels cleanly.
+
+## 2026-11-04 (s38-o3) — OPT-5 WebView2 memory budget flags
 
 ### Added
 

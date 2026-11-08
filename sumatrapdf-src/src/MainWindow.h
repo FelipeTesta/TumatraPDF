@@ -231,6 +231,11 @@ struct MainWindow {
     // plus ancestors). Used when gShowAllMatchingTOC to multi-highlight; the
     // tree still has a single selection (the best match). Cleared with the TOC.
     Vec<TocItem*> tocMatchingItems;
+    // TOC bookmark drag-reorder state (s43-b): item being dragged + guide line.
+    TocItem* tocDragItem = nullptr;
+    int tocDragGuideY = -1; // tree-view client y of the horizontal drop guide, -1 = hidden
+    Point tocDragStart{};   // drag start mouse pos, tree-view client coords
+    UINT_PTR tocTreeSubclassId = 0;
     // width of the toc/favorites sidebar; the source of truth for layout
     // (the toc box window can be hidden and its rect stale, e.g. when only
     // favorites are showing). 0 = not laid out yet
@@ -452,6 +457,16 @@ struct MainWindow {
         HWND hwndToolbar2 = nullptr; // second toolbar
     } archTools;
     // --- end arch tools state ---
+
+    // --- capture tool state ---
+    // pageRect is kept in PAGE coords of pageNo (captured at drag start).
+    struct CaptureToolState {
+        bool on = false;
+        int pageNo = 0; // virtual pageNo the rect was captured on
+        Point dragStart;
+        RectF pageRect;
+    } captureTool;
+    // --- end capture tool state ---
 
     // --- flashcard state ---
     // Window/session-level state. Per-document data (cards, study states,

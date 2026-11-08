@@ -1,0 +1,63 @@
+// ===================== TAB SESSION SYSTEM =====================
+// Snapshot 2026-11-06 pre-s46. Red dashed = sync gaps found by audit;
+// s46 fix applied : RemoveTab now syncs, last-tab pre-sync covers
+// programmatic path, drag/keyboard reorder sync, pinned keyboard lock,
+// boot re-save. Remaining red = direct SetSelected bypass
+// (SumatraPDF.cpp:3970, hard-banned file) + #8 missing-file-at-restore
+// pending design decision. Line numbers drift with edits — re-verify
+// before trusting.
+digraph TabSessionSystem {
+    rankdir=LR;
+    node [shape=box, fontname="Consolas", fontsize=10];
+    edge [fontname="Consolas", fontsize=9];
+    User [label="User", shape=ellipse];
+    TabsCtrlBar [label="TabsCtrl bar\n(wingui/TabsCtrl.cpp)", shape=cylinder];
+    TabsMgmt [label="Tabs.cpp mgmt\n(AddTabToWindow/RemoveTab/CloseAllTabs/MoveTab)"];
+    SumatraPDF [label="SumatraPDF.cpp\n(CloseTab:4950 / CloseWindow:5079 / SaveSettings)"];
+    TabGroups [label="gGlobalPrefs->tabGroups\n(Settings.h:1025)", shape=database];
+    ActiveGroup [label="gGlobalPrefs->activeTabGroup\n(Settings.h:1067)", shape=note];
+    SettingsFile [label="TumatraPDF-settings.txt\n(on disk)", shape=database];
+    Window [label="MainWindow / Win->Tabs()\n(WindowTab per-doc state)"];
+    Restore [label="Startup restore\n(SumatraStartup.cpp:2677)"];
+    User -> TabsCtrlBar [label="open doc / click tab"];
+    TabsCtrlBar -> TabsMgmt [label="AddTabToWindow (Tabs.cpp:760)"];
+    TabsMgmt -> SumatraPDF [label="LoadDocumentFinish (3311)"];
+    TabsMgmt -> TabGroups [label="UpdateActiveGroupAutoSave (806) syncs tabFiles"];
+    TabGroups -> SettingsFile [label="SaveSettings (AppSettings.cpp:797)"];
+    TabsMgmt -> Window [label="win->Tabs() += tab"];
+    TabsCtrlBar -> TabsMgmt [label="Alt+click / middle-click\nCloseTab (TabsCtrl.cpp:555)"];
+    TabsMgmt -> SumatraPDF [label="MainWindowTabClosed (616)\n→ CloseTab (SumatraPDF:4950)"];
+    TabsMgmt -> TabGroups [label="UpdateActiveGroupAutoSave (628)"];
+    SumatraPDF -> SettingsFile [label="SaveSettings (5035)"];
+    SumatraPDF -> TabsMgmt [label="Ctrl+W / menu Close\nCloseTab (4950) → RemoveTab (155)"];
+    TabsMgmt -> SumatraPDF [label="SaveSettings (5035)"];
+    SumatraPDF -> TabGroups [label="STALE: tabFiles not updated", color=red, style=dashed];
+    SumatraPDF -> SettingsFile [label="persists stale group", color=red];
+    TabsCtrlBar -> TabsMgmt [label="last tab Alt+click / mid-click"];
+    TabsMgmt -> SumatraPDF [label="MainWindowTabClosed (616)"];
+    SumatraPDF -> TabGroups [label="SyncActiveGroupToEmpty (600)\n[s45 FIX] clears tabFiles→0", color=green];
+    SumatraPDF -> TabsMgmt [label="CloseTab → CloseWindow (5079)"];
+    SumatraPDF -> SettingsFile [label="SaveSettings (5173) persists EMPTY group"];
+    SumatraPDF -> SumatraPDF [label="CloseTab (4950) tabCount==1 → CloseWindow (4996)", color=red];
+    SumatraPDF -> TabGroups [label="NO SyncActiveGroupToEmpty", color=red, style=dashed];
+    SumatraPDF -> SettingsFile [label="SaveSettings (5173) persists STALE group\n(s45 bug unfixed)", color=red];
+    TabsCtrlBar -> TabsCtrlBar [label="drag reorder\nUpdateAfterDrag (505)", color=red, style=dashed];
+    TabsCtrlBar -> TabGroups [label="NO sync — order diverges", color=red, style=dashed];
+    TabsMgmt -> TabsMgmt [label="MoveTab/SwapTabs (892)", color=red, style=dashed];
+    TabsMgmt -> TabGroups [label="NO sync", color=red, style=dashed];
+    TabsCtrlBar -> TabsMgmt [label="drag out to new window\nMainWindowTabMigration (645)"];
+    TabsMgmt -> ActiveGroup [label="activeTabGroup='' (663)"];
+    User -> SumatraPDF [label="Ctrl+N"];
+    SumatraPDF -> ActiveGroup [label="activeTabGroup='' (9848)"];
+    User -> TabsCtrlBar [label="Tab Group dropdown"];
+    TabsCtrlBar -> SumatraPDF [label="HandleTabGroupMenuCmd (12447)"];
+    SumatraPDF -> Window [label="ActivateTabGroupInWindow (617)\nclose current, load group files"];
+    SumatraPDF -> TabGroups [label="SuppressGroupAutoSave (625)\n→ two-phase, no data loss"];
+    User -> TabsCtrlBar [label="Save Tab Group"];
+    TabsCtrlBar -> SumatraPDF [label="ShowSaveTabGroupDialog"];
+    SumatraPDF -> TabGroups [label="SaveTabGroup (122)\n→ SaveSettings (151)"];
+    SumatraPDF -> SettingsFile [label="SaveSettings on quit (5173)"];
+    SettingsFile -> Restore [label="read tabGroups + activeTabGroup"];
+    Restore -> Window [label="load each tabFiles entry (2690)"];
+    Restore -> TabGroups [label="SuppressGroupAutoSave during boot (2686)\nNO final SaveSettings (6)"];
+}

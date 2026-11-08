@@ -532,6 +532,10 @@ void AutoScrollContinuousTick(MainWindow* win, HWND hwnd) {
         if (win->autoScroll.timerMinutes > 0 && win->autoScroll.startTick > 0) {
             u64 elapsedMs = GetTickCount64() - win->autoScroll.startTick;
             if (elapsedMs >= (DWORD)win->autoScroll.timerMinutes * 60 * 1000) {
+                logf("[as-exp] FIRE timerMinutes=%u thresholdMs=%llu startTick=%llu elapsedMs=%llu now=%llu\n",
+                     win->autoScroll.timerMinutes, (unsigned long long)win->autoScroll.timerMinutes * 60ULL * 1000ULL,
+                     (unsigned long long)win->autoScroll.startTick, (unsigned long long)elapsedMs,
+                     (unsigned long long)GetTickCount64());
                 win->autoScroll.active = false;
                 KillTimer(hwnd, kContinuousAutoScrollTimerID);
                 UpdateToolbarEtaText(win, -1);
@@ -548,6 +552,13 @@ void AutoScrollContinuousTick(MainWindow* win, HWND hwnd) {
         // per-tick quantum assumed — that mismatch was inflating the ETA
         // once the measured speed replaced the nominal one).
         u64 nowMs = GetTickCount64();
+        static u64 asExpLastLogTick = 0;
+        if (nowMs - asExpLastLogTick >= 10000) {
+            asExpLastLogTick = nowMs;
+            logf("[as-exp] tick timerMinutes=%u startTick=%llu elapsedMs=%llu\n", win->autoScroll.timerMinutes,
+                 (unsigned long long)win->autoScroll.startTick,
+                 (unsigned long long)(nowMs - win->autoScroll.startTick));
+        }
         float elapsedSec = (float)(nowMs - win->autoScroll.lastScrollTick) / 1000.0f;
         win->autoScroll.lastScrollTick = nowMs;
         if (elapsedSec < 0.0f || elapsedSec > 1.0f) {
@@ -594,6 +605,10 @@ void AutoScrollContinuousTick(MainWindow* win, HWND hwnd) {
         if (win->autoScroll.timerMinutes > 0 && win->autoScroll.startTick > 0) {
             u64 elapsedMs = GetTickCount64() - win->autoScroll.startTick;
             if (elapsedMs >= (DWORD)win->autoScroll.timerMinutes * 60 * 1000) {
+                logf("[as-exp] FIRE timerMinutes=%u thresholdMs=%llu startTick=%llu elapsedMs=%llu now=%llu\n",
+                     win->autoScroll.timerMinutes, (unsigned long long)win->autoScroll.timerMinutes * 60ULL * 1000ULL,
+                     (unsigned long long)win->autoScroll.startTick, (unsigned long long)elapsedMs,
+                     (unsigned long long)GetTickCount64());
                 win->autoScroll.active = false;
                 KillTimer(hwnd, kContinuousAutoScrollTimerID);
                 SetWebviewAutoScroll(win, 0);

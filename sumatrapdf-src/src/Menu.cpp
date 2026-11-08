@@ -1230,6 +1230,10 @@ static MenuDef menuDefContext[] = {
         CmdShowErrors,
     },
     {
+        _TRN("Repair Document File"),
+        CmdRepairDocumentFile,
+    },
+    {
         _TRN("E&xit Fullscreen"),
         CmdToggleFullscreen, // only seen in full-screen mode
     },

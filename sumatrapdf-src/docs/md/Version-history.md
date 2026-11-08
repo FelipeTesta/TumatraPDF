@@ -161,6 +161,7 @@ Available in [pre-release](https://www.sumatrapdfreader.org/prerelease) builds.
 - add `Annotations.FreeTextAlignment` advanced setting (`left`, `center`, `right`): how text is aligned in newly created free text annotations, so the **Text Alignment** you want no longer has to be set by hand on every annotation. Right-to-left scripts (Arabic, Hebrew, Persian) want `right`. `CmdCreateAnnotFreeText` and the other `CmdCreateAnnot*` commands take a matching `alignment` argument (issue #4799)
 - clearer rendering of CAD / engineering-drawing PDFs: hairline strokes get a zoom-aware minimum width and typical CAD-export grays are darkened toward Acrobat-like contrast, so drawings stay readable when zoomed out. Applied automatically when a drawing is detected (PDF/E marker, CAD authoring tool in the metadata, or content heuristics; screenshot/raster and WPS-style hairline exports are handled too); control it with the `EngineeringDrawingEnhance` advanced setting (`off` / `auto` / `on`) or per document with **Toggle Engineering Drawing Enhancement** (`Ctrl + K` command palette). Ported from the [SumatraPDF Plus](https://github.com/dengxibo/sumatrapdf-plus) fork
 - **Fit Content** (`Ctrl + 3`) now works on print-ready PDFs. Those draw crop and registration marks in the bleed area outside the page, and the content detection used to count them, so it reported the whole page and zooming to content did nothing. Ink drawn outside the page is now ignored. Same for **Shrink** / **Fit to printable area** printing, which uses the same detection. Fit Content also crops the margins properly in the non-continuous **Single Page**, **Facing** and **Book View** modes (it used to show the top/left margin with the content cut off at the other end), and in the continuous modes the mouse wheel now scrolls the document instead of flipping a whole page per notch
+- add **Repair Document File** to the right-click context menu (next to **Show Errors**): re-saves the current PDF in place with mupdf garbage-collect + clean (a full non-incremental rewrite) to repair structural damage such as a broken xref, parent tree, or optional-content/layer config, verifies the error count does not increase, then atomically swaps the corrected file over the original (`MoveFileExW` `MOVEFILE_REPLACE_EXISTING`) and reloads the same page and scroll; the original is left untouched unless every step succeeds
 
 **New commands:**
 
@@ -215,6 +216,7 @@ Available in [pre-release](https://www.sumatrapdfreader.org/prerelease) builds.
 - `CmdPdShowInfo` : "Show PDF Info"
 - `CmdReadAloud` : "Read Aloud"
 - `CmdRemoveDeletedFilesFromHistory` : "Remove Deleted Files From History"
+- `CmdRepairDocumentFile` : "Repair Document File" — re-saves the current PDF in place to repair structural damage, then atomically replaces the original and reloads the same page/scroll
 - `CmdDeleteCachedFiles` : "Delete Cached Files" — deletes local network-drive comic book cache (`cbx-cache`)
 - `CmdResizeImage` : "Resize Image"
 - `CmdScreenshot` : "Take Screenshot"

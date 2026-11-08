@@ -1359,12 +1359,12 @@ TempStr VirtWndHitTestResultTemp(int samplesPerWnd, int seed, int* exitCodeOut) 
     return ToStrTemp(out);
 }
 
-static void AppendTocItems(str::Builder& out, TocItem* item) {
+static void AppendTocItems(str::Builder& out, TocItem* item, int depth = 0) {
     for (; item; item = item->next) {
         if (item->title) {
-            out.Append(fmt("%s|page=%d\n", item->title, item->pageNo));
+            out.Append(fmt("%s|page=%d|depth=%d\n", item->title, item->pageNo, depth));
         }
-        AppendTocItems(out, item->child);
+        AppendTocItems(out, item->child, depth + 1);
     }
 }
 

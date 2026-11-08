@@ -22,365 +22,136 @@ We thank Krzysztof and all contributors for the excellent work on SumatraPDF.
 
 The features below were developed on top of SumatraPDF and **do not exist in the original version**. They follow the same project philosophy — native C/C++ code, Win32 interface, no external dependencies.
 
-> **Note for Krzysztof Kowalczyk** (creator of SumatraPDF): these features were implemented as **direct patches in `sumatrapdf-src/src/`** — the upstream code is preserved in `sumatrapdf-src/`. The `src/features/` and `src/hooks/` directories **do not exist** (README diagram was aspirational). Feel free to incorporate any of them into the official SumatraPDF.
+> **Note for Krzysztof Kowalczyk** (creator of SumatraPDF): these features were implemented as **direct patches in `sumatrapdf-src/src/`** — the upstream code is preserved in `sumatrapdf-src/`. The `src/features/` and `src/hooks/` directories **do not exist**. Feel free to incorporate any of them into the official SumatraPDF.
 
 ---
 
-### 1. ⏱️ AutoScroll with Timer and ETA
+### Reading experience
 
-**What it does:** Continuous automatic document scrolling with speed control, scheduled stop timer, and estimated time remaining (ETA) to finish the book.
+#### AutoScroll with timer & ETA
 
-**How it works:**
+- Continuous auto-scroll with F9 start/stop and F7/F8 speed (round steps), plus a session timer that auto-stops after N minutes.
+- ETA to finish the book shown in the toolbar; scroll speed remembered per document, so a book reopens at its last speed.
+- Pauses when you click the page or lose focus; works on PDF and Markdown.
 
-- A high-precision timer (`SetTimer`) fires `MoveDocBy(0, dy)` on each tick, moving the document vertically
-- Sub-pixel accumulator ensures smooth scrolling even at low speeds
-- ETA calculation uses: `remaining pages × page height / current scroll speed`
-- ETA is computed once on start / speed change / page change and then counts down by wall clock — no per-second recalculation, and only the label (not the whole toolbar) is repainted, so the timer stays smooth
-- Scrolling pauses automatically when clicking on the page (for text selection)
-- Stops at the end of the document (`IsAtDocumentEnd()`)
+#### Scan Mode & Two Columns
 
-**Controls:**
+- Read two-column books one column at a time (Scan Mode) or as stacked narrow columns (Two Columns), maximizing screen space.
+- Margins and inter-column gap adjustable in pixels; a quick toggle shows the full page, then returns to crop view without losing position.
+- Bookmarks and links land on the **left column** of the target page; both modes remembered per document, new files start off.
 
-| Shortcut | Action                |
-| -------- | --------------------- |
-| `F9`     | Start/Stop AutoScroll |
-| `F7`     | Increase speed (+20%) |
-| `F8`     | Decrease speed (-20%) |
+#### Trim (top/bottom margin elimination)
 
-**Toolbar interface:**
+- Cut top and bottom margins from rendered pages to fit more content on screen.
+- Draggable red lines per page (context-aware: shows neighbor pages' lines too); applied on first layout so there is no flicker.
+- Remembered per document; new files start untrimmed.
 
-- Play/Pause toggle button (▶/⏸ icon)
-- - and - buttons for speed adjustment
-- Speed label `%d px/min` in dedicated toolbar slot via fake placeholder button `SpeedInfoId` + `TbSetButtonDx` (cloned page-counter pattern) — occupies space like a native control, no overlap
-- Numeric field for timer (minutes, 0 = no limit) — `[checkbox][Timer:][input]` anchored to the Autoscroll button rect looked up by **command id** (`TbGetRectForCmd` = `TB_COMMANDTOINDEX` + `TB_GETITEMRECT`): moves with it on resize/wrap, hidden as a whole when the wrapped toolbar leaves no room — it can only ever be placed inside that button, never over its neighbours
-- Label showing ETA (e.g.: "⏱ 12min remaining") — works on both PDF (fixed pages: remaining height / speed) and Markdown (webview `autoscrollProgress` ~100ms → `DocController::OnAutoScrollProgress` → `UpdateToolbarEtaText`); the label stays hidden until autoscroll is actually on (no empty black box at document open)
+#### Markdown full-width reading
 
-**Persistence:** Speed and timer saved in `TumatraPDF-settings.txt` (`AutoScrollSpeed`, `AutoScrollTimerMinutes`), and the **speed is also kept per document** (`FileState.autoScrollSpeedMultiplier`): a book reopens at the speed it was last read with, an unopened one at the default. Fresh docs start at min speed `0.008×` (`kMinSpeedMultiplier = 0.008f` ≈ 100 px/min — never-used default). Any persisted value below min clamps to min.
+- Markdown opens full-width with word-wrap that reflows on resize; auto-scroll and contrast work in WebView2 mode.
 
-**Advanced Options:** `AutoScrollShowEta` (default `true`) — set to `false` to hide the ETA label in the toolbar entirely.
+### Page tools
 
-**Markdown (.md):** Works in WebView2 mode (default) via `window.scrollBy(0,dy)` JS injection; stop-at-bottom via JS `autoscrollBottom` → native `DocController::OnAutoScrollBottom`; ETA via JS `autoscrollProgress` → `OnAutoScrollProgress` → ETA `remainingPx / AutoScrollPxPerSec`. MuPDF fallback (`useFixedPageUI=true`) unchanged. F7/F8 multiplier shared. Toolbar buttons (toggle/±) now visible/enabled for .md — fixed 2026-08-25 (was `AsChm()||AsMarkdown()` CHM blacklist → `AsChm()` only + `removeIfMarkdown[]` for fixed-page cmds). PDF ETA path untouched — no regression.
+#### Image editing (right-click on an image)
 
-> **Timer UI:** `[checkbox][Timer:][input]` control on the toolbar before the Autoscroll button. Positioned from the Autoscroll button's rect (by command id), so wrapping and resizing keep it inside that button; it hides as a whole when the row has no room left.
+- Replace Image, Edit With Paint, Crop/Resize, and Copy Image to clipboard — shown only when an image is under the cursor.
+- Crop/Resize edits are written back into the PDF on Save; aspect preserved with Shift-drag.
 
----
+#### Edit mode
 
-### 2. 🎨 Contrast Filter (Overlay)
+- Paste a clipboard image into the current page and place it with a click; drag handles to move/crop it; Apply writes edits back into the PDF.
+- Toggle on/off from the toolbar; mutually exclusive with Arch Tools and Flashcards.
 
-**What it does:** Applies a semi-transparent black overlay over the document, simulating brightness/contrast reduction without modifying the original PDF.
+#### Capture tool (Shift+S)
 
-**How it works:**
+- Draw a rectangle over the page to capture it at the document's DPI and copy it to the clipboard.
+- Works on the page the drag started on; auto-exits after capture; Esc cancels.
 
-- An overlay window (`WS_EX_LAYERED | WS_EX_TRANSPARENT`) is created as a sibling of `hwndCanvas`
-- The `WS_EX_TRANSPARENT` attribute ensures mouse clicks pass through the overlay — text selection and navigation continue to work normally
-- Opacity is controlled via `SetLayeredWindowAttributes(hwnd, 0, alpha, LWA_ALPHA)`, where alpha = 255 × (transparency / 100)
-- The overlay automatically resizes with the window (`WM_SIZE`)
+#### Contrast filter & dark mode
 
-**Controls:**
+- Semi-transparent black overlay (Ctrl+Shift+C) for comfortable reading; opacity 0–100%, remembered per document.
+- Dark theme (default) plus page-color invert (Shift+I); both survive document reload.
 
-| Shortcut       | Action                         |
-| -------------- | ------------------------------ |
-| `Ctrl+Shift+C` | Enable/Disable contrast filter |
+#### Arch Tools (scale & measure)
 
-**Toolbar interface:**
+- For architecture PDFs: draw a line, enter its real length, then measure x/y/length in real-world units.
+- Radius (3-click arc) and Ref Line (full-page guide line); erase individual lines with E.
+- Conflict gates keep Arch Tools, Flashcards, AutoScroll, Scan Mode, and Trim from overlapping.
 
-- Toggle button (🌓/☀ icon)
-- Slider/numeric input from 0% to 100% (0% = no overlay, 100% = full black)
+### Bookmarks & flashcards
 
-**Persistence:** State and value saved (`ContrastEnabled`, `ContrastOpacity`). Fresh docs (no `FileState`) reset `contrastEnabled=false` / `contrastOpacity=50` / `autoScrollSpeedMultiplier=0.1f` — no cross-tab leak (`LoadDocument` else-branch). **Win32 overlay cross-doc leak fix:** `DestroyContrastOverlay(win)` called unconditionally on document change (`LoadDocument`) and in OFF toggle branch for all modes (clears tainted cross-doc Win32 layers).
+#### Editable bookmarks sidebar
 
-**Markdown (.md):** Works in WebView2 mode (default) via injected `div#__sumatra_contrast` CSS overlay (`Eval`, `pointer-events:none`, max `z-index`); opacity `contrastOpacity*255/100/255.0f` — same math as Win32 overlay; OFF now `d.remove()` not `display:none`. Persisted via `RestoreContrastOverlay` on `OnDocumentComplete`. MuPDF fallback unchanged. Per-doc persistence applies to .md too — reopen restores saved `ContrastEnabled`/`ContrastOpacity`; black veil on reopen = persisted ON → `Ctrl+Shift+C` toggles off (by design, matches PDF).
+- Add bookmarks for the current page; right-click to Rename, Delete, or Update; drag to reorder and indent with a white guide line.
+- Changes persist into the PDF on save and survive reopen.
 
----
+#### Flashcards (cloze SRS)
 
-### 3. 📖 Scan Mode & Two Columns (ex Viewport Crop)
+- Turn text selections into cloze cards — a gray highlight mask over the PDF's own text, nothing duplicated.
+- SM-2 spaced repetition per book; rate 1–4 on reveal; Alt+drag and cross-page selections make one grouped card.
+- Study timer, per-day stats, Order/Filter/List windows, cross-document sessions, export/import, and local backups.
 
-**Status:** 🟢 Complete
+### Tabs & sessions
 
-**What it does:** Displays two-column pages one column at a time (Scan Mode) or as stacked narrow columns (Two Columns), maximizing screen space and optimizing auto-scroll reading flow.
+#### Tab groups (named sessions)
 
-**Names (2026-09-30):** the column-by-column toggle is **Scan Mode** (ex Viewport Crop / "Two Column"); the stacked-columns variant is **Two Columns** (ex "Two Column 2"). Toolbar + `New Tools` menu labels follow the new names. Turning Scan Mode on always first fits the page width, so toggling it from any zoom level is safe (no "half of half" division).
+- Save the open documents of a window as a named group; restore any group on startup or on demand; groups auto-sync as tabs are added, removed, or closed.
+- Dropdown lists groups with Open here / Open in new window / Rename / Delete / New session; Ctrl+N starts an unsynced window.
 
-**How it works:**
+#### Tab drag guide line
 
-- The viewport is cropped by user-defined margins (left, right, top, bottom, inter-column gap) in pixels
-- In two-column mode, each column is displayed sequentially: left → right → next page left
-- The zoom level adjusts like "fit-width" but constrained within the trimmed area
-- A quick toggle (double-click or shortcut) temporarily shows the full page — useful for tables or images — and returns to crop view without losing settings or page position
+- A white vertical line shows the drop position while dragging a tab; dropping reorders tabs in place.
 
-**Configuration dialog:**
+#### Interface defaults
 
-| Input            | Unit | Description                  |
-| ---------------- | ---- | ---------------------------- |
-| Left margin      | px   | Crop from left edge          |
-| Right margin     | px   | Crop from right edge         |
-| Top margin       | px   | Crop from top edge           |
-| Bottom margin    | px   | Crop from bottom edge        |
-| Inter-column gap | px   | Gap between two text columns |
+- Sidebar starts hidden on every document open (enable via the bookmarks button, F9/F12, or the View menu).
+- Bare digit keys type into edit fields; only Ctrl+digit zoom presets remain global shortcuts.
+- Toolbar wraps to a second row on narrow windows instead of cutting off buttons.
 
-**Quick toggle:** Temporarily switch to full-page "fit width" view and back without resetting crop settings or losing the current page position.
+### Stats & profile
 
-**Bookmarks / TOC / outline links:** destinations store PHYSICAL page numbers, so in Two Columns they are mapped to the column domain before scrolling — clicking a bookmark lands on the **LEFT** column of the registered page (page `N` left = the start of the spread), never in the middle of it.
+#### Reading stats
 
-**Persistence:** both modes are **per document** (`FileState.ViewportCropV2` / `MarginTrim` / `TrimTop` / `TrimBottom`) — every book keeps the setup it was saved with, and a **new file always opens with both OFF** instead of inheriting the mode the last book was left in. The per-file values survive for every document still in the history (the 10 most recent keep their full state).
+- Time spent reading with auto-scroll tracked per document and per day, shown on a Home dashboard band.
+- Most-read ranking, Today/Total totals, 365-day heatmap, and annual graph; master total survives renaming or moving a book.
 
-**Interface:**
+#### Profile memory & sync
 
-| Access                      | Action                      |
-| --------------------------- | --------------------------- |
-| Menu: New Tools → Scan Mode | Enable/disable              |
-| Toolbar button              | Toggle on/off               |
-| Config button (gear icon)   | Open margin settings dialog |
-| Quick toggle                | Temporarily show full page  |
+- All reading time, flashcard data, and per-book state in a single `tumatraPDF-data_1.json` that can be exported, imported, and synced (e.g. via Google Drive).
+- Home "🔁 Sync" button opens the Profile Sync window; 9 rolling local backups; `profileDataDir` setting points at a synced folder; portable→install import.
 
----
+### Update & identity
 
-### 3.5 ✂️ Trim (Top/Bottom Margin Elimination)
+#### Own update system
 
-**Status:** 🟢 Complete (2026-08-15)
+- The app checks its own GitHub Releases (`update.txt`) daily instead of upstream SumatraPDF checks; downloads, validates (MZ header + size), and self-replaces (portable) or runs the installer (installed).
+- Fully isolated from upstream SumatraPDF: own directory, registry keys, settings file, and exe name.
 
-**What it does:** Eliminates top/bottom margins from the rendered pages in continuous reader mode, optimizing screen usage.
+#### Own visual identity
 
-**How it works:**
+- `TumatraPDF.exe`, "TumatraPDF" window title, `TumatraPDF-settings.txt`, inverted-color logos, and own registry keys — installs side-by-side with SumatraPDF.
 
-- Clip-based render elimination (`RenderPageArgs.pageRect`) — NOT a zoom hack
-- Trim Config dialog with "margin-top" / "margin-bottom" buttons
-- Draggable red 2px horizontal line to set the trim distance
-- Context-aware lines: every margin line visible in the viewport is shown (near a page top you also get the previous page's bottom line; near a page bottom the next page's top line; a fully visible page shows its own two lines) — drag any of them
-- While the Trim Config dialog is open, trim is temporarily disabled so the FULL page is visible for placing the lines; it comes back on Save/Cancel. Auto-scroll **pauses** for as long as the dialog is open and resumes on Save/Cancel, so the page cannot drift while the lines are being placed
-- ✅ button saves the distances
+#### Repair Document File
 
-**Persistence:** trim on/off and the two margin distances are **per document** (`FileState.MarginTrim` / `TrimTop` / `TrimBottom`, `-1` = follow the global default), and the **first layout of a newly opened file is built with the document's own margins** — no flicker of untrimmed pages, and a new file starts with trim OFF.
-
-**Controls:**
-
-| Access             | Action             |
-| ------------------ | ------------------ |
-| Toolbar button     | Trim on/off        |
-| Trim Config button | Open config dialog |
-
----
-
-### 4. 🔄 Own Update System (replaces upstream checks)
-
-**What it does:** The app checks for its OWN new versions (this repo's GitHub Releases) — upstream SumatraPDF update checks and all upstream data collection were removed.
-
-- Daily check of the repo's `update.txt`; a newer version prompts and downloads the update, validates it (MZ header + size)
-- **Portable copy:** replaces its own exe via a detached helper script (no installer, no admin)
-- **Installed copy:** runs the downloaded installer (`-install`) — it reuses the install dir remembered in the registry and upgrades files in place
-- Releases are built by GitHub Actions from `v*` tags; every release ships TWO assets: `TumatraPDF-portable-win64.exe` and `TumatraPDF-install-win64.exe` (same exe — the `install` in the name flips it into installer mode)
-- Installed build is fully isolated from upstream SumatraPDF: own install dir (`%LOCALAPPDATA%\TumatraPDF` / Program Files), own registry keys (`TumatraPDF*` progIDs, Uninstall, App Paths, RegisteredApplications), own settings dir (`%LOCALAPPDATA%\TumatraPDF`), installed exe named `TumatraPDF.exe`
-- Tracking/merging UPSTREAM SumatraPDF changes is a manual process documented in `MERGE.md`
-
----
-
-### 5. 📐 Arch Tools (Scale + Measure)
-
-**Status:** 🟢 Complete + E2E verified (s33, 2026-10-09)
-
-**What it does:** For architecture PDFs (vector drawings). Define a scale by drawing/selecting a line and entering its real length; then measure any line to get real-world x / y / length.
-
-**How it works:**
-
-- A second toolbar (below the main one) opens via the "Arch Tools" toggle button on the main toolbar. Lines (scale + measurements) are visible only when Arch Tools = ON.
-- **Scale:** draw a line on the page (snaps to vector endpoints), open the floating Scale dialog, type the real length + Enter/✅ → computes the scale factor (page units / real unit). Drawing a new line replaces the previous one.
-- **Calculator input:** the length field accepts simple expressions — `100-20`, `2*50`, `25/2` (+ - * /, left-to-right). Enter (main or numpad) accepts the computed value.
-- **Pan between clicks:** after the first click pins point 1, drag with the RIGHT mouse button to pan the page (zoom also works) and click point 2 far away — the pinned point is stored in page coordinates and stays put.
-- **Measure:** draw lines; each shows its real x / y / length (in the chosen unit) as a label on the page.
-- **Radius ("Radius" button):** three clicks — chord start, chord end, then the arc bulge point — draws the arc through them and labels its radius in the page scale.
-- **Ref Line ("Ref Line" button):** two clicks → a thin subtle gray guide line spanning the whole page through both points (reference guides for alignment work).
-- **Clean lines** (`CmdArchClear`): clears all measurements + the scale line/calibration of the page. **Reset Scale** (`CmdArchResetScale`): clears scale calibration only.
-- **Erase:** hold `E` while Arch Tools is ON → red "+" cursor; click a drawn line to delete it individually.
-- **Esc:** cancels the current draw / closes the Scale dialog.
-- **Conflict gates:** while Arch Tools = ON the Two Columns, Scan View, Autoscroll, Trim and Flashcards buttons gray out (and their shortcuts/menus are blocked — turning a still-active one OFF stays possible). While Flashcards = ON, Arch Tools, Autoscroll and Scan View are disabled the same way. The toolbars never auto-close each other.
-
-**Controls:**
-
-| Access                           | Action                          |
-| -------------------------------- | ------------------------------- |
-| Main toolbar "Arch Tools" toggle | Show/hide 2nd toolbar + lines   |
-| 2nd toolbar "Scale"              | Enter scale mode (opens dialog)       |
-| 2nd toolbar "Measure"            | Toggle measure mode                   |
-| 2nd toolbar "Radius"             | 3-click arc radius mode               |
-| 2nd toolbar "Ref Line"           | 2-click full-page guide line          |
-| 2nd toolbar "Clean lines"        | Clear measurements + scale line       |
-| 2nd toolbar "Reset Scale"        | Clear scale calibration         |
-| Right-drag (while drawing)       | Pan the page between clicks     |
-| Hold `E` + click                 | Erase individual line           |
-| `Esc`                            | Cancel draw / close dialog      |
-
-**Technical:** `sumatrapdf-src/src/ArchScaleDialog.{h,cpp}` (floating dialog + expression evaluator), `sumatrapdf-src/src/ArchVector.{h,cpp}` (PDF vector segment extraction + snap + hit-test), `sumatrapdf-src/src/Canvas.cpp` (draw overlay + erase + right-drag pan), `sumatrapdf-src/src/Toolbar.cpp` (2nd toolbar + conflict gates in `IsCmdEnabled`), `sumatrapdf-src/src/SumatraPDF.cpp` (command handlers + FrameOnCommand gates + RelayoutFrame), `src/Commands_ArchTools.cpp`. Draw points stored in PAGE coords (pan/zoom-proof). Modularity gate: global pref `archToolsEnabled` (default on; off = zero cost).
-
----
-
-### 6. 🎨 Own Visual Identity
-
-- **Binary name:** `TumatraPDF.exe` (allows side-by-side installation with original SumatraPDF)
-- **Window:** Title "TumatraPDF" instead of "SumatraPDF"
-- **Settings file:** `TumatraPDF-settings.txt` (does not conflict with `SumatraPDF-settings.txt`)
-- **Icons:** Logos with inverted colors for visual distinction
-- **Registry:** Own keys in Windows Registry (do not interfere with SumatraPDF installation)
-
----
-
-### 7. 🃏 Flashcards — Cloze SRS over PDF text
-
-**Status:** 🟢 Complete (study flow, filter window, cross-doc sessions deployed 2026-09-25; user live tests pending)
-
-**What it does:** Turns text selections into cloze flashcards — a gray highlight annotation acts as an occlusion mask over the PDF's own text (no content duplicated). Spaced repetition (SM-2) schedules reviews per book.
-
-**How it works:**
-
-- **Create:** select text → `S` (or `Shift+S`). `Alt+drag` accumulates disjoint selections → ONE grouped card (N masks). Selection continuing onto the NEXT page also makes **ONE card**: every page it covers is masked at once in study (Page column shows the range, e.g. `12-13`) — the per-page highlights share a group token in their annotation author.
-- **Study:** toolbar Study button. Card arrives masked, vertically centered (TC2 column-aware). `Space`/`Enter` reveals → `1`–`4` rate (Again/Hard/Good/Easy, numpad too) → auto-advance. Again reinserts the card (relearn). Back = previous card, arrives revealed, keeps scroll. Next = skip without rating.
-- **SM-2 state:** per-book JSON in the study-history folder (default: portable app-data dir next to the exe, configurable via the Settings window), keyed by MD5(filePath) — per-book isolation; files carry the book's name for the Config list. All flashcard windows are theme-aware (dark mode included).
-- **Order dialog** (Order button): Sequential/Random (shuffle within new/due groups) + new-cards position — before due / after due / mixed (proportional interleave, default). Instant apply.
-- **Settings window** (Settings button; ex-Clean, ex-Config): (1) **study-history folder** — shows the current dir, `📂` opens a folder picker; point it at a Google Drive folder to keep every book's history backed up/synced (empty = default app-data dir; existing JSONs are MIGRATED to the new folder — files already there are kept); (2) **history list** — every book in the study dir with `|PDF | cards | due | last reviewed|` (~10 rows + scroll, column header strip aligned with the rows); (3) **Clear Selected** (2s orange hold) — clears the SELECTED book's history; (4) **Clear All** (5s red hold); (5) **Link to PDF...** — manual resync: point an orphaned history at a renamed/moved book; (6) **Restore Backup** (5s red hold) — restores the newest snapshot; (7) **sync markers** — a dot before each name: green = history linked to a PDF at a known location, red = PDF moved/renamed (use Link to PDF... to fix), grey = legacy file; the **Re-check** button re-validates all markers (e.g. after a Drive folder finishes loading). Actions run inside the window; the list reloads live. X/Esc closes.
-- **Resync:** history files are keyed by MD5(file path) — renaming/moving a PDF would orphan its history. Automatic: opening a moved book (same base name) ADOPTS its old history file. Manual: Settings → Link to PDF... for renames.
-- **Local backups:** rolling snapshots of the whole study dir in `backup\1d`, `backup\3d`, `backup\7d` (refreshed after each save when older than the slot's age). Restore via Settings → Restore Backup.
-- **Filter window** (Filter button): page-set expression `1-15;20-25;-22-23;` (ranges add, `-` prefix removes, sequential eval) + bookmark mirror (checkbox per TOC item injects the chapter's range; chapter = first bookmark page → page before next flat bookmark, sublevels included) + Filters ON/OFF (keeps expression) + Clear Filters (2s hold). Filter is per-book; Apply/Enter applies. Fully themed (dark mode included).
-- **Cross-document sessions:** checkbox "Study all open PDFs (session)" — study queue over ALL PDF tabs in the SAME window; advancing auto-switches tab and centers the card; SM-2 saved to each book's own JSON. Two distinct study modes: current document × global session.
-- **Import window** (toolbar Import button): compare another copy of the same book with yours — `| Document | Cards |` table (current doc + picked source), dry-run `New cards: N` count, `[Import new cards to this document]` creates only the DIFFERENT flashcard-tagged highlights (duplicates skipped, study history NOT imported); cards reload immediately.
-- **Session window** (toolbar Session button): search every book in your study history, multi-select via checkboxes (`|PDF | cards | due | last reviewed | tags|`, sync dots included) and **Open Session** launches a new TumatraPDF window with all selected books — combine with the session-wide study/filter for a multi-book review.
-- **Per-tab state:** cards, study history and filter live on the tab (`WindowTab::flashcard`) — switching tabs reloads each book's cards; session/queue lives on the window.
-- **List panel** (List button, ex-"Lista"): docked right-side panel (resizable via splitter) listing the book's cards in 4 columns — Flashcard (the masked text, extracted live; nothing stored in the PDF), Page, Due (countdown to next review, "0min" when due), Status with colors (new = blue, due = orange, learn = purple, ok = green). Click a row → navigate to the card; refreshed after rating and history wipes.
-
-**Controls:** press `?` (Shift+/) for the in-app keyboard shortcuts sheet — it lists the Flashcards and Auto-Scroll & Contrast sections too, and the sheet window is resizable. The Command Palette (`Ctrl+K`) also exposes every fork command.
-
-**Controls:**
-
-| Shortcut             | Action                          |
-| -------------------- | ------------------------------- |
-| `S` / `Shift+S`      | Create card from selection      |
-| `Space` / `Enter`    | Reveal answer                   |
-| `1`–`4` (numpad too) | Rate Again / Hard / Good / Easy |
-
-`1`–`4` are rating keys only while a study card is on screen; otherwise they type digits into edit fields (page box, timer field).
-
-**Technical:** `src/Flashcard.{h,cpp}` (loader, SM-2, study JSON incl. docName + folder setting, history list reader, filter parser), `src/Commands_Flashcard.cpp` (session queue `{tab, cardIdx}`, navigation, rating, xorshift shuffle), `src/FlashcardToolbar.cpp` (2nd toolbar + shared dialog scaffolding + Order/Filter/Config windows, theme-aware), `src/FlashcardSidebar.cpp`, `src/Canvas.cpp` (`PaintFlashcardMasks`), `src/WindowTab.h` (per-tab `FlashcardTabState`). Rich `[fc]` logging for bug diagnosis.
-
----
-
-### 8. 🖼️ Image Editing (right-click on an image)
-
-The Image submenu appears only when an image is under the cursor (or the tab is an image file) — previously its items showed on every right-click and several of them did nothing.
-
-- **Copy Image To Clipboard** is a top-level context-menu entry (was nested in Image >).
-- **Replace Image...** — pick another image from the PC, confirm, and the embedded image is swapped in the PDF (same page position). Save the PDF afterwards (File > Save) to keep the change.
-- **Edit With Paint** — the image opens in mspaint; every time you save there, the PDF image is replaced automatically. Save the PDF afterwards to persist.
-- **Crop / Resize** — the editor window (Image > Crop / Image > Resize) now writes the edited image back into the PDF on **Save** (position and aspect preserved — the edit is composed onto the original image canvas), in addition to the exported file. Hold **Shift** while dragging a resize edge to keep the aspect ratio.
-- **"Convert page to PDF"** is disabled (grayed) — pending a revisit.
-
-**Technical:** `EngineMupdf::ReplaceImageWithFile`/`ReplaceImageByIdx` (pageNo + imageIdx identity from the clicked element; mupdf image-store pointer match → XObject dict `pdf_add_image` + `pdf_dict_put`), page-cache invalidation (`InvalidatePageAfterImageReplace`) after every in-place swap, 1.2s mtime watch timer for the external-edit flow, transform-tracked crop/resize writeback (padded PNG replace via `ImageEditHost::WriteBackToPdf`), command handlers in `src/Commands_Image.cpp`, recursive submenu pruning in `Menu.cpp`.
-
-Also: **Home (`⌂`) toolbar button** before Open — the Home tab no longer auto-opens at startup; it opens only on request.
-
-### 9. 🧰 Responsive Toolbar + Sidebar/Input Defaults
-
-- **Bookmarks toolbar button** (icon-only, Tabler "bookmarks", between Open and Print): toggles the sidebar; checked state mirrors sidebar visibility (single sync point in `SetSidebarVisibility` — F9/F12/menu/toolbar all converge there).
-- **Save button** (icon, right of Print): saves annotations/edits into the open document (same as `Ctrl + Shift + S`). Disabled while nothing is unsaved, lights up when the document goes dirty. The page-number box anchors on the nearest visible button to its left (was hard-coded to Print), so inserted buttons never get covered.
-- **Two-row wrap:** when the window gets narrow enough to clip a button, the toolbar doubles its height and the buttons that don't fit move down to a second row (rightmost first). Works via a debounced rebuild (200 ms after the last resize step) — comctl only computes wrap points when buttons are added, so the toolbar deletes and re-adds its buttons at the new width, then re-applies every per-button state (hidden/enabled, checked toggles, tooltips, page box). ArchTools and Flashcard toolbars get their band heights synced through the same subclass.
-- **Sidebar starts hidden:** every document opens with favorites/TOC OFF (previous "show TOC by default" heuristics removed); enable manually via the bookmarks button, F9/F12, or the View menu.
-- **Digit keys stay digits:** `1`–`4` (and all bare digits) type into edit fields; only Ctrl+digit combos (zoom presets) remain global shortcuts.
-
-**Technical:** `src/Toolbar.cpp` (`AddAllToolbarButtons`, `RebuildToolbarButtonsForWidth`, `SetToolbarBandToRowHeight`, `WndProcToolbar` WM_SIZE/WM_TIMER), `src/ToolbarLayout.cpp` (timer trio anchored to the Autoscroll button rect, looked up by command id via `TbGetRectForCmd` in `src/base/Win.cpp` — `TB_GETRECT` wants a *button index*, not a command id), `src/Accelerators.cpp` (`isSafeAccel` bare-digit rule), `src/SvgIcons.cpp` (`gIconBookmarks`).
-
-### 10. ✏️ Edit Mode (paste images into the page + in-page image editing)
-
-Toolbar toggle like Arch Tools/Flashcards. When ON:
-
-- A second toolbar offers **+Text**, **+Img**, **Crop** and **Apply**.
-- **Ctrl+V** pastes the clipboard image INTO the current page — the next left-click places it (clamped to fit the page) as a stamp annotation. With Edit OFF, Ctrl+V keeps the old behavior (open the clipboard image as a new document).
-- **Click any embedded image** to select it: a bounding box with drag handles appears directly over the page (no separate window). Drag the border/edges to resize/crop the region, drag inside to move it. **Crop** dims the area outside the box; **Apply** writes all pending edits back into the PDF (File > Save persists). Right-click → Image → Crop/Resize opens this same flow.
-- Mutually exclusive with Arch Tools and Flashcards — enabling Edit turns those off.
-
-**Technical:** `src/Commands_Edit.{h,cpp}` (toggle, toolbars, placement, bbox editing + Apply via `ReplaceImageByIdx` on a transparent padded canvas), `MainWindow::EditToolsState` (`MainWindow.h`), `Canvas.cpp` click/drag/cursor/paint routing, overlay painted on the screen DC post-flush, `EngineMupdfCreateAnnotation` (stamp; clipboard BGR pixmaps converted to RGB before embedding — mupdf only accepts Gray/RGB/CMYK).
-
-### 11. 📊 Reading Stats (auto-scroll time tracking + Home dashboard)
-
-Time spent reading with **auto-scroll** active is tracked per document and per calendar day, and shown in a **stats band on the Home page** (top half, above the file thumbnails):
-
-- **Most-read ranking** — top 8 documents with right-aligned reading time.
-- **`Today <t> | Total: <t>` totals** — the all-time total is summed from the daily buckets in `reading-stats.txt`, so it is a **master counter that survives renaming, deleting or moving a book** (per-document time would be lost if the file left the history). Times are drawn with the strong text colour so they stay legible in dark themes.
-- **365-day heatmap** (GitHub/Anki style) — green gradient by minutes read per day, gray for empty days, month letters above, weekday letters (M W F S) on the left, ◀/▶ arrows to navigate years, hover shows "YYYY-MM-DD: time".
-- **Annual chart** — days × hours-read bar chart with the max labeled.
-- **Auto-pause:** minimizing the window or switching apps pauses the auto-scroll automatically; re-activation resumes it with a fresh time base (a manual toggle always overrides).
-
-**Technical:** `src/ReadingStats.{h,cpp}` (capture + daily sidecar `reading-stats.txt` — plain `YYYYMMDD <sec>` lines next to the settings file; per-doc `FileState.readingTimeSec` via gen-settings; `ReadingStatsGetTotalSec()` = all-time total over the daily buckets), hooks in `AutoScroll.cpp` (credit per tick, reset on every stall/pause, flush at stops + `SaveSettings`), focus pause in `WM_ACTIVATE` (`SumatraPDF.cpp`), `HomeStatsWnd` (VirtWnd in the home chrome tree) + `HomePageLayout.rcStats` band in `HomePage.cpp`.
-
-### 📋 Technical Summary for Developers
-
-| Feature                    | Main files                                                                                                                       | Hook point                                                                                              |
-| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| AutoScroll                 | `src/AutoScroll.cpp`, `src/AutoScroll.h`, `src/Canvas.cpp`                                                                       | `OnTimer()`, `FrameOnCommand()`                                                                         |
-| Contrast Filter            | `src/ContrastOverlay.cpp`, `src/Canvas.cpp`                                                                                      | `WM_CREATE` (overlay window)                                                                            |
-| Viewport Crop              | `src/DisplayModel.cpp`, `src/SumatraPDF.cpp`                                                                                     | `GetViewPort()`, `ScrollYBy()`, `PhysicalToVirtualPage()`                                                |
-| Update                     | `scripts/check-updates.ps1`, `MERGE.md`                                                                                          | N/A (external tool)                                                                                     |
-| Arch Tools (Scale+Measure) | `src/ArchScaleDialog.{h,cpp}`, `src/ArchVector.{h,cpp}`, `src/Canvas.cpp`, `src/Toolbar.cpp`, `src/SumatraPDF.cpp`               | `CmdArchToolsToggle`/`CmdArchScale`/`CmdArchMeasure`, `OnPaintDocument`, `UpdateToolbar2State`          |
-| Flashcards (Cloze SRS)     | `src/Flashcard.{h,cpp}`, `src/Commands_Flashcard.cpp`, `src/FlashcardToolbar.cpp`, `src/FlashcardSidebar.cpp`, `src/WindowTab.h` | `FrameOnCommand()` flashcard branch, `LoadModelIntoTab` (per-tab state), `OnPaintDocument` (mask paint) |
-| Image Editing              | `src/Commands_Image.cpp`, `src/EngineMupdf.cpp`, `src/ImageSaveCropResize.cpp`, `src/ImageEditHostSumatra.cpp`, `src/Menu.cpp` | right-click Image menu, `FrameOnCommand()`, WM_TIMER paint watch |
-| Edit Mode                  | `src/Commands_Edit.{h,cpp}`, `src/Canvas.cpp`, `src/MainWindow.h`                                                              | `CmdEditToolsToggle`, Ctrl+V routing, canvas click placement                                        |
-| Reading Stats              | `src/ReadingStats.{h,cpp}`, `src/HomePage.cpp` (`HomeStatsWnd`), `src/AutoScroll.cpp`, `src/AppSettings.cpp`                    | autoscroll tick credit, WM_ACTIVATE pause, Home stats band                                            |
-
-**How to build:** See "Build" section below.
-
----
-
-### 12. 💾 Profile Memory / Sync
-
-**Status:** 🟢 Complete (s36-bn/bp/bq)
-
-**What it does:** Single portable user-data file `tumatraPDF-data_<n>.json` consolidates books (SM-2 study states), per-day reading/study stats, per-document time counters — export/sync/import as one unit. Location configurable (`profileDataDir`, default app-data). Legacy per-book JSONs + two stats sidecars keep being written as import/legacy views; profile is authoritative superset. Day rows carry per-machine attribution so two machines sharing via cloud-synced folder sum exactly without double-counting.
-
-**Home page:** `🔁 Sync` button next to "Stats" title → Profile Sync window (dark-themed): format version, file size, last save timestamp, machine, books, reading days, study days, backup count, destination dir (abbreviated).
-
-**Buttons:** Save Now, Open Folder, Backups (9-slot × 8h rolling dialog + restore), Export (primary + backup/ → chosen folder), Import (Replace = backup to `.pre-import` then adopt; Merge = newest-wins adopt-absent), Close.
-
-**File integrity:** MD5 checksum in JSON header; corrupt file → automatic backup-slot recovery / legacy fallback.
-
-**Cloud-safe:** Drive conflicted-copy merge (newer lastWriteTs + per-machine day rows), cloud-revert restore prompt, portable→install auto-import.
-
----
-
-### 🗺️ What's new
-
-The per-version changelog (features + bug fixes, newest first) lives in **[CHANGELOG.md](CHANGELOG.md)**.
+- Right-click a damaged PDF → "Repair Document File": engine-corrected in-place save that clears structural errors without touching page content; the original is left untouched on failure.
 
 ---
 
 ## Modularity Strategy
 
-**Reality (audit 2026-08-24):** The fork uses **direct patches in `sumatrapdf-src/src/`** — not a separate `src/features/` or `src/hooks/` tree. Those directories do not exist.
+The fork uses **direct patches in `sumatrapdf-src/src/`** — not a separate `src/features/` or `src/hooks/` tree. Those directories do not exist.
 
-```
-TumatraPDF/
-├── sumatrapdf-src/        # Original SumatraPDF code (preserved)
-│   └── src/               # ~810 insertions across 34 files + new modules
-│       ├── AutoScroll.{h,cpp}        # NEW module
-│       ├── ContrastOverlay.cpp       # NEW module
-│       ├── TrimConfigDialog.{h,cpp}  # NEW module
-│       └── ... (direct patches to existing files)
-├── docs/                  # Documentation
-├── FLOW/                  # Planning diagrams
-├── README.md
-├── LOG.md
-└── MERGE.md               # Upstream merge instructions
-```
+- Upstream code in `sumatrapdf-src/` is the baseline; patches applied directly (~810 insertions across 34 files plus new modules such as AutoScroll, ContrastOverlay, TrimConfigDialog, Flashcard, ReadingStats, ProfileData).
+- `MERGE.md` documents the upstream update process (fork point ~912ecf2, Aug 2026).
+- Informativos (`README.md`, `LOG.md`, `TODO.md`, `BUILD.md`, `MERGE.md`, `FLOW/*.dot`): English + caveman-compressed, always.
 
-**Principles:**
-
-- Upstream code in `sumatrapdf-src/` is the baseline; patches applied directly
-- New features added as standalone modules in `sumatrapdf-src/src/` (AutoScroll, ContrastOverlay, TrimConfigDialog)
-- `MERGE.md` documents the upstream update process (fork point ~912ecf2, Aug 2026)
-- Informativos (`README.md`, `LOG.md`, `TODO.md`, `BUILD.md`, `MERGE.md`, `FLOW/*.dot`): English + caveman, always (AGENTS.md §13)
-
-## Download + Update System (s26, installer since s32)
+## Download + Update System
 
 - **Releases:** built by GitHub Actions from `v*` tags — grab `TumatraPDF-portable-win64.exe` (just run) or `TumatraPDF-install-win64.exe` (installer) from [Releases](https://github.com/FelipeTesta/TumatraPDF/releases)
-- **In-app auto-update:** daily check of the repo's `update.txt`; when a newer version exists, the app downloads it, validates it (MZ header + size). Portable copies self-replace via a detached helper script; installed copies run the downloaded installer, which upgrades the install dir in place
-- **Isolation:** installing TumatraPDF does NOT touch an existing upstream SumatraPDF install (separate dirs, registry keys, exe and settings names)
-- **Privacy:** the only network call the app makes on its own is the update-check GET to this repo. All upstream SumatraPDF data collection (crash upload, symbol download, apptranslator links) was removed — crash dumps stay local
-- Upstream merge tracking documented in `MERGE.md` (manual process)
+- **In-app auto-update:** daily check of the repo's `update.txt`; when a newer version exists, the app downloads it, validates it, and self-replaces (portable) or runs the installer (installed). No installer, no admin needed for portable.
+- **Isolation:** installing TumatraPDF does NOT touch an existing upstream SumatraPDF install (separate directories, registry keys, exe and settings names).
+- **Privacy:** the only network call the app makes on its own is the update-check GET to this repo. All upstream SumatraPDF data collection (crash upload, symbol download, translation links) was removed — crash dumps stay local.
+- Upstream merge tracking documented in `MERGE.md` (manual process).
 
 ## Architecture
 
@@ -391,8 +162,7 @@ Based on SumatraPDF:
 - **UI:** Native Win32 API
 - **PDF engine:** MuPDF
 - **Formats:** PDF, EPUB, MOBI, CBZ/CBR, FB2, CHM, XPS, DjVu, Markdown (.md/.markdown)
-- **Native auto-update:** `src/UpdateCheck.cpp` (SumatraPDF)
 
 ## Status
 
-🟢 Core features complete. Modularization in progress: 16A-16C ✅, 16C-F6 ✅, Design system ✅, Autoscroll ✅, Toolbar wrapping ✅, ToolbarLayout ✅, Flashcards ✅ (full stack: cloze SRS + study flow + Order/Filter/Settings/List windows + cross-doc sessions + data tools). History + fixes: see [CHANGELOG.md](CHANGELOG.md).
+🟢 Core features complete. History + fixes: see [CHANGELOG.md](CHANGELOG.md) and [LOG.md](LOG.md).
