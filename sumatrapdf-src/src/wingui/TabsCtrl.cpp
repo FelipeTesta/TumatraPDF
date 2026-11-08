@@ -18,6 +18,7 @@
 // Forward declaration - defined in MainWindow.cpp
 struct MainWindow;
 MainWindow* FindMainWindowByHwnd(HWND hwnd);
+void UpdateActiveGroupAutoSave(MainWindow* win);
 
 //--- Tabs
 //
@@ -160,6 +161,24 @@ void TabWnd::Paint(VirtWndPaintCtx& ctx) {
         Rect rUl = {r.x, r.y + r.dy - underlineDy, r.dx, underlineDy};
         SolidBrush ulBr(GdipCol(RGB(255, 255, 255)));
         gfx.FillRectangle(&ulBr, ToGdipRect(rUl));
+    }
+
+    // white vertical insertion guide line during tab drag, full tab-bar height,
+    // centered on dragGuideX (root-local x == tab->bounds space). Drawn by the tab
+    // whose bounds contain the boundary, clamped to its own clip region.
+    if (tabsCtrl && tabsCtrl->draggingTab && tabsCtrl->dragGuideX >= 0) {
+        int guideX = tabsCtrl->dragGuideX;
+        int tabRight = r.x + r.dx;
+        if (guideX >= r.x && guideX <= tabRight) {
+            int guideW = DpiScale(hwnd, 2); // 2-3 px wide
+            int gx = guideX - guideW / 2;
+            if (gx < r.x) gx = r.x;
+            int gx2 = gx + guideW;
+            if (gx2 > tabRight) gx2 = tabRight;
+            Rect rGuide = {gx, r.y, gx2 - gx, r.dy};
+            SolidBrush guideBr(GdipCol(RGB(255, 255, 255)));
+            gfx.FillRectangle(&guideBr, ToGdipRect(rGuide));
+        }
     }
 
     // StringFormat hoisted to function-local static (UI thread only, thread-safe).
@@ -506,6 +525,12 @@ static void UpdateAfterDrag(TabsCtrl* tabsCtrl, int tabIdxFrom, int tabIdxTo) {
     tabsCtrl->RebuildTabWnds();
     tabsCtrl->SetSelected(tabIdxTo);
     tabsCtrl->LayoutTabs();
+    // persist the reorder into the active group's tabFiles (suppressed mid-drag
+    // via draggingTab guard inside UpdateActiveGroupAutoSave; group-switch
+    // suppression also respected). Reorders the live book to match disk order.
+    if (MainWindow* win = FindMainWindowByHwnd(tabsCtrl->hwnd)) {
+        UpdateActiveGroupAutoSave(win);
+    }
     TabsCtrlUpdateAfterChangingTabsCount(tabsCtrl);
 }
 
@@ -573,6 +598,24 @@ LRESULT TabsCtrl::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     if (draggingTab && msg == WM_MOUSEMOVE) {
         Point p = HwndMapWindowPoint(hwnd, nullptr, mousePos);
         ImageList_DragMove(p.x, p.y);
+
+        // insertion guide line: show where the tab would be dropped (mirrors
+        // LBUTTONUP dstIdx logic). Coordinates are root-local (== tab->bounds space).
+        int n = TabCount();
+        int dstIdx = tabState.tabIdx;
+        if (dstIdx >= 0 && tabState.inRightHalf) {
+            dstIdx++;
+        }
+        int newGuideX = -1;
+        if (dstIdx >= 0 && dstIdx < n) {
+            newGuideX = tabWnds[dstIdx]->bounds.x; // left edge of insert-before tab
+        } else if (dstIdx >= n && n > 0) {
+            newGuideX = tabWnds[n - 1]->bounds.x + tabWnds[n - 1]->bounds.dx; // after all
+        }
+        if (newGuideX != dragGuideX) {
+            dragGuideX = newGuideX;
+            ScheduleRepaint();
+        }
         return 0;
     }
 
@@ -614,6 +657,17 @@ LRESULT TabsCtrl::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             }
             tabHighlightedClose = -1;
             UpdateHover(-1);
+            break;
+        }
+
+        case WM_CAPTURECHANGED: {
+            // capture lost mid-drag (e.g. user alt-tabbed): cancel drag state
+            if (draggingTab) {
+                draggingTab = false;
+                dragGuideX = -1;
+                ImageList_EndDrag();
+                ScheduleRepaint();
+            }
             break;
         }
 
@@ -690,7 +744,7 @@ LRESULT TabsCtrl::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             // update the hover state
             UpdateHover(tabUnderMouse);
 
-            if (!draggingTab) {
+            if (!isDragging) {
                 LRESULT res = 0;
                 if (vroot) {
                     vroot->OnMessage(msg, wp, lp, res);
@@ -698,6 +752,8 @@ LRESULT TabsCtrl::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 return 0;
             }
             draggingTab = false;
+            dragGuideX = -1;
+            ScheduleRepaint();
             ImageList_EndDrag();
             int selectedTab = selectedIdx;
             if (tabUnderMouse < 0) {

@@ -831,6 +831,9 @@ struct TabsCtrl : Wnd {
     bool withToolTips = false;
     bool inTitleBar = false;
     bool draggingTab = false;
+    // root-local x of the white insertion guide line painted during tab drag;
+    // -1 = hide. Set in WndProc WM_MOUSEMOVE drag path, reset on drag end.
+    int dragGuideX = -1;
     // dx of tab if there's more space available
     int tabDefaultDx = 300;
 
