@@ -36,6 +36,10 @@
 #include "FilterHighlightDraw.h"
 
 static void LayoutTocContainer(MainWindow* win);
+static void TocAddBookmark(MainWindow* win);
+static void ShowBookmarkRenameDialog(MainWindow* win, TocItem* dti);
+static LRESULT CALLBACK WndProcTocTree(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR /*subclassId*/,
+                                       DWORD_PTR data);
 
 // When true, multi-highlight every TOC item that matches the current page
 // (issue #4642). Easy to flip for comparison with single-selection behavior.
@@ -911,6 +915,18 @@ static MenuDef menuDefContextToc[] = {
         CmdFavoriteDel,
     },
     {
+        "Delete bookmark",
+        CmdBookmarkDelete,
+    },
+    {
+        "Update bookmark page",
+        CmdBookmarkUpdate,
+    },
+    {
+        "Rename bookmark",
+        CmdBookmarkRename,
+    },
+    {
         nullptr,
         0,
     },
@@ -936,6 +952,13 @@ static void TocContextMenu(ContextMenuEvent* ev) {
 
     WindowTab* tab = win->CurrentTab();
     HMENU popup = BuildMenuFromDef(menuDefContextToc, CreatePopupMenu(), nullptr);
+
+    // bookmark edit items need a selected entry
+    if (!dti) {
+        MenuRemove(popup, CmdBookmarkDelete);
+        MenuRemove(popup, CmdBookmarkUpdate);
+        MenuRemove(popup, CmdBookmarkRename);
+    }
 
     Str path;
     Str fileName;
@@ -1036,6 +1059,29 @@ static void TocContextMenu(ContextMenuEvent* ev) {
             break;
         case CmdFavoriteDel:
             DelFavorite(filePath, pageNo);
+            break;
+        case CmdBookmarkDelete:
+            if (dti) {
+                if (auto* t = win->CurrentTab()) {
+                    if (auto* engine = t->GetEngine()) {
+                        engine->OutlineEdit(2, dti->pageNo, dti->title, StrL(""), 0);
+                    }
+                }
+            }
+            break;
+        case CmdBookmarkUpdate:
+            if (dti) {
+                if (auto* t = win->CurrentTab()) {
+                    if (auto* engine = t->GetEngine()) {
+                        engine->OutlineEdit(3, dti->pageNo, dti->title, StrL(""), win->ctrl->CurrentPageNo());
+                    }
+                }
+            }
+            break;
+        case CmdBookmarkRename:
+            if (dti) {
+                ShowBookmarkRenameDialog(win, dti);
+            }
             break;
         case CmdSaveEmbeddedFile: {
             SaveEmbeddedFile(tab, path, fileName);
@@ -1832,11 +1878,39 @@ void CreateToc(MainWindow* win) {
     ReportIf(!treeView->hwnd);
     win->tocTreeView = treeView;
 
+    win->tocTreeSubclassId = NextSubclassId();
+    SetWindowSubclass(treeView->hwnd, WndProcTocTree, win->tocTreeSubclassId, (DWORD_PTR)win);
+
     // stack label, filter edit and tree vertically; the tree flexes to fill the
     // remaining height. The VBox owns these controls/spacer (freed in ~MainWindow).
     auto* vbox = new VBox();
     vbox->alignMain = MainAxisAlign::MainStart;
     vbox->alignCross = CrossAxisAlign::Stretch;
+
+    // top button row: Add bookmark + Reorder toggle (disabled this round, s43-b)
+    auto* btnRow = new HBox();
+    btnRow->alignMain = MainAxisAlign::MainStart;
+    {
+        Button::CreateArgs a;
+        a.parent = win->hwndTocBox;
+        a.font = GetAppFont(win->hwndFrame);
+        a.text = _TRA("Add bookmark");
+        a.ownerDrawn = true;
+        auto* bAdd = new Button();
+        bAdd->onClick = MkFunc0(TocAddBookmark, win);
+        btnRow->AddChild(bAdd);
+    }
+    {
+        Button::CreateArgs a;
+        a.parent = win->hwndTocBox;
+        a.font = GetAppFont(win->hwndFrame);
+        a.text = _TRA("Reorder (s43-b)");
+        a.ownerDrawn = true;
+        auto* bReorder = new Button();
+        btnRow->AddChild(bReorder);
+    }
+    vbox->AddChild(btnRow);
+
     vbox->AddChild(l);
     vbox->AddChild(filterEdit);
     vbox->AddChild(new Spacer(0, 2)); // gap under the search field
@@ -1846,4 +1920,370 @@ void CreateToc(MainWindow* win) {
     SubclassToc(win);
 
     UpdateControlsColors(win);
+}
+
+// Add a bookmark ("Page <n>") at the end of the top-level TOC for the current
+// page. Driven by the Add button in the TOC panel header (and by tests).
+static void TocAddBookmark(MainWindow* win) {
+    if (!win || !win->ctrl || !win->IsDocLoaded()) {
+        return;
+    }
+    int pageNo = win->ctrl->CurrentPageNo();
+    if (pageNo < 1) {
+        return;
+    }
+    TempStr title = fmt("Page %d", pageNo);
+    if (auto* tab = win->CurrentTab()) {
+        if (auto* engine = tab->GetEngine()) {
+            engine->OutlineEdit(1, 0, StrL(""), title, pageNo);
+        }
+    }
+}
+
+// Modal rename dialog for a bookmark (s43-b). Self-contained here (not in
+// SumatraPDF.cpp) following the ShowTabGroupNameDialog pattern: a popup window
+// with an EDIT prefilled with the current title, OK/CANCEL buttons, and a
+// GetMessage modal loop. On OK, calls engine->OutlineEdit(4, ...) which
+// invalidates the toc tree and marks the doc modified/dirty.
+struct RenameDialogState {
+    HWND hEdit = nullptr;
+    WStr newName{};
+    bool done = false;
+    bool ok = false;
+};
+
+static LRESULT CALLBACK RenameDialogWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR /*subclassId*/,
+                                            DWORD_PTR ref) {
+    auto* st = (RenameDialogState*)ref;
+    if (!st) {
+        return DefSubclassProc(hwnd, msg, wp, lp);
+    }
+    if (msg == WM_COMMAND) {
+        if (LOWORD(wp) == IDOK) {
+            WCHAR buf[512] = {};
+            GetWindowTextW(st->hEdit, buf, len(buf));
+            st->newName = WStr(buf, lstrlenW(buf));
+            st->ok = true;
+            st->done = true;
+            DestroyWindow(hwnd);
+            return 0;
+        }
+        if (LOWORD(wp) == IDCANCEL) {
+            st->done = true;
+            DestroyWindow(hwnd);
+            return 0;
+        }
+    }
+    if (msg == WM_DESTROY) {
+        st->done = true;
+    }
+    return DefSubclassProc(hwnd, msg, wp, lp);
+}
+
+static void ShowBookmarkRenameDialog(MainWindow* win, TocItem* dti) {
+    if (!win || !dti || !dti->title) {
+        return;
+    }
+    static bool sRegDone = false;
+    if (!sRegDone) {
+        WNDCLASSW wc{};
+        wc.lpfnWndProc = DefWindowProcW;
+        wc.hInstance = GetModuleHandleW(nullptr);
+        wc.lpszClassName = L"TUMATRA_BOOKMARK_RENAME";
+        RegisterClassW(&wc);
+        sRegDone = true;
+    }
+
+    int w = DpiScale(win->hwndFrame, 320);
+    int h = DpiScale(win->hwndFrame, 170);
+    RECT rcParent;
+    GetWindowRect(win->hwndFrame, &rcParent);
+    int x = rcParent.left + (rcParent.right - rcParent.left - w) / 2;
+    int y = rcParent.top + (rcParent.bottom - rcParent.top - h) / 2;
+
+    HWND hwnd = CreateWindowExW(0, L"TUMATRA_BOOKMARK_RENAME", ToWStrTemp(_TRA("Rename bookmark")).s,
+                                WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_VISIBLE, x, y, w, h, win->hwndFrame,
+                                nullptr, GetModuleHandleW(nullptr), nullptr);
+    if (!hwnd) {
+        return;
+    }
+
+    int editX = DpiScale(win->hwndFrame, 20);
+    int editY = DpiScale(win->hwndFrame, 40);
+    int editW = DpiScale(win->hwndFrame, 260);
+    int editH = DpiScale(win->hwndFrame, 26);
+    HWND hEdit =
+        CreateWindowExW(0, L"EDIT", ToWStrTemp(dti->title).s, WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL, editX,
+                        editY, editW, editH, hwnd, (HMENU)1001, GetModuleHandleW(nullptr), nullptr);
+    SendMessageW(hEdit, EM_SETLIMITTEXT, 200, 0);
+
+    int btnW = DpiScale(win->hwndFrame, 70);
+    int btnH = DpiScale(win->hwndFrame, 30);
+    int btnY = editY + editH + DpiScale(win->hwndFrame, 24);
+    CreateWindowW(L"BUTTON", ToWStrTemp(_TRA("OK")).s, WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON, editX, btnY, btnW,
+                  btnH, hwnd, (HMENU)IDOK, GetModuleHandleW(nullptr), nullptr);
+    CreateWindowW(L"BUTTON", ToWStrTemp(_TRA("Cancel")).s, WS_CHILD | WS_VISIBLE,
+                  editX + btnW + DpiScale(win->hwndFrame, 12), btnY, btnW, btnH, hwnd, (HMENU)IDCANCEL,
+                  GetModuleHandleW(nullptr), nullptr);
+
+    SetFocus(hEdit);
+
+    RenameDialogState st{};
+    st.hEdit = hEdit;
+    UINT_PTR subclassId = NextSubclassId();
+    SetWindowSubclass(hwnd, RenameDialogWndProc, subclassId, (DWORD_PTR)&st);
+
+    MSG msg;
+    while (!st.done && GetMessageW(&msg, nullptr, 0, 0)) {
+        if (!IsDialogMessageW(hwnd, &msg)) {
+            TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
+    }
+    RemoveWindowSubclass(hwnd, RenameDialogWndProc, subclassId);
+    DestroyWindow(hwnd);
+
+    if (st.ok && st.newName.s && st.newName.len > 0 && !str::Eq(ToUtf8Temp(st.newName), dti->title)) {
+        if (auto* tab = win->CurrentTab()) {
+            if (auto* engine = tab->GetEngine()) {
+                TempStr newTitle = ToUtf8Temp(st.newName);
+                engine->OutlineEdit(4, dti->pageNo, dti->title, newTitle, dti->pageNo);
+            }
+        }
+    }
+}
+
+// --- TOC bookmark drag-reorder (s43-b) --------------------------------------
+
+// true if `ancestor` is a (strict) ancestor of `item`
+static bool IsAncestor(TocItem* ancestor, TocItem* item) {
+    while (item && item->parent) {
+        if (item->parent == ancestor) {
+            return true;
+        }
+        item = item->parent;
+    }
+    return false;
+}
+
+// unlink `item` from whatever child chain it belongs to (top-level -> root->child)
+static void UnlinkTocItem(TocItem* root, TocItem* item) {
+    if (!item) {
+        return;
+    }
+    TocItem* parent = item->parent;
+    TocItem** pHead = parent ? &parent->child : &root->child;
+    TocItem* prev = nullptr;
+    for (TocItem* cur = *pHead; cur; prev = cur, cur = cur->next) {
+        if (cur == item) {
+            if (prev) {
+                prev->next = item->next;
+            } else {
+                *pHead = item->next;
+            }
+            item->next = nullptr;
+            item->parent = nullptr;
+            return;
+        }
+    }
+}
+
+// link `item` into `parent`'s child chain (parent==null -> top-level under root),
+// right before `beforeSibling` (null -> append at end)
+static void LinkTocItem(TocItem* root, TocItem* parent, TocItem* item, TocItem* beforeSibling) {
+    if (!item) {
+        return;
+    }
+    item->parent = parent;
+    TocItem** pHead = parent ? &parent->child : &root->child;
+    if (!beforeSibling) {
+        if (!*pHead) {
+            *pHead = item;
+            item->next = nullptr;
+            return;
+        }
+        TocItem* cur = *pHead;
+        while (cur->next) {
+            cur = cur->next;
+        }
+        cur->next = item;
+        item->next = nullptr;
+        return;
+    }
+    if (*pHead == beforeSibling) {
+        item->next = beforeSibling;
+        *pHead = item;
+        return;
+    }
+    TocItem* cur = *pHead;
+    while (cur && cur->next != beforeSibling) {
+        cur = cur->next;
+    }
+    if (cur) {
+        item->next = beforeSibling;
+        cur->next = item;
+    }
+}
+
+// Move `source` relative to `target`:
+//  - drop ON target body   -> source becomes last child of target (indent deeper)
+//  - drop on far-left strip -> source becomes sibling of target (unindent one level)
+//  - target == null        -> source becomes top-level, appended at end
+// `farLeft` is true when the cursor is in the tree's far-left strip.
+static void MoveTocItem(MainWindow* win, TocItem* source, TocItem* target, bool farLeft) {
+    if (!source || source == target) {
+        return;
+    }
+    TreeView* tv = win->tocTreeView;
+    TocTree* tt = tv ? (TocTree*)tv->treeModel : nullptr;
+    if (!tt || !tt->root) {
+        return;
+    }
+    TocItem* root = tt->root;
+    // never reparent under oneself or a descendant (would create a cycle)
+    if (target && IsAncestor(source, target)) {
+        return;
+    }
+    UnlinkTocItem(root, source);
+    TocItem* newParent = nullptr;
+    TocItem* beforeSibling = nullptr;
+    if (target) {
+        if (farLeft) {
+            newParent = target->parent; // unindent: sibling of target
+            beforeSibling = target;
+        } else {
+            newParent = target; // indent deeper: child of target
+        }
+    }
+    LinkTocItem(root, newParent, source, beforeSibling);
+    // invalidate the cached toc tree so GetToc rebuilds; mark the doc modified
+    if (auto* tab = win->CurrentTab()) {
+        if (auto* engine = tab->GetEngine()) {
+            engine->OutlineEdit(5, source->pageNo, source->title, newParent ? newParent->title : StrL(""),
+                                newParent ? newParent->pageNo : 0, farLeft && target ? target->pageNo : 0,
+                                farLeft && target ? target->title : StrL(""));
+        }
+    }
+}
+
+// width (in DPI-scaled px) of the far-left strip on the tree that unindents
+static int TocFarLeftStripWidth(HWND hwnd) {
+    return DpiScale(hwnd, 30);
+}
+
+static LRESULT CALLBACK WndProcTocTree(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR /*subclassId*/,
+                                       DWORD_PTR data) {
+    MainWindow* win = (MainWindow*)data;
+    if (!win || !win->tocTreeView) {
+        return DefSubclassProc(hwnd, msg, wp, lp);
+    }
+    TreeView* tv = win->tocTreeView;
+
+    switch (msg) {
+        case WM_LBUTTONDOWN: {
+            Point pt{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
+            TreeItem ti = tv->GetItemAt(pt.x, pt.y);
+            if (ti == TreeModel::kNullItem || !ti) {
+                break;
+            }
+            TocItem* item = (TocItem*)ti;
+            win->tocDragItem = item;
+            win->tocDragStart = pt;
+            win->tocDragGuideY = -1;
+            SetCapture(hwnd);
+            return 0;
+        }
+
+        case WM_CAPTURECHANGED: {
+            // capture lost mid-drag: cancel drag state (local copy before ReleaseCapture resets)
+            bool wasDragging = (win->tocDragItem != nullptr);
+            if (wasDragging) {
+                win->tocDragItem = nullptr;
+                int oldGuide = win->tocDragGuideY;
+                win->tocDragGuideY = -1;
+                if (oldGuide >= 0) {
+                    HwndInvalidate(hwnd, true);
+                }
+            }
+            break;
+        }
+
+        case WM_MOUSEMOVE: {
+            if (!win->tocDragItem || GetCapture() != hwnd) {
+                break;
+            }
+            Point pt{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
+            int cxDrag = GetSystemMetrics(SM_CXDRAG);
+            int cyDrag = GetSystemMetrics(SM_CYDRAG);
+            bool beyondThreshold =
+                (abs(pt.x - win->tocDragStart.x) > cxDrag) || (abs(pt.y - win->tocDragStart.y) > cyDrag);
+            if (!beyondThreshold) {
+                break;
+            }
+            TreeItem tti = tv->GetItemAt(pt.x, pt.y);
+            TocItem* target = (tti == TreeModel::kNullItem || !tti) ? nullptr : (TocItem*)tti;
+            int newGuideY = -1;
+            if (target) {
+                Rect rc{};
+                if (tv->GetItemRect((TreeItem)target, false, rc)) {
+                    newGuideY = rc.y;
+                }
+            }
+            if (newGuideY != win->tocDragGuideY) {
+                win->tocDragGuideY = newGuideY;
+                HwndScheduleRepaint(hwnd);
+            }
+            return 0;
+        }
+
+        case WM_LBUTTONUP: {
+            bool wasDragging = (win->tocDragItem != nullptr);
+            TocItem* source = win->tocDragItem;
+            TocItem* target = nullptr;
+            bool farLeft = false;
+            if (wasDragging) {
+                Point pt{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
+                TreeItem tti = tv->GetItemAt(pt.x, pt.y);
+                target = (tti == TreeModel::kNullItem || !tti) ? nullptr : (TocItem*)tti;
+                farLeft = target && (pt.x < TocFarLeftStripWidth(hwnd));
+                int oldGuide = win->tocDragGuideY;
+                win->tocDragItem = nullptr;
+                win->tocDragGuideY = -1;
+                win->tocDragStart = {};
+                if (oldGuide >= 0) {
+                    HwndInvalidate(hwnd, true);
+                }
+            }
+            // release capture AFTER copying local state (TabsCtrl WM_CAPTURECHANGED trap)
+            ReleaseCapture();
+            if (wasDragging && source) {
+                MoveTocItem(win, source, target, farLeft);
+                HwndInvalidate(hwnd, true);
+            }
+            return 0;
+        }
+
+        case WM_PAINT: {
+            LRESULT res = DefSubclassProc(hwnd, msg, wp, lp);
+            if (win->tocDragGuideY >= 0) {
+                HDC hdc = GetDC(hwnd);
+                if (hdc) {
+                    RECT rc;
+                    GetClientRect(hwnd, &rc);
+                    HPEN hPen = CreatePen(PS_SOLID, 2, RGB(255, 255, 255));
+                    HPEN hOld = (HPEN)SelectObject(hdc, hPen);
+                    MoveToEx(hdc, 0, win->tocDragGuideY, nullptr);
+                    LineTo(hdc, rc.right, win->tocDragGuideY);
+                    SelectObject(hdc, hOld);
+                    DeleteObject(hPen);
+                    ReleaseDC(hwnd, hdc);
+                }
+            }
+            return res;
+        }
+
+        default:
+            break;
+    }
+    return DefSubclassProc(hwnd, msg, wp, lp);
 }

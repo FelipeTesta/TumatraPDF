@@ -182,7 +182,23 @@ EXPORTS
 
 	fz_load_outline
 
+	fz_drop_outline_iterator
+
+	fz_outline_iterator_delete
+
+	fz_outline_iterator_from_outline
+
+	fz_outline_iterator_insert
+
+	fz_outline_iterator_item
+
+	fz_outline_iterator_next
+
+	fz_outline_iterator_update
+
 	fz_load_page
+
+	pdf_new_outline_iterator
 
 	fz_bound_page
 

@@ -181,12 +181,39 @@ class EngineMupdf : public EngineBase {
 
     TocTree* tocTree = nullptr;
 
+    // in-session bookmark edits not (yet) persisted to the PDF file.
+    struct TocAddedEntry {
+        Str title;
+        int pageNo = 0;
+    };
+    Vec<TocAddedEntry> tocAdded;
+
+    // serialized edit log (source of truth for outline persistence). op:
+    // 1=add top-level (newValue=title, newPageNo=page), 2=delete(target),
+    // 3=update-page(target -> newPageNo), 4=rename(target -> newValue),
+    // 5=reorder-move(source=target -> new parent=newValue/newPageNo).
+    struct OutlineEditEntry {
+        int op = 0;
+        int targetPageNo = 0;
+        Str targetTitle;
+        Str newValue;
+        int newPageNo = 0;
+        // op=5 only: insert source before this sibling (0/empty = append as last child / top-level end)
+        int moveBeforePageNo = 0;
+        Str moveBeforeTitle;
+    };
+    Vec<OutlineEditEntry> outlineEdits;
+
     // password used to decrypt the document (needed for re-encryption/decryption)
     TempStr pdfPassword;
 
     // used to track "dirty" state of annotations. not perfect because if we add and delete
     // the same annotation, we should be back to 0
     bool modifiedAnnotations = false;
+
+    // used to track "dirty" state of bookmark (outline) edits. set on any
+    // add/delete/update/rename of a TOC entry; reset on save or on doc reload
+    bool modifiedOutline = false;
 
     // smart dark mode: engine-level image feature/processed caches
     DarkModeEngineCache* darkModeEngineCache = nullptr;
@@ -217,6 +244,9 @@ class EngineMupdf : public EngineBase {
     fz_matrix viewctm(int pageNo, float zoom, int rotation);
     fz_matrix viewctm(fz_page* page, float zoom, int rotation) const;
     TocItem* BuildTocTree(TocItem* parent, fz_outline* outline, int& idCounter, bool isAttachment, int depth);
+    bool HasUnsavedOutline() override { return modifiedOutline; }
+    bool OutlineEdit(int op, int targetPageNo, Str targetTitle, Str newValue, int newPageNo, int moveBeforePageNo = 0,
+                     Str moveBeforeTitle = StrL("")) override;
     TempStr ExtractFontListTemp();
 
     Str LoadStreamFromPDFFile(Str filePath);

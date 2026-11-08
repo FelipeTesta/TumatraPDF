@@ -458,6 +458,7 @@ class EngineBase {
 
     void AppendError(Str msg);
     bool HasErrors();
+    int ErrorCount();
     TempStr GetErrorsTextTemp();
 
     int PageCount() const;
@@ -525,6 +526,13 @@ class EngineBase {
     bool HasToc();
 
     virtual TocTree* GetToc();
+
+    virtual bool HasUnsavedOutline() { return false; }
+
+    virtual bool OutlineEdit(int = 0, int = 0, Str = StrL(""), Str = StrL(""), int = 0,
+                             int = 0, Str = StrL("")) {
+        return false; // base engine: no outline editing
+    }
 
     bool HasPageLabels() const;
 

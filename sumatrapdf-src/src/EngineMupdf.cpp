@@ -2748,6 +2748,14 @@ EngineMupdf::~EngineMupdf() {
 
     fz_drop_outline(ctx, outline);
     fz_drop_outline(ctx, attachments);
+    outline = nullptr;
+    attachments = nullptr;
+    modifiedOutline = false;
+    // drop in-session added bookmark titles
+    for (TocAddedEntry& e : tocAdded) {
+        str::FreePtr(&e.title);
+    }
+    tocAdded.Reset();
 
     if (pdfInfo) {
         pdf_drop_obj(ctx, pdfInfo);
@@ -3575,6 +3583,11 @@ bool EngineMupdf::FinishLoading() {
         // otherwise get displayed
         logfa("Couldn't load outline for '%s'\n", FilePath());
     }
+    modifiedOutline = false;
+    for (TocAddedEntry& e : tocAdded) {
+        str::FreePtr(&e.title);
+    }
+    tocAdded.Reset();
 
     attachments = PdfLoadAttachments(ctx, pdfdoc, FilePath());
 
@@ -3744,13 +3757,204 @@ TocItem* EngineMupdf::BuildTocTree(TocItem* parent, fz_outline* outline, int& id
     return root;
 }
 
+// op: 1=add top-level (newValue=title, newPageNo=page), 2=delete(targetTitle+targetPageNo),
+//     3=update-page(targetTitle+targetPageNo -> newPageNo), 4=rename(targetTitle+targetPageNo -> newValue),
+//     5=reorder-move(source=targetTitle+targetPageNo -> new parent=newValue/newPageNo).
+// Records the edit in the persistent edit log (outlineEdits) so it can be replayed
+// into the PDF outline at save time, marks the doc modified and invalidates the
+// cached toc tree. Outline PDF-write via fz_outline_iterator insert/update/delete
+// exists in vendored mupdf (pdf-outline.c) and is wired here; gated behind the
+// TumatraPDF.exe build so PdfFilter/PdfPreview (which recompile EngineMupdf.cpp)
+// are unaffected.
+bool EngineMupdf::OutlineEdit(int op, int targetPageNo, Str targetTitle, Str newValue, int newPageNo,
+                              int moveBeforePageNo, Str moveBeforeTitle) {
+    if (!pdfdoc) {
+        return false;
+    }
+    OutlineEditEntry e{};
+    e.op = op;
+    e.targetPageNo = targetPageNo;
+    e.targetTitle = str::Dup(targetTitle);
+    e.newValue = str::Dup(newValue);
+    e.newPageNo = newPageNo;
+    e.moveBeforePageNo = moveBeforePageNo;
+    e.moveBeforeTitle = str::Dup(moveBeforeTitle);
+    outlineEdits.Append(e);
+    if (op == 1) {
+        // keep the in-session overlay entry so the next GetToc rebuild shows it
+        TocAddedEntry ae{};
+        ae.title = str::Dup(newValue);
+        ae.pageNo = newPageNo;
+        tocAdded.Append(ae);
+    }
+    // any edit marks the document modified and invalidates the cached toc tree
+    modifiedOutline = true;
+    delete tocTree;
+    tocTree = nullptr;
+    return true;
+}
+
+// position a fresh outline iterator on the first item matching title (ops match by title,
+// consistent with existing delete/update/rename); caller must drop the returned iterator.
+static fz_outline_iterator* OutlineIteratorFind(fz_context* ctx, pdf_document* doc, Str title) {
+    fz_outline_iterator* it = pdf_new_outline_iterator(ctx, doc);
+    if (!it) {
+        return nullptr;
+    }
+    // check the current (first) item before advancing; next() moves to the next
+    // item and would otherwise skip the first entry in the tree.
+    for (;;) {
+        fz_outline_item* item = fz_outline_iterator_item(ctx, it);
+        if (item && item->title && title && str::Eq(Str(item->title), title)) {
+            return it;
+        }
+        if (fz_outline_iterator_next(ctx, it) != 0) {
+            break;
+        }
+    }
+    fz_drop_outline_iterator(ctx, it);
+    return nullptr;
+}
+
+// Replay the in-session outline edit log into the PDF outline via mupdf's
+// fz_outline_iterator (insert/update/delete). Called once at save time from
+// EngineMupdfSaveUpdated. Edits are applied in log order; each op re-walks the
+// iterator from the (mutated) outline so later ops see earlier edits.
+// Returns true on ok (false only on mupdf error).
+static bool PersistOutlineEdits(EngineMupdf* epdf) {
+    if (!epdf || !epdf->pdfdoc || len(epdf->outlineEdits) == 0) {
+        return true;
+    }
+    fz_context* ctx = epdf->Ctx();
+    fz_try(ctx) {
+        fz_outline_iterator* iter = nullptr;
+        for (EngineMupdf::OutlineEditEntry& e : epdf->outlineEdits) {
+            // iterator positioned on the PDF document's /Outlines dict (pdf_obj-based
+            // "current"), which is what pdf_outline_iterator_insert/update/delete
+            // expect. fz_outline_iterator_from_outline() positions on an fz_outline*
+            // tree instead, so its insert() would not write back to the document.
+            // Re-walk from the (mutated) document outline for each op so later ops
+            // see earlier edits.
+            if (iter) {
+                fz_drop_outline_iterator(ctx, iter);
+            }
+            iter = pdf_new_outline_iterator(ctx, epdf->pdfdoc);
+            if (!iter) {
+                return false;
+            }
+            bool needFind = (e.op != 1); // op=1 add: insert at top-level (no search)
+            bool found = !needFind;
+            while (!found) {
+                int rc = fz_outline_iterator_next(ctx, iter);
+                if (rc < 0) {
+                    break; // end of tree
+                }
+                fz_outline_item* item = fz_outline_iterator_item(ctx, iter);
+                if (!item) {
+                    continue;
+                }
+                if (item->title && e.targetTitle && str::Eq(Str(item->title), e.targetTitle)) {
+                    found = true;
+                }
+            }
+            fz_outline_item wi{};
+            wi.title = e.newValue ? CStrTemp(e.newValue) : nullptr;
+            wi.uri = nullptr;
+            wi.is_open = 1;
+            wi.flags = 0;
+            wi.r = wi.g = wi.b = 0;
+            switch (e.op) {
+                case 1: { // add top-level bookmark
+                    TempStr uri = fmt("#page=%d", e.newPageNo);
+                    wi.uri = CStrTemp(uri);
+                    // append at end of top-level so insertion order is preserved
+                    while (fz_outline_iterator_next(ctx, iter) == 0) {
+                    } // iter on last top-level item (modifier MOD_AFTER), or NULL if empty
+                    fz_outline_iterator_insert(ctx, iter, &wi);
+                    break;
+                }
+                case 2: // delete bookmark
+                    if (found) {
+                        fz_outline_iterator_delete(ctx, iter);
+                    }
+                    break;
+                case 3: // update page (deferred: mupdf update doesn't repoint dest)
+                    if (found) {
+                        fz_outline_iterator_update(ctx, iter, &wi);
+                    }
+                    break;
+                case 4: // rename bookmark
+                    if (found) {
+                        fz_outline_iterator_update(ctx, iter, &wi);
+                    }
+                    break;
+                case 5: { // reorder-move: delete source(targetTitle), then re-insert under newParent/top-level
+                    fz_outline_item mvItem{};
+                    mvItem.title = e.targetTitle ? CStrTemp(e.targetTitle) : nullptr;
+                    TempStr uri = fmt("#page=%d", e.targetPageNo);
+                    mvItem.uri = CStrTemp(uri);
+                    mvItem.is_open = 1;
+                    mvItem.flags = 0;
+                    mvItem.r = mvItem.g = mvItem.b = 0;
+
+                    // 1) delete source from its current position (match by title, consistent with ops 2-4)
+                    if (fz_outline_iterator* dit = OutlineIteratorFind(ctx, epdf->pdfdoc, e.targetTitle)) {
+                        fz_outline_iterator_delete(ctx, dit);
+                        fz_drop_outline_iterator(ctx, dit);
+                    }
+
+                    // 2) re-insert: before moveBefore sibling, else as last child of newParent, else top-level end
+                    fz_outline_iterator* iit = pdf_new_outline_iterator(ctx, epdf->pdfdoc);
+                    bool inserted = false;
+                    if (iit) {
+                        if (e.moveBeforeTitle) {
+                            if (fz_outline_iterator* anchor =
+                                    OutlineIteratorFind(ctx, epdf->pdfdoc, e.moveBeforeTitle)) {
+                                fz_outline_iterator_insert(ctx, anchor, &mvItem); // MOD_NONE -> before anchor
+                                fz_drop_outline_iterator(ctx, anchor);
+                                inserted = true;
+                            }
+                        }
+                        if (!inserted && e.newValue) {
+                            if (fz_outline_iterator* pit = OutlineIteratorFind(ctx, epdf->pdfdoc, e.newValue)) {
+                                if (pit->down(ctx, pit) == 0) { // fz_outline_iterator_down is static; use vtable
+                                    while (fz_outline_iterator_next(ctx, pit) == 0) {
+                                    } // pit on last child (modifier MOD_AFTER)
+                                    fz_outline_iterator_insert(ctx, pit, &mvItem); // append after last child
+                                } else {
+                                    fz_outline_iterator_insert(ctx, pit,
+                                                               &mvItem); // MOD_BELOW -> First=Last on newParent
+                                }
+                                fz_drop_outline_iterator(ctx, pit);
+                                inserted = true;
+                            }
+                        }
+                        if (!inserted) { // top-level append: walk to last top-level item, then append after it
+                            while (fz_outline_iterator_next(ctx, iit) == 0) {
+                            } // iit on last top-level (or NULL if none)
+                            fz_outline_iterator_insert(ctx, iit, &mvItem); // NULL -> creates Outlines First=Last
+                        }
+                        fz_drop_outline_iterator(ctx, iit);
+                    }
+                    break;
+                }
+            }
+        }
+        if (iter) {
+            fz_drop_outline_iterator(ctx, iter);
+        }
+    }
+    fz_catch(ctx) {
+        fz_report_error(ctx);
+        return false;
+    }
+    return true;
+}
+
 // TODO: maybe build in FinishLoading
 TocTree* EngineMupdf::GetToc() {
     if (tocTree) {
         return tocTree;
-    }
-    if (outline == nullptr && attachments == nullptr) {
-        return nullptr;
     }
 
     int idCounter = 0;
@@ -3772,11 +3976,33 @@ TocTree* EngineMupdf::GetToc() {
         root = att;
     }
 MakeTree:
-    if (!root) {
+    // in-session added bookmarks show up even when the PDF has no outline
+    if (!root && len(tocAdded) == 0) {
         return nullptr;
     }
     TocItem* realRoot = AllocTocItem(nullptr, {}, 0);
     realRoot->child = root;
+    // append in-session added bookmarks as top-level entries
+    TocItem* last = root;
+    while (last && last->next) {
+        last = last->next;
+    }
+    for (TocAddedEntry& e : tocAdded) {
+        TocItem* item = AllocTocItem(nullptr, e.title, e.pageNo);
+        item->id = ++idCounter;
+        item->isOpenDefault = false;
+        item->isOpenToggled = false;
+        item->fontFlags = 0;
+        item->color = 0;
+        item->dest = nullptr;
+        if (last) {
+            last->next = item;
+        } else {
+            realRoot->child = item;
+            root = item;
+        }
+        last = item;
+    }
     tocTree = new TocTree(realRoot);
     return tocTree;
 }
@@ -6439,7 +6665,8 @@ Str EngineMupdfGetPassword(EngineBase* engine) {
 // annotations).
 // if filePath is not given, we save under the same name
 // TODO: if the file is locked, this might fail.
-bool EngineMupdfSaveUpdated(EngineBase* engine, Str path, const ShowErrorCb& showErrorFunc) {
+bool EngineMupdfSaveUpdated(EngineBase* engine, Str path, const ShowErrorCb& showErrorFunc, const void* saveOpts,
+                            bool forceSave) {
     ReportIf(!engine);
     if (!engine) {
         return false;
@@ -6448,7 +6675,7 @@ bool EngineMupdfSaveUpdated(EngineBase* engine, Str path, const ShowErrorCb& sho
     if (!epdf || !epdf->pdfdoc) {
         return false;
     }
-    if (!EngineMupdfHasUnsavedAnnotations(engine)) {
+    if (!forceSave && !EngineMupdfHasUnsavedAnnotations(engine) && !epdf->modifiedOutline) {
         return false;
     }
 
@@ -6461,10 +6688,14 @@ bool EngineMupdfSaveUpdated(EngineBase* engine, Str path, const ShowErrorCb& sho
     ScopedRecursiveMutex scope(&epdf->docLock);
 
     pdf_write_options save_opts{};
-    save_opts = pdf_default_write_options2;
+    save_opts = saveOpts ? *(const pdf_write_options*)saveOpts : pdf_default_write_options2;
     // TODO: if saving to a new file, don't do incremental and linearlize?
     // save_opts.do_linear = 1;
-    save_opts.do_incremental = pdf_can_be_saved_incrementally(ctx, epdf->pdfdoc);
+    // only override do_incremental for the default (annotation) save path;
+    // an explicit saveOpts (e.g. a full structural repair) keeps its setting
+    if (!saveOpts) {
+        save_opts.do_incremental = pdf_can_be_saved_incrementally(ctx, epdf->pdfdoc);
+    }
     // Same-path saves (Ctrl+S / save-on-close) must stay FAST: never
     // re-compress streams there. do_compress_images on a full rewrite of a
     // large scanned PDF re-deflates every image stream — minutes of UI
@@ -6531,6 +6762,9 @@ bool EngineMupdfSaveUpdated(EngineBase* engine, Str path, const ShowErrorCb& sho
     bool ok = false;
     fz_var(ok);
     fz_try(ctx) {
+        // persist in-session bookmark (outline) edits into the PDF before saving,
+        // so Ctrl+S / close-prompt save writes bookmarks to disk.
+        PersistOutlineEdits(epdf);
         pdf_save_document(ctx, epdf->pdfdoc, CStrTemp(path), &save_opts);
         ok = true;
         auto dur = TimeSinceInMs(timeStart);
@@ -6550,6 +6784,8 @@ bool EngineMupdfSaveUpdated(EngineBase* engine, Str path, const ShowErrorCb& sho
     // note: this should be short-lived as we should re-load the file
     if (ok) {
         epdf->modifiedAnnotations = false;
+        epdf->modifiedOutline = false;
+        epdf->outlineEdits.Reset();
     }
     return ok;
 }

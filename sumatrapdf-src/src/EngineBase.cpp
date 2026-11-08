@@ -367,6 +367,11 @@ bool EngineBase::HasErrors() {
     return !errors.IsEmpty();
 }
 
+int EngineBase::ErrorCount() {
+    ScopedMutex scope(&errorsLock);
+    return len(errors);
+}
+
 // internal builder buffer (no copy); valid until next AppendError or engine
 // destruction — do not free or keep beyond the current frame
 TempStr EngineBase::GetErrorsTextTemp() {
