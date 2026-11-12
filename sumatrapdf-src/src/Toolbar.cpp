@@ -196,6 +196,21 @@ void SetToolbarButtonCheckedState(MainWindow* win, int cmdId, bool isChecked) {
             }
         }
     }
+    // Also search edit toolbar if it exists
+    if (win->editTools.hwndToolbarEdit) {
+        int countEdit = (int)SendMessageW(win->editTools.hwndToolbarEdit, TB_BUTTONCOUNT, 0, 0);
+        for (int idx = 0; idx < countEdit; idx++) {
+            TBBUTTONINFOW bi{};
+            bi.cbSize = sizeof(bi);
+            bi.dwMask = TBIF_BYINDEX | TBIF_COMMAND;
+            if (SendMessageW(win->editTools.hwndToolbarEdit, TB_GETBUTTONINFO, idx, (LPARAM)&bi)) {
+                if (bi.idCommand == cmdId) {
+                    UpdateToolbarButtonStateByIdx(win->editTools.hwndToolbarEdit, idx, isChecked, TBSTATE_CHECKED);
+                    break;
+                }
+            }
+        }
+    }
     // update gAnyToggleChecked: scan main toolbar for toggle buttons (BTNS_CHECK)
     gAnyToggleChecked = false;
     int count = (int)SendMessageW(win->hwndToolbar, TB_BUTTONCOUNT, 0, 0);
@@ -218,6 +233,21 @@ void SetToolbarButtonCheckedState(MainWindow* win, int cmdId, bool isChecked) {
             bi.cbSize = sizeof(bi);
             bi.dwMask = TBIF_BYINDEX | TBIF_STATE | TBIF_STYLE;
             if (SendMessageW(win->archTools.hwndToolbar2, TB_GETBUTTONINFO, i, (LPARAM)&bi)) {
+                if ((bi.fsStyle & BTNS_CHECK) && (bi.fsState & TBSTATE_CHECKED)) {
+                    gAnyToggleChecked = true;
+                    break;
+                }
+            }
+        }
+    }
+    // Also check edit toolbar for any toggles
+    if (!gAnyToggleChecked && win->editTools.hwndToolbarEdit) {
+        int countEdit = (int)SendMessageW(win->editTools.hwndToolbarEdit, TB_BUTTONCOUNT, 0, 0);
+        for (int i = 0; i < countEdit; i++) {
+            TBBUTTONINFOW bi{};
+            bi.cbSize = sizeof(bi);
+            bi.dwMask = TBIF_BYINDEX | TBIF_STATE | TBIF_STYLE;
+            if (SendMessageW(win->editTools.hwndToolbarEdit, TB_GETBUTTONINFO, i, (LPARAM)&bi)) {
                 if ((bi.fsStyle & BTNS_CHECK) && (bi.fsState & TBSTATE_CHECKED)) {
                     gAnyToggleChecked = true;
                     break;
@@ -633,6 +663,8 @@ void ToolbarUpdateStateForWindow(MainWindow* win, bool setButtonsVisibility) {
     DisplayModel* dmChecked = win->AsFixed();
     SetToolbarButtonCheckedState(win, CmdViewportCropV2Toggle, dmChecked ? dmChecked->viewportCropV2Enabled : false);
     SetToolbarButtonCheckedState(win, CmdMarginTrimToggle, dmChecked ? dmChecked->marginTrimEnabled : false);
+    // Crop Align (moved to Edit toolbar): sync checked state from archTools.toolMode
+    SetToolbarButtonCheckedState(win, CmdArchAlign, win->archTools.toolMode == 5);
 
     // reposition the floating find bar over the search icon (and hide it if the
     // current document doesn't support find) when toolbar buttons change
@@ -1355,18 +1387,18 @@ static void EnforceToolbarTextButtonWidths(MainWindow* win, HWND hwndToolbar) {
         // leaving ghost label pixels right of the button when comctl shrinks
         // back. Its width is owned by the leading spaces baked into the label
         // (see AddAllToolbarButtons), which reserve trioDx + slack instead.
-        if ((int)bi.cx < needed && !isAutoscroll) {
+        if ((int)bi.cx < needed) {
             TBBUTTONINFOW biSet{};
             biSet.cbSize = sizeof(biSet);
             biSet.dwMask = TBIF_SIZE;
             biSet.idCommand = bi.idCommand;
             biSet.cx = needed;
-            if (bi.idCommand == CmdAutoScrollToggle) {
-                // BTNS_AUTOSIZE makes comctl IGNORE TBIF_SIZE (the width never
-                // stuck) — clear the style so the explicit width (label + the
-                // timer trio the button hosts) actually applies
-                biSet.dwMask |= TBIF_STYLE;
-                biSet.fsStyle = (BYTE)(bi.fsStyle & ~BTNS_AUTOSIZE);
+            // BTNS_AUTOSIZE makes comctl IGNORE TBIF_SIZE (the width never
+            // stuck) — clear the style so the explicit width actually applies.
+            // This is needed for ALL text buttons, not just Autoscroll.
+            biSet.dwMask |= TBIF_STYLE;
+            biSet.fsStyle = (BYTE)(bi.fsStyle & ~BTNS_AUTOSIZE);
+            if (isAutoscroll) {
                 sDbgAutoscrollSet = needed;
             }
             // NOTE: must go through TbSetButtonInfo — the helper sends
@@ -3350,7 +3382,8 @@ static LRESULT CALLBACK ToolbarPaintSubclassProc(HWND hWnd, UINT uMsg, WPARAM wP
         LRESULT res = DefSubclassProc(hWnd, uMsg, wParam, lParam);
         MainWindow* win = FindMainWindowByHwnd(hWnd);
         if (win && !win->isBeingClosed &&
-            (hWnd == win->archTools.hwndToolbar2 || hWnd == win->editTools.hwndToolbarEdit)) {
+            (hWnd == win->archTools.hwndToolbar2 || hWnd == win->editTools.hwndToolbarEdit ||
+             hWnd == win->hwndTocToolbar)) {
             // NOTE: DefSubclassProc already validated the update region, so
             // BeginPaint would return an empty rect. Use GetDC instead to
             // paint over comctl's output.
@@ -3360,7 +3393,7 @@ static LRESULT CALLBACK ToolbarPaintSubclassProc(HWND hWnd, UINT uMsg, WPARAM wP
                 for (int i = 0; i < count; i++) {
                     TBBUTTONINFOW bi{};
                     bi.cbSize = sizeof(bi);
-                    bi.dwMask = TBIF_BYINDEX | TBIF_STYLE | TBIF_TEXT | TBIF_COMMAND;
+                    bi.dwMask = TBIF_BYINDEX | TBIF_STATE | TBIF_STYLE | TBIF_TEXT | TBIF_COMMAND;
                     WCHAR tbuf[256]{};
                     bi.pszText = tbuf;
                     bi.cchText = dimof(tbuf);
@@ -3379,6 +3412,13 @@ static LRESULT CALLBACK ToolbarPaintSubclassProc(HWND hWnd, UINT uMsg, WPARAM wP
                     HGDIOBJ oldF = SelectObject(hdc, fnt);
                     DrawTextW(hdc, tbuf, -1, &rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
                     SelectObject(hdc, oldF);
+                    // checked-state 3px underline (white text color in dark theme)
+                    if (bi.fsState & TBSTATE_CHECKED) {
+                        RECT rcLine = {rc.left + 2, rc.bottom - 3, rc.right - 2, rc.bottom};
+                        HBRUSH br = CreateSolidBrush(ThemeWindowTextColor());
+                        FillRect(hdc, &rcLine, br);
+                        DeleteObject(br);
+                    }
                 }
                 ReleaseDC(hWnd, hdc);
             }
@@ -3401,6 +3441,7 @@ void UpdateToolbar2State(MainWindow* win) {
     SetToolbarButtonCheckedState(win, CmdArchMeasure, win->archTools.toolMode == 2);
     SetToolbarButtonCheckedState(win, CmdArchMeasureRadius, win->archTools.toolMode == 3);
     SetToolbarButtonCheckedState(win, CmdArchRefLine, win->archTools.toolMode == 4);
+    // Crop Align moved to Edit toolbar — synced via ToolbarUpdateStateForWindow
     // Scale button is not a toggle (it opens dialog), so no checked state needed
     // Reset Scale is a push button, no checked state
 }

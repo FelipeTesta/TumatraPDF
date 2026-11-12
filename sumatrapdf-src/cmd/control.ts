@@ -56,6 +56,14 @@ export enum ControlCommand {
   TestBookmarkToc = 61,
   TestBookmarkSave = 62,
   TestBookmarkMove = 63,
+  TestAlignQueue = 64,
+  TestGeomSave = 65,
+  TestAlignApply = 66,
+  TestAlignCommit = 67,
+  TestAlignDiscard = 68,
+  TestGetPageNo = 69,
+  TestTocToolbarButton = 70,
+  TestBookmarkDelete = 71,
 }
 
 export type ControlArg = number | string | Uint8Array | ControlArg[];

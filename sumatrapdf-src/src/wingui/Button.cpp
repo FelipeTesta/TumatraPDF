@@ -34,6 +34,14 @@ bool Button::OnCommand(WPARAM wparam, LPARAM /*lparam*/) {
     return false;
 }
 
+void Button::SetIsChecked(bool isChecked) {
+    this->isChecked = isChecked;
+}
+
+bool Button::IsChecked() const {
+    return isChecked;
+}
+
 // Windows draws a themed push button in a face color of its own ("DarkMode_
 // Explorer" gives a fixed #333333), which sits wherever it lands against an
 // app palette - a light gray box on a black dialog (issue #5896). Draw it here
@@ -61,6 +69,11 @@ void Button::PaintOwnerDrawn(DRAWITEMSTRUCT* dis) {
     COLORREF edge = col.edge;
     if (isDisabled) {
         edge = col.edgeDisabled;
+    } else if (isChecked) {
+        // toggle ON: accent fill + edge so the active mode is visible at a
+        // glance (theme colors only, dark+light safe). No RGB literals.
+        bg = col.bgHot;
+        edge = col.edgeHot;
     } else if (isPressed) {
         bg = col.bgPressed;
         edge = col.edgeHot;

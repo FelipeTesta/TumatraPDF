@@ -133,6 +133,7 @@ void EditToolbarCreate(MainWindow* win) {
         {CmdEditAddText, _TRN("+Text")},
         {CmdEditAddImage, _TRN("+Img")},
         {CmdEditImageCrop, _TRN("Crop")},
+        {CmdArchAlign, _TRN("Crop Align")},
         {CmdEditImageApply, _TRN("Apply")},
     };
     constexpr int kEditToolbarButtonsCount = dimof(gEditToolbarButtons);
@@ -146,8 +147,8 @@ void EditToolbarCreate(MainWindow* win) {
         b.iBitmap = (int)TbIcon::Text;
         b.fsState = TBSTATE_ENABLED;
         b.fsStyle = BTNS_BUTTON | BTNS_SHOWTEXT | BTNS_AUTOSIZE;
-        // Crop is a toggle: needs BTNS_CHECK for the visual checked state
-        if (bi.cmdId == CmdEditImageCrop) {
+        // Crop and Crop Align are toggles: need BTNS_CHECK for the visual checked state
+        if (bi.cmdId == CmdEditImageCrop || bi.cmdId == CmdArchAlign) {
             b.fsStyle |= BTNS_CHECK;
         }
         Str s = trans::GetTranslation(bi.toolTip);

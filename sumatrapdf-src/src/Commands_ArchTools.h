@@ -11,6 +11,7 @@ void HandleCmdArchScale(MainWindow* win);
 void HandleCmdArchMeasure(MainWindow* win);
 void HandleCmdArchMeasureRadius(MainWindow* win);
 void HandleCmdArchRefLine(MainWindow* win);
+void HandleCmdArchAlign(MainWindow* win);
 void HandleCmdArchClear(MainWindow* win);
 void HandleCmdArchResetScale(MainWindow* win);
 void HandleCmdArchToolsToggle(MainWindow* win);

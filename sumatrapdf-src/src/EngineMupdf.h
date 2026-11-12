@@ -6,6 +6,7 @@
 struct Annotation;
 struct DarkModePageAnalysis;
 struct DarkModeEngineCache;
+struct DisplayModel;
 
 struct FitzPageImageInfo {
     fz_rect rect = fz_unit_rect;
@@ -204,6 +205,39 @@ class EngineMupdf : public EngineBase {
     };
     Vec<OutlineEditEntry> outlineEdits;
 
+    // pending page geometry edits (rotation + crop) to be applied at save.
+    // one entry per page; re-queueing on the same page overrides the previous.
+    struct PageGeomEdit {
+        int pageNo = 0;       // 1-based
+        float angleDeg = 0.f; // rotation delta (+ = CCW)
+        RectF cropRectPage;   // crop rect in original page coordinates
+        RectF newMediabox;    // new mediabox after apply (empty = unchanged)
+    };
+    Vec<PageGeomEdit> pendingGeomEdits;
+
+    // Pristine page geometry state for reset (s64: RestorePageGeometry).
+    // Captured at FIRST in-memory apply so we can revert to original geometry
+    // before re-applying a new align line (prevents cumulative corruption).
+    struct PagePristineState {
+        int pageNo = 0;              // 1-based
+        pdf_obj* pageDict = nullptr; // kept ref to original page dict
+        pdf_obj* contents = nullptr; // kept ref to original /Contents
+        pdf_obj* resources = nullptr;// kept ref to original /Resources
+        fz_rect mediaBox;            // original MediaBox
+        fz_rect cropBox;             // original CropBox
+        int rotate = 0;              // original /Rotate
+        bool hasState = false;       // true if captured
+    };
+    Vec<PagePristineState> pristinePageStates;
+
+    // Preview geometry edit (s64-R2: apply/preview gating).
+    // When user draws an align line, we apply it in-memory for visual preview
+    // but do NOT add to pendingGeomEdits (which controls what gets saved).
+    // The preview is promoted to pendingGeomEdits on Apply button click,
+    // or discarded on panel close / tool switch / Esc.
+    PageGeomEdit previewGeomEdit;
+    bool hasPreviewGeomEdit = false;
+
     // password used to decrypt the document (needed for re-encryption/decryption)
     TempStr pdfPassword;
 
@@ -214,6 +248,15 @@ class EngineMupdf : public EngineBase {
     // used to track "dirty" state of bookmark (outline) edits. set on any
     // add/delete/update/rename of a TOC entry; reset on save or on doc reload
     bool modifiedOutline = false;
+
+    // used to track "dirty" state of page geometry edits (align). set on any
+    // QueuePageGeometry call; reset on save or on doc reload
+    bool modifiedPageGeometry = false;
+
+    // true if pendingGeomEdits have been applied to the live document (instant
+    // visual deskew). If true, EngineMupdfSaveUpdated skips re-applying and
+    // goes straight to pdf_save_document to avoid double-transform.
+    bool appliedInMemory = false;
 
     // smart dark mode: engine-level image feature/processed caches
     DarkModeEngineCache* darkModeEngineCache = nullptr;
@@ -247,6 +290,15 @@ class EngineMupdf : public EngineBase {
     bool HasUnsavedOutline() override { return modifiedOutline; }
     bool OutlineEdit(int op, int targetPageNo, Str targetTitle, Str newValue, int newPageNo, int moveBeforePageNo = 0,
                      Str moveBeforeTitle = StrL("")) override;
+    bool QueuePageGeometry(int pageNo, float angleDeg, RectF cropRectPage) override;
+    bool ApplyPendingGeometryEditsNow() override;
+    // Preview gating (s64-R2): visual preview without committing to save
+    bool ApplyPreviewGeometry(int pageNo, float angleDeg, RectF cropRectPage, DisplayModel* dm);
+    bool PromotePreviewToPending(int pageNo);
+    bool DiscardPreview(int pageNo, DisplayModel* dm);
+    bool RestorePageGeometry(int pageNo, DisplayModel* dm);
+    bool RestorePreviewIfNeeded(DisplayModel* dm); // call before save
+    bool HasUnsavedPageGeometry() override { return modifiedPageGeometry; }
     TempStr ExtractFontListTemp();
 
     Str LoadStreamFromPDFFile(Str filePath);

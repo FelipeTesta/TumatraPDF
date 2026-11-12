@@ -1,0 +1,155 @@
+digraph BookmarkStripFeatures {
+    rankdir=TB;
+    node [shape=box, style=rounded, fontname="Consolas", fontsize=10];
+    edge [fontname="Consolas", fontsize=9];
+    compound=true;
+
+    // ============================================================
+    // SCENARIO 1: Strip creation (CreateToc → TocToolbarCreate)
+    // ============================================================
+    subgraph cluster_scenario1 {
+        label="Scenario 1: Strip creation (CreateToc → TocToolbarCreate)";
+        color="#4caf50";
+
+        s1_create [label="CreateToc(win)\nTableOfContents.cpp:2212\nCreateWindowEx(WC_STATIC) hwndTocBox\nlabel + filterEdit + treeView\nSetWindowSubclass(treeView, WndProcTocTree)\n:2267 (WndProcTocTree subclass install)", fillcolor="#c8e6c9", style=filled];
+        s1_toolbar [label="TocToolbarCreate(win)\n:2070\nkTocToolbarCmdAdd=531 (CmdBookmarkAdd)\nkTocToolbarCmdReorder=9001\nTB_ADD BUTTONS (Add + Reorder toggle)\nREBAR band + hwndTocReBar/hwndTocToolbar", fillcolor="#bbdefb", style=filled];
+        s1_wire [label="Wire TreeView callbacks\nonContextMenu=TocContextMenu :2255\nonSelectionChanged=TocTreeSelectionChanged :2257\nonKeyDown=TocTreeKeyDown :2258\nonGetTooltip=TocCustomizeTooltip :2259\nonClick=TocTreeClick :2260", fillcolor="#bbdefb", style=filled];
+        s1_show [label="ShowWindow(hwndTocReBar, SW_SHOW)\n// strip visible above Bookmarks label", fillcolor="#c8e6c9", style=filled];
+
+        s1_create -> s1_toolbar -> s1_wire -> s1_show;
+    }
+
+    // ============================================================
+    // SCENARIO 2: Add bookmark (WndProcTocBox → TocAddBookmark)
+    // ============================================================
+    subgraph cluster_scenario2 {
+        label="Scenario 2: Add bookmark (Add button → TocAddBookmark)";
+        color="#2196f3";
+
+        s2_click [label="User clicks Add button\nWM_COMMAND cmd=531\nWndProcTocBox :1893-1898 → TocAddBookmark(win)", fillcolor="#c8e6c9", style=filled];
+        s2_title [label="TempStr title = fmt(\"Page %d\", pageNo)\n// TEMP-ARENA VIEW (dangling risk if stored raw)\n:2301", fillcolor="#fff9c4", style=filled];
+        s2_outline [label="engine->OutlineEdit(1, 0, StrL(\"\"), title, pageNo)\nEngineMupdf.cpp:3769\n→ outlineEdits.Append + tocAdded.Append(ae)\nmodifiedOutline = true\n// tocTree NOT deleted here (s56 change)", fillcolor="#bbdefb", style=filled];
+        s2_alloc [label="AllocTocItem(nullptr, title, pageNo)\nEngineBase.cpp:133\n// title: str::Dup(nullptr, ...) → malloc (heap, safe)\n// item: malloc (heap)\n// ownerTree = nullptr (NEVER SET) ← SUSPECT\n:2315", fillcolor="#ffcdd2", style=filled];
+        s2_dest [label="newItem->dest = NewSimpleDest(pageNo, RectF(), 0.f)\nEngineBase.cpp:87\n// heap 'new PageDestination()' (owner: caller)\n:2321", fillcolor="#bbdefb", style=filled];
+        s2_link [label="Walk last->next, append newItem to root->child\nroot->child = newItem (in-memory tocTree mutation)\n:2312-2327", fillcolor="#bbdefb", style=filled];
+        s2_reload [label="ReloadTocTree(tab, title, pageNo)\n:2331\n→ posts async uitask (ReloadTocTreeAsync)\n// selTitle = TempStr (raw temp-arena ptr!) ← SUSPECT", fillcolor="#bbdefb", style=filled];
+        s2_async [label="ReloadTocTreeAsync(data)\n:1283\nClearTocBox(win) :404\nLoadTocTree(win) :1196\n→ GetToc() rebuilds tocTree (incl. tocAdded overlay)\n→ SetTocTreeOwner sets ownerTree on ALL items", fillcolor="#e1bee7", style=filled];
+        s2_select [label="FindTocItemByTitleAndPage(title, pageNo)\ntreeView->SelectItem()\nTreeView_EnsureVisible\n:1326-1337", fillcolor="#c8e6c9", style=filled];
+        s2_paint [label="OnTocCustomDraw → DrawTocItemPostPaint\nreads tocItem->title :1438\nGuard: IsTocItemInCurrentTree (ownerTree==tt) :1443\n:1584", fillcolor="#e1bee7", style=filled];
+
+        s2_click -> s2_title -> s2_outline -> s2_alloc -> s2_dest -> s2_link -> s2_reload -> s2_async -> s2_select -> s2_paint;
+    }
+
+    // ============================================================
+    // SCENARIO 3: Reorder drag
+    // ============================================================
+    subgraph cluster_scenario3 {
+        label="Scenario 3: Reorder drag (toggle → drag → MoveTocItem)";
+        color="#e91e63";
+
+        s3_toggle [label="User clicks Reorder button\ncmd=9001 → TocReorderToggle(win)\n:2341\ntocReorderMode = !tocReorderMode\nTbSetButtonChecked(hwndTocToolbar, 9001, mode)", fillcolor="#c8e6c9", style=filled];
+        s3_lbutton [label="WndProcTocTree WM_LBUTTONDOWN :2617\nif (tocReorderMode) {\n  tocDragItem = item; SetCapture(hwnd)\n} else break (pass through)", fillcolor="#bbdefb", style=filled];
+        s3_mousemove [label="WM_MOUSEMOVE :2652\nif (beyond threshold) {\n  target = GetItemAt(pt)\n  tocDragGuideY = target->rc.y\n  tocDragFarLeft = pt.x < stripWidth\n  HwndScheduleRepaint\n}\n// guide line painted in WM_PAINT :2707", fillcolor="#bbdefb", style=filled];
+        s3_lbuttonup [label="WM_LBUTTONUP :2680\nfarLeft = win->tocDragFarLeft (stored; matches painted guide)\nReleaseCapture()\nMoveTocItem(win, source, target, farLeft)\n:2701", fillcolor="#bbdefb", style=filled];
+        s3_move [label="MoveTocItem(win, source, target, farLeft)\n:2556\nfarLeft=true (sibling/unindent): newParent=target->parent → FULL-width guide\nfarLeft=false (child/indent): newParent=target → HALF-width indented guide (one level)\nUnlinkTocItem(root, source) :2493 (correct root)\nLinkTocItem(root, newParent, source, beforeSibling) :2516\nengine->OutlineEdit(5, ...) :2592\nReloadTocTree(tab, selTitle, selPageNo, itemToFree) :2597", fillcolor="#bbdefb", style=filled];
+        s3_reload [label="ReloadTocTreeAsync → ClearTocBox → LoadTocTree\nGetToc rebuilds (tocAdded overlay)\nselect/reveal moved item", fillcolor="#e1bee7", style=filled];
+
+        s3_toggle -> s3_lbutton -> s3_mousemove -> s3_lbuttonup -> s3_move -> s3_reload;
+    }
+
+    // ============================================================
+    // SCENARIO 4: Right-click context menu
+    // ============================================================
+    subgraph cluster_scenario4 {
+        label="Scenario 4: Right-click (TocContextMenu → CmdBookmarkDelete/Update/Rename)";
+        color="#9c27b0";
+
+        s4_menu [label="TocContextMenu(ev)\n:962\nGetOrSelectTreeItemAtPos → dti\nBuildMenuFromDef(menuDefContextToc)\nTrackPopupMenu → cmd\n:1062-1161", fillcolor="#c8e6c9", style=filled];
+        s4_delete [label="CmdBookmarkDelete (2)\n:1090\ndelTitle = str::Dup(dti->title)\nsurvivor = next sibling or parent (capture BEFORE unlink)\nUnlinkTocItem(root, dti) (correct root, NOT root->child)\nengine->OutlineEdit(2, delPageNo, delTitle, \"\", 0)\nReloadTocTree(t, delTitle, delPageNo, itemToFree=dti)\n// free DEFERRED via ReloadTocTaskData dtor after LoadTocTree\n// restore selection = survivor, NOT deleted title\n:1094-1111", fillcolor="#c8e6c9", style=filled];
+        s4_update [label="CmdBookmarkUpdate (3)\n:1115\ndti->pageNo = newPageNo\ndelete dti->dest (if owned)\ndti->dest = NewSimpleDest(newPageNo, ...)\nengine->OutlineEdit(3, ...)\nReloadTocTree(t, dti->title, newPageNo)\n:1120-1136", fillcolor="#bbdefb", style=filled];
+        s4_rename [label="CmdBookmarkRename (4)\n:1140\nShowBookmarkRenameDialog(win, dti)\n→ RenameDialogWndProc → OK\n→ engine->OutlineEdit(4, ...)\n→ ReloadTocTree\n// s60: Enter/ESC routed via EDIT subclass (RenameEditWndProc\n//   forwards VK_RETURN→WM_COMMAND IDOK, VK_ESCAPE→WM_COMMAND IDCANCEL)\n// s61 FIXED: RESULT newName.len=0 root cause — zero-init buf[512] →\n//   len(buf)==0 → GetWindowTextW capacity 0 → empty capture; now dimofi(buf)\n//   capacity + wstr::Dup heap copy (was dangling stack-view WStr) + wstr::Free;\n//   IDOK/VK_RETURN rawEditLen logs.\n// s61 FIXED: dark theme — ApplyDarkModeToPopupWindow was called BEFORE\n//   children existed (dmlib themes only present children); now AFTER child\n//   create; popup handles WM_ERASEBKGND + WM_CTLCOLORDLG; CTLCOL* brush cache\n//   keyed on theme color.\n//   + dark theme: ApplyDarkModeToPopupWindow + WM_CTLCOLOREDIT/WM_CTLCOLORSTATIC\n//   theme brush; result logf \"CmdBookmarkRename: RESULT ...\"", fillcolor="#c8e6c9", style=filled];
+
+        s4_menu -> s4_delete;
+        s4_menu -> s4_update;
+        s4_menu -> s4_rename;
+    }
+
+    // ============================================================
+    // SCENARIO 5: Reload machinery state machine
+    // ============================================================
+    subgraph cluster_scenario5 {
+        label="Scenario 5: Reload state machine (tocReloading/tocReloadPending)";
+        color="#795548";
+
+        s5_flags [label="MainWindow.h :226 tocLoaded=false\n:231 tocReloadPending=false\n:234 tocReloading=false", fillcolor="#fff9c4", style=filled];
+        s5_post [label="ReloadTocTree(tab, selTitle, selPageNo)\n:1356\nif (tocReloadPending) return (guard)\ntocReloadPending = true\nPost(ReloadTocTreeAsync, \"TaskReloadTocTree\")\n:1380-1400", fillcolor="#bbdefb", style=filled];
+        s5_async [label="ReloadTocTreeAsync(data)\n:1283\nif (!CurrentTab==tab || !tocLoaded) → early exit\ntocReloading = true\nClearTocBox → LoadTocTree\nselect/reveal\ntocReloading = false; tocReloadPending = false\n:1307-1345", fillcolor="#e1bee7", style=filled];
+        s5_guard [label="IsTocItemInCurrentTree(tv, item)\n:1574\nreturn item->ownerTree == tt;\n// O(1) guard, avoids O(n) walk\n// ownerTree set only by SetTocTreeOwner (LoadTocTree :1229)", fillcolor="#fff9c4", style=filled];
+        s5_tocsel [label="TocTreeSelectionChanged\n// guard: skip if reloading / item not in current tree", fillcolor="#fff9c4", style=filled];
+
+        s5_flags -> s5_post -> s5_async;
+        s5_async -> s5_guard [style=dashed];
+        s5_guard -> s5_tocsel [style=dashed];
+    }
+
+    // ============================================================
+    // SCENARIO 6: Save path (PersistOutlineEdits → GetToc)
+    // ============================================================
+    subgraph cluster_scenario6 {
+        label="Scenario 6: Save path (PersistOutlineEdits → GetToc rebuild)";
+        color="#000000";
+
+        s6_save [label="Save → EngineMupdfSaveUpdated\n→ PersistOutlineEdits(epdf)\nEngineMupdf.cpp:3824\nreplay outlineEdits via pdf_new_outline_iterator\nop=1 add / 2 delete / 3 update / 4 rename / 5 reorder\n// s60 GHOST FIX: case 3 update-page = deliberate no-op skip\n//   (CmdBookmarkUpdate passes empty newValue → old code wrote wi.title empty\n//   + wi.uri=nullptr → empty-title pageNo=-1 ghost persisted; came back after delete)\n//   page dest not repointable via outline iterator; tocTree holds new pageNo.\n// s62 GHOST REPAIR: case 2 empty-target NO LONGER skips — finds FIRST outline
+//   entry with empty/whitespace-only title (OutlineIteratorFindEmptyTitle, null-title walk)
+//   and DELETES it at save; healthy outlines never have one, match unambiguous;
+//   corrupt pre-s60 user files repaired on next Ctrl+S. logf "removed empty-title ghost".
+//   (s61 skip made the ghost UNDELETABLE — user live bug on s61 build.)
+// s61 GHOST HARDENING: case 5 mvItem.title null\n//   → skip+log BEFORE fz_outline_iterator_insert (never writes empty-title);\n//   OutlineIteratorFind nullptr on empty titles (anchor/parent can not match ghosts).\n//   Defensive: case 1/4/5 skip empty titles; case 5 null-target move =\n//   move to END (top-level append) matching in-memory MoveTocItem(target=null);\n//   log skipped ops; replay matches in-memory result exactly, never creates empty titles.", fillcolor="#c8e6c9", style=filled];
+        s6_gettoc [label="GetToc()\nEngineMupdf.cpp:4010\nBuildTocTree from PDF outline + attachments\nif (!root && len(tocAdded)==0) return nullptr\nrealRoot = AllocTocItem(nullptr, {}, 0)\nappend tocAdded entries as top-level\n:4029-4051\ntocTree = new TocTree(realRoot) :4052", fillcolor="#e1bee7", style=filled];
+        s6_overlay [label="tocAdded = in-session overlay (TocAddedEntry)\nAppend only in OutlineEdit op=1 (add)\n:3785-3788\nReset in engine teardown :2758, :3590", fillcolor="#fff9c4", style=filled];
+
+        s6_save -> s6_gettoc;
+        s6_overlay -> s6_gettoc [style=dashed];
+    }
+
+    // ============================================================
+    // SCENARIO 7: Delete path on doc close / engine teardown
+    // ============================================================
+    subgraph cluster_scenario7 {
+        label="Scenario 7: Doc close / engine teardown (delete tocTree, tocAdded reset)";
+        color="#ff9800";
+
+        s7_close [label="Document close → EngineMupdf::~EngineMupdf\nEngineMupdf.cpp:2778\ndelete tocTree\n:2755-2758 tocAdded iteration + tocAdded.Reset()", fillcolor="#bbdefb", style=filled];
+        s7_teardown [label="tocTree freed (FreeTocItemRec → delete item->dest, free item->title)\nownerTree back-pointers become dangling (tree gone)\n// tocTree pointer itself deleted, not null'd", fillcolor="#e1bee7", style=filled];
+
+        s7_close -> s7_teardown;
+    }
+
+    // ============================================================
+    // SUSPECT / CRASH-PATH (RED)
+    // ============================================================
+    subgraph cluster_suspect {
+        label="Suspect / crash-path (RED — r1,r2,r3 FIXED s57 choke-point Dup/ownerTree; r4 harmless no-change; r5 FIXED s57 FreeTocItemRec + s58 wrong-root/survivor/deferred-free itemToFree)";
+        color="#2e7d32";
+        style=dashed;
+
+        r1 [label="AllocTocItem(nullptr, title, pageNo)\nEngineBase.cpp:133\ntitle: str::Dup(nullptr, ...) → malloc (heap, SAFE from arena reset)\nitem: malloc (heap)\nownerTree = nullptr (zero-init, set by SetTocTreeOwner on LoadTocTree)\n:2315 TocAddBookmark — FIXED s57 (ownerTree covered)", fillcolor="#c8e6c9", style=filled];
+        r2 [label="NewSimpleDest(pageNo, ...) → new PageDestination()\nEngineBase.cpp:87 (heap, caller owns)\ndeleted in FreeTocItemRec / OutlineEdit handlers\n:2321 TocAddBookmark, :1126 CmdBookmarkUpdate — SAFE", fillcolor="#c8e6c9", style=filled];
+        r3 [label="ReloadTocTaskData::selTitle → str::Dup(selTitle) at ReloadTocTree entry (~:1372)\n~ReloadTocTaskData str::Free(heap) — VALID\nuitask::Post async now owns heap copy, not temp-arena dangling ptr\nTableOfContents.cpp:1275-1401 — FIXED s57 (choke-point Dup covers TocAddBookmark:2331, CmdBookmarkRename:2472)", fillcolor="#c8e6c9", style=filled];
+        r4 [label="newItem->ownerTree never set at add time\nSetTocTreeOwner (LoadTocTree :1229) recursively marks ALL items on every load\n:1574-1579 IsTocItemInCurrentTree ownerTree==tt — HARMLESS, no change needed (s57 verified)", fillcolor="#c8e6c9", style=filled];
+        r5 [label="Delete path: UnlinkTocItem(root, dti) correct root (NOT root->child)\nsurvivor captured BEFORE unlink; free DEFERRED via ReloadTocTaskData::itemToFree\n(dtor frees after LoadTocTree; also on early-exit paths)\nrestore selection = survivor, NOT deleted title\nTableOfContents.cpp:1099-1101 + :2556-2616 — FIXED s58", fillcolor="#c8e6c9", style=filled];
+
+        r1 -> r2 -> r3 -> r4 -> r5 [style=dashed];
+    }
+
+    // ============================================================
+    // CROSS-SCENARIO LINKS
+    // ============================================================
+    s1_show -> s2_click [style=dashed, label="strip must exist first"];
+    s2_reload -> s5_post [style=dashed, label="ReloadTocTree = entry"];
+    s3_reload -> s5_post [style=dashed, label="same async path"];
+    s4_delete -> s5_post [style=dashed, label="same async path"];
+    s4_update -> s5_post [style=dashed, label="same async path"];
+    s6_gettoc -> s5_async [style=dashed, label="GetToc feeds LoadTocTree"];
+    s7_close ..> r3 [style=dotted, color="#d32f2f", label="teardown frees tocTree"];
+}

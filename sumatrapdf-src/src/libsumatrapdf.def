@@ -220,6 +220,8 @@ EXPORTS
 
 	pdf_page_resources
 
+	pdf_page_contents
+
 	xps_drop_part
 
 	install_load_windows_font_funcs
@@ -227,6 +229,10 @@ EXPORTS
 	pdf_page_transform
 
 	pdf_page_obj_transform
+
+	pdf_set_page_box
+
+	pdf_dict_put_rect
 
 	fz_close_device
 
@@ -297,6 +303,8 @@ EXPORTS
 	pdf_graft_mapped_object
 
 	pdf_add_object
+
+	pdf_add_object_drop
 
 	pdf_flatten_inheritable_page_items
 
@@ -1435,6 +1443,8 @@ EXPORTS
 	pdf_dict_getsa
 
 	pdf_dict_put
+
+	pdf_dict_put_int
 
 	pdf_dict_puts
 

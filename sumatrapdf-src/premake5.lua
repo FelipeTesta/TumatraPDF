@@ -1309,7 +1309,7 @@ workspace "TumatraPDF"
     debugenvs { 'ASAN_OPTIONS=windows_hook_legacy_allocators=0:suppressions="$(SolutionDir)..\\asan.supp"' }
 
     includedirs { "ext/darkmodelib/include" }
-    defines { "_DARKMODELIB_NO_INI_CONFIG" }
+    defines { "_DARKMODELIB_NO_INI_CONFIG", "TUMATRA_APP" }
     darkmodelib_files()
 
     webview_conf()
@@ -1417,7 +1417,7 @@ workspace "TumatraPDF"
     debugenvs { 'ASAN_OPTIONS=windows_hook_legacy_allocators=0:suppressions="$(SolutionDir)..\\asan.supp"' }
 
     includedirs { "ext/darkmodelib/include" }
-    defines { "_DARKMODELIB_NO_INI_CONFIG" }
+    defines { "_DARKMODELIB_NO_INI_CONFIG", "TUMATRA_APP" }
     darkmodelib_files()
 
     synctex_files()

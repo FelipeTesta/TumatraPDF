@@ -43,6 +43,7 @@ const user32 = dlopen("user32.dll", {
   SetForegroundWindow: { args: [FFIType.ptr], returns: FFIType.bool },
   GetForegroundWindow: { args: [], returns: FFIType.u64 },
   GetWindowDC: { args: [FFIType.ptr], returns: FFIType.u64 },
+  GetDC: { args: [FFIType.ptr], returns: FFIType.u64 },
   ReleaseDC: { args: [FFIType.ptr, FFIType.u64], returns: FFIType.i32 },
   PrintWindow: { args: [FFIType.ptr, FFIType.u64, FFIType.u32], returns: FFIType.bool },
   FindWindowW: { args: [FFIType.ptr, FFIType.ptr], returns: FFIType.u64 },
@@ -266,6 +267,36 @@ export const WM_COMMAND = 0x0111;
 export const WM_COPYDATA = 0x004a;
 // button messages
 export const BM_CLICK = 0x00f5;
+// toolbar messages
+export const TB_BUTTONCOUNT = 0x041e;
+export const TB_GETBUTTON = 0x0417;
+export const TB_GETITEMRECT = 0x044f;
+// TBBUTTON (64-bit) = 24 bytes: idCommand is the 2nd int (offset 4)
+export const kTbbButtonBytes = 6; // Int32Count
+
+export function toolbarButtonCount(hwnd: number): number {
+  return Number(sendMessage(hwnd, TB_BUTTONCOUNT, 0, 0));
+}
+
+// idCommand of the toolbar button at `index`.
+export function toolbarButtonCmdId(hwnd: number, index: number): number {
+  const buf = new Int32Array(kTbbButtonBytes);
+  sendMessage(hwnd, TB_GETBUTTON, index, ptr(buf));
+  return buf[1];
+}
+
+// Button rect in client coords of the toolbar, or null if index out of range.
+export function toolbarButtonRect(
+  hwnd: number,
+  index: number,
+): { left: number; top: number; right: number; bottom: number } | null {
+  const buf = new Int32Array(4);
+  const r = sendMessage(hwnd, TB_GETITEMRECT, index, ptr(buf));
+  if (r === 0) {
+    return null;
+  }
+  return { left: buf[0], top: buf[1], right: buf[2], bottom: buf[3] };
+}
 // virtual-key / mouse-button flags
 export const MK_LBUTTON = 0x0001;
 export const MK_RBUTTON = 0x0002;
@@ -955,6 +986,73 @@ export function captureWindowToPng(hwnd: number, outPath: string): boolean {
   gdi32.symbols.DeleteDC(memDC);
   user32.symbols.ReleaseDC(hwnd, winDC);
   return status === 0;
+}
+
+// Capture a popup menu (class #32768) to a PNG file. Popup menus are
+// layered/topmost windows: PrintWindow WITHOUT PW_RENDERFULLCONTENT (0x2)
+// often returns an all-black surface, and reading the window DC under DWM also
+// reads black. The reliable ground truth for an on-screen, unoccluded menu is
+// a BitBlt from the SCREEN DC (GetDC(NULL)) at the menu's window rect.
+//
+// Strategy: BitBlt from the screen DC first (captures what is actually painted
+// on the desktop). Fall back to PrintWindow + PW_RENDERFULLCONTENT for menus
+// that are occluded / off-screen, where a screen grab cannot see them.
+//
+// The menu must still be open when this runs -- a closed menu yields a
+// stale/zero rect and a black PNG. Call waitForContextMenu() before this.
+export function captureWindowMenuToPng(hwnd: number, outPath: string): boolean {
+  ensureGdiplus();
+  const r = getWindowRect(hwnd);
+  const w = r.right - r.left;
+  const h = r.bottom - r.top;
+  if (w <= 0 || h <= 0) return false;
+
+  let ok = false;
+
+  // ---- primary: BitBlt from screen DC ----
+  const screenDC = user32.symbols.GetDC(0n);
+  const memDC = gdi32.symbols.CreateCompatibleDC(screenDC);
+  const bmp = gdi32.symbols.CreateCompatibleBitmap(screenDC, w, h);
+  const oldObj = gdi32.symbols.SelectObject(memDC, bmp);
+  const bltOk = gdi32.symbols.BitBlt(memDC, 0, 0, w, h, screenDC, r.left, r.top, SRCCOPY);
+  gdi32.symbols.SelectObject(memDC, oldObj);
+
+  if (bltOk) {
+    const gpBmp = new BigUint64Array(1);
+    gdiplus.symbols.GdipCreateBitmapFromHBITMAP(bmp, 0n, ptr(gpBmp));
+    const status = gdiplus.symbols.GdipSaveImageToFile(gpBmp[0], ptr(wideZ(outPath)), ptr(PNG_ENCODER_CLSID), 0);
+    gdiplus.symbols.GdipDisposeImage(gpBmp[0]);
+    ok = status === 0;
+  }
+
+  // ---- fallback: PrintWindow + PW_RENDERFULLCONTENT ----
+  if (!ok) {
+    gdi32.symbols.DeleteObject(bmp);
+    gdi32.symbols.DeleteDC(memDC);
+    user32.symbols.ReleaseDC(0n, screenDC);
+
+    const winDC = user32.symbols.GetWindowDC(hwnd);
+    const memDC2 = gdi32.symbols.CreateCompatibleDC(winDC);
+    const bmp2 = gdi32.symbols.CreateCompatibleBitmap(winDC, w, h);
+    const oldObj2 = gdi32.symbols.SelectObject(memDC2, bmp2);
+    user32.symbols.PrintWindow(hwnd, memDC2, PW_RENDERFULLCONTENT);
+    gdi32.symbols.SelectObject(memDC2, oldObj2);
+
+    const gpBmp = new BigUint64Array(1);
+    gdiplus.symbols.GdipCreateBitmapFromHBITMAP(bmp2, 0n, ptr(gpBmp));
+    const status = gdiplus.symbols.GdipSaveImageToFile(gpBmp[0], ptr(wideZ(outPath)), ptr(PNG_ENCODER_CLSID), 0);
+    gdiplus.symbols.GdipDisposeImage(gpBmp[0]);
+    ok = status === 0;
+
+    gdi32.symbols.DeleteObject(bmp2);
+    gdi32.symbols.DeleteDC(memDC2);
+    user32.symbols.ReleaseDC(hwnd, winDC);
+  } else {
+    gdi32.symbols.DeleteObject(bmp);
+    gdi32.symbols.DeleteDC(memDC);
+    user32.symbols.ReleaseDC(0n, screenDC);
+  }
+  return ok;
 }
 
 // Capture a window by BitBlt-ing from its window DC instead of PrintWindow.

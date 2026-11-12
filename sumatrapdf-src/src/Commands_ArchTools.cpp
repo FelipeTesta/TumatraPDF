@@ -17,8 +17,31 @@
 #include "EngineBase.h"
 #include "DisplayModel.h"
 
+#include "Annotation.h"
+
+extern "C" {
+#include <mupdf/pdf.h>
+}
+#include "EngineMupdf.h"
+
 // Forward declarations — these are defined in other translation units
 void ShowArchScaleDialog(MainWindow* win);
+
+// Cheap relative ms timestamp for [arch] debug logs (ms since first call in this TU).
+static u64 ArchElapsedMs() {
+    static u64 base = 0;
+    u64 now = (u64)GetTickCount64();
+    if (base == 0) base = now;
+    return now - base;
+}
+
+// Idempotency guard window for rapid double-dispatch of CmdArchAlign.
+// A second toggle within this window, with no canvas interaction in between,
+// is treated as a spurious re-post (e.g. Edit toolbar re-posting WM_COMMAND)
+// and ignored so a single click leaves align ON. A legit fast OFF->ON within
+// the window would be swallowed — acceptable tradeoff to kill the phantom
+// 5->0 flip seen on real machines (gap can exceed 100ms).
+constexpr u64 kAlignToggleGuardMs = 500;
 void UpdateToolbar2State(MainWindow*);
 void SetToolbarButtonCheckedState(MainWindow* win, int cmdId, bool isChecked);
 bool RelayoutFrame(MainWindow* win, bool updateToolbars, int sidebarDx);
@@ -28,13 +51,29 @@ bool IsCurrentDocMarkdown(MainWindow* win);
 // HandleCmdArchScale — open floating scale dialog
 void HandleCmdArchScale(MainWindow* win) {
     if (!gGlobalPrefs->archToolsEnabled) return;
+    int oldMode = win->archTools.toolMode;
     int pageNo = win->ctrl ? win->ctrl->CurrentPageNo() : 1;
     auto& ps = win->archTools.GetScaleForPage(pageNo);
-    LogInfo("[arch] CmdArchScale: page %d, opening scale dialog", pageNo);
+    LogInfo("[arch +%llums] CmdArchScale: page %d, opening scale dialog", (unsigned long long)ArchElapsedMs(), pageNo);
     if (!ps.scaleLineDefined) {
         win->archTools.toolMode = 1;
         if (win->hwndCanvas) {
             SetCursor(LoadCursor(nullptr, IDC_CROSS));
+        }
+    }
+    // s64-R2: if switching away from align mode (oldMode == 5), discard any uncommitted preview
+    if (oldMode == 5) {
+        DisplayModel* dm = win->AsFixed();
+        if (dm) {
+            EngineMupdf* em = AsEngineMupdf(dm->GetEngine());
+            if (em && em->hasPreviewGeomEdit) {
+                int curPageNo = dm->CurrentPageNo();
+                if (dm->ValidPageNo(curPageNo)) {
+                    em->DiscardPreview(curPageNo, dm);
+                    LogInfo("[arch +%llums] CmdArchScale: discarded align preview on mode switch",
+                            (unsigned long long)ArchElapsedMs());
+                }
+            }
         }
     }
     ShowArchScaleDialog(win);
@@ -45,6 +84,8 @@ void HandleCmdArchMeasure(MainWindow* win) {
     if (!gGlobalPrefs->archToolsEnabled) return;
     int oldMode = win->archTools.toolMode;
     if (win->archTools.toolMode == 2) {
+        LogInfo("[arch +%llums] CmdArchMeasure OFF toolMode=%d -> 0", (unsigned long long)ArchElapsedMs(),
+                win->archTools.toolMode);
         win->archTools.toolMode = 0;
         if (win->hwndCanvas) {
             SetCursor(LoadCursor(nullptr, IDC_ARROW));
@@ -55,7 +96,23 @@ void HandleCmdArchMeasure(MainWindow* win) {
             SetCursor(LoadCursor(nullptr, IDC_CROSS));
         }
     }
-    LogInfo("[arch] CmdArchMeasure: archToolMode=%d -> %d", oldMode, win->archTools.toolMode);
+    // s64-R2: if switching away from align mode (oldMode == 5), discard any uncommitted preview
+    if (oldMode == 5) {
+        DisplayModel* dm = win->AsFixed();
+        if (dm) {
+            EngineMupdf* em = AsEngineMupdf(dm->GetEngine());
+            if (em && em->hasPreviewGeomEdit) {
+                int pageNo = dm->CurrentPageNo();
+                if (dm->ValidPageNo(pageNo)) {
+                    em->DiscardPreview(pageNo, dm);
+                    LogInfo("[arch +%llums] CmdArchMeasure: discarded align preview on mode switch",
+                            (unsigned long long)ArchElapsedMs());
+                }
+            }
+        }
+    }
+    LogInfo("[arch +%llums] CmdArchMeasure: archToolMode=%d -> %d", (unsigned long long)ArchElapsedMs(), oldMode,
+            win->archTools.toolMode);
     UpdateToolbar2State(win);
 }
 
@@ -70,7 +127,23 @@ void HandleCmdArchMeasureRadius(MainWindow* win) {
     if (win->hwndCanvas) {
         SetCursor(LoadCursor(nullptr, win->archTools.toolMode ? IDC_CROSS : IDC_ARROW));
     }
-    LogInfo("[arch] CmdArchMeasureRadius: archToolMode=%d -> %d", oldMode, win->archTools.toolMode);
+    // s64-R2: if switching away from align mode (oldMode == 5), discard any uncommitted preview
+    if (oldMode == 5) {
+        DisplayModel* dm = win->AsFixed();
+        if (dm) {
+            EngineMupdf* em = AsEngineMupdf(dm->GetEngine());
+            if (em && em->hasPreviewGeomEdit) {
+                int pageNo = dm->CurrentPageNo();
+                if (dm->ValidPageNo(pageNo)) {
+                    em->DiscardPreview(pageNo, dm);
+                    LogInfo("[arch +%llums] CmdArchMeasureRadius: discarded align preview on mode switch",
+                            (unsigned long long)ArchElapsedMs());
+                }
+            }
+        }
+    }
+    LogInfo("[arch +%llums] CmdArchMeasureRadius: archToolMode=%d -> %d", (unsigned long long)ArchElapsedMs(), oldMode,
+            win->archTools.toolMode);
     UpdateToolbar2State(win);
 }
 
@@ -84,8 +157,112 @@ void HandleCmdArchRefLine(MainWindow* win) {
     if (win->hwndCanvas) {
         SetCursor(LoadCursor(nullptr, win->archTools.toolMode ? IDC_CROSS : IDC_ARROW));
     }
-    LogInfo("[arch] CmdArchRefLine: archToolMode=%d -> %d", oldMode, win->archTools.toolMode);
+    // s64-R2: if switching away from align mode (oldMode == 5), discard any uncommitted preview
+    if (oldMode == 5) {
+        DisplayModel* dm = win->AsFixed();
+        if (dm) {
+            EngineMupdf* em = AsEngineMupdf(dm->GetEngine());
+            if (em && em->hasPreviewGeomEdit) {
+                int pageNo = dm->CurrentPageNo();
+                if (dm->ValidPageNo(pageNo)) {
+                    em->DiscardPreview(pageNo, dm);
+                    LogInfo("[arch +%llums] CmdArchRefLine: discarded align preview on mode switch",
+                            (unsigned long long)ArchElapsedMs());
+                }
+            }
+        }
+    }
+    LogInfo("[arch +%llums] CmdArchRefLine: archToolMode=%d -> %d", (unsigned long long)ArchElapsedMs(), oldMode,
+            win->archTools.toolMode);
     UpdateToolbar2State(win);
+}
+
+// HandleCmdArchAlign — toggle align mode (toolMode 5): user draws a 2-point
+// line; the tool decides the nearer axis (Shift snaps H/V), computes the
+// rotation to make the line axis-aligned and the page crop rect (mediabox
+// rotated so the line is axis-aligned, mediabox W:H preserved). Ephemeral:
+// not persisted, cleared on toggle-off / ESC / doc close.
+void HandleCmdArchAlign(MainWindow* win) {
+    if (!gGlobalPrefs->archToolsEnabled) return;
+    int oldMode = win->archTools.toolMode;
+    LogInfo("[arch +%llums] CmdArchAlign ENTRY toolMode=%d", (unsigned long long)ArchElapsedMs(), oldMode);
+
+    // Idempotency guard: a second CmdArchAlign within kAlignToggleGuardMs of the first,
+    // with no canvas interaction in between, is a rapid double-dispatch
+    // (e.g. the Edit toolbar check button re-posting WM_COMMAND). Ignore it
+    // so a single click leaves align ON (toolMode stays 5) instead of
+    // instantly flipping 5 -> 0.
+    u64 nowMs = (u64)GetTickCount64();
+    if (oldMode == 5 && nowMs - win->archTools.alignLastToggleMs < kAlignToggleGuardMs &&
+        win->archTools.alignCanvasInteractMs <= win->archTools.alignLastToggleMs) {
+        LogInfo("[arch +%llums] CmdArchAlign: rapid duplicate dispatch ignored (toolMode stays 5)",
+                (unsigned long long)ArchElapsedMs());
+        // Resync the Edit toolbar checked state so the button stays ON visually.
+        ToolbarUpdateStateForWindow(win, false);
+        return;
+    }
+
+    // s64-R2: if switching away from align mode (5 -> 0), discard any uncommitted preview
+    if (oldMode == 5 && win->archTools.toolMode != 5) {
+        DisplayModel* dm = win->AsFixed();
+        if (dm) {
+            EngineMupdf* em = AsEngineMupdf(dm->GetEngine());
+            if (em && em->hasPreviewGeomEdit) {
+                int pageNo = dm->CurrentPageNo();
+                if (dm->ValidPageNo(pageNo)) {
+                    em->DiscardPreview(pageNo, dm);
+                    LogInfo("[arch +%llums] CmdArchAlign: discarded preview on mode switch",
+                            (unsigned long long)ArchElapsedMs());
+                }
+            }
+        }
+    }
+
+    win->archTools.toolMode = (win->archTools.toolMode == 5) ? 0 : 5;
+    win->archTools.dragLine = 0;
+    win->archTools.alignLastToggleMs = nowMs;
+    win->archTools.alignCanvasInteractMs = 0; // new toggle cycle: no canvas interaction yet
+    if (win->archTools.toolMode == 0) {
+        win->archTools.alignLine = MainWindow::AlignLine{};
+        if (win->hwndCanvas) {
+            SetCursor(LoadCursor(nullptr, IDC_ARROW));
+        }
+    } else {
+        if (win->hwndCanvas) {
+            SetCursor(LoadCursor(nullptr, IDC_CROSS));
+        }
+    }
+    LogInfo("[arch +%llums] CmdArchAlign EXIT toolMode=%d (was=%d)", (unsigned long long)ArchElapsedMs(),
+            win->archTools.toolMode, oldMode);
+    UpdateToolbar2State(win);
+    // Crop Align button is on Edit toolbar — sync its checked state via
+    // ToolbarUpdateStateForWindow (UpdateToolbar2State only syncs Arch toolbar)
+    ToolbarUpdateStateForWindow(win, false);
+}
+
+// HandleCmdArchAlignApply — commit the current align preview for save (s64-R2).
+// Promotes the in-memory preview edit to pendingGeomEdits so it will be
+// persisted on Ctrl+S / save-on-close. Enabled only when a preview is active.
+void HandleCmdArchAlignApply(MainWindow* win) {
+    if (!gGlobalPrefs->archToolsEnabled) return;
+    DisplayModel* dm = win->AsFixed();
+    if (!dm) return;
+    EngineMupdf* em = AsEngineMupdf(dm->GetEngine());
+    if (!em) return;
+
+    int pageNo = dm->CurrentPageNo();
+    if (!dm->ValidPageNo(pageNo)) return;
+
+    if (em->hasPreviewGeomEdit && em->previewGeomEdit.pageNo == pageNo) {
+        if (em->PromotePreviewToPending(pageNo)) {
+            em->hasPreviewGeomEdit = false;
+            em->modifiedPageGeometry = true;
+            em->previewGeomEdit = EngineMupdf::PageGeomEdit{};
+            LogInfo("[arch +%llums] CmdArchAlignApply: promoted preview to pending for page %d",
+                    (unsigned long long)ArchElapsedMs(), pageNo);
+            ToolbarUpdateStateForWindow(win, false);
+        }
+    }
 }
 
 // HandleCmdArchClear — clear current page's measurements AND its scale line
@@ -111,8 +288,8 @@ void HandleCmdArchClear(MainWindow* win) {
     ps.scaleFactor = 0.0f;
     ps.scaleLineP1x = ps.scaleLineP1y = 0.0f;
     ps.scaleLineP2x = ps.scaleLineP2y = 0.0f;
-    LogInfo("[arch] CmdArchClear: cleared %d measurements (scale reset: %d) on page %d", count, hadScale ? 1 : 0,
-            pageNo);
+    LogInfo("[arch +%llums] CmdArchClear: cleared %d measurements (scale reset: %d) on page %d",
+            (unsigned long long)ArchElapsedMs(), count, hadScale ? 1 : 0, pageNo);
     ScheduleRepaint(win, 0);
 }
 
@@ -126,7 +303,8 @@ void HandleCmdArchResetScale(MainWindow* win) {
     ps.scaleFactor = 0.0f;
     ps.scaleLineP1x = ps.scaleLineP1y = 0.0f;
     ps.scaleLineP2x = ps.scaleLineP2y = 0.0f;
-    LogInfo("[arch] CmdArchResetScale: reset scale for page %d only", pageNo);
+    LogInfo("[arch +%llums] CmdArchResetScale: reset scale for page %d only", (unsigned long long)ArchElapsedMs(),
+            pageNo);
     ScheduleRepaint(win, 0);
 }
 
@@ -164,6 +342,8 @@ void HandleCmdArchToolsToggle(MainWindow* win) {
         if (win->archTools.hwndReBar2) {
             ShowWindow(win->archTools.hwndReBar2, SW_HIDE);
         }
+        LogInfo("[arch +%llums] CmdArchToolsToggle OFF toolMode=%d -> 0", (unsigned long long)ArchElapsedMs(),
+                win->archTools.toolMode);
         win->archTools.toolMode = 0;
         win->archTools.eraseMode = false;
         win->archTools.dragLine = 0;
@@ -176,7 +356,8 @@ void HandleCmdArchToolsToggle(MainWindow* win) {
     }
     // Explicitly set checked state for the toggle button (fixes underline drawing)
     SetToolbarButtonCheckedState(win, CmdArchToolsToggle, win->archTools.on);
-    LogInfo("[arch] CmdArchToolsToggle: archToolsOn=%d", win->archTools.on);
+    LogInfo("[arch +%llums] CmdArchToolsToggle: archToolsOn=%d", (unsigned long long)ArchElapsedMs(),
+            win->archTools.on);
     // refresh button enabled states: the conflicting buttons gray out while
     // arch tools are on and come back when it's off (IsCmdEnabled)
     ToolbarUpdateStateForWindow(win, false);
@@ -194,7 +375,8 @@ void HandleCmdArchCleanAll(MainWindow* win) {
     if (win->hwndCanvas) {
         SetCursor(LoadCursor(nullptr, IDC_ARROW));
     }
-    LogInfo("[arch] CmdArchCleanAll: cleared %d measurements + all page scales", count);
+    LogInfo("[arch +%llums] CmdArchCleanAll: cleared %d measurements + all page scales",
+            (unsigned long long)ArchElapsedMs(), count);
     UpdateToolbar2State(win);
     ScheduleRepaint(win, 0);
 }

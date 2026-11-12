@@ -1,0 +1,148 @@
+digraph CropAlign {
+    rankdir=TB;
+    node [shape=box, style=rounded, fontname="Consolas", fontsize=10];
+    edge [fontname="Consolas", fontsize=9];
+    compound=true;
+
+    // ============================================================
+    // Cluster 1: Tool invocation + line drawing (align, toolMode=5)
+    // ============================================================
+    subgraph cluster_invoke {
+        label="Cluster 1: Tool invocation + line drawing (Crop Align, toolMode=5)";
+        color="#4caf50";
+
+        c1_cmd [label="CmdArchAlign (Edit toolbar, CmdArchAlign=525)\nHandleCmdArchAlign\nCommands_ArchTools.cpp:117\nguard kAlignToggleGuardMs=500 (:37)\ntoolMode 0<->5 toggle (s50-R8 idempotency)", fillcolor="#c8e6c9", style=filled];
+        c1_draw [label="User draws line on canvas (LIVE rubber-band)\nWM_LBUTTONDOWN/-MOVE/-UP (toolMode==5)\narchTools.point1/point2 (page coords)\nCanvas.cpp OnMouseMove drag preview :1855-1886\nCanvas.cpp OnMouseLeftButtonDown drag start :2564-2575\nclick-click 2nd path :2576-2593", fillcolor="#bbdefb", style=filled];
+        c1_fin [label="FinalizeAlign(win, dm, pageNo)\nCanvas.cpp:2848\nangle vs nearer axis atan2f (:2870)\nnormDeg [-90,90] (:2873-2888)\naxis 0=vertical / 1=horizontal (:2882-2888)\nrotation = -measuredAngle (:2891) CCW+\ncrop = mediabox rotated about center (:2897-2919)\nclamp to mediabox (:2921-2924)\naspect preserved to mediabox W:H (:2925-2934)", fillcolor="#bbdefb", style=filled];
+
+        c1_cmd -> c1_draw -> c1_fin;
+    }
+
+    // ============================================================
+    // Cluster 1b: Reset on second draw (s64)
+    // ============================================================
+    subgraph cluster_reset {
+        label="Cluster 1b: Reset on second draw — prevent cumulative corruption (s64)";
+        color="#e91e63";
+
+        c1b_mouse [label="OnMouseLeftButtonDown: toolMode=5, dragLine=0\nCanvas.cpp:2564\nIf em->appliedInMemory for this page:\n  RestorePageGeometryForAlign(em, pageNo, dm)\n  BEFORE placing point1", fillcolor="#fce4ec", style=filled];
+        c1b_restore [label="RestorePageGeometryForAlign(em, pageNo, dm)\nCanvas.cpp:2860 (helper)\nPass1 docLock: restore orig /Contents, /Resources\n  MediaBox, CropBox, /Rotate from pristinePageStates\nPass2 pagesLock+renderLock: drop fz_page, displayList\n  pageInfo->mediabox = orig mediabox\n  elementsNeedRebuilding = true\nClear pendingGeomEdits[pageNo]\nflags: modifiedPageGeometry, appliedInMemory\nFreeForDisplayModel + BuildPagesInfo + RelayoutKeepingView", fillcolor="#f8bbd0", style=filled];
+
+        c1b_mouse -> c1b_restore;
+    }
+
+    // ============================================================
+    // Cluster 2: Finalize + instant apply (s50-R9)
+    // ============================================================
+    subgraph cluster_apply {
+        label="Cluster 2: Finalize + instant apply (s50-R9/R10)";
+        color="#2196f3";
+
+        c2_queue [label="dm->GetEngine()->QueuePageGeometry(pageNo, rotation, bbox)\nEngineMupdf.cpp:4050\nrejects pages with engine annotations/widgets (:4057-4072)\nper-page dedupe (:4075-4082)\nmodifiedPageGeometry = true (:4088)", fillcolor="#bbdefb", style=filled];
+        c2_apply [label="dm->GetEngine()->ApplyPendingGeometryEditsNow()\nCanvas.cpp:2949\nEngineMupdf.cpp:7132\nPass1 docLock (:7141) applies to live pdfdoc\n  CAPTURE pristine state at FIRST apply (s64)\n    keeps pdf_keep_obj refs to pageDict, contents, resources\n    captures orig MediaBox, CropBox, /Rotate\nPass2 pagesLock+renderLock (:7463) drops caches", fillcolor="#bbdefb", style=filled];
+        c2_fix [label="NEW (s63 FIX): gRenderCache->FreeForDisplayModel(dm)\nCanvas.cpp immediately after ApplyPendingGeometryEditsNow\nprecedent: TrimConfigDialog.cpp:146, Commands_Image.cpp:157/247,\nCommands_Edit.cpp:927, ImageEditHostSumatra.cpp:152\nDROP stale (dm,pageNo,rotation,zoom,tile) bitmaps", fillcolor="#c8e6c9", style=filled];
+        c2_build [label="dm->BuildPagesInfo()\nCanvas.cpp:2957 (was 2951)\nDisplayModel.cpp:1013\nre-AllocArray pagesInfo (state=Unknown)\n0.00ms EXPECTED — measurement deferred to Relayout\n(useLazyMediaBoxes/default box, :1036)", fillcolor="#e1bee7", style=filled];
+        c2_relayout [label="dm->RelayoutKeepingView()\nCanvas.cpp:2958 (was 2952)\nDisplayModel.cpp:1603\nanchor FirstVisiblePageNo + dyInPage (:1604-1611)\nRelayout(zoomVirtual, rotation) (:1613)\nPageMediaBox :820 -> engine->PageMediabox :831 (pass2 mediabox)\nRecalcVisibleParts :1619 -> RenderVisibleParts :1620\ncb->UpdateScrollbars :1621 -> RepaintDisplay :1622 (Repaint -> cb->Repaint :410)", fillcolor="#e1bee7", style=filled];
+        c2_repaint [label="ScheduleRepaint(win, 0)\nCanvas.cpp:2969 (was 2963)\ncanvas WM_PAINT -> Canvas.cpp:4074 gRenderCache->Paint(...)", fillcolor="#c8e6c9", style=filled];
+
+        c2_queue -> c2_apply -> c2_fix -> c2_build -> c2_relayout -> c2_repaint;
+    }
+
+    // ============================================================
+    // Cluster 3: Geometry mutation in EngineMupdf (XObject /Matrix + boxes)
+    // ============================================================
+    subgraph cluster_geom {
+        label="Cluster 3: Geometry mutation (EngineMupdf.cpp)";
+        color="#9c27b0";
+
+        c3_r3 [label="R3 arbitrary-angle path (:7181-7348)\nangleDeg 37.1deg -> not 90-multiple\nmediabox = pdf_bound_page FZ_MEDIA_BOX (:7188)\ncropRect = ToFzRect(edit.cropRectPage) (:7191)\nrotatedBBox = rot corners bbox (:7210-7220)\nXObject content: q %g %g cm <orig contents> Q (:7229-7252)\n/BBox = [0 0 cropW cropH] (:7259)\n/Matrix = translate(-cropW/2,-cropH/2) pre_rotate pre_translate(newCx,newCy) (:7263-7266)\npdf_new_xobject (:7275) — resources borrowed from page (:7269-7272)\nnew page /Contents = q /FmN Do Q (:7290-7302)\n/Resources = old + /XObject<</FmN xobj>> (:7304-7335)\npdf_set_page_box FZ_MEDIA_BOX + FZ_CROP_BOX = rotatedBBox (:7342-7343)\nedit.newMediabox = ToRectF(rotatedBBox) NON-ZERO ORIGIN (:7347)\n/Rotate LEFT UNCHANGED (currentRotate factoring = known limitation :7183-7185)", fillcolor="#bbdefb", style=filled];
+        c3_r2 [label="R2 90-multiple path (:7122-7180)\n/Rotate = (currentRotate + round(angle/90)*90) % 360 (:7125-7127)\nCropBox transformed about mediabox center (:7138-7175)\nmediabox NOT touched — edit.newMediabox = empty (:7180)", fillcolor="#fff9c4", style=filled];
+
+        c3_r3 -> c3_r2 [style=dashed, label="sibling branch"];
+    }
+
+    // ============================================================
+    // Cluster 4: Cache invalidation — WHICH caches get dropped
+    // ============================================================
+    subgraph cluster_cache {
+        label="Cluster 4: Cache invalidation (s50-R10 two-pass)";
+        color="#ff9800";
+
+        c4_pass2 [label="Pass 2 pagesLock+renderLock (:7363-7391)\nfor each pendingGeomEdit:\nIF newMediabox non-empty: pageInfo->mediabox = :7375-7377 (R3 only!)\nfz_drop_page + pageInfo->page = nullptr (:7379-7382)\nfz_drop_display_list + displayList = nullptr (:7384-7387)\nelementsNeedRebuilding = true (:7389) — consumed EngineMupdf.cpp:1774\nappliedInMemory = true (:7393)", fillcolor="#bbdefb", style=filled];
+        c4_red [label="RED — ROOT CAUSE (s63): RenderCache bitmap cache\nkeyed (dm, pageNo, rotation, zoom, tile) — NEVER invalidated by\nApplyPendingGeometryEditsNow / FinalizeAlign / BuildPagesInfo /\nRelayoutKeepingView. PaintTile Find() (RenderCache.cpp:1132) matches\nSTALE entry; BlitPixmapRegion (:1179) paints OLD unrotated bitmap;\nentry->outOfDate only set cue flag (:1188), never blocks blit.\n= user sees ZERO change though engine apply SUCCEEDS.\nFIX (s63): FinalizeAlign calls gRenderCache->FreeForDisplayModel(dm)\nbefore BuildPagesInfo; SumatraControl TestAlignApply mirrors the same tail.", fillcolor="#ffcdd2", style=filled];
+        c4_getorbuild [label="GetOrBuildPageDisplayList\nEngineMupdf.cpp:4626\nrebuilds displayList lazily from reloaded fz_page (after drop)\nnext RenderPage uses NEW page content (XObject /Matrix)", fillcolor="#e1bee7", style=filled];
+
+        c4_pass2 -> c4_red [style=dashed, color="#d32f2f"];
+        c4_red -> c4_getorbuild [style=dashed, label="post-fix path"];
+    }
+
+    // ============================================================
+    // Cluster 5: Render / repaint after apply (paint path)
+    // ============================================================
+    subgraph cluster_render {
+        label="Cluster 5: Render/repaint path (post-fix)";
+        color="#795548";
+
+        c5_paint [label="Canvas WM_PAINT\nCanvas.cpp:4074 gRenderCache->Paint(hdc, bounds, dm, pageNo, pi, ...)\nrenderMissing=true -> Find(dm,pageNo,rotation,zoom,&tile) (:1132)", fillcolor="#bbdefb", style=filled];
+        c5_miss [label="Post-fix: cache MISS (FreeForDisplayModel dropped entries)\n-> RequestRendering(dm, pageNo, tile) (:1144) render thread\nRenderPage: GetFzPageInfo reloads fz_page (pageInfo->page was null)\nGetOrBuildPageDisplayList (:4626) rebuilds from mutated pdfdoc\ncontent = q /FmN Do Q with rotated /Matrix -> pixmap at NEW mediabox size\nentry cached -> BlitPixmapRegion (:1179) = DESKEWED BITMAP", fillcolor="#c8e6c9", style=filled];
+        c5_hit [label="Pre-fix: cache HIT (stale)\nold bitmap blitted at (possibly) re-laid-out pageOnScreen\ncontent stays UNROTATED = no visual deskew\n(zoom/tile-res unchanged matches key; factor rescales but\nnever re-renders glyphs)", fillcolor="#ffcdd2", style=filled];
+
+        c5_paint -> c5_miss [label="post-fix"];
+        c5_paint -> c5_hit [label="pre-fix", color="#d32f2f"];
+    }
+
+    // ============================================================
+    // Cluster 6: Save path (PersistOutlineEdits sibling)
+    // ============================================================
+    subgraph cluster_save {
+        label="Cluster 6: Save path (geometry re-apply skip)";
+        color="#000000";
+
+        c6_save [label="Ctrl+S -> EngineMupdfSaveUpdated\nEngineMupdf.cpp:7402\nchecks appliedInMemory — if true, SKIPS ApplyPendingGeometryEdits\n(:7500, sets appliedInMemory=false + modifiedPageGeometry=false on success :7531-7532)\nelse applies via ApplyPendingGeometryEdits (:6916, save-time transform)\nHASUNSaves: HasUnsavedPageGeometry() :7741-style, modifiedPageGeometry :7745", fillcolor="#e1bee7", style=filled];
+        c6_geomtest [label="Control cmds (SumatraControl.cpp)\nTestGeomSave = 65 (headless save path, EngineMupdfSaveUpdated)\nTestAlignApply = 66 (GUI window required)\ns63 EXTENDED: now mirrors FinalizeAlign tail —\n  ApplyPendingGeometryEditsNow + FreeForDisplayModel(dm)\n  + BuildPagesInfo + RelayoutKeepingView + ToolbarUpdateStateForWindow\nTestAlignQueue = 64 (queue only)\nmbBefore/mbAfter logged in cmd result (:1518-1531)", fillcolor="#fff9c4", style=filled];
+
+        c6_save -> c6_geomtest [style=dashed, label="exercised by tests"];
+    }
+
+    // ============================================================
+    // Cluster 7: s64 Pristine capture + Restore path
+    // ============================================================
+    subgraph cluster_s64 {
+        label="Cluster 7: s64 — Pristine capture at 1st apply + Restore on 2nd draw";
+        color="#673ab7";
+
+        c7_cap [label="Pristine capture in ApplyPendingGeometryEditsNow\nEngineMupdf.cpp:7143-7178\nPagePristineState struct added to EngineMupdf\n  pageDict, contents, resources (pdf_keep_obj)\n  mediaBox, cropBox, rotate\ncaptured ONCE per page at FIRST in-memory apply\npristinePageStates vector stores by pageNo", fillcolor="#d1c4e9", style=filled];
+        c7_restore2 [label="RestorePageGeometryForAlign (Canvas.cpp:2860)\nCalled from OnMouseLeftButtonDown before new align line\nPass1 docLock: restore orig objects to page dict\nPass2 locks: drop page/displayList, reset mediabox cache\nClear pendingGeomEdits for page\nFreeForDisplayModel + BuildPagesInfo + RelayoutKeepingView\nResult: new align line drawn on PRISTINE skewed page\nAngle computed ABSOLUTE from original, never cumulative", fillcolor="#e1bee7", style=filled];
+        c7_idem [label="IDEMPOTENCY guarantee (s64)\nN consecutive draw-apply cycles:\n  1st: capture pristine, apply deskew A1\n  2nd: restore pristine, apply deskew A2 (from original)\n  3rd: restore pristine, apply deskew A3 (from original)\nSaved file = single deskew (last angle from ORIGINAL)\nNo nested Fm0 XObjects, no double rotation", fillcolor="#c8e6c9", style=filled];
+
+        c7_cap -> c7_restore2 -> c7_idem;
+    }
+
+    // ============================================================
+    // KNOWN LATENT ISSUES (RED / yellow — not fixed this round)
+    // ============================================================
+    subgraph cluster_latent {
+        label="Latent / known issues (s63: noted, not fixed)";
+        color="#d32f2f";
+        style=dashed;
+
+        l1 [label="R2 (90deg) path: pageInfo->mediabox NOT updated (:7180 empty newMediabox)\nlayout keeps pre-edit W:H though /Rotate+CropBox changed — Fit Width/page layout\nmay mis-size swapped-orientation pages. FIX LATER: recompute mediabox via\npdf_page_obj_transform post /Rotate set, or ToRectF(rotated crop).", fillcolor="#fff9c4", style=filled];
+        l2 [label="R3 rotatedBBox has NON-ZERO origin (ToRectF(rotatedBBox), :7347)\nMediaBox/CropBox stored with absolute rotated-corner coords.\nRender CTM (FzCreateViewCtm, :479) ignores origin for rotation==0 (scale only) —\npage content coords are absolute too, so page renders correctly;\nmonitor for selection/hit-test/screen math assuming origin 0.", fillcolor="#fff9c4", style=filled];
+        l3 [label="elementsNeedRebuilding=true set (:7389) but no full annot re-decode before\nnext paint is guaranteed — annots/widgets on edited pages were already\nREJECTED at QueuePageGeometry (:4057-4072), so expected no-op.", fillcolor="#c8e6c9", style=filled];
+
+        l1 -> l2 -> l3 [style=dashed];
+    }
+
+    // ============================================================
+    // FLOW LINKS
+    // ============================================================
+    c1_fin -> c2_queue;
+    c2_apply -> c4_pass2;
+    c3_r3 -> c4_pass2 [style=dashed, label="pass1 output"];
+    c2_fix -> c4_red [style=dashed, label="closes the hole"];
+    c2_relayout -> c5_paint;
+    c1b_mouse -> c1_fin [style=dotted, label="reset before finalize"];
+    c7_cap -> c2_apply [style=dotted, label="capture at 1st apply"];
+    l1 -> c3_r2 [style=dotted, color="#d32f2f"];
+    l2 -> c3_r3 [style=dotted, color="#d32f2f"];
+}

@@ -166,3 +166,51 @@ Get-ChildItem "$env:LOCALAPPDATA\SumatraPDF-data\*\crashinfo\*.txt" | Select-Str
 
 - TumatraPDF's OWN dump writer (not WER).
 - ~130 dirs accumulated Oct 2026; housekeeping optional.
+
+---
+
+## Popup Menu Capture (#32768)
+
+### Root cause of all-black PNGs
+
+Popup menus are `WS_EX_LAYERED` topmost windows (class `#32768`).
+`PrintWindow` **without** `PW_RENDERFULLCONTENT` (0x2) often returns an
+all-black surface for layered / DirectComposition surfaces. Plain `BitBlt`
+from the window DC under DWM also reads black. `PrintWindow`
+*with* `PW_RENDERFULLCONTENT` works for many menus but can still fail on
+occluded / off-screen ones.
+
+### Winning method (verified s51-h, tests/tmp/s51h/)
+
+Capture an **on-screen, unoccluded** menu with `BitBlt` from the **screen DC**
+(`GetDC(NULL)`) at the menu's window rect. This reads what is actually painted
+on the desktop and is the ground truth for a visible menu.
+
+Reusable helper: `captureWindowMenuToPng(hwnd, outPath)` in
+`tests/winapi.ts` (~line 990).
+1. `BitBlt` from screen DC at `GetWindowRect(hwnd)` → PNG (primary).
+2. Fall back to `PrintWindow(hwnd, memDC, PW_RENDERFULLCONTENT)` → PNG
+   (for occluded / off-screen menus where a screen grab cannot see them).
+
+Both paths go through GDI+ `GdipSaveImageToFile` with the PNG encoder CLSID.
+
+### Gotchas
+
+- Menu must be **open during capture** — `waitForContextMenu()` first, then
+  capture immediately. A closed menu yields a stale/zero rect → black PNG.
+- Get the menu hwnd via `enumWindows` matching class `#32768` after
+  `TrackPopupMenu` / `WM_CONTEXTMENU`. Do not hardcode hwnds.
+- Call `setProcessDpiAware()` before reading rects/pixels on scaled displays
+  (DPI virtualization makes rects and window-DC coords disagree).
+- The menu rect is in **screen** coords — use it directly with the screen-DC
+  `BitBlt`; do not add/subtract frame offsets.
+- Black PNGs are tiny / uniform; verify by vision + file size. Readable menu
+  text = success (e.g. "Expand All", "Delete bookmark").
+
+### Verified probe
+
+`tests/tmp/s51h/menu-capture.ts` captures the TOC context menu three ways
+(PrintWindow+PW_RENDERFULLCONTENT, screen-DC BitBlt, window-DC BitBlt) plus
+the new helper, saving `menu-final.png`. All readable in this environment;
+screen-DC BitBlt is the reliable ground truth.
+

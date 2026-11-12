@@ -252,6 +252,12 @@ struct Button : Wnd {
     // WM_DRAWITEM never reports a hot state
     bool isHot = false;
     bool trackingMouse = false;
+    // toggle/checked state (e.g. Reorder button in the TOC panel). When ON the
+    // button paints an accent fill so the active mode is visible at a glance.
+    bool isChecked = false;
+
+    void SetIsChecked(bool isChecked);
+    bool IsChecked() const;
 
     Button();
 

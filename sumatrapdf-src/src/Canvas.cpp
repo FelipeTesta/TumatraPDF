@@ -33,6 +33,11 @@
 #include "EngineBase.h"
 #include "EngineAll.h"
 
+extern "C" {
+#include <mupdf/pdf.h>
+}
+#include "EngineMupdf.h"
+
 #include "DisplayModel.h"
 #include "Theme.h"
 #include "GlobalPrefs.h"
@@ -75,6 +80,14 @@
 // Conversion table: meters per unit (index matches ArchUnit enum: 0=mm,1=cm,2=m,3=in,4=ft)
 static const float kMeterPerUnit[5] = {0.001f, 0.01f, 1.0f, 0.0254f, 0.3048f};
 
+// Relative ms timestamp for [arch] debug logs (ms since first call in this TU).
+static u64 ArchElapsedMs() {
+    static u64 base = 0;
+    u64 now = (u64)GetTickCount64();
+    if (base == 0) base = now;
+    return now - base;
+}
+
 // if set instead of trying to render pages we don't have, we simply do nothing
 // this reduces the flickering when going quickly through pages but creates
 // impression of lag
@@ -85,6 +98,11 @@ Kind kNotifAnnotation = "notifAnnotation";
 constexpr int kRenderDelayShowNotif = 500;
 
 //--- laser pointer (CmdToggleLaserPointer)
+
+// Forward declarations
+class EngineMupdf;
+struct DisplayModel;
+static void RestorePageGeometryForAlign(EngineMupdf* em, int pageNo, DisplayModel* dm);
 
 // A laser pointer is a session mode, not a setting: it's turned on to point
 // things out during a presentation and off again afterwards, and an app that
@@ -1513,6 +1531,7 @@ static RectF CalculateResizedRect(MainWindow* win, int x, int y);
 static void FinalizeArchMeasurement(MainWindow* win, DisplayModel* dm, int pageNo);
 static void FinalizeArchRadius(MainWindow* win, int pageNo);
 static void FinalizeArchReferenceLine(MainWindow* win, int pageNo);
+static void FinalizeAlign(MainWindow* win, DisplayModel* dm, int pageNo);
 // CaptureToolExecute is declared in Canvas.h and defined in SumatraPDF.cpp.
 
 // --- touch text selection (issue #538) --------------------------------------
@@ -1828,8 +1847,44 @@ static void OnMouseMove(MainWindow* win, int x, int y, WPARAM key) {
                 int dy = y - win->archTools.dragStartPos.y;
                 if (dx * dx + dy * dy > 16) { // ~4px threshold
                     win->archTools.dragMoved = true;
-                    LogInfo("[arch] OnMouseMove: drag threshold crossed, moved=true (mode=%d)",
-                            win->archTools.toolMode);
+                    LogInfo("[arch +%llums] OnMouseMove: drag threshold crossed, moved=true (mode=%d)",
+                            (unsigned long long)ArchElapsedMs(), win->archTools.toolMode);
+                }
+            }
+            ScheduleRepaint(win, 0);
+            return;
+        }
+    }
+
+    // Arch align: live preview while dragging between the two points
+    if (gGlobalPrefs->archToolsEnabled && win->archTools.toolMode == 5 && win->archTools.dragLine == 1 &&
+        win->AsFixed() && !(key & MK_RBUTTON)) {
+        win->archTools.alignCanvasInteractMs = (u64)GetTickCount64();
+        LogInfo("[arch +%llums] Align: canvas drag (toolMode=5, draw state survives)",
+                (unsigned long long)ArchElapsedMs());
+        DisplayModel* dm = win->AsFixed();
+        int pageNo = dm->CurrentPageNo();
+        if (dm->ValidPageNo(pageNo)) {
+            Point screenPt{x, y};
+            PointF pagePt = ArchSnapScreenPoint(win, dm, pageNo, screenPt);
+            // Shift constraint: snap to horizontal or vertical
+            if (GetAsyncKeyState(VK_SHIFT) & 0x8000) {
+                PointF p1page = win->archTools.point1;
+                float dx = pagePt.x - p1page.x;
+                float dy = pagePt.y - p1page.y;
+                if (fabsf(dx) > fabsf(dy)) {
+                    pagePt.y = p1page.y;
+                } else {
+                    pagePt.x = p1page.x;
+                }
+            }
+            win->archTools.point2 = pagePt;
+            // Track drag distance for click-click vs click-drag detection.
+            if ((key & MK_LBUTTON) && !win->archTools.dragMoved) {
+                int dx = x - win->archTools.dragStartPos.x;
+                int dy = y - win->archTools.dragStartPos.y;
+                if (dx * dx + dy * dy > 16) { // ~4px threshold
+                    win->archTools.dragMoved = true;
                 }
             }
             ScheduleRepaint(win, 0);
@@ -2342,7 +2397,8 @@ static void OnMouseLeftButtonDown(MainWindow* win, int x, int y, WPARAM key) {
                     win->archTools.measurements[i] = win->archTools.measurements[win->archTools.measurements.len - 1];
                     win->archTools.measurements.len--;
                     removed = true;
-                    LogInfo("[arch] erase: removed measurement at index %d", i);
+                    LogInfo("[arch +%llums] erase: removed measurement at index %d",
+                            (unsigned long long)ArchElapsedMs(), i);
                     break;
                 }
             }
@@ -2358,7 +2414,8 @@ static void OnMouseLeftButtonDown(MainWindow* win, int x, int y, WPARAM key) {
                     ps.scaleLineP1x = ps.scaleLineP1y = 0.0f;
                     ps.scaleLineP2x = ps.scaleLineP2y = 0.0f;
                     removed = true;
-                    LogInfo("[arch] erase: removed scale line on page %d", pageNo);
+                    LogInfo("[arch +%llums] erase: removed scale line on page %d", (unsigned long long)ArchElapsedMs(),
+                            pageNo);
                 }
             }
 
@@ -2374,8 +2431,9 @@ static void OnMouseLeftButtonDown(MainWindow* win, int x, int y, WPARAM key) {
         if (dm->ValidPageNo(pageNo)) {
             Point screenPt{x, y};
             PointF pagePt = ArchSnapScreenPoint(win, dm, pageNo, screenPt);
-            LogInfo("[arch] OnMouseLeftButtonDown: mode=%d dragLine=%d pagePt=(%.2f,%.2f) moved=%d",
-                    win->archTools.toolMode, win->archTools.dragLine, pagePt.x, pagePt.y, win->archTools.dragMoved);
+            LogInfo("[arch +%llums] OnMouseLeftButtonDown: mode=%d dragLine=%d pagePt=(%.2f,%.2f) moved=%d",
+                    (unsigned long long)ArchElapsedMs(), win->archTools.toolMode, win->archTools.dragLine, pagePt.x,
+                    pagePt.y, win->archTools.dragMoved);
 
             if (win->archTools.toolMode == 1) { // Scale mode
                 if (win->archTools.dragLine == 0) {
@@ -2389,7 +2447,8 @@ static void OnMouseLeftButtonDown(MainWindow* win, int x, int y, WPARAM key) {
                     win->archTools.dragMoved = false;
                     SetCapture(win->hwndCanvas);
                     win->mouseAction = MouseAction::Dragging;
-                    LogInfo("[arch] Scale: first point placed, waiting for 2nd click or drag");
+                    LogInfo("[arch +%llums] Scale: first point placed, waiting for 2nd click or drag",
+                            (unsigned long long)ArchElapsedMs());
                     return;
                 } else if (win->archTools.dragLine == 1 && !win->archTools.dragMoved) {
                     // Second click (not a drag): finalize the line
@@ -2418,8 +2477,8 @@ static void OnMouseLeftButtonDown(MainWindow* win, int x, int y, WPARAM key) {
                     ps.scaleLineP2y = p2page.y;
                     ReleaseCapture();
                     win->mouseAction = MouseAction::None;
-                    LogInfo("[arch] Scale: line finalized by 2nd click p1=(%.2f,%.2f) p2=(%.2f,%.2f)", p1page.x,
-                            p1page.y, p2page.x, p2page.y);
+                    LogInfo("[arch +%llums] Scale: line finalized by 2nd click p1=(%.2f,%.2f) p2=(%.2f,%.2f)",
+                            (unsigned long long)ArchElapsedMs(), p1page.x, p1page.y, p2page.x, p2page.y);
                     ScheduleRepaint(win, 0);
                     return;
                 }
@@ -2432,7 +2491,8 @@ static void OnMouseLeftButtonDown(MainWindow* win, int x, int y, WPARAM key) {
                     win->archTools.dragMoved = false;
                     SetCapture(win->hwndCanvas);
                     win->mouseAction = MouseAction::Dragging;
-                    LogInfo("[arch] Measure: first point placed, waiting for 2nd click or drag");
+                    LogInfo("[arch +%llums] Measure: first point placed, waiting for 2nd click or drag",
+                            (unsigned long long)ArchElapsedMs());
                     return;
                 } else if (win->archTools.dragLine == 1 && !win->archTools.dragMoved) {
                     // Second click (not a drag): finalize measurement
@@ -2450,7 +2510,8 @@ static void OnMouseLeftButtonDown(MainWindow* win, int x, int y, WPARAM key) {
                     win->archTools.dragLine = 2;
                     ReleaseCapture();
                     win->mouseAction = MouseAction::None;
-                    LogInfo("[arch] Measure: line finalized by 2nd click, finalizing measurement");
+                    LogInfo("[arch +%llums] Measure: line finalized by 2nd click, finalizing measurement",
+                            (unsigned long long)ArchElapsedMs());
                     // Finalize measurement
                     FinalizeArchMeasurement(win, dm, pageNo);
                     return;
@@ -2464,7 +2525,8 @@ static void OnMouseLeftButtonDown(MainWindow* win, int x, int y, WPARAM key) {
                     win->archTools.dragMoved = false;
                     SetCapture(win->hwndCanvas);
                     win->mouseAction = MouseAction::Dragging;
-                    LogInfo("[arch] Radius: chord start placed, waiting for chord end");
+                    LogInfo("[arch +%llums] Radius: chord start placed, waiting for chord end",
+                            (unsigned long long)ArchElapsedMs());
                     ScheduleRepaint(win, 0);
                     return;
                 } else if (win->archTools.dragLine == 1 && !win->archTools.dragMoved) {
@@ -2490,7 +2552,8 @@ static void OnMouseLeftButtonDown(MainWindow* win, int x, int y, WPARAM key) {
                     win->archTools.dragMoved = false;
                     SetCapture(win->hwndCanvas);
                     win->mouseAction = MouseAction::Dragging;
-                    LogInfo("[arch] RefLine: first point placed, waiting for 2nd");
+                    LogInfo("[arch +%llums] RefLine: first point placed, waiting for 2nd",
+                            (unsigned long long)ArchElapsedMs());
                     ScheduleRepaint(win, 0);
                     return;
                 } else if (win->archTools.dragLine == 1 && !win->archTools.dragMoved) {
@@ -2499,6 +2562,53 @@ static void OnMouseLeftButtonDown(MainWindow* win, int x, int y, WPARAM key) {
                     ReleaseCapture();
                     win->mouseAction = MouseAction::None;
                     FinalizeArchReferenceLine(win, pageNo);
+                    return;
+                }
+            } else if (win->archTools.toolMode == 5) {
+                // Align mode: 2-point line → angle + axis decision → cropRectPage
+                if (win->archTools.dragLine == 0) {
+                    // First click: start drawing
+                    // If there's already an applied geometry edit for this page, restore pristine first
+                    // to prevent cumulative corruption (s64: reset on second draw).
+                    EngineMupdf* em = AsEngineMupdf(dm->GetEngine());
+                    if (em) {
+                        for (const auto& edit : em->pendingGeomEdits) {
+                            if (edit.pageNo == pageNo && em->appliedInMemory) {
+                                LogInfo("[arch +%llums] Align: restoring pristine geometry for page %d before new draw",
+                                        (unsigned long long)ArchElapsedMs(), pageNo);
+                                RestorePageGeometryForAlign(em, pageNo, dm);
+                                break;
+                            }
+                        }
+                    }
+                    win->archTools.point1 = pagePt;
+                    win->archTools.dragLine = 1;
+                    win->archTools.dragStartPos = Point{x, y};
+                    win->archTools.dragMoved = false;
+                    win->archTools.alignCanvasInteractMs = (u64)GetTickCount64();
+                    SetCapture(win->hwndCanvas);
+                    win->mouseAction = MouseAction::Dragging;
+                    LogInfo("[arch] Align: first point placed, waiting for 2nd click or drag (canvas interact)");
+                    ScheduleRepaint(win, 0);
+                    return;
+                } else if (win->archTools.dragLine == 1 && !win->archTools.dragMoved) {
+                    // Second click (not a drag): finalize
+                    // Shift constraint: snap to horizontal or vertical
+                    if (GetAsyncKeyState(VK_SHIFT) & 0x8000) {
+                        float dx = pagePt.x - win->archTools.point1.x;
+                        float dy = pagePt.y - win->archTools.point1.y;
+                        if (fabsf(dx) > fabsf(dy)) {
+                            pagePt.y = win->archTools.point1.y;
+                        } else {
+                            pagePt.x = win->archTools.point1.x;
+                        }
+                    }
+                    win->archTools.point2 = pagePt;
+                    win->archTools.dragLine = 2;
+                    ReleaseCapture();
+                    win->mouseAction = MouseAction::None;
+                    LogInfo("[arch +%llums] Align: line finalized by 2nd click", (unsigned long long)ArchElapsedMs());
+                    FinalizeAlign(win, dm, pageNo);
                     return;
                 }
             }
@@ -2750,6 +2860,228 @@ static void FinalizeArchMeasurement(MainWindow* win, DisplayModel* /*dm*/, int p
     ScheduleRepaint(win, 0);
 }
 
+// Restore page geometry to pristine state (s64: reset on second align draw).
+// Reverts the page to its original state before any geometry edits were applied.
+// Called before starting a new align line on a page that already has applied geometry.
+static void RestorePageGeometryForAlign(EngineMupdf* em, int pageNo, DisplayModel* dm) {
+    if (!em || !em->pdfdoc || pageNo < 1 || pageNo > em->pageCount) {
+        return;
+    }
+    fz_context* ctx = em->Ctx();
+    if (!ctx) return;
+
+    // Find pristine state for this page
+    EngineMupdf::PagePristineState* pristine = nullptr;
+    for (int i = 0; i < len(em->pristinePageStates); i++) {
+        if (em->pristinePageStates[i].pageNo == pageNo) {
+            pristine = &em->pristinePageStates[i];
+            break;
+        }
+    }
+    if (!pristine || !pristine->hasState) {
+        return; // No pristine state captured
+    }
+
+    // Pass 1: restore PDF objects under docLock
+    {
+        ScopedRecursiveMutex scope(&em->docLock);
+        fz_try(ctx) {
+            FzPageInfo* pageInfo = em->pages[pageNo - 1];
+            if (!pageInfo || !pageInfo->page) {
+                // Load the page if needed
+                fz_try(ctx) {
+                    pageInfo->page = fz_load_page(ctx, em->_doc, pageNo - 1);
+                }
+                fz_catch(ctx) {
+                    fz_report_error(ctx);
+                }
+            }
+            if (pageInfo && pageInfo->page) {
+                pdf_page* pdfpage = pdf_page_from_fz_page(ctx, pageInfo->page);
+                if (pdfpage) {
+                    pdf_obj* pageObj = pdfpage->obj;
+                    if (pageObj) {
+                        // Restore original /Contents
+                        if (pristine->contents) {
+                            pdf_dict_put(ctx, pageObj, PDF_NAME(Contents), pristine->contents);
+                        }
+                        // Restore original /Resources (removes added XObject)
+                        if (pristine->resources) {
+                            pdf_dict_put(ctx, pageObj, PDF_NAME(Resources), pristine->resources);
+                        }
+                        // Restore original MediaBox and CropBox
+                        pdf_dict_put_rect(ctx, pageObj, PDF_NAME(MediaBox), pristine->mediaBox);
+                        pdf_dict_put_rect(ctx, pageObj, PDF_NAME(CropBox), pristine->cropBox);
+                        // Restore original /Rotate
+                        pdf_dict_put_int(ctx, pageObj, PDF_NAME(Rotate), pristine->rotate);
+                    }
+                }
+            }
+        }
+        fz_catch(ctx) {
+            fz_report_error(ctx);
+        }
+    }
+
+    // Pass 2: invalidate caches under pagesLock+renderLock
+    {
+        ScopedRecursiveMutex ps(&em->pagesLock);
+        ScopedMutex rl(&em->renderLock);
+        FzPageInfo* pageInfo = em->pages[pageNo - 1];
+        if (pageInfo) {
+            // Restore mediabox cache to original
+            pageInfo->mediabox = ToRectF(pristine->mediaBox);
+            // Drop cached page so it reloads with original geometry
+            if (pageInfo->page) {
+                fz_drop_page(ctx, pageInfo->page);
+                pageInfo->page = nullptr;
+            }
+            // Drop cached display list
+            if (pageInfo->displayList) {
+                fz_drop_display_list(ctx, pageInfo->displayList);
+                pageInfo->displayList = nullptr;
+            }
+            pageInfo->elementsNeedRebuilding = true;
+        }
+    }
+
+    // Clear the pending geometry edit for this page
+    for (int i = 0; i < len(em->pendingGeomEdits); i++) {
+        if (em->pendingGeomEdits[i].pageNo == pageNo) {
+            em->pendingGeomEdits.RemoveAtFast(i);
+            break;
+        }
+    }
+    // Update modifiedPageGeometry flag
+    bool anyLeft = false;
+    for (const EngineMupdf::PageGeomEdit& e : em->pendingGeomEdits) {
+        if (e.pageNo > 0) { anyLeft = true; break; }
+    }
+    em->modifiedPageGeometry = anyLeft;
+    em->appliedInMemory = anyLeft; // if no edits left, not applied in memory
+
+    // Invalidate render cache and relayout (mirrors FinalizeAlign tail)
+    if (gRenderCache) {
+        gRenderCache->FreeForDisplayModel(dm);
+    }
+    dm->BuildPagesInfo();
+    dm->RelayoutKeepingView();
+}
+
+// FinalizeAlign — compute angle vs nearer axis, rotation to axis-align the line,
+// and the page crop rect (mediabox rotated so the line is axis-aligned, mediabox
+// W:H preserved). Ephemeral result stored in win->archTools.alignLine.
+static void FinalizeAlign(MainWindow* win, DisplayModel* dm, int pageNo) {
+    PointF p1 = win->archTools.point1;
+    PointF p2 = win->archTools.point2;
+    float dx = p2.x - p1.x;
+    float dy = p2.y - p1.y;
+    float len = sqrtf(dx * dx + dy * dy);
+
+    MainWindow::AlignLine& al = win->archTools.alignLine;
+    al = MainWindow::AlignLine{};
+    al.pageNo = pageNo;
+    al.p1 = p1;
+    al.p2 = p2;
+    al.defined = (len > 1.0f);
+    if (!al.defined) {
+        win->archTools.dragLine = 0;
+        ScheduleRepaint(win, 0);
+        return;
+    }
+
+    // Angle of the line vs vertical axis (0° = vertical) and vs horizontal axis.
+    // Screen Y grows downward, so atan2f(dx, dy) = deviation from vertical.
+    const float kDegPerRad = 180.0f / 3.141592653589793f;
+    float angleToVertical = atan2f(dx, dy) * kDegPerRad;
+    float angleToHorizontal = atan2f(dy, dx) * kDegPerRad;
+    // Normalize to [-90, 90] (a line is un-oriented: 100° == -80°)
+    auto normDeg = [](float a) {
+        while (a > 90.0f) a -= 180.0f;
+        while (a < -90.0f) a += 180.0f;
+        return a;
+    };
+    angleToVertical = normDeg(angleToVertical);
+    angleToHorizontal = normDeg(angleToHorizontal);
+
+    // Nearer axis: whichever deviation is smaller. measuredAngleDeg = deviation.
+    if (fabsf(angleToVertical) <= fabsf(angleToHorizontal)) {
+        al.axis = 0; // vertical
+        al.measuredAngleDeg = angleToVertical;
+    } else {
+        al.axis = 1; // horizontal
+        al.measuredAngleDeg = angleToHorizontal;
+    }
+
+    // Rotation (degrees, + = CCW) to bring the line onto the chosen axis.
+    float rotation = al.axis == 0 ? -angleToVertical : -angleToHorizontal;
+    float rad = rotation * 3.141592653589793f / 180.0f;
+    float c = cosf(rad), s = sinf(rad);
+
+    // Crop rect: mediabox rotated by `rad` about page center → axis-aligned bbox,
+    // clamped to mediabox, then scaled to preserve mediabox W:H.
+    EngineBase* engine = dm->GetEngine();
+    RectF mediabox = engine->PageMediabox(pageNo);
+    PointF center{(mediabox.x + mediabox.Right()) / 2.0f, (mediabox.y + mediabox.Bottom()) / 2.0f};
+    PointF corners[4] = {
+        PointF{mediabox.x, mediabox.y},
+        PointF{mediabox.Right(), mediabox.y},
+        PointF{mediabox.Right(), mediabox.Bottom()},
+        PointF{mediabox.x, mediabox.Bottom()},
+    };
+    float minX = corners[0].x, minY = corners[0].y, maxX = corners[0].x, maxY = corners[0].y;
+    for (int i = 0; i < 4; i++) {
+        float cx = corners[i].x - center.x;
+        float cy = corners[i].y - center.y;
+        float rx = cx * c - cy * s;
+        float ry = cx * s + cy * c;
+        float wx = rx + center.x;
+        float wy = ry + center.y;
+        if (wx < minX) minX = wx;
+        if (wy < minY) minY = wy;
+        if (wx > maxX) maxX = wx;
+        if (wy > maxY) maxY = wy;
+    }
+    RectF bbox{minX, minY, maxX - minX, maxY - minY};
+    // Clamp to mediabox
+    if (bbox.x < mediabox.x) bbox.x = mediabox.x;
+    if (bbox.y < mediabox.y) bbox.y = mediabox.y;
+    if (bbox.Right() > mediabox.Right()) bbox.x = mediabox.Right() - bbox.dx;
+    if (bbox.Bottom() > mediabox.Bottom()) bbox.y = mediabox.Bottom() - bbox.dy;
+    // Preserve mediabox W:H aspect
+    float mbAspect = mediabox.dx / mediabox.dy;
+    if (bbox.dx > 0.0f && bbox.dy > 0.0f) {
+        float bboxAspect = bbox.dx / bbox.dy;
+        if (bboxAspect > mbAspect) {
+            bbox.dy = bbox.dx / mbAspect;
+        } else {
+            bbox.dx = bbox.dy * mbAspect;
+        }
+    }
+    al.cropRectPage = bbox;
+    al.defined = true;
+
+    // Preview gating (s64-R2): apply in-memory for visual preview only.
+    // Does NOT add to pendingGeomEdits (committed edits for save).
+    // Preview is promoted on Apply button click, discarded on panel close/tool switch.
+    if (dm && dm->GetEngine()) {
+        EngineMupdf* em = AsEngineMupdf(dm->GetEngine());
+        if (em && em->ApplyPreviewGeometry(pageNo, rotation, bbox, dm)) {
+            // Preview applied successfully - visual deskew active
+            // Note: modifiedPageGeometry NOT set (not committed for save)
+            ToolbarUpdateStateForWindow(win, false);
+        }
+    }
+
+    win->archTools.dragLine = 0; // ready for next align
+    LogInfo(
+        "[arch +%llums] FinalizeAlign: page=%d p1=(%.2f,%.2f) p2=(%.2f,%.2f) angle=%.1f° axis=%d "
+        "crop=(%.2f,%.2f,%.2f,%.2f)",
+        (unsigned long long)ArchElapsedMs(), pageNo, p1.x, p1.y, p2.x, p2.y, al.measuredAngleDeg, al.axis,
+        al.cropRectPage.x, al.cropRectPage.y, al.cropRectPage.dx, al.cropRectPage.dy);
+    ScheduleRepaint(win, 0);
+}
+
 static void OnMouseLeftButtonUp(MainWindow* win, int x, int y, WPARAM key) {
     // Capture tool: finish a region drag -> copy to clipboard at doc DPI,
     // then auto-exit capture mode.
@@ -2851,6 +3183,21 @@ static void OnMouseLeftButtonUp(MainWindow* win, int x, int y, WPARAM key) {
                     // Reference line: a drag finalizes the guide immediately
                     win->archTools.dragLine = 0;
                     FinalizeArchReferenceLine(win, pageNo);
+                } else if (win->archTools.toolMode == 5) {
+                    // Align mode: drag finalized → compute angle/axis/cropRectPage
+                    // Re-apply Shift constraint at release for correctness
+                    if (GetAsyncKeyState(VK_SHIFT) & 0x8000) {
+                        PointF p1page = win->archTools.point1;
+                        float dx = win->archTools.point2.x - p1page.x;
+                        float dy = win->archTools.point2.y - p1page.y;
+                        if (fabsf(dx) > fabsf(dy)) {
+                            win->archTools.point2.y = p1page.y;
+                        } else {
+                            win->archTools.point2.x = p1page.x;
+                        }
+                    }
+                    LogInfo("[arch] OnMouseLeftButtonUp: drag finalized mode=align, finalizing align");
+                    FinalizeAlign(win, dm, pageNo);
                 }
             } else {
                 // Click case: keep archDragLine=1, wait for second click
@@ -4246,7 +4593,8 @@ static void OnPaintDocument(MainWindow* win) {
                 // page, no in-progress line, no erase crosshair) skip Graphics
                 // and all GDI+ object construction entirely
                 bool nothingToDraw = !scaleState.scaleSet && !hasMeasurementOnPage && win->archTools.dragLine <= 0 &&
-                                     !win->archTools.eraseMode && !win->captureTool.on;
+                                     !win->archTools.eraseMode && !win->captureTool.on &&
+                                     !(win->archTools.toolMode == 5 && win->archTools.alignLine.defined);
                 if (!nothingToDraw) {
                     HDC bufHdc = win->buffer->GetDC();
                     Gdiplus::Graphics gs(bufHdc);
@@ -4363,6 +4711,7 @@ static void OnPaintDocument(MainWindow* win) {
                     // pans/zooms between clicks. Mode 4 shows the final guide
                     // line directly; mode 3 (radius) previews the arc at the
                     // tracked bulge point after the chord is set.
+                    // Mode 5 (align): live rubber-band line during drag (measure-style).
                     if (win->archTools.dragLine > 0 && dm->ValidPageNo(curPageNo)) {
                         int archMode = win->archTools.toolMode;
                         if (archMode == 4) {
@@ -4370,24 +4719,70 @@ static void OnPaintDocument(MainWindow* win) {
                         } else {
                             Point p1 = dm->CvtToScreen(curPageNo, win->archTools.point1);
                             Point p2 = dm->CvtToScreen(curPageNo, win->archTools.point2);
-                            dragPen.SetDashStyle(Gdiplus::DashStyleDash); // idempotent; shared pen
-                            gs.DrawLine(&dragPen, p1.x, p1.y, p2.x, p2.y);
-                            // Endpoint circles
-                            int r = 4;
-                            gs.FillEllipse(&dragBrush, p1.x - r, p1.y - r, 2 * r, 2 * r);
-                            gs.FillEllipse(&dragBrush, p2.x - r, p2.y - r, 2 * r, 2 * r);
-                            if (archMode == 3 && win->archTools.dragLine == 2) {
-                                // chord is set: arc preview follows the cursor
-                                static Gdiplus::Pen arcPreviewPen(Gdiplus::Color(255, 0, 180, 160), 2.0f);
-                                Gdiplus::PointF arcPts[33];
-                                int nArc =
-                                    ArchArcScreenPoints(dm, curPageNo, win->archTools.point1, win->archTools.point2,
-                                                        win->archTools.point3, arcPts, dimof(arcPts));
-                                if (nArc >= 2) {
-                                    gs.DrawLines(&arcPreviewPen, arcPts, nArc);
+                            if (archMode == 5) {
+                                // Align mode: purple dashed line (matches finalized align preview color)
+                                static Gdiplus::Pen alignDragPen(Gdiplus::Color(255, 170, 0, 255), 2.0f);
+                                alignDragPen.SetDashStyle(Gdiplus::DashStyleDash);
+                                gs.DrawLine(&alignDragPen, p1.x, p1.y, p2.x, p2.y);
+                                int r = 4;
+                                static Gdiplus::SolidBrush alignDragBrush(Gdiplus::Color(255, 170, 0, 255));
+                                gs.FillEllipse(&alignDragBrush, p1.x - r, p1.y - r, 2 * r, 2 * r);
+                                gs.FillEllipse(&alignDragBrush, p2.x - r, p2.y - r, 2 * r, 2 * r);
+                            } else {
+                                dragPen.SetDashStyle(Gdiplus::DashStyleDash); // idempotent; shared pen
+                                gs.DrawLine(&dragPen, p1.x, p1.y, p2.x, p2.y);
+                                // Endpoint circles
+                                int r = 4;
+                                gs.FillEllipse(&dragBrush, p1.x - r, p1.y - r, 2 * r, 2 * r);
+                                gs.FillEllipse(&dragBrush, p2.x - r, p2.y - r, 2 * r, 2 * r);
+                                if (archMode == 3 && win->archTools.dragLine == 2) {
+                                    // chord is set: arc preview follows the cursor
+                                    static Gdiplus::Pen arcPreviewPen(Gdiplus::Color(255, 0, 180, 160), 2.0f);
+                                    Gdiplus::PointF arcPts[33];
+                                    int nArc =
+                                        ArchArcScreenPoints(dm, curPageNo, win->archTools.point1, win->archTools.point2,
+                                                            win->archTools.point3, arcPts, dimof(arcPts));
+                                    if (nArc >= 2) {
+                                        gs.DrawLines(&arcPreviewPen, arcPts, nArc);
+                                    }
                                 }
                             }
                         }
+                    }
+
+                    // Arch align preview: line + dashed translucent crop rect + "%.1f°" readout.
+                    // Gated on toolMode==5 so ESC / mode switch hides the preview.
+                    if (win->archTools.toolMode == 5 && win->archTools.alignLine.defined &&
+                        win->archTools.alignLine.pageNo == curPageNo && dm->ValidPageNo(curPageNo)) {
+                        MainWindow::AlignLine& al = win->archTools.alignLine;
+                        Point p1s = dm->CvtToScreen(curPageNo, al.p1);
+                        Point p2s = dm->CvtToScreen(curPageNo, al.p2);
+                        static Gdiplus::Pen alignPen(Gdiplus::Color(255, 170, 0, 255), 2); // purple
+                        static Gdiplus::SolidBrush alignBrush(Gdiplus::Color(255, 170, 0, 255));
+                        int r = 4;
+                        gs.DrawLine(&alignPen, p1s.x, p1s.y, p2s.x, p2s.y);
+                        gs.FillEllipse(&alignBrush, p1s.x - r, p1s.y - r, 2 * r, 2 * r);
+                        gs.FillEllipse(&alignBrush, p2s.x - r, p2s.y - r, 2 * r, 2 * r);
+                        // Dashed translucent crop rect outline (page coords -> screen)
+                        PointF cropTLf{al.cropRectPage.x, al.cropRectPage.y};
+                        PointF cropBRf{al.cropRectPage.x + al.cropRectPage.dx, al.cropRectPage.y + al.cropRectPage.dy};
+                        Point cropTL = dm->CvtToScreen(curPageNo, cropTLf);
+                        Point cropBR = dm->CvtToScreen(curPageNo, cropBRf);
+                        float cdx = (float)(cropBR.x - cropTL.x);
+                        float cdy = (float)(cropBR.y - cropTL.y);
+                        static Gdiplus::Pen cropPen(Gdiplus::Color(120, 170, 0, 255), 1); // translucent purple
+                        cropPen.SetDashStyle(Gdiplus::DashStyleDash);
+                        gs.DrawRectangle(&cropPen, (float)cropTL.x, (float)cropTL.y, cdx, cdy);
+                        // Angle readout near p2
+                        WCHAR label[64];
+                        swprintf_s(label, L"%.1f°", al.measuredAngleDeg);
+                        Gdiplus::RectF textSize;
+                        gs.MeasureString(label, -1, &fontReg, Gdiplus::PointF(0, 0), &textSize);
+                        Gdiplus::RectF bgRect((float)p2s.x + 4, (float)p2s.y - textSize.Height - 2, textSize.Width + 8,
+                                              textSize.Height + 4);
+                        gs.FillRectangle(&bgBrush, bgRect);
+                        gs.DrawString(label, -1, &fontReg, Gdiplus::PointF(bgRect.X + 4, bgRect.Y + 2),
+                                      &measureTextBrush);
                     }
 
                     // Erase mode: draw red "+" crosshair overlay at mouse position

@@ -354,6 +354,9 @@
     <ClInclude Include="..\src\ProfileData.h">
       <Filter>src</Filter>
     </ClInclude>
+    <ClInclude Include="..\src\ProfileSyncWnd.h">
+      <Filter>src</Filter>
+    </ClInclude>
     <ClInclude Include="..\src\ProgressUpdateUI.h">
       <Filter>src</Filter>
     </ClInclude>
@@ -770,6 +773,9 @@
     <ClCompile Include="..\src\EngineMupdf.cpp">
       <Filter>src</Filter>
     </ClCompile>
+    <ClCompile Include="..\src\EngineMupdf_Preview.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
     <ClCompile Include="..\src\EnginePs.cpp">
       <Filter>src</Filter>
     </ClCompile>
@@ -954,6 +960,9 @@
       <Filter>src</Filter>
     </ClCompile>
     <ClCompile Include="..\src\ProfileData.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\ProfileSyncWnd.cpp">
       <Filter>src</Filter>
     </ClCompile>
     <ClCompile Include="..\src\ReadAloudHighlight.cpp">

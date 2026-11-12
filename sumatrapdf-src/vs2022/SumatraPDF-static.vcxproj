@@ -1235,6 +1235,7 @@
     <ClInclude Include="..\src\Print.h" />
     <ClInclude Include="..\src\ProfileBackupWnd.h" />
     <ClInclude Include="..\src\ProfileData.h" />
+    <ClInclude Include="..\src\ProfileSyncWnd.h" />
     <ClInclude Include="..\src\ProgressUpdateUI.h" />
     <ClInclude Include="..\src\ReadAloudHighlight.h" />
     <ClInclude Include="..\src\ReadAloudPlaybackBar.h" />
@@ -1412,6 +1413,7 @@
     <ClCompile Include="..\src\EngineEbook.cpp" />
     <ClCompile Include="..\src\EngineImages.cpp" />
     <ClCompile Include="..\src\EngineMupdf.cpp" />
+
     <ClCompile Include="..\src\EnginePs.cpp" />
     <ClCompile Include="..\src\ExifDump.cpp" />
     <ClCompile Include="..\src\ExternalViewers.cpp" />
@@ -1473,6 +1475,7 @@
     <ClCompile Include="..\src\Print.cpp" />
     <ClCompile Include="..\src\ProfileBackupWnd.cpp" />
     <ClCompile Include="..\src\ProfileData.cpp" />
+    <ClCompile Include="..\src\ProfileSyncWnd.cpp" />
     <ClCompile Include="..\src\ReadAloudHighlight.cpp" />
     <ClCompile Include="..\src\ReadAloudPlaybackBar.cpp" />
     <ClCompile Include="..\src\ReadingStats.cpp" />

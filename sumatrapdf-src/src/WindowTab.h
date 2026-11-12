@@ -70,6 +70,7 @@ struct WindowTab {
     float prevZoomVirtual{kInvalidZoom};
     DisplayMode prevDisplayMode{DisplayMode::Automatic};
     TocTree* currToc = nullptr; // not owned by us
+    int currTocIdCounter = 0; // for assigning unique IDs to new TOC items
     EditAnnotationsWindow* editAnnotsWindow = nullptr;
     Rect lastEditAnnotsWindowPos;
 

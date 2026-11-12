@@ -335,6 +335,10 @@ struct TocItem {
     // between runs so that it can be persisted in FileState::tocState)
     int id;
 
+    // back-pointer to owning TocTree for O(1) validity check
+    // (IsTocItemInCurrentTree). Set when tree is loaded into TreeView.
+    struct TocTree* ownerTree = nullptr;
+
     int fontFlags; // fontBitBold, fontBitItalic
     COLORREF color;
 
@@ -529,10 +533,27 @@ class EngineBase {
 
     virtual bool HasUnsavedOutline() { return false; }
 
-    virtual bool OutlineEdit(int = 0, int = 0, Str = StrL(""), Str = StrL(""), int = 0,
-                             int = 0, Str = StrL("")) {
+    virtual bool OutlineEdit(int = 0, int = 0, Str = StrL(""), Str = StrL(""), int = 0, int = 0, Str = StrL("")) {
         return false; // base engine: no outline editing
     }
+
+    // queue a page geometry edit (rotation + crop) to be applied at save.
+    // pageNo: 1-based. angleDeg: rotation delta (+ = CCW). cropRectPage: crop rect in
+    // original page coordinates (before rotation). returns false if not supported.
+    virtual bool QueuePageGeometry(int pageNo, float angleDeg, RectF cropRectPage) {
+        (void)pageNo;
+        (void)angleDeg;
+        (void)cropRectPage;
+        return false;
+    }
+
+    // apply pending page geometry edits immediately (not at save).
+    // used for instant visual deskew: after QueuePageGeometry, call this to
+    // mutate the live PDF document and refresh the view. returns true on success.
+    virtual bool ApplyPendingGeometryEditsNow() { return false; }
+
+    // returns true if the engine has pending page geometry edits not yet saved.
+    virtual bool HasUnsavedPageGeometry() { return false; }
 
     bool HasPageLabels() const;
 

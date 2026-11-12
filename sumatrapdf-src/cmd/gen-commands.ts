@@ -333,6 +333,8 @@ export const commands = [
     "CmdEditImageApply", "Edit: Apply Image Edits",
     "CmdArchMeasureRadius", "Arch: Measure Radius (3 clicks)",
     "CmdArchRefLine", "Arch: Reference Line",
+    "CmdArchAlign", "Crop Align: draw 2-point line, preview rotated crop rect",
+    "CmdArchAlignApply", "Crop Align: commit preview rotation/crop for save",
     "CmdFlashcardStudyTimerToggle", "Toggle Flashcard Study Session Timer",
     "CmdFlashcardStudyTimerEdit", "Edit Flashcard Study Session Timer Duration",
     "CmdProfileBackups", "Profile: Backups...",

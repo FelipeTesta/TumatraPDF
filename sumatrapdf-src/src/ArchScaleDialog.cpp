@@ -245,6 +245,7 @@ void ArchScaleDialogWnd::OnOk() {
     LogInfo("[arch] OnOk: accepted length %.4g (unit %d), factor %.1f pt/m", realLen, selUnit, ps.scaleFactor);
 
     // Exit scale mode
+    LogInfo("[arch] ArchScaleDialog OnOk toolMode=%d -> 0", win->archTools.toolMode);
     win->archTools.toolMode = 0;
     win->archTools.dragLine = 0;
     // Restore normal cursor

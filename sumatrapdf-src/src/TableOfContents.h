@@ -6,7 +6,10 @@ void ClearTocBox(MainWindow*);
 void ToggleTocBox(MainWindow*);
 void LoadTocTree(MainWindow*);
 // rebuild the tree view after the controller replaced its TocTree
-void ReloadTocTree(WindowTab*);
+// If selTitle/selPageNo are provided, they are used for selection restore instead
+// of reading from the TreeView (which may point to already-freed TocItems after
+// OutlineEdit deletes the cached tocTree).
+void ReloadTocTree(WindowTab*, Str selTitle = nullptr, int selPageNo = 0, TocItem* itemToFree = nullptr);
 void UpdateTocSelection(MainWindow*, int currPageNo);
 void ExpandTocToCurrentPage(MainWindow*);
 void UpdateTocExpansionState(Vec<int>& tocState, TreeView*, TocTree*);

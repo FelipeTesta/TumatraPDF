@@ -34,6 +34,8 @@ import { testit as adHocRepairReplace } from "./ad-hoc-repair-replace.ts";
 import { testit as adHocBookmarkEdit } from "./ad-hoc-bookmark-edit.ts";
 import { testit as adHocBookmarkPersist } from "./ad-hoc-bookmark-persist.ts";
 import { testit as adHocBookmarkReorder } from "./ad-hoc-bookmark-reorder.ts";
+import { testit as adHocAlignSave } from "./ad-hoc-align-save.ts";
+import { testit as adHocAlignDeskew } from "./ad-hoc-align-deskew.ts";
 import { testit as adHocTabSessionSync } from "./ad-hoc-tab-session-sync.ts";
 import { testit as adHocTabSessionSync2 } from "./ad-hoc-tab-session-sync2.ts";
 
@@ -65,6 +67,8 @@ const adHocTests: [string, () => void | Promise<void>][] = [
   ["ad-hoc-repair-replace", adHocRepairReplace],
   ["ad-hoc-bookmark-edit", adHocBookmarkEdit],
   ["ad-hoc-bookmark-persist", adHocBookmarkPersist],
+  ["ad-hoc-align-save", adHocAlignSave],
+  ["ad-hoc-align-deskew", adHocAlignDeskew],
 ];
 
 export async function testit(): Promise<void> {

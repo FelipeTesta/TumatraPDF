@@ -227,6 +227,11 @@ struct MainWindow {
     // whether the ToC sidebar is currently visible
     // set to temporarily disable UpdateTocSelection
     bool tocKeepSelection = false;
+    // debounced async reload flag (avoids sync reload storm after OutlineEdit)
+    bool tocReloadPending = false;
+    // guard: true while ReloadTocTree is rebuilding the tree (suppresses
+    // TVN_SELCHANGED handling to prevent selection-restore loops)
+    bool tocReloading = false;
     // Non-owning TOC items that match the current page (same page as best match
     // plus ancestors). Used when gShowAllMatchingTOC to multi-highlight; the
     // tree still has a single selection (the best match). Cleared with the TOC.
@@ -235,6 +240,15 @@ struct MainWindow {
     TocItem* tocDragItem = nullptr;
     int tocDragGuideY = -1; // tree-view client y of the horizontal drop guide, -1 = hidden
     Point tocDragStart{};   // drag start mouse pos, tree-view client coords
+    bool tocDragFarLeft = false; // true = sibling drop (full line), false = child drop (half line)
+    // TOC drag-reorder mode (s51-d): drag-reorder ONLY while ON (default OFF).
+    // When OFF, left-click on a tree item passes through to normal TreeView
+    // behavior (selection + click-nav); WndProcTocTree intercepts WM_LBUTTONDOWN
+    // only while ON. The Reorder toolbar button's checked state mirrors
+    // tocReorderMode (synced in TocReorderToggle).
+    bool tocReorderMode = false;
+    HWND hwndTocReBar = nullptr;   // native toolbar strip (child of hwndTocBox)
+    HWND hwndTocToolbar = nullptr; // Add + Reorder text buttons
     UINT_PTR tocTreeSubclassId = 0;
     // width of the toc/favorites sidebar; the source of truth for layout
     // (the toc box window can be hidden and its rect stale, e.g. when only
@@ -383,9 +397,21 @@ struct MainWindow {
     // --- end trim config dialog state ---
 
     // --- arch tools state ---
+    // Ephemeral align result (toolMode 5): not persisted, recomputed per draw,
+    // cleared on toggle-off / ESC / doc close. R2 reuses axis + cropRectPage.
+    struct AlignLine {
+        int pageNo = 0;
+        float measuredAngleDeg = 0.0f; // angle vs nearer axis, degrees
+        int axis = 0;                  // 0 = vertical, 1 = horizontal
+        RectF cropRectPage{};          // page coords, axis-aligned, mediabox W:H preserved
+        PointF p1{};
+        PointF p2{};
+        bool defined = false;
+    };
     struct ArchToolsState {
-        int toolMode = 0; // 0=off, 1=scale, 2=measure, 3=radius (3 clicks), 4=reference line (2 clicks)
-        int unit = 2;     // 0=mm,1=cm,2=m,3=in,4=ft
+        int toolMode =
+            0; // 0=off, 1=scale, 2=measure, 3=radius (3 clicks), 4=reference line (2 clicks), 5=align (2-point line)
+        int unit = 2; // 0=mm,1=cm,2=m,3=in,4=ft
 
         // Per-page scale state
         struct ArchScaleState {
@@ -421,9 +447,16 @@ struct MainWindow {
         bool scaleLineDefined = false; // true when a scale line has been drawn (for dialog ✅)
         PointF point1;                 // page coords during draw (survives pan/zoom between clicks)
         PointF point2;
-        PointF point3;    // radius arc bulge point (mode 3)
-        int dragLine = 0; // 0 none, 1 first point placed, 2 done
-        bool snap = true; // default true
+        PointF point3;       // radius arc bulge point (mode 3)
+        int dragLine = 0;    // 0 none, 1 first point placed, 2 done
+        AlignLine alignLine; // ephemeral align result (toolMode 5)
+        bool snap = true;    // default true
+        // Idempotency guard for CmdArchAlign: a second dispatch within ~100ms
+        // of the first, with no canvas interaction in between, is a rapid
+        // double-post (Edit toolbar check button) and is ignored so a single
+        // click leaves align ON (toolMode stays 5).
+        u64 alignLastToggleMs = 0;     // GetTickCount64() of last CmdArchAlign dispatch
+        u64 alignCanvasInteractMs = 0; // GetTickCount64() of last canvas interaction while align on
         Vec<ArchMeasurement> measurements;
         // Per-document measurements store (not persisted to disk, discarded on close)
         // NOTE: POD by design — the project's Vec<T> copies elements BITWISE

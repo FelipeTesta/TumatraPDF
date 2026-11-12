@@ -13,6 +13,7 @@
 - ALWAYS use `#ifndef`/`#define` guards, NOT `#pragma once`.
 - ALWAYS run `clang-format` on `.cpp`/`.c`/`.h` files after edits (before build).
 - ALWAYS pass `-for-testing` when launching for ad-hoc testing.
+- ALWAYS read \FLOW\ .dot files
 
 # 0b. USE tree-sitter for exploration & debugging (MANDATORY)
 
@@ -72,6 +73,16 @@ Debug:              windbgx -Q -o -g out/dbg64/TumatraPDF.exe
 ```
 
 VS command-line tools (`cl.exe`, `msbuild.exe`) must be in PATH. Fallback: `MSBuild.exe sumatrapdf-src\vs2022\TumatraPDF.sln /t:TumatraPDF /p:Configuration=Debug /p:Platform=x64 /m`.
+
+## Debug Methods
+Tools: `Tree-sitter`, `Lemma`, `Serena`, .dot files;
+For complex debuggin wich cant be solved in two temptatives, do:
+  0. Read: `Lemma session start`, `lemma memories`, '.md' and '.dot' files;
+  1. create a \FLOW\DEBUG\`tool_debug`.dot;
+  2. fill it with the whole tree of functions and symbols related;
+  3. fill hipothesis from bug origin;
+  4. keep files updated until bug is solved;
+  5. document bug solving methods and session learnings for next agents;
 
 # 3. Project Layout
 

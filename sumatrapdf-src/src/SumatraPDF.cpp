@@ -145,6 +145,14 @@ using Gdiplus::Graphics;
 using Gdiplus::Pen;
 using Gdiplus::SolidBrush;
 
+// Relative ms timestamp for [arch] debug logs (ms since first call in this TU).
+static u64 ArchElapsedMs() {
+    static u64 base = 0;
+    u64 now = (u64)GetTickCount64();
+    if (base == 0) base = now;
+    return now - base;
+}
+
 constexpr const char* kRestrictionsFileName = "sumatrapdfrestrict.ini";
 
 constexpr const char* kSumatraWindowTitle = "TumatraPDF";
@@ -4670,7 +4678,7 @@ bool SaveAnnotationsToExistingFile(WindowTab* tab) {
     tab->ignoreNextAutoReload = true;
     ShowErrorData data{tab, path};
     auto fn = MkFunc1(ShowSaveAnnotationError, &data);
-    bool ok = EngineMupdfSaveUpdated(engine, nullptr, fn);
+    bool ok = EngineMupdfSaveUpdated(engine, nullptr, fn, nullptr, false, dm);
     if (!ok) {
         tab->ignoreNextAutoReload = false;
         return false;
@@ -4758,7 +4766,8 @@ bool SaveAnnotationsToMaybeNewPdfFile(WindowTab* tab) {
 
     ShowErrorData data{tab, dstFilePath};
     auto fn = MkFunc1(ShowSaveAnnotationError, &data);
-    ok = EngineMupdfSaveUpdated(engine, dstFilePath, fn);
+    DisplayModel* dm = tab->AsFixed();
+    ok = EngineMupdfSaveUpdated(engine, dstFilePath, fn, nullptr, false, dm);
     if (!ok) {
         str::Free(srcFileName);
         return false;
@@ -4929,7 +4938,7 @@ bool MaybeSaveAnnotations(WindowTab* tab) {
             // const char* path = engine->FileName();
             ShowErrorData data{tab, path};
             auto fn = MkFunc1(ShowSaveAnnotationError, &data);
-            bool didSave = EngineMupdfSaveUpdated(engine, nullptr, fn);
+            bool didSave = EngineMupdfSaveUpdated(engine, nullptr, fn, nullptr, false, dm);
             if (!didSave) {
                 // fn reported the error. Don't close: that would discard the
                 // annotations. Re-arm the prompt so the user can retry or pick
@@ -6596,8 +6605,8 @@ bool RelayoutFrame(MainWindow* win, bool updateToolbars, int sidebarDx) {
             int rebar2Dy = tbDy + chrome;
             bool atBottom = ToolbarAtBottom();
             int rebar2Y = atBottom ? (rc.y + rc.dy - rebar2Dy) : rc.y;
-            logf("[arch] relayout rc.y=%d rebar2Y=%d rebar2Dy=%d (tbDy=%d chrome=%d) atBottom=%d\n", rc.y, rebar2Y,
-                 rebar2Dy, tbDy, chrome, (int)atBottom);
+            logf("[arch +%llums] relayout rc.y=%d rebar2Y=%d rebar2Dy=%d (tbDy=%d chrome=%d) atBottom=%d\n",
+                 (unsigned long long)ArchElapsedMs(), rc.y, rebar2Y, rebar2Dy, tbDy, chrome, (int)atBottom);
             if (updateToolbars) {
                 dh.SetWindowPos(win->archTools.hwndReBar2, nullptr, rc.x, rebar2Y, rc.dx, rebar2Dy, SWP_NOZORDER);
             }
@@ -6607,7 +6616,7 @@ bool RelayoutFrame(MainWindow* win, bool updateToolbars, int sidebarDx) {
             if (!atBottom) {
                 rc.y += rebar2Dy;
             }
-            logf("[arch] after reserve rc.y=%d rc.dy=%d\n", rc.y, rc.dy);
+            logf("[arch +%llums] after reserve rc.y=%d rc.dy=%d\n", (unsigned long long)ArchElapsedMs(), rc.y, rc.dy);
         }
     }
     // Flashcard toolbar - positioned below arch tools when visible
@@ -8190,7 +8199,8 @@ static bool FrameOnKeydown(MainWindow* win, WPARAM key, LPARAM lp) {
             if (win->archTools.hwndArchScaleDialog && IsWindowVisible(win->archTools.hwndArchScaleDialog)) {
                 // Close floating Scale dialog
                 PostMessageW(win->archTools.hwndArchScaleDialog, WM_CLOSE, 0, 0);
-                LogInfo("[arch] Esc cancel: closed Scale dialog, mode=%d", win->archTools.toolMode);
+                LogInfo("[arch +%llums] Esc cancel: closed Scale dialog, mode=%d", (unsigned long long)ArchElapsedMs(),
+                        win->archTools.toolMode);
             } else {
                 // Cancel draw mode
                 int oldMode = win->archTools.toolMode;
@@ -8198,6 +8208,10 @@ static bool FrameOnKeydown(MainWindow* win, WPARAM key, LPARAM lp) {
                 win->archTools.dragLine = 0;
                 win->archTools.scaleLineDefined = false;
                 win->archTools.eraseMode = false;
+                // TUMATRA-FORK(s50): ESC cancels align mode: clears alignLine ephemeral result
+                // upstream re-apply: keep clear here next to toolMode=0/dragLine=0; gate paint on toolMode==5 so ESC
+                // hides preview.
+                win->archTools.alignLine = MainWindow::AlignLine{}; // clear ephemeral align result
                 win->archTools.point1 = PointF{0, 0};
                 win->archTools.point2 = PointF{0, 0};
                 if (GetCapture() == win->hwndCanvas) {
@@ -8206,7 +8220,21 @@ static bool FrameOnKeydown(MainWindow* win, WPARAM key, LPARAM lp) {
                 win->mouseAction = MouseAction::None;
                 UpdateToolbar2State(win);
                 ScheduleRepaint(win, 0);
-                LogInfo("[arch] Esc cancel: draw mode cancelled, was mode=%d", oldMode);
+                LogInfo("[arch +%llums] Esc cancel: draw mode cancelled, was mode=%d", (unsigned long long)ArchElapsedMs(),
+                        oldMode);
+            }
+            // s64-R2: if there's an uncommitted align preview, discard it on ESC
+            DisplayModel* dm = win->AsFixed();
+            if (dm) {
+                EngineMupdf* em = AsEngineMupdf(dm->GetEngine());
+                if (em && em->hasPreviewGeomEdit) {
+                    int pageNo = dm->CurrentPageNo();
+                    if (dm->ValidPageNo(pageNo)) {
+                        em->DiscardPreview(pageNo, dm);
+                        LogInfo("[arch +%llums] Esc discard: preview discarded for page %d",
+                                (unsigned long long)ArchElapsedMs(), pageNo);
+                    }
+                }
             }
             return true;
         }
@@ -10076,7 +10104,7 @@ static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, L
                 break;
         }
         if (isGatedCmd && !featureOn) {
-            logf("[arch] blocked cmd %d while arch tools are on\n", cmdId);
+            logf("[arch +%llums] blocked cmd %d while arch tools are on\n", (unsigned long long)ArchElapsedMs(), cmdId);
             return 0;
         }
     }
@@ -10852,6 +10880,13 @@ static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, L
             break;
         case CmdArchRefLine:
             HandleCmdArchRefLine(win);
+            break;
+        case CmdArchAlign:
+            // TUMATRA-FORK(s50): Align tool command dispatch (CmdArchAlign=525 -> HandleCmdArchAlign)
+            // upstream re-apply: keep case block before CmdArchClear; handler lives in Commands_ArchTools.cpp,
+            // toolMode=5.
+            LogInfo("[arch +%llums] FrameOnCommand CmdArchAlign dispatch", (unsigned long long)ArchElapsedMs());
+            HandleCmdArchAlign(win);
             break;
         case CmdArchClear:
             HandleCmdArchClear(win);
@@ -15562,6 +15597,9 @@ void MainWindow::ArchClearMeasurementsForPath(Str path) {
     if (!path) {
         return;
     }
+    // TUMATRA-FORK(s50): doc close clears alignLine ephemeral result
+    // upstream re-apply: keep in ArchClearMeasurementsForPath alongside measurementsByDoc reset.
+    archTools.alignLine = MainWindow::AlignLine{}; // doc closed: clear ephemeral align result
     for (int i = 0; i < archTools.measurementsByDoc.len; ++i) {
         if (str::Eq(archTools.measurementsByDoc[i].path, path)) {
             archTools.measurementsByDoc[i].measurements.Reset();

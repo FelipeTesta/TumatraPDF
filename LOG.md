@@ -1,21 +1,401 @@
-﻿## 2026-11-08 (s49-c) — pending right-click action now flushes immediately
+﻿## 2026-11-12 (s62) - Ghost bookmark deletable: op=2 empty-target now removes empty-title ghost (corrupt-file repair)
 
 ### Fixed
+- **BUG: ghost bookmark survives delete+save (user live on s61 build):** user's file (corrupted pre-s60 by the op=3 empty-title bug) contains an empty-title outline entry; user deletes it in the UI (`CmdBookmarkDelete: ENTER title='' pageNo=-1`) but s61's op=2 empty-target early-skip prevented replay -> ghost never left the file -> reappeared on every reload. Rename itself confirmed working on s61 (`IDOK rawEditLen=5 name='TESTE'`).
+- Fix (EngineMupdf.cpp `PersistOutlineEdits`): op=2 (delete) with EMPTY target title now finds the FIRST outline entry whose title is empty/whitespace-only (new `OutlineIteratorFindEmptyTitle`, null/whitespace-title walk — healthy outlines never have one, match is unambiguous) and DELETES it; logs `op=2 empty-target delete -> removed empty-title ghost entry` (or `skip ... no empty-title ghost found in outline`). Non-empty-target deletes unchanged (title match). This REPAIRS already-corrupted user files on next save.
+- New control command `TestBookmarkDelete = 69` (SumatraControl.cpp + cmd/control.ts): i32 pageNo + string title (empty title allowed via `ArgAt` presence check, not truthiness) -> queues `OutlineEdit(2, ...)`. Used by headless repro.
+- Headless repro PASS (tests/tmp/s62/ad-hoc-s62-ghost-repair.ts): fixture PDF (outline = [empty-title ghost, Real One p2, Real Two p3], with /Next//Prev sibling links — required by mupdf outline loader) -> open -> TestBookmarkDelete(-1, "") -> TestBookmarkSave -> PyMuPDF `get_toc()` on saved file: ghost GONE, Real One/Real Two intact. (In-app TOC dumps skip null-title items — file-level check is authoritative; log line not found under isolated LOCALAPPDATA, noted.)
+
+### Verified
+- Build 0 err / 0 warn. Deploy MD5 match `2BB91FB89D55E0039DDBEF94BA6A0D76` (out/dbg64 == Compiled, 21762560 bytes, 11/12/2026 13:22:44).
+- Regressions --no-build PASS: issue-2799, ad-hoc-bookmark-edit, ad-hoc-bookmark-reorder, ad-hoc-bookmark-persist, ad-hoc-repair-replace, ad-hoc-toc-reorder-crash (4.8s), ad-hoc-s60-bookmark-replay (X1,X3,X4,X2), ad-hoc-s62-ghost-repair.
+
+### Remaining
+- User live: on s62 build, delete the ghost bookmark + Ctrl+S once -> ghost must vanish permanently (repair-on-save). File stays fixed afterwards.
+
+## 2026-11-12 (s61) - Rename Enter empty newName root cause; rename popup dark theme ordering; ghost replay hardening
+
+### Fixed
+- **P1 Rename RESULT newName.len=0 (s60 fix incomplete):** `WCHAR buf[512] = {}` zero-init -> `len(buf)` (implicit `WStr` strlen) == 0 -> `GetWindowTextW(hEdit, buf, 0)` capacity 0 -> buf stays all-NUL -> `st.newName` empty -> ok-path guard `newName.len > 0` skipped -> title never changed. Also `st->newName = WStr(buf, n)` was a VIEW onto stack `buf` (dangling after return). Fix: pass explicit capacity `dimofi(buf)`; `wstr::Dup(WStr(buf, n))` (heap) + `wstr::Free(st.newName)` at end of `ShowBookmarkRenameDialog`; added `IDOK rawEditLen=%d` / `VK_RETURN rawEditLen=%d` logs (both copies of the capture had the bug).
+- **P2 Rename dialog still WHITE in dark theme:** `ApplyDarkModeToPopupWindow(hwnd)` was called BEFORE EDIT/BUTTON children existed - dmlib themes only children present at call time. Fix: move call AFTER child creation (before `SetFocus`). Also: popup now handles `WM_ERASEBKGND` (fills `ThemeWindowControlBackgroundColor()` brush) + `WM_CTLCOLORDLG`; `WM_CTLCOLOREDIT`/`WM_CTLCOLORSTATIC` brush cache refreshes when theme color changes (was stale static). Buttons/edit get themed via dmlib child-subclass now that call happens post-create.
+- **P3 Ghost bookmark (empty-title items still written):** `PersistOutlineEdits` hardening - case 2 delete with empty target = explicit early skip + log (was: fall-through found=false log); case 5 re-insert: `mvItem.title` null -> skip + log BEFORE any `fz_outline_iterator_insert` (never writes empty-title ghost); `OutlineIteratorFind` returns nullptr for empty titles (anchor/parent search can not match empty-title ghosts; `str::Eq` len-0==len-0 would have matched).
+
+### Verified
+- Build 0 err / 0 warn. Deploy MD5 match `891A5C85C2A1C7C1115943A25C9392C5` (out/dbg64 == Compiled, 21762560 bytes, 11/12/2026 13:09:04).
+- Regressions --no-build PASS: issue-2799, ad-hoc-bookmark-edit, ad-hoc-bookmark-reorder, ad-hoc-bookmark-persist, ad-hoc-repair-replace, ad-hoc-s60-bookmark-replay (X1,X3,X4,X2). ad-hoc-toc-reorder-crash: 1st run FAIL (app did not exit within 30s of Quit, 32.5s) -> re-ran 2x PASS (6.7s, 7.9s) = flaky timeout, not regression (s55-s60 history PASS).
+
+### Remaining
+- User live validation: rename Enter actually changes title (watch `IDOK rawEditLen` log) + rename popup dark (bg/edit/buttons) in dark theme + save -> reopen shows no empty-title ghost. GUI-only, not headless-coverable.
+
+## 2026-11-12 (s60) - TOC bookmark rename Enter + dark theme; save-replay ghost bookmark
+
+### Fixed
+- **BUG A rename dialog Enter dead + no dark theme:**
+  - Root cause: rename modal loop used `IsDialogMessageW(hwnd,&msg)` with focus in the edit; `IsDialogMessageW` did not route `VK_RETURN`→`WM_COMMAND IDOK` to the dialog subclass, so `st.ok` never set → ok-path (`TableOfContents.cpp` ENTER old/new/EXIT) never ran.
+  - Fix: subclass the EDIT control (`RenameEditWndProc`) to forward `VK_RETURN`→`WM_COMMAND IDOK`, `VK_ESCAPE`→`WM_COMMAND IDCANCEL` to the dialog; drop `IsDialogMessageW` from the loop (plain `TranslateMessage`/`DispatchMessage`; no tab nav needed); keep `WM_COMMAND` IDOK/IDCANCEL + `WM_KEYDOWN` handlers as belt-and-suspenders. Added `logf "[toc] CmdBookmarkRename: RESULT st.ok=%d st.done=%d newName.len=%d newName=%s"` so ok/cancel is visible in next log.
+  - Dark theme: `ApplyDarkModeToPopupWindow(hwnd)` after create + `WM_CTLCOLOREDIT`/`WM_CTLCOLORSTATIC` returning theme brush with `ThemeWindowControlBackgroundColor()`/`ThemeWindowTextColor()` (ArchScaleDialog/TrimConfigDialog pattern).
+- **BUG B ghost bookmark from save replay:**
+  - Root cause: `CmdBookmarkUpdate` calls `OutlineEdit(3, pageNo, title, StrL(""), newPageNo)` — `newValue` empty. `PersistOutlineEdits` case 3 built `wi` with `wi.title=e.newValue` (empty) + `wi.uri=nullptr` → corrupted target item into empty-title, pageNo=-1 ghost written to the file (the `Update 'Slide 10' 10→5` op manufactured it; ghost came back after delete because it was in the saved file).
+  - Fix: case 3 is now a deliberate no-op skip (page destination cannot be repointed via `fz_outline_iterator`; the in-session tocTree holds the new pageNo). Log skipped op. Defensive guards: case 1/4/5 skip empty titles; case 5 move-with-null-target = move to END (top-level append) matching in-memory `MoveTocItem(target=null)`; log ops that match nothing. Replay must match in-memory result exactly and never create empty-title entries.
+  - No repair of already-corrupted user files this round (noted).
+
+### Verified
+- Build 0 err / 0 warn. Deploy MD5 match: `38A0139FB2B389D7B691CF3992C1E15D` (out/dbg64 == Compiled).
+- Headless (tests/tmp/s60/ad-hoc-s60-bookmark-replay.ts): Add→Move(null/top)→Move(parent)→Add→Add→Move→Save→reopen → outline has NO empty-title entries, count correct (X1,X2,X3,X4).
+- Regressions --no-build PASS: issue-2799, ad-hoc-bookmark-edit, ad-hoc-bookmark-reorder, ad-hoc-bookmark-persist, ad-hoc-toc-reorder-crash, ad-hoc-repair-replace.
+
+### Remaining
+- User live validation: rename Enter + dark theme (GUI-only, not headless-coverable) + delete + dirty dot after edits.
+
+## 2026-11-12 (s59) — TOC bookmark P1-P4 fix: rename broken, dark-theme colors, reorder guide pos, dirty indicator
+
+### Fixed
+- **P1 Rename broken (3 bugs):**
+  - (a) `str::Free(dti->title)` on potentially arena-allocated title → heap corruption risk. Fix: LEAK-REPLACE — `dti->title = str::Dup(newTitle)` without freeing old (dies with tree). All TOC items are heap-allocated (nullptr arena) but this pattern is arena-safe.
+  - (b) `OutlineEdit(4, ...)` called AFTER title mutation → targetTitle==newValue → replay-at-save broken. Fix: capture `oldTitle = str::Dup(dti->title)` BEFORE mutation, call `OutlineEdit(4, dti->pageNo, oldTitle, newTitle, dti->pageNo)`, THEN mutate.
+  - (c) Dialog Enter key not routed (not a real dialog → `IsDialogMessageW` ignores it). Fix: handle `WM_KEYDOWN VK_RETURN` + `VK_ESCAPE` in `RenameDialogWndProc`. Added instrumentation log `st.ok=%d newName.len=%d`.
+- **P2 New bookmark dark-theme colors:** `TocAddBookmark` hardcoded `color=0` (black) instead of `kColorUnset` (theme default). Fix: `newItem->color = kColorUnset` so custom draw uses theme colors in dark AND light.
+- **P3 Reorder guide line position (child drop):** `WM_MOUSEMOVE` set `newGuideY = rc.y` (top) for ALL drops. Child drop (`farLeft=false`) must render at BOTTOM edge (`rc.y + rc.dy`) — a child is appended AFTER the hovered item. Sibling drop (`farLeft=true`) stays at top (boundary line). Fix: `newGuideY = newFarLeft ? rc.y : rc.y + rc.dy`.
+- **P4 Dirty indicator (🔴) missing after outline edits:** `EngineMupdfHasUnsavedAnnotations` only checked `modifiedAnnotations || modifiedPageGeometry`, not `modifiedOutline`. Fix: add `|| epdf->modifiedOutline` so tab red dot lights on any bookmark add/delete/rename/update/move.
+
+### Verified
+- Build 0 err / 0 warn. Deploy MD5 match: `442D52C8E85A9F3B616424D070E03D83` (out/dbg64 == Compiled).
+- Regressions --no-build PASS: issue-2799, ad-hoc-bookmark-edit, ad-hoc-bookmark-reorder, ad-hoc-bookmark-persist, ad-hoc-toc-reorder-crash, ad-hoc-repair-replace.
+
+### Remaining
+- User live validation: rename + delete + guide-line visuals (dark + light) + dirty dot after edits.
+
+## 2026-11-12 (s58) — TOC bookmark delete heap corruption + drag-reorder guide level
+
+### Fixed
+- **CmdBookmarkDelete heap corruption (root cause):** `UnlinkTocItem` was called with `root->child` instead of `root` (wrong root param) + the item was freed immediately while the TreeView/async task still referenced it + restore re-selected the deleted title. Now: capture the survivor (next sibling or parent) BEFORE unlink, pass the correct root, and free is DEFERRED via new `ReloadTocTaskData::itemToFree` (freed in the destructor after `LoadTocTree` completes; also freed on early-exit paths). `ReloadTocTree` gained an `itemToFree` param (forward decl + header + definition aligned to a single 4-arg overload with defaulted `itemToFree=nullptr`). Restore selection = survivor, never the victim.
+- **CmdBookmarkRename:** entry logging added (`[toc] Rename: ENTER ...`) for rename-dispatch observability.
+- **TOC drag-reorder guide level (Task C):** `WM_LBUTTONUP` now uses stored `win->tocDragFarLeft` (synced with the painted guide line in `WM_MOUSEMOVE`) so the visual guide always matches the actual drop result. `WM_PAINT` guide line draws FULL item width for a sibling drop (`farLeft=true`) and an indented HALF line (one tree level, `DpiScale(hwnd,16)`) for a child drop (`farLeft=false`), keeping the white line readable on dark theme.
+
+### Verified
+- Build 0 err / 0 warn. Deploy MD5 match: `1C1415DD2D4CBF721A5A65214344A7AB` (out/dbg64 == Compiled).
+- Regressions --no-build PASS: issue-2799, ad-hoc-bookmark-edit, ad-hoc-bookmark-reorder, ad-hoc-bookmark-persist, ad-hoc-toc-reorder-crash, ad-hoc-repair-replace.
+- Headless smoke (tests/tmp/s58/smoke-toc-headless.ts): outline PDF `/PageMode /UseOutlines` + Ping→TestBookmarkAdd→TestTocToolbarButton(9001)→TestBookmarkMove→TestBookmarkToc via `-dbg-control`; process alive ≥5s after every step; clean exit (no death); TOC tree intact (`Alpha|page=1|depth=0 … count=1`).
+
+### Remaining
+- User live validation: rename + delete + guide-line visuals (dark + light).
+
+## 2026-11-12 (s57) — TOC bookmark add silent-death fix: TempStr stored raw in async task data
+
+### Fixed
+- **Root cause:** `ReloadTocTree` stored incoming `selTitle` TempStr (arena view) raw into `ReloadTocTaskData::selTitle` (TableOfContents.cpp:1388). `uitask::Post` is async (PostMessageW) → task runs AFTER temp-arena reset → dangling title. `~ReloadTocTaskData` then `str::Free(selTitle)` on a temp-arena pointer = INVALID FREE → heap corruption → silent death (no dump, no teardown) right after a clean ReloadTocTreeAsync cycle. Same class as s54-b, re-introduced by s55/s56 refactor.
+- **Fix (choke-point heap Dup, covers ALL callers):**
+  - `ReloadTocTree`: `str::Dup(selTitle)` once at entry before all exit paths (TableOfContents.cpp:~:1372). Every exit `str::Free`s a heap pointer; async task data owns a stable heap copy. Callers pass either TempStr or heap Str — both safe.
+  - `MoveTocItem`: pass `source->title` directly (was `str::Dup` → now double-dup + leak removed since ReloadTocTree Dup's internally).
+  - `CmdBookmarkDelete`: after `UnlinkTocItem`, call `FreeTocItemRec(nullptr, dti)` — s56 no longer rebuilds frees the item ("freed when tree rebuilt" comment no longer true; no rebuild happens).
+- **Verified safe (no change needed):** `EngineMupdf::OutlineEdit` already `str::Dup`s targetTitle/newValue/moveBeforeTitle (EngineMupdf.cpp:3777-3781). `ownerTree` set recursively for ALL items by `SetTocTreeOwner` on every `LoadTocTree` (TableOfContents.cpp:1229) — `(d)` no change.
+
+### Verified
+- Build 0 err / 0 warn. Deploy MD5 match: `81a31add924169ffe15964190aff8c4d` (out/dbg64 == Compiled).
+- Regressions --no-build PASS: issue-2799, ad-hoc-bookmark-edit, ad-hoc-bookmark-reorder, ad-hoc-bookmark-persist, ad-hoc-toc-reorder-crash, ad-hoc-repair-replace.
+- Headless repro (tests/tmp/s57-repro-bookmark.ts): outline-less PDF + TestBookmarkAdd ×2 + TestTocToolbarButton via -dbg-control; process alive after each async reload (no silent death).
+
+### Remaining
+- User live validation on real build/machine.
+
+## 2026-11-12 (s56) — TOC bookmark cascade fix: cached tree as session truth
+
+### Fixed
+- **Root cause (architecture bug):** `OutlineEdit` deleted `tocTree` for ALL ops (add/delete/rename/update/move), but only op=1 (Add) kept in-session overlay (`tocAdded`). GetToc rebuilt from STALE PDF outline + `tocAdded` — moves/deletes/renames/updates NEVER reflected in rebuild. Callers (`TableOfContents.cpp`) did NOT mutate in-memory tree directly; `MoveTocItem` mutated tree but `OutlineEdit(5)` deleted it → reload reverted move. Right-click delete/rename/update showed stale state; Add worked but landed at list end (out of view).
+- **Fix:** 
+  1. EngineMupdf.cpp `OutlineEdit`: REMOVE `delete tocTree; tocTree=nullptr` (all ops). Keep `outlineEdits` log + `modifiedOutline=true`; `tocAdded` overlay ONLY for op=1 (fallback for no-outline PDFs). GetToc returns cached `tocTree` if exists — session source of truth.
+  2. TableOfContents.cpp callers mutate cached tree directly BEFORE `OutlineEdit`:
+     - `TocAddBookmark`: append new `TocItem` under root END, `ReloadTocTree` with new title/pageNo → selects + `TreeView_EnsureVisible` (scroll into view).
+     - `CmdBookmarkDelete`: capture title/pageNo → `UnlinkTocItem` from cached tree → `OutlineEdit(2)` → `ReloadTocTree` (falls back gracefully, item gone).
+     - `CmdBookmarkRename`: update `item->title` in cached tree → `OutlineEdit(4)` → `ReloadTocTree` with NEW title.
+     - `CmdBookmarkUpdate`: update `item->pageNo/dest` in cached tree → `OutlineEdit(3)` → `ReloadTocTree`.
+     - `MoveTocItem`: already mutates in-memory (Unlink/Link) — keep; no tree deletion in path now.
+  3. Instrument `[toc]` logs: all entry/exit points, `OutlineEdit` return value, `TocContextMenu` entry.
+  4. `PersistOutlineEdits` save-path UNCHANGED (ops replay at save via `pdf_new_outline_iterator`).
+  5. `ReloadTocTreeAsync`: after `SelectItem`, call `TreeView_EnsureVisible` so new bookmark at list end becomes visible.
+
+### Verified
+- Build 0 err / 0 warn. Deploy MD5 match: `b69ab6446c1ab88b57b13daaf5731b28` (out/dbg64 == Compiled).
+- Regressions --no-build PASS: issue-2799, ad-hoc-bookmark-edit, ad-hoc-bookmark-reorder, ad-hoc-bookmark-persist, ad-hoc-toc-reorder-crash, ad-hoc-repair-replace.
+- Repro headless: outline PDF `/PageMode /UseOutlines` + `TestTocToolbarButton`(9001) + `TestBookmarkAdd`/`TestBookmarkMove` (via `-dbg-control`). Assert: Add shows N+1 items; Move changes order; reload cycle persists state in-session. No death, no hang, no slow-dispatch storm.
+
+### Remaining
+- User live validation on real build/machine.
+
+## 2026-11-12 (s55-b) — TOC ReloadTocTree use-after-free fix
+
+### Fixed
+- **Root cause:** ReloadTocTree read TocItem* title from TreeView after OutlineEdit freed tocTree → stale pointer deref on bookmark add/move (s55).
+- **Fix:** capture selTitle + selPageNo BEFORE OutlineEdit in TocAddBookmark + MoveTocItem; pass plain strings to ReloadTocTree, never read tree-backed pointer after model invalidation. hwnd NOT recreated → subclass/wiring persist. SumatraPDF.cpp untouched.
+
+### Verified
+- Deploy: MD5 Compiled == out/dbg64 = EBB0FB25936677ECBA038D8065EF2AE6; LastWriteTime match (2026-11-11 23:45). No rebuild needed.
+- Build 0/0. Tests --no-build PASS: ad-hoc-toc-reorder-crash, ad-hoc-bookmark-reorder, ad-hoc-bookmark-persist, ad-hoc-repair-replace; issue-2799 PASS (s55).
+
+### Remaining
+- User live validation on real build/machine.
+
+## 2026-11-11 (s54-b) — TOC Reorder toggle instant-death fix
+
+### Fixed
+- **Crash clicking TOC Reorder toggle (instant process death, no dump):** not stack overflow as suspected — heap corruption (`STATUS_HEAP_CORRUPTION`, C0000374) in `ReloadTocTaskData::~ReloadTocTaskData` (src/TableOfContents.cpp:1244): `selTitle` was allocated with temp-arena `str::DupTemp` (ReloadTocTree :1346) but freed with heap `str::Free` in the destructor. The async uitask task outlives the temp arena, so the free hit a dangling/arena pointer → instant death, no teardown/crash dump.
+- **Fix (src/TableOfContents.cpp:1346):** `str::DupTemp(sel->title)` → `str::Dup(sel->title)` so `selTitle` is heap-allocated and the destructor's `str::Free` is correct; also removes the dangling-pointer risk once the temp arena resets before the async task runs.
+- **Repro harness:** added `ControlCmd::TestTocToolbarButton` (=68) in src/SumatraControl.cpp + cmd/control.ts — posts `WM_COMMAND 9001` (kTocToolbarCmdReorder) to `win->hwndTocBox`, driving `TocReorderToggle` from the `-dbg-control` pipe for headless repro.
+
+### Verified
+- Repro (outline PDF `/PageMode /UseOutlines`, show TOC panel via F12, Reorder ON, then `ReloadTocTree`): crashed before fix (uitask thread `Func0::Call`/`ReloadTocTreeAsync` heap corruption), passes after — clean `ReloadTocTreeAsync: EXIT`, selection restore guarded by `tocReloading`, no death, no slow-dispatch storm.
+- Regressions PASS: issue-2799, ad-hoc-bookmark-edit/reorder/persist, ad-hoc-toc-reorder-crash.
+
+### Remaining
+- User validation on their real build/machine (user sequence: selected bookmark + clicked items first, then Reorder).
+
+## 2026-11-11 (s53) — TOC async reload + O(1) validity guard fixes UI wedge
+
+### Fixed
+
+- **UI hang/wedge after bookmark add/reorder + navigation:** synchronous `ReloadTocTree` after `OutlineEdit` caused selection-restore loop → `TVN_SELCHANGED` storms + relayout (`[d6]`) + `IsTocItemInCurrentTree` O(n²) paint storm → "uitask::WndProcTaskDispatch: slow dispatch" spam up to 6121ms → UI thread wedged, process killed without crash dump.
+- **Root cause cycle:** `ReloadTocTree` (sync) → `ClearTocBox` + `LoadTocTree` + `SelectItem` restore → `TVN_SELCHANGED` (action=0) logged but early-return → `UpdateTocSelection` fallback → another `SelectItem` → relayout → custom draw calls O(n) `IsTocItemInCurrentTree` per visible item → CPU saturation.
+- **Fix (src/TableOfContents.cpp):**
+  1. **Debounced async reload:** `ReloadTocTree` now sets `win->tocReloadPending` + posts `TaskReloadTocTree` uitask (coalesces multiple OutlineEdits) instead of immediate rebuild.
+  2. **Reload guard:** `win->tocReloading` flag set during async rebuild; `TocTreeSelectionChanged` returns early if `tocReloading` (suppresses selection-restore loop).
+  3. **O(1) validity check:** added `TocItem::ownerTree` back-pointer (EngineBase.h:342); `SetTocTreeOwner` walks tree once at load/filter time; `IsTocItemInCurrentTree` now single pointer compare (was O(n) tree walk).
+  4. **Filtered tree:** `ApplyTocFilter` marks copied items with new `filteredTree` owner.
+- Build 0 err / 0 warn, deployed Compiled/. Tests PASS: issue-2799, ad-hoc-bookmark-edit/reorder/persist (--no-build).
+
+### Notes
+
+- Async reload introduces ~1 frame delay before tree refresh; acceptable (user sees stale data <16ms).
+- `tocReloadPending` coalesces rapid OutlineEdits (e.g. drag-reorder multiple drops).
+- `ownerTree` eliminates O(n²) paint storm on large TOCs (3000+ items).
+
+## 2026-11-11 (s52) — TOC custom-draw use-after-free crash (Add/Reorder)
+
+### Fixed
+
+- **Crash clicking bookmark Add/Reorder:** `TreeView::GetHandleByTreeItem` (src/wingui/TreeView.cpp:94) fault reading 0xFFFFFFFFFFFFFFFF via `OnTocCustomDraw` (src/TableOfContents.cpp:1446); RAX = ASCII "Slide" = freed TocItem* reused → use-after-free in TOC custom draw.
+- **Root cause:** `OutlineEdit` (src/EngineMupdf.cpp:3792-3793) deletes cached tocTree immediately on add/reorder; TreeView still holds stale TocItem* in item lParam; custom-draw fires before ReloadTocTree refreshes → dereference freed memory.
+- **Fix (src/TableOfContents.cpp):** IsTocItemInCurrentTree(TreeView*, TocItem*) validator (fwd decl :1290, impl :1431); guarded OnTocCustomDraw (:1301), DrawTocItemPostPaint (:1484), TocTreeClick (:1577), TocTreeSelectionChanged (:1614/:1617); immediate ReloadTocTree(tab) after OutlineEdit in TocAddBookmark (:2167) + MoveTocItem (:2414).
+- Build 0 err / 0 warn, deployed Compiled/. MD5 Compiled==out/dbg64 = 398BFF02C7C27202B1CEC23057800BEB. Tests --no-build PASS: ad-hoc-bookmark-edit/reorder/persist + issue-2799.
+
+### Notes
+
+- Guard class: custom draw validates item vs current model each paint; outline edits delete tocTree → tree lParams dangle until reload.
+- User live validation PENDING (app launched -log-to-file tests/tmp/s52/user-crash-log.txt).
+
+## 2026-11-11 (s51-e/f) — TOC panel-header toolbar strip + visual verification
+
+### Added
+
+- **TOC panel top bar restyle:** `src/TableOfContents.cpp` `TocToolbarCreate` — native ReBar+Toolbar strip parented to `hwndTocBox`, positioned above the "Bookmarks" label by `LayoutTocContainer` on WM_SIZE. Buttons: Add (`CmdBookmarkAdd` 531) + Reorder (custom 9001, `BTNS_CHECK` toggle, checked = 3px `ThemeWindowTextColor` underline via `ToolbarPaintSubclassProc`). Text-only buttons (`TbIcon::Text`) with explicit post-add sizing so labels never ellipsis-truncate.
+
+### Verified
+
+- Build `bun cmd/build.ts`: 0 err / 0 warn, deployed to Compiled/.
+- s51-e regressions PASS: issue-2799, ad-hoc-bookmark-edit, ad-hoc-bookmark-persist, ad-hoc-bookmark-reorder.
+- s51-f visual verification (PNGs under `tests/tmp/s51f/`):
+  - png1 dark + Reorder OFF: strip above Bookmarks, labels full, dark theme readable, no underline — PASS
+  - png2 dark + Reorder ON (WM_COMMAND 9001): strip above Bookmarks, labels full, Reorder checked + 3px underline visible — PASS
+  - png3 context menu on TOC item (#32768): Expand/Collapse All, Expand to Level 1-3, Collapse Same Level, Expand to Current Page, separator, Add page to favorites, Delete bookmark — intact — PASS
+  - png4 light (CmdToggleLightDarkTheme): strip above Bookmarks, labels full, light theme readable, Reorder ON state carried — PASS
+- No code changes required; no defect found in any PNG.
+
+### Notes
+
+- `src/SumatraPDF.cpp` untouched (READ-ONLY per s51-f scope).
+- Remaining = user live validation only (no control-pipe command to open sidebar/toggle Reorder headlessly).
+
+## 2026-11-11 (s51-d) — TOC click-nav fix + Reorder ON/OFF toggle
+
+### Fixed
+
+- **Bookmark click-nav broken (s43-b regression):** `src/TableOfContents.cpp` `WndProcTocTree` WM_LBUTTONDOWN intercepted + `return 0` on EVERY left click, swallowing selection/TVN_SELCHANGED/navigation before the TreeView saw it (user live log: TocTreeClick never fired). Fix: gate interception behind new `MainWindow::tocReorderMode` (default OFF). OFF → `break` → DefSubclassProc = normal TreeView behavior (selection + click-nav restored). ON → existing drag-reorder pattern (GetItemAt/SetCapture/return 0 + WM_MOUSEMOVE guide + WM_LBUTTONUP commit). Logs `[toc] Reorder ON/OFF`.
+
+### Changed
+
+- **Reorder button = ON/OFF toggle:** `TableOfContents.cpp` `CreateToc` — label "Reorder" (dropped "(s43-b)"), wired `onClick` to `TocReorderToggle` which flips `tocReorderMode`, sets button `isChecked`, invalidates, logs the transition. OFF default.
+- **Button checked-state visual:** `wingui/Button.cpp`/`WinGui.h` — `Button::isChecked` + `SetIsChecked`/`IsChecked`; checked paints accent fill+edge (`col.bgHot`/`col.edgeHot` theme colors, dark+light safe). No RGB literals.
+- `MainWindow.h`: added `tocReorderMode` (default false) + non-owning `tocReorderBtn`.
+
+### Verified
+
+- Build `bun cmd/build.ts`: 0 err / 0 warn, deployed to Compiled/.
+- Regressions `--no-build`: issue-2799 PASS, ad-hoc-bookmark-edit PASS, ad-hoc-bookmark-reorder PASS.
+
+### Notes
+
+- In Reorder ON mode click-nav is disabled by design (interception ON = drag mode; a click within drag threshold = no reorder, no nav — accepted tradeoff, documented in tests/tmp/s51d/notes.md).
+- Probe skipped: no control-pipe command to toggle the TOC sidebar or Reorder; drag simulation not automatable headlessly here → **user live validation pending**.
+
+## 2026-11-10 (s50-R9) — Instant visual deskew (apply-at-finalize, save writes only)
+
+### Added
+
+- **Instant visual deskew (s50-R9):** Crop Align (Edit toolbar) now applies rotation+crop IMMEDIATELY when user finalizes the alignment line (click+drag or two clicks). Page rights itself visually ("/---/" → "|---|") in the live view without waiting for Ctrl+S.
+  - `Canvas.cpp` `FinalizeAlign`: after `QueuePageGeometry`, calls new `EngineMupdf::ApplyPendingGeometryEditsNow()` to mutate the live PDF document, then `dm->BuildPagesInfo()` + `dm->RelayoutKeepingView()` to rebuild page geometry and refresh view preserving scroll anchor (same pattern as `ApplyViewportCropV2`).
+  - `EngineMupdf.h/.cpp`: new virtual `ApplyPendingGeometryEditsNow()` in `EngineBase`/`EngineMupdf` — applies same transforms as `ApplyPendingGeometryEdits` (90° multiples → /Rotate+CropBox; arbitrary → Form XObject) but does NOT clear `pendingGeomEdits` or `modifiedPageGeometry`. Sets `appliedInMemory=true` so save path skips re-applying.
+  - `EngineMupdf.cpp` `EngineMupdfSaveUpdated`: checks `appliedInMemory` — if true, skips `ApplyPendingGeometryEdits` (anti-double-apply) and goes straight to `pdf_save_document`. Resets `appliedInMemory=false` on successful save.
+  - Aspect ratio: `FinalizeAlign` crop math already preserves mediabox W:H (lines 2925-2934) — matches jpg-orientation-editor straighten+crop behavior.
+  - Zoom clamp: `RelayoutKeepingView` preserves virtual zoom + view anchor (first visible page + in-page offset), following crop/trim precedent (lemma `mb5e17e7b361f`).
+
+- **Anti-double-apply guard:** `appliedInMemory` flag ensures multiple aligns before save each apply once; save writes only. Annotations-only changes unaffected. Both 90° and arbitrary paths covered.
+
+- **Guard + timestamps:** R8 idempotency guard widened 100ms→500ms (already `kAlignToggleGuardMs=500`). All `[arch]` log lines use `ArchElapsedMs()` relative-ms format (`[arch +XXXms]`).
+
+### Verified
+
+- Build 0 err / 0 warn (clang-format applied), exe deployed to ../Compiled/TumatraPDF.exe.
+- `bun tests/ad-hoc-align-deskew.ts` (5° arbitrary) → PASS (text extraction OK on saved file).
+- `bun tests/ad-hoc-align-save.ts` (90° rotation) → PASS (text extraction OK on saved file).
+- `bun tests/ad-hoc-bookmark-edit.ts` → PASS (dirty funnel regression: bookmark edits still mark document dirty, close-prompt works).
+
+### Notes
+
+- Architecture change: apply-at-finalize (instant visual) + save writes only. Old design was apply-at-save only (no visual change until Ctrl+S).
+- `SumatraPDF.cpp` untouched (hard ban). `libsumatrapdf.def` untouched.
+- User re-test: click Crop Align → draw line → page rights instantly + 🔴 lights → Ctrl+S writes change to file (no notification UI).
+
+## 2026-11-08 (s50-R8) — Crop Align instant-toggle-off (double-dispatch) fix
+
+### Fixed
+
+- **Crop Align instant toggle-off (real root cause):** single physical click on Edit toolbar "Crop Align" appeared ON then instantly OFF (toolMode 0→5→0, cannot draw). Probe `tests/tmp/s50r8/double.ts` confirmed two rapid WM_COMMAND(CmdArchAlign=525) posts flip toolMode 0→5→0 at the handler (`HandleCmdArchAlign`, Commands_ArchTools.cpp). s50-R6's `ToolbarUpdateStateForWindow` call fixed the Edit toolbar checked-state SYNC (button shows ON) but did NOT fix the toggle-off itself.
+- Fix: idempotency guard in `HandleCmdArchAlign` (Commands_ArchTools.cpp) — a second CmdArchAlign within ~100ms of the first, with no canvas interaction in between, is treated as a rapid double-dispatch and ignored (toolMode stays 5). Timestamps `alignLastToggleMs` / `alignCanvasInteractMs` added to `MainWindow.h` `ArchToolsState`. Canvas mouse-down/move log `[arch]` + stamp `alignCanvasInteractMs` when toolMode==5 to prove draw state survives.
+- All existing [arch] instrumentation (R7a/R7b) kept — none removed as noise.
+
+### Verified
+
+- Build 0 err / 0 warn (clang-format applied), exe deployed to ../Compiled/TumatraPDF.exe.
+- Probe A `tests/tmp/s50r8/single.ts`: single post → toolMode stays ON (5) ≥ 2s, no phantom OFF. PASS.
+- Probe B `tests/tmp/s50r8/double.ts`: double post (<150ms) → exactly ONE toggle outcome (ON), rapid duplicate ignored, no OFF within 1s. PASS.
+- `bun tests/ad-hoc-align-save.ts --no-build` → PASS; `bun tests/ad-hoc-align-deskew.ts --no-build` → PASS.
+
+### Notes
+
+- Double-post SOURCE not isolated (Edit vs Arch toolbar creation/subclass paths near-identical; dmlib is third-party). Idempotency guard is source-agnostic: fixes the bug regardless of which path double-posts.
+- USER validation still required live on the real machine (cannot reproduce exact double-dispatch timing here). Button must stay ON and drawing must work.
+
+## 2026-11-08 (s50-R6) — Crop Align toggle fix + Edit toolbar +Text truncation fix
+
+### Fixed
+
+- **Crop Align instant toggle-off (real bug):** clicking "Crop Align" on Edit toolbar toggled ON then instantly OFF. Root cause: `HandleCmdArchAlign` only called `UpdateToolbar2State` (syncs Arch toolbar buttons), but Crop Align button lives on Edit toolbar. Fix: added `ToolbarUpdateStateForWindow(win, false)` call in `HandleCmdArchAlign` (Commands_ArchTools.cpp:113) to sync Edit toolbar checked state from `archTools.toolMode == 5`. Same sync pattern as Arch Tools toggle buttons (Measure/Radius/Ref Line) which work correctly via `UpdateToolbar2State`.
+
+- **"+Text" button truncated to "+Te...":** first Edit toolbar button label truncated. Root cause: `EnforceToolbarTextButtonWidths` (Toolbar.cpp) only cleared `BTNS_AUTOSIZE` for Autoscroll button; other text buttons retained `BTNS_AUTOSIZE`, so comctl recalculated/overrode explicit width on subsequent layout passes. Fix: clear `BTNS_AUTOSIZE` for ALL text buttons when pinning explicit `cx = label + pad` (Toolbar.cpp:1390-1408). Now "+Text", "Crop Align", etc. render full label.
+
+### Verified
+
+- Build 0 err / 0 warn, exe deployed to ../Compiled/TumatraPDF.exe.
+
+### Notes
+
+- Crop Align toggle fix follows Arch toolbar precedent: Measure/Radius/Ref Line buttons (CmdArchMeasure/CmdArchMeasureRadius/CmdArchRefLine) use BTNS_CHECK on Arch toolbar and stay toggled via `UpdateToolbar2State`. Crop Align moved to Edit toolbar (s50-R2) but handler didn't sync Edit toolbar — fixed by adding `ToolbarUpdateStateForWindow` call.
+- Text button fix applies to both main and secondary toolbars (Arch/Edit/Flashcard) via `ToolbarEnforceSecondaryTextWidths` wrapper.
+
+## 2026-11-08 (s50-R5) — Edit toolbar "..." residue probe + probe closure
+
+### Fixed
+
+- TASK A "..." residue: investigated Commands_Edit.cpp EditToolbarCreate gEditToolbarButtons — FIRST entry is {CmdEditAddText, _TRN("+Text")}, a real wired command (CmdEditAddText -> CmdCreateAnnotFreeText). grep of Toolbar.cpp/Commands_Edit.cpp/MainWindow found no "…"/"..." text placeholder or icon-less text item on Edit toolbar. Live probe (PrintWindow full-frame PNG, Edit toolbar open + Crop Align toggled) confirms NO separate "…" button — first Edit item is "+Text" (visually "+Te..." narrow truncation, not debug residue). Nothing to remove/relabel. Verdict: residue absent (already clean). Crop Align present on Edit toolbar, absent from Arch band (moved there s50-R2). NO src edits needed — build 0 err/0 warn untouched.
+
+### Probe closure (TASK B)
+
+- probe v2 rewritten tests/tmp/s50r5/probe-crop-align.ts: fabricates valid 2-page PDF (makePdf, same pattern as ad-hoc-align-save.ts — mupdf loads without repair), verifies load via control-pipe Ping + frame title BEFORE UI steps, uses TestToolbarButtons control cmd for textual button enumeration (NO raw FFI enumChildWindows — that hung s50-R4), one full-frame PrintWindow PNG with Edit toolbar open + Crop Align toggled.
+- `bun tests/tmp/s50r5/probe-crop-align.ts --no-build` → PASS (4.6s): Ping pong OK, title="s50r5-probe.pdf - TumatraPDF", no "…" residue, "Crop Align" enumerated+present on Edit toolbar, PNG captured at tests/tmp/s50r5-probe/s50r5-probe-frame.png.
+- Honest limit: textual dump covers main toolbar (hwndToolbar); Edit toolbar (hwndToolbarEdit) confirmed VISUALLY via PNG only, not via control-pipe text dump. Crop Align checked-state not independently asserted beyond toggle + PNG.
+
+### Notes
+
+- Build lock: `taskkill /IM TumatraPDF.exe /F; bun cmd/build.ts` → 0 err/0 warn, exe deployed to ../Compiled/TumatraPDF.exe.
+- Shell: `;` chains (no `&&`), no `2>nul`; scratch under tests/tmp/s50r5/.
+
+## 2026-11-08 (s50-R3) — arbitrary-angle deskew at save (Technique A)
+
+### Added
+
+- src/EngineMupdf.cpp: ApplyPendingGeometryEdits split — 90° multiples use existing /Rotate + CropBox transform (R2 unchanged); else branch builds Form XObject (pdf_new_xobject) with arbitrary-angle rotation matrix, replaces page /Contents with `q /FmN Do Q`, merges /Resources + /XObject, sets MediaBox/CropBox to rotated bbox. /Rotate left unchanged.
+- src/libsumatrapdf.def: exports added `pdf_page_contents`, `pdf_add_object_drop`.
+- tests/ad-hoc-align-deskew.ts: headless TestGeomSave with 5° rotation + crop; verifies saved file loads + text extraction OK. Registered in tests/before-release.ts.
+
+### Fixed
+
+- Build 0 err / 0 warn, exe deployed to ../Compiled/TumatraPDF.exe.
+
+### Verified
+
+- `bun tests/ad-hoc-align-save.ts --no-build` → PASS (5.9s): 90° rotation + crop headless save, text extraction OK.
+- `bun tests/ad-hoc-align-deskew.ts --no-build` → PASS (3.9s): 5° deskew + crop headless save, text extraction OK.
+- Regression suite: ad-hoc-bookmark-edit/persist/reorder + ad-hoc-repair-replace all PASS.
+
+### Notes
+
+- CTM math verified on paper: XObject /BBox = [0 0 cropW cropH]; /Matrix = T(newBboxCenter) * R(angleDeg) * T(-cropW/2, -cropH/2); XObject content = `q -cropX0 -cropY0 cm <orig> Q`. Parent page just Does the XObject.
+- Current /Rotate (if any) not factored into arbitrary-angle transform — known limitation, future refinement.
+- pdf_load_stream signature corrected to take pdf_obj*; fz_buffer_storage used for stream data access.
+- Static xobjCounter for unique /FmN names (no persistent state needed, reset per process).
+
+## 2026-11-08 (s50-R2) — align apply-at-save
+
+### Added
+
+- src/SumatraControl.cpp: enum ControlCmd `TestGeomSave = 65` + switch case (headless: CreateEngineFromFile → QueuePageGeometry → EngineMupdfSaveUpdated to outPath). No window/tab needed.
+- cmd/control.ts: enum ControlCommand `TestGeomSave = 65` (matches C++ enum; tests use enum, never hardcode ids).
+- tests/ad-hoc-align-save.ts: headless TestGeomSave client (launch -dbg-control, assert OK, reopen outPath via TestGetToc, extract-text on saved file). Registered in before-release.ts.
+
+### Fixed
+
+- Build 0 err / 0 warn, exe deployed to ../Compiled/TumatraPDF.exe.
+
+### Verified
+
+- `bun tests/ad-hoc-align-save.ts --no-build` → PASS (5.2s): geometry queued + saved headlessly, saved file loads + text extraction OK ("Page 1", "Page 2").
+- QueuePageGeometry has NO auto-save path: callers (Canvas.cpp:2922 FinalizeAlign, TestAlignQueue, TestGeomSave) only queue + set dirty flag; ApplyPendingGeometryEdits runs only inside EngineMupdfSaveUpdated (EngineMupdf.cpp:6916) before pdf_save_document. Explicit save only.
+- /Rotate trap confirmed honest limitation: PDF /Rotate only accepts multiples of 90°; small angles (5°) round to 0, rotation silently lost. Test uses 90° to exercise rotation path; crop applies for any angle. No mediabox readback API via control pipe.
+
+### Notes
+
+- 4 regression tests (ad-hoc-bookmark-edit/persist/reorder, ad-hoc-repair-replace) are imported in before-release.ts but DO NOT EXIST on disk — cannot run, honest FAIL (missing files, not test failures).
+- No commit (build lock held, pending explicit command).
+
+## 2026-11-08 (s50-R1) — align tool line+preview
+
+### Fixed
+
+- src/SumatraPDF.cpp: added `// TUMATRA-FORK(s50):` marker + upstream re-apply note on all 3 s50 deltas (dispatch case CmdArchAlign=525, ESC alignLine clear, doc-close path clear) — fork-marker mandatory on SumatraPDF.cpp exceptions; clang-format applied.
+- Build 0 err / 0 warn, exe deployed to ../Compiled/TumatraPDF.exe.
+
+### Verified
+
+- grep TUMATRA-FORK(s50) → 3 hits; CmdArchAlign id = 525 (gen-commands.ts regen).
+- Probe tests/tmp/s50/probe.ts: WM_COMMAND CmdArchAlign toggles Arch Tools button on (toolMode=5 reachable); posted mouse drag near canvas center did NOT produce visible align line / crop-rect — DPI ×1.25 posted-coords trap, coords unreliable, honest limit. PNGs: tests/tmp/s50/align-base.png, align-probe.png.
+- No commit (build lock held, pending explicit command).
+
+### Notes
+
+- Math lives in Canvas.cpp FinalizeAlign (axis=nearer vertical/horizontal, aspect-preserved cropRectPage, angle readout); R2 = PDF write/crop reuse.
+- DPI posted-coords probe limits documented; do not claim line/crop visually verified.
+
+## 2026-11-08 (s49-c) — pending right-click action now flushes immediately
+
+### Fixed
+
 - src/SumatraPDF.cpp: TabGroupMenuFilterProc hook (right-click option chosen in tab-group dropdown) now calls EndMenu() right after storing gPendingTabGroupCmdId/gPendingTabGroupWin, ending the outer TrackPopupMenuEx tracking at once so the dropdown closes immediately. ShowTabGroupDropdown post-loop flush (~12741) then runs HandleTabGroupMenuCmd for the pending id right away (rename dialog / Delete MessageBox / Open in new window) instead of waiting for the user to dismiss the dropdown. Marked `// TUMATRA-FORK(s49-c): ...` with upstream re-apply note.
 - Left-click items untouched: hook only fires on WM_RBUTTONUP; left-click reaches post-loop HandleTabGroupMenuCmd normally and never sets pending. Escape-without-choice leaves pending==0 (optCmdId==0), dropdown behaves as before.
 
 ### Verified
+
 - build 0 err / 0 warn, deployed to Compiled/TumatraPDF.exe.
 - 4 regression tests PASS (--no-build, fresh dbg64 exe): ad-hoc-tab-session, ad-hoc-tab-session-e2e, ad-hoc-tab-session-sync, ad-hoc-tab-session-sync2.
 - E2E probe tests/tmp/s49c/probe.ts: WM_COMMAND(8000) opens #32768 dropdown (hook installed), Escape dismisses it, TestTabGroupMenuCmd rename handler OK. Driving nested options items via posted coords not reliably drivable (honest limit) — attempted, not claimed as pass.
 
 ### Notes
+
 - EndMenu() chosen over PostMessage(WM_CANCELMODE): synchronous + documented classic pattern; WM_CANCELMODE via PostMessage is async (menu closes later, not immediate). One EndMenu() call suffices — inner TPM_RECURSE options popup already returned optCmdId before pending is stored, so only outer tracking is active.
 - AUTH EXCEPTION: src/SumatraPDF.cpp read-only ban lifted for this fix only. Marker + re-apply note on every delta for a future upstream sync/merge.
 
 ## 2026-11-08 (s49-b) — tab-group rename: activeTabGroup now tracks new name (no ghost)
 
 ### Fixed
+
 - src/SumatraPDF.cpp:12543-12558 (menu path, HandleTabGroupMenuCmd case 2 rename): gate `wasActive = activeTabGroup.s && str::EqI(g->name, activeTabGroup)` BEFORE `str::ReplaceWithCopy(&g->name, newName.s)`; if renamed group == active group, `str::ReplaceWithCopy(&gGlobalPrefs->activeTabGroup, newName.s)` after rename so pointer tracks new name, no ghost.
 - src/SumatraPDF.cpp:14836-14865 (dialog-test path, kTabGroupDialogTestCmd 8950 rename): same gate before `str::ReplaceWithCopy(&g->name, tmp)`; if active, `str::ReplaceWithCopy(&gGlobalPrefs->activeTabGroup, Str(tmp.s))`.
 - Non-active rename untouched (no update needed — matches delete-case precedent at 12561-12563).
@@ -23,26 +403,31 @@
 - SaveSettings()/RefreshTabGroupButton() call order unchanged; MaybeSaveAnnotations / annotation-save integrity untouched (no save-flow reorder).
 
 ### Verified
+
 - build 0 err / 0 warn (clang-format applied on SumatraPDF.cpp), deployed to Compiled/TumatraPDF.exe.
 - 4 regression tests PASS (--no-build, fresh dbg64 exe): ad-hoc-tab-session, ad-hoc-tab-session-sync, ad-hoc-tab-session-sync2, ad-hoc-tab-session-e2e.
 - E2E extended: ad-hoc-tab-session-e2e.ts step 8 renames active group E→GroupY via real dialog, asserts active=GroupY (ghost eliminated). Non-active rename (GroupB→GroupZ, active stays GroupA) still passes.
 
 ### Notes
+
 - AUTH EXCEPTION: src/SumatraPDF.cpp read-only ban lifted for this fix only (user @57). Marker + re-apply note on every delta for a future upstream sync/merge.
 - TabGroupsManage.cpp audited: ShowSaveTabGroupDialog (~605)/SaveTabGroup (~122)/SetActiveTabGroup (211) create/set active group by name but do NOT rename an existing group — out of scope, no activeTabGroup update needed there.
 
 ## 2026-11-08 (s49) — tab-group dropdown dialogs frozen (triple modal loops) → deferral fix (auth exception)
 
 ### Fixed
+
 - src/SumatraPDF.cpp: tab-group dropdown right-click (Rename / Delete / Open in new window) froze because HandleTabGroupMenuCmd ran synchronously inside the WH_MSGFILTER hook during the outer TrackPopupMenuEx modal loop -> triple modal loop (menu hook -> options popup -> rename/delete dialog). Dialog's GetMessage loop fought the menu filter hook -> could not confirm/cancel/close.
 - Fix: deferral — store gPendingTabGroupCmdId + gPendingTabGroupWin in the hook (return 1, keep main menu tracking), run HandleTabGroupMenuCmd AFTER the outer TrackPopupMenuEx returns, before UnhookWindowsHookEx. Three touch points, all marked `// TUMATRA-FORK(s49): ...` with re-apply instructions. Left-click post-loop HandleTabGroupMenuCmd call untouched.
 
 ### Verified
+
 - build 0 err / 0 warn (clang-format applied on SumatraPDF.cpp).
 - 4 regression tests PASS: ad-hoc-tab-session, ad-hoc-tab-session-e2e, ad-hoc-tab-session-sync, ad-hoc-tab-session-sync2 (--no-build, fresh dbg64 exe).
 - E2E honest result (real menu path, NO -for-testing): WM_COMMAND(8000) opens the #32768 dropdown; right-click hook fires (options popup #32768 appears). Full right-click->Rename->dialog->IDOK chain not reliably drivable via posted coords (two #32768 windows, item-height estimation) — recorded as attempted, not claimed as pass.
 
 ### Notes
+
 - AUTH EXCEPTION: src/SumatraPDF.cpp read-only ban lifted for this fix only (user @57). Heavy inline fork-delta documentation with re-apply instructions for a future upstream sync/merge of this file. Delta minimal & self-contained; touches only the tab-group dropdown area.
 - TODO.md §Bugs: no "rename-buttons" entry exists (verified) — nothing to remove/annotate.
 - Control-pipe async test path (8950 via SumatraControl.cpp:340 / SumatraPDF.cpp:14790) unaffected, as expected.

@@ -30,6 +30,8 @@ extern "C" {
 #include "ImageSaveCropResize.h"
 #include "base/GuessFileType.h"
 #include "EngineAll.h"
+#include "DisplayModel.h"
+#include "RenderCache.h"
 #include "Commands.h"
 #include "FindWindow.h"
 #include "Menu.h"
@@ -397,6 +399,14 @@ enum class ControlCmd : u16 {
     TestBookmarkToc = 61,
     TestBookmarkSave = 62,
     TestBookmarkMove = 63,
+    TestAlignQueue = 64,
+    TestGeomSave = 65,
+    TestAlignApply = 66,
+    TestAlignCommit = 67,
+    TestAlignDiscard = 68,
+    TestGetPageNo = 69,
+    TestTocToolbarButton = 70,
+    TestBookmarkDelete = 71,
 };
 
 enum class ControlArgType : u16 {
@@ -619,6 +629,21 @@ static bool IntArg(ControlRequest* req, size_t idx, i32& valOut) {
         return false;
     }
     valOut = arg->intVal;
+    return true;
+}
+
+static bool FloatArg(ControlRequest* req, size_t idx, float& valOut) {
+    ControlArg* arg = ArgAt(req, idx, ControlArgType::String);
+    if (!arg || !arg->str) {
+        return false;
+    }
+    // parse float from string
+    char* end = nullptr;
+    double d = strtod(arg->str.s, &end);
+    if (end == arg->str.s || *end != '\0') {
+        return false;
+    }
+    valOut = (float)d;
     return true;
 }
 
@@ -1329,6 +1354,28 @@ static void ExecuteControlRequest(ControlRequest* req) {
             break;
         }
 
+        case ControlCmd::TestBookmarkDelete: {
+            i32 pageNo = 0;
+            ControlArg* titleArg = ArgAt(req, 1, ControlArgType::String);
+            if (!IntArg(req, 0, pageNo) || !titleArg) {
+                AppendError(req, "TestBookmarkDelete expects int pageNo, string title (empty allowed)");
+                break;
+            }
+            Str title = titleArg->str; // may be empty: the ghost entry (pre-s60 corruption class)
+            if (len(gWindows) == 0) {
+                AppendError(req, "TestBookmarkDelete no-window");
+                break;
+            }
+            MainWindow* win = gWindows[0];
+            auto* engine = win->CurrentTab() ? win->CurrentTab()->GetEngine() : nullptr;
+            if (!engine || !engine->OutlineEdit(2, pageNo, title, StrL(""), 0)) {
+                AppendError(req, "TestBookmarkDelete failed");
+                break;
+            }
+            AppendTestResult(req, 0, StrL("OK\n"));
+            break;
+        }
+
         case ControlCmd::TestBookmarkMove: {
             i32 sourcePageNo = 0;
             i32 newParentPageNo = 0;
@@ -1354,6 +1401,232 @@ static void ExecuteControlRequest(ControlRequest* req) {
                 !engine->OutlineEdit(5, sourcePageNo, sourceTitle, newParentPageNo < 0 ? StrL("") : newParentTitle,
                                      newParentPageNo < 0 ? 0 : newParentPageNo, moveBeforePageNo, moveBeforeTitle)) {
                 AppendError(req, "TestBookmarkMove failed");
+                break;
+            }
+            AppendTestResult(req, 0, StrL("OK\n"));
+            break;
+        }
+
+        case ControlCmd::TestGetPageNo: {
+            int cur = 0;
+            if (len(gWindows) > 0) {
+                MainWindow* win = gWindows[0];
+                if (win->ctrl) {
+                    cur = win->ctrl->CurrentPageNo();
+                }
+            }
+            AppendTestResult(req, cur, StrL(""));
+            break;
+        }
+
+        case ControlCmd::TestTocToolbarButton: {
+            // posts WM_COMMAND 9001 (kTocToolbarCmdReorder) to the TOC box so
+            // WndProcTocBox -> TocReorderToggle toggles drag-reorder mode ON/OFF.
+            // Runs async (PostMessage); the app replies immediately.
+            if (len(gWindows) == 0) {
+                AppendError(req, "TestTocToolbarButton no-window");
+                break;
+            }
+            MainWindow* win = gWindows[0];
+            if (!win || !win->hwndTocBox) {
+                AppendError(req, "TestTocToolbarButton no-tocbox");
+                break;
+            }
+            PostMessageW(win->hwndTocBox, WM_COMMAND, MAKEWPARAM(9001, 0), 0);
+            AppendTestResult(req, 0, StrL("OK posted\n"));
+            break;
+        }
+
+        case ControlCmd::TestAlignQueue: {
+            i32 pageNo = 0;
+            float angleDeg = 0;
+            float cropX = 0, cropY = 0, cropDx = 0, cropDy = 0;
+            if (!IntArg(req, 0, pageNo) || !FloatArg(req, 1, angleDeg) || !FloatArg(req, 2, cropX) ||
+                !FloatArg(req, 3, cropY) || !FloatArg(req, 4, cropDx) || !FloatArg(req, 5, cropDy)) {
+                AppendError(req,
+                            "TestAlignQueue expects int pageNo, float angleDeg, float cropX, float cropY, float "
+                            "cropDx, float cropDy");
+                break;
+            }
+            if (len(gWindows) == 0) {
+                AppendError(req, "TestAlignQueue no-window");
+                break;
+            }
+            MainWindow* win = gWindows[0];
+            auto* engine = win->CurrentTab() ? win->CurrentTab()->GetEngine() : nullptr;
+            if (!engine) {
+                AppendError(req, "TestAlignQueue no-engine");
+                break;
+            }
+            RectF cropRect{cropX, cropY, cropDx, cropDy};
+            if (!engine->QueuePageGeometry(pageNo, angleDeg, cropRect)) {
+                AppendError(req, "TestAlignQueue failed (page may have annotations)");
+                break;
+            }
+            // Also mark dirty for UI
+            EngineMupdf* em = AsEngineMupdf(engine);
+            if (em) {
+                em->modifiedPageGeometry = true;
+            }
+            ToolbarUpdateStateForWindow(win, false);
+            AppendTestResult(req, 0, StrL("OK\n"));
+            break;
+        }
+
+        case ControlCmd::TestAlignApply: {
+            // Queue geometry edit + apply instantly + return page mediabox
+            i32 pageNo = 0;
+            float angleDeg = 0;
+            float cropX = 0, cropY = 0, cropDx = 0, cropDy = 0;
+            if (!IntArg(req, 0, pageNo) || !FloatArg(req, 1, angleDeg) || !FloatArg(req, 2, cropX) ||
+                !FloatArg(req, 3, cropY) || !FloatArg(req, 4, cropDx) || !FloatArg(req, 5, cropDy)) {
+                AppendError(req,
+                            "TestAlignApply expects int pageNo, float angleDeg, float cropX, float cropY, float "
+                            "cropDx, float cropDy");
+                break;
+            }
+            if (len(gWindows) == 0) {
+                AppendError(req, "TestAlignApply no-window");
+                break;
+            }
+            MainWindow* win = gWindows[0];
+            auto* engine = win->CurrentTab() ? win->CurrentTab()->GetEngine() : nullptr;
+            if (!engine) {
+                AppendError(req, "TestAlignApply no-engine");
+                break;
+            }
+            // Get mediabox BEFORE apply
+            RectF mbBefore = engine->PageMediabox(pageNo);
+            RectF cropRect{cropX, cropY, cropDx, cropDy};
+            if (!engine->QueuePageGeometry(pageNo, angleDeg, cropRect)) {
+                AppendError(req, "TestAlignApply queue failed (page may have annotations)");
+                break;
+            }
+            EngineMupdf* em = AsEngineMupdf(engine);
+            if (em) {
+                em->modifiedPageGeometry = true;
+            }
+            // Apply instantly (instant visual deskew), then mirror the full
+            // FinalizeAlign tail (Canvas.cpp): drop stale RenderCache bitmaps,
+            // rebuild page info, relayout keeping the view anchor and repaint.
+            // Otherwise the test control command would leave the canvas showing
+            // the pre-edit bitmap.
+            bool applied = engine->ApplyPendingGeometryEditsNow();
+            DisplayModel* dm = win->AsFixed();
+            if (applied && dm) {
+                if (gRenderCache) {
+                    gRenderCache->FreeForDisplayModel(dm);
+                }
+                dm->BuildPagesInfo();
+                dm->RelayoutKeepingView();
+                ToolbarUpdateStateForWindow(win, false);
+            }
+            // Get mediabox AFTER apply
+            RectF mbAfter = engine->PageMediabox(pageNo);
+            // Build result: applied flag + before/after mediabox
+            str::Builder sb;
+            sb.Append(fmt("applied=%d\n", applied ? 1 : 0));
+            sb.Append(fmt("before=%.2f,%.2f,%.2f,%.2f\n", mbBefore.x, mbBefore.y, mbBefore.dx, mbBefore.dy));
+            sb.Append(fmt("after=%.2f,%.2f,%.2f,%.2f\n", mbAfter.x, mbAfter.y, mbAfter.dx, mbAfter.dy));
+            AppendTestResult(req, 0, sb.TakeStr());
+            break;
+        }
+
+        case ControlCmd::TestAlignCommit: {
+            // Promote preview to pending (commit for save)
+            i32 pageNo = 0;
+            if (!IntArg(req, 0, pageNo)) {
+                AppendError(req, "TestAlignCommit expects int pageNo");
+                break;
+            }
+            if (len(gWindows) == 0) {
+                AppendError(req, "TestAlignCommit no-window");
+                break;
+            }
+            MainWindow* win = gWindows[0];
+            DisplayModel* dm = win->AsFixed();
+            if (!dm) {
+                AppendError(req, "TestAlignCommit no-displaymodel");
+                break;
+            }
+            EngineMupdf* em = AsEngineMupdf(dm->GetEngine());
+            if (!em || !em->hasPreviewGeomEdit || em->previewGeomEdit.pageNo != pageNo) {
+                AppendError(req, "TestAlignCommit no-preview-on-page");
+                break;
+            }
+            if (em->PromotePreviewToPending(pageNo)) {
+                em->hasPreviewGeomEdit = false;
+                em->modifiedPageGeometry = true;
+                em->previewGeomEdit = EngineMupdf::PageGeomEdit{};
+                AppendTestResult(req, 0, StrL("committed\n"));
+            } else {
+                AppendError(req, "TestAlignCommit promote-failed");
+            }
+            break;
+        }
+
+        case ControlCmd::TestAlignDiscard: {
+            // Discard preview and restore pristine geometry
+            i32 pageNo = 0;
+            if (!IntArg(req, 0, pageNo)) {
+                AppendError(req, "TestAlignDiscard expects int pageNo");
+                break;
+            }
+            if (len(gWindows) == 0) {
+                AppendError(req, "TestAlignDiscard no-window");
+                break;
+            }
+            MainWindow* win = gWindows[0];
+            DisplayModel* dm = win->AsFixed();
+            if (!dm) {
+                AppendError(req, "TestAlignDiscard no-displaymodel");
+                break;
+            }
+            EngineMupdf* em = AsEngineMupdf(dm->GetEngine());
+            if (!em || !em->hasPreviewGeomEdit || em->previewGeomEdit.pageNo != pageNo) {
+                AppendError(req, "TestAlignDiscard no-preview-on-page");
+                break;
+            }
+            if (em->DiscardPreview(pageNo, dm)) {
+                AppendTestResult(req, 0, StrL("discarded\n"));
+            } else {
+                AppendError(req, "TestAlignDiscard discard-failed");
+            }
+            break;
+        }
+
+        case ControlCmd::TestGeomSave: {
+            // Headless: open a PDF, queue a page-geometry edit (rotation + crop),
+            // save to outPath (exercises EngineMupdf::ApplyPendingGeometryEdits
+            // before pdf_save_document). No GUI window/engine needed.
+            Str inPath = StringArg(req, 0);
+            Str outPath = StringArg(req, 1);
+            i32 pageNo = 0;
+            float angleDeg = 0;
+            float cropX = 0, cropY = 0, cropDx = 0, cropDy = 0;
+            if (!inPath || !outPath || !IntArg(req, 2, pageNo) || !FloatArg(req, 3, angleDeg) ||
+                !FloatArg(req, 4, cropX) || !FloatArg(req, 5, cropY) || !FloatArg(req, 6, cropDx) ||
+                !FloatArg(req, 7, cropDy)) {
+                AppendError(req,
+                            "TestGeomSave expects string inPath, string outPath, int pageNo, float angleDeg, float "
+                            "cropX, float cropY, float cropDx, float cropDy");
+                break;
+            }
+            EngineBase* engine = CreateEngineFromFile(inPath, nullptr, false);
+            if (!engine) {
+                AppendError(req, "TestGeomSave engine-create-failed");
+                break;
+            }
+            RectF cropRect{cropX, cropY, cropDx, cropDy};
+            if (!engine->QueuePageGeometry(pageNo, angleDeg, cropRect)) {
+                SafeEngineRelease(&engine);
+                AppendError(req, "TestGeomSave queue-failed (page may have annotations)");
+                break;
+            }
+            bool ok = EngineMupdfSaveUpdated(engine, outPath, Func1<Str>{}, nullptr, false);
+            SafeEngineRelease(&engine);
+            if (!ok) {
+                AppendError(req, "TestGeomSave save-failed");
                 break;
             }
             AppendTestResult(req, 0, StrL("OK\n"));

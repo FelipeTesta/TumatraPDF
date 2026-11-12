@@ -340,6 +340,8 @@ static SeqStrings gCommandNames =
     "CmdEditImageApply\0"
     "CmdArchMeasureRadius\0"
     "CmdArchRefLine\0"
+    "CmdArchAlign\0"
+    "CmdArchAlignApply\0"
     "CmdFlashcardStudyTimerToggle\0"
     "CmdFlashcardStudyTimerEdit\0"
     "CmdProfileBackups\0"
@@ -677,6 +679,8 @@ static i32 gCommandIds[] = {
     CmdEditImageApply,
     CmdArchMeasureRadius,
     CmdArchRefLine,
+    CmdArchAlign,
+    CmdArchAlignApply,
     CmdFlashcardStudyTimerToggle,
     CmdFlashcardStudyTimerEdit,
     CmdProfileBackups,
@@ -1014,6 +1018,8 @@ SeqStrings gCommandDescriptions =
     "Edit: Apply Image Edits\0"
     "Arch: Measure Radius (3 clicks)\0"
     "Arch: Reference Line\0"
+    "Crop Align: draw 2-point line, preview rotated crop rect\0"
+    "Crop Align: commit preview rotation/crop for save\0"
     "Toggle Flashcard Study Session Timer\0"
     "Edit Flashcard Study Session Timer Duration\0"
     "Profile: Backups...\0"

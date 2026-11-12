@@ -3787,16 +3787,19 @@ bool EngineMupdf::OutlineEdit(int op, int targetPageNo, Str targetTitle, Str new
         ae.pageNo = newPageNo;
         tocAdded.Append(ae);
     }
-    // any edit marks the document modified and invalidates the cached toc tree
+    // any edit marks the document modified; tocTree is NO LONGER deleted here.
+    // The cached tocTree is now the session source of truth; callers mutate it
+    // directly. The outlineEdits log is replayed only at save (PersistOutlineEdits).
     modifiedOutline = true;
-    delete tocTree;
-    tocTree = nullptr;
     return true;
 }
 
 // position a fresh outline iterator on the first item matching title (ops match by title,
 // consistent with existing delete/update/rename); caller must drop the returned iterator.
 static fz_outline_iterator* OutlineIteratorFind(fz_context* ctx, pdf_document* doc, Str title) {
+    if (!title) {
+        return nullptr; // never match empty titles (would hit empty-title ghosts)
+    }
     fz_outline_iterator* it = pdf_new_outline_iterator(ctx, doc);
     if (!it) {
         return nullptr;
@@ -3807,6 +3810,40 @@ static fz_outline_iterator* OutlineIteratorFind(fz_context* ctx, pdf_document* d
         fz_outline_item* item = fz_outline_iterator_item(ctx, it);
         if (item && item->title && title && str::Eq(Str(item->title), title)) {
             return it;
+        }
+        if (fz_outline_iterator_next(ctx, it) != 0) {
+            break;
+        }
+    }
+    fz_drop_outline_iterator(ctx, it);
+    return nullptr;
+}
+
+// position a fresh outline iterator on the first entry whose title is empty or
+// whitespace-only (the pre-s60 op=3 bug wrote empty-title pageNo=-1 ghosts).
+// Healthy outlines never contain one, so matching the empty-title CLASS is
+// unambiguous and lets op=2 repairs delete the ghost. Caller must drop the iterator.
+static fz_outline_iterator* OutlineIteratorFindEmptyTitle(fz_context* ctx, pdf_document* doc) {
+    fz_outline_iterator* it = pdf_new_outline_iterator(ctx, doc);
+    if (!it) {
+        return nullptr;
+    }
+    for (;;) {
+        fz_outline_item* item = fz_outline_iterator_item(ctx, it);
+        if (item) {
+            bool hasNonWs = false;
+            if (item->title) {
+                for (const char* p = item->title; *p; p++) {
+                    char c = *p;
+                    if (c != ' ' && c != '\t' && c != '\r' && c != '\n') {
+                        hasNonWs = true;
+                        break;
+                    }
+                }
+            }
+            if (!hasNonWs) {
+                return it; // positioned on the ghost
+            }
         }
         if (fz_outline_iterator_next(ctx, it) != 0) {
             break;
@@ -3865,6 +3902,10 @@ static bool PersistOutlineEdits(EngineMupdf* epdf) {
             wi.r = wi.g = wi.b = 0;
             switch (e.op) {
                 case 1: { // add top-level bookmark
+                    if (!e.newValue) {
+                        logf("[toc] PersistOutlineEdits: skip op=1 add (empty title)\n");
+                        break;
+                    }
                     TempStr uri = fmt("#page=%d", e.newPageNo);
                     wi.uri = CStrTemp(uri);
                     // append at end of top-level so insertion order is preserved
@@ -3874,23 +3915,69 @@ static bool PersistOutlineEdits(EngineMupdf* epdf) {
                     break;
                 }
                 case 2: // delete bookmark
-                    if (found) {
+                    if (!e.targetTitle) {
+                        // corrupt pre-s60 file: match the empty-title CLASS and delete the ghost
+                        if (fz_outline_iterator* eit = OutlineIteratorFindEmptyTitle(ctx, epdf->pdfdoc)) {
+                            fz_outline_iterator_delete(ctx, eit);
+                            fz_drop_outline_iterator(ctx, eit);
+                            logf(
+                                "[toc] PersistOutlineEdits: op=2 empty-target delete -> removed empty-title ghost "
+                                "entry\n");
+                        } else {
+                            logf(
+                                "[toc] PersistOutlineEdits: skip op=2 delete (empty target, no empty-title ghost found "
+                                "in outline)\n");
+                        }
+                    } else if (found) {
                         fz_outline_iterator_delete(ctx, iter);
+                    } else {
+                        logf("[toc] PersistOutlineEdits: skip op=2 delete target='%s' (not found in outline)\n",
+                             e.targetTitle);
                     }
                     break;
-                case 3: // update page (deferred: mupdf update doesn't repoint dest)
+                case 3: { // update page (deferred: mupdf update doesn't repoint dest)
+                    // Intentionally a no-op for the PDF outline: the page
+                    // destination cannot be repointed via fz_outline_iterator,
+                    // and writing wi (newValue is "" for page updates, uri is
+                    // null) would corrupt the item into an empty-title,
+                    // pageNo=-1 ghost bookmark. The in-session tocTree already
+                    // holds the new pageNo; GetToc reads the cached tree.
                     if (found) {
-                        fz_outline_iterator_update(ctx, iter, &wi);
+                        logf(
+                            "[toc] PersistOutlineEdits: skip op=3 update-page target='%s' (page repoint not "
+                            "supported)\n",
+                            e.targetTitle);
+                    } else {
+                        logf("[toc] PersistOutlineEdits: skip op=3 update-page target='%s' (not found in outline)\n",
+                             e.targetTitle);
                     }
                     break;
+                }
                 case 4: // rename bookmark
-                    if (found) {
+                    if (!e.newValue) {
+                        logf("[toc] PersistOutlineEdits: skip op=4 rename target='%s' (empty new title)\n",
+                             e.targetTitle);
+                    } else if (found) {
                         fz_outline_iterator_update(ctx, iter, &wi);
+                    } else {
+                        logf("[toc] PersistOutlineEdits: skip op=4 rename target='%s' (not found in outline)\n",
+                             e.targetTitle);
                     }
                     break;
                 case 5: { // reorder-move: delete source(targetTitle), then re-insert under newParent/top-level
+                    // Move with null target (targetTitle==source title, newValue="") means "move to end /
+                    // top-level" — matches in-memory MoveTocItem(target=null). Never synthesize an empty title.
+                    if (!e.targetTitle) {
+                        logf("[toc] PersistOutlineEdits: skip op=5 move (empty source title)\n");
+                        break;
+                    }
                     fz_outline_item mvItem{};
                     mvItem.title = e.targetTitle ? CStrTemp(e.targetTitle) : nullptr;
+                    if (!mvItem.title) {
+                        // never write an empty-title ghost into the outline
+                        logf("[toc] PersistOutlineEdits: skip op=5 re-insert (empty source title)\n");
+                        break;
+                    }
                     TempStr uri = fmt("#page=%d", e.targetPageNo);
                     mvItem.uri = CStrTemp(uri);
                     mvItem.is_open = 1;
@@ -3901,6 +3988,11 @@ static bool PersistOutlineEdits(EngineMupdf* epdf) {
                     if (fz_outline_iterator* dit = OutlineIteratorFind(ctx, epdf->pdfdoc, e.targetTitle)) {
                         fz_outline_iterator_delete(ctx, dit);
                         fz_drop_outline_iterator(ctx, dit);
+                    } else {
+                        logf(
+                            "[toc] PersistOutlineEdits: op=5 move source='%s' not found in outline (still re-inserting "
+                            "to match in-memory)\n",
+                            e.targetTitle);
                     }
 
                     // 2) re-insert: before moveBefore sibling, else as last child of newParent, else top-level end
@@ -3948,6 +4040,52 @@ static bool PersistOutlineEdits(EngineMupdf* epdf) {
         fz_report_error(ctx);
         return false;
     }
+    return true;
+}
+
+// queue a page geometry edit (rotation + crop) to be applied at save.
+// pageNo: 1-based. angleDeg: rotation delta (+ = CCW). cropRectPage: crop rect in
+// original page coordinates (before rotation). one entry per page; re-queueing
+// on the same page overrides the previous.
+bool EngineMupdf::QueuePageGeometry(int pageNo, float angleDeg, RectF cropRectPage) {
+    if (!pdfdoc || pageNo < 1 || pageNo > pageCount) {
+        return false;
+    }
+    // Check if page already has engine annotations (flashcard/highlight) - if so,
+    // reject the geometry edit to avoid annotation coordinate drift (too risky R2).
+    FzPageInfo* pageInfo = pages[pageNo - 1];
+    if (pageInfo && pageInfo->annotsLoaded) {
+        for (Annotation* annot : pageInfo->annotations) {
+            if (annot && annot->pdfannot) {
+                // Check if it's a TumatraPDF flashcard annotation (author starts with
+                // "TumatraPDF-Flashcard") or other engine annotation we create.
+                // For safety, reject if any annotation exists on the page.
+                // (Could refine to only reject flashcard annots, but keep simple R2.)
+                return false;
+            }
+        }
+        for (Annotation* widget : pageInfo->widgets) {
+            if (widget && widget->pdfannot) {
+                return false;
+            }
+        }
+    }
+
+    // Find existing entry for this page or add new one
+    for (PageGeomEdit& e : pendingGeomEdits) {
+        if (e.pageNo == pageNo) {
+            e.angleDeg = angleDeg;
+            e.cropRectPage = cropRectPage;
+            modifiedPageGeometry = true;
+            return true;
+        }
+    }
+    PageGeomEdit e{};
+    e.pageNo = pageNo;
+    e.angleDeg = angleDeg;
+    e.cropRectPage = cropRectPage;
+    pendingGeomEdits.Append(e);
+    modifiedPageGeometry = true;
     return true;
 }
 
@@ -6660,13 +6798,752 @@ Str EngineMupdfGetPassword(EngineBase* engine) {
     return epdf->pdfPassword;
 }
 
+// Apply pending page geometry edits (rotation + crop) to the PDF document.
+// Called from EngineMupdfSaveUpdated before pdf_save_document.
+// For each edit:
+//   - If angleDeg is a multiple of 90: use /Rotate + CropBox transform (R2 path).
+//   - Else (arbitrary angle): create a Form XObject with the page content rotated
+//     by the arbitrary angle, replace page contents with a Do of that XObject,
+//     and set MediaBox/CropBox to the rotated bbox. /Rotate is left unchanged.
+static void ApplyPendingGeometryEdits(EngineMupdf* epdf) {
+    if (!epdf || !epdf->pdfdoc || len(epdf->pendingGeomEdits) == 0) {
+        return;
+    }
+    fz_context* ctx = epdf->Ctx();
+    ScopedRecursiveMutex scope(&epdf->docLock);
+    fz_try(ctx) {
+        for (EngineMupdf::PageGeomEdit& edit : epdf->pendingGeomEdits) {
+            if (edit.pageNo < 1 || edit.pageNo > epdf->pageCount) {
+                continue;
+            }
+            FzPageInfo* pageInfo = epdf->pages[edit.pageNo - 1];
+            if (!pageInfo) {
+                continue;
+            }
+            // Load the page on demand — it may never have been rendered yet
+            // (headless/fresh engine, e.g. TestGeomSave). Without this the
+            // edit was silently dropped and the file was saved unchanged.
+            if (!pageInfo->page) {
+                fz_try(ctx) {
+                    pageInfo->page = fz_load_page(ctx, epdf->_doc, edit.pageNo - 1);
+                }
+                fz_catch(ctx) {
+                    fz_report_error(ctx);
+                }
+            }
+            if (!pageInfo->page) {
+                continue;
+            }
+            pdf_page* pdfpage = pdf_page_from_fz_page(ctx, pageInfo->page);
+            if (!pdfpage) {
+                continue;
+            }
+            pdf_obj* pageObj = pdfpage->obj;
+            if (!pageObj) {
+                continue;
+            }
+
+            // Get current rotation from /Rotate key (default 0)
+            int currentRotate = 0;
+            pdf_obj* rotateObj = pdf_dict_gets(ctx, pageObj, "Rotate");
+            if (rotateObj && pdf_is_int(ctx, rotateObj)) {
+                currentRotate = pdf_to_int(ctx, rotateObj);
+            }
+
+            float angleDeg = edit.angleDeg;
+
+            // Check if angle is effectively a multiple of 90 degrees (R2 path)
+            float rem = fmodf(fabsf(angleDeg), 90.0f);
+            bool is90Multiple = (rem < 0.01f || rem > 89.99f);
+
+            if (is90Multiple) {
+                // R2 path: round to nearest 90 and use /Rotate + CropBox transform
+                int rotateDelta = (int)lroundf(angleDeg / 90.0f) * 90;
+                int newRotate = (currentRotate + rotateDelta) % 360;
+                if (newRotate < 0) newRotate += 360;
+                pdf_dict_put_int(ctx, pageObj, PDF_NAME(Rotate), newRotate);
+
+                // Set CropBox to the cropRectPage (in original page coords).
+                // Note: pdf_set_page_box expects coordinates in the page's coordinate space.
+                // If we just changed /Rotate, the page's coordinate space is rotated.
+                // The cropRectPage from FinalizeAlign is in the ORIGINAL page coords (before rotation).
+                // We need to transform it to the rotated page's coordinate space.
+                // For 90-degree multiples: swap W/H and adjust origin.
+                fz_rect cropBox = ToFzRect(edit.cropRectPage);
+                if (rotateDelta == 90 || rotateDelta == -270) {
+                    // 90 deg CCW: (x,y) -> (-y, x) relative to center
+                    fz_rect mb = pdf_bound_page(ctx, pdfpage, FZ_MEDIA_BOX);
+                    float cx = (mb.x0 + mb.x1) / 2;
+                    float cy = (mb.y0 + mb.y1) / 2;
+                    float x = cropBox.x0 - cx;
+                    float y = cropBox.y0 - cy;
+                    float w = cropBox.x1 - cropBox.x0;
+                    float h = cropBox.y1 - cropBox.y0;
+                    cropBox.x0 = cx - y - h;
+                    cropBox.y0 = cy + x;
+                    cropBox.x1 = cropBox.x0 + h;
+                    cropBox.y1 = cropBox.y0 + w;
+                } else if (rotateDelta == 180 || rotateDelta == -180) {
+                    // 180 deg: (x,y) -> (-x, -y) relative to center
+                    fz_rect mb = pdf_bound_page(ctx, pdfpage, FZ_MEDIA_BOX);
+                    float cx = (mb.x0 + mb.x1) / 2;
+                    float cy = (mb.y0 + mb.y1) / 2;
+                    float x = cropBox.x0 - cx;
+                    float y = cropBox.y0 - cy;
+                    float w = cropBox.x1 - cropBox.x0;
+                    float h = cropBox.y1 - cropBox.y0;
+                    cropBox.x0 = cx - x - w;
+                    cropBox.y0 = cy - y - h;
+                    cropBox.x1 = cropBox.x0 + w;
+                    cropBox.y1 = cropBox.y0 + h;
+                } else if (rotateDelta == 270 || rotateDelta == -90) {
+                    // 270 deg CCW (90 CW): (x,y) -> (y, -x) relative to center
+                    fz_rect mb = pdf_bound_page(ctx, pdfpage, FZ_MEDIA_BOX);
+                    float cx = (mb.x0 + mb.x1) / 2;
+                    float cy = (mb.y0 + mb.y1) / 2;
+                    float x = cropBox.x0 - cx;
+                    float y = cropBox.y0 - cy;
+                    float w = cropBox.x1 - cropBox.x0;
+                    float h = cropBox.y1 - cropBox.y0;
+                    cropBox.x0 = cx + y;
+                    cropBox.y0 = cy - x - w;
+                    cropBox.x1 = cropBox.x0 + h;
+                    cropBox.y1 = cropBox.y0 + w;
+                }
+                // For rotateDelta == 0, cropBox stays as-is (original coords)
+
+                pdf_set_page_box(ctx, pdfpage, FZ_CROP_BOX, cropBox);
+            } else {
+                // R3 path: arbitrary angle deskew via Form XObject
+                // Keep /Rotate unchanged (factor existing /Rotate into page transform if needed)
+                // For simplicity, assume currentRotate == 0 here; if not, the content
+                // stream transform would need to account for it. This is a known limitation.
+
+                // Read the page boxes (PDF user space, y-up). The R3 transform is
+                // generated entirely in PDF user space — mixing in fitz (y-down)
+                // coordinates corrupts both the matrix translation and the inner cm.
+                pdf_obj* boxObj = pdf_dict_get_inheritable(ctx, pageObj, PDF_NAME(CropBox));
+                if (!boxObj || !pdf_is_array(ctx, boxObj)) {
+                    boxObj = pdf_dict_get_inheritable(ctx, pageObj, PDF_NAME(MediaBox));
+                }
+                fz_rect cbPdf = boxObj ? pdf_to_rect(ctx, boxObj) : fz_make_rect(0, 0, 612, 792);
+                float cbX0 = fz_min(cbPdf.x0, cbPdf.x1);
+                float cbY1 = fz_max(cbPdf.y0, cbPdf.y1);
+
+                // Crop rect in original page coordinates (fitz page space, y-down)
+                fz_rect cropRect = ToFzRect(edit.cropRectPage);
+                float cropX0 = cropRect.x0;
+                float cropY0 = cropRect.y0;
+                float cropW = cropRect.x1 - cropRect.x0;
+                float cropH = cropRect.y1 - cropRect.y0;
+                float cropY1 = cropRect.y1;
+
+                // Crop rect in PDF user space (y-up, cropbox-anchored)
+                float x0_pdf = cbX0 + cropX0;
+                float y0_pdf = cbY1 - cropY1;
+                float Cx_pdf = cbX0 + (cropX0 + cropRect.x1) / 2;
+                float Cy_pdf = cbY1 - (cropY0 + cropY1) / 2;
+
+                // Compute rotated bbox of the crop rect
+                float cx = cropX0 + cropW / 2;
+                float cy = cropY0 + cropH / 2;
+                float rad = angleDeg * (float)M_PI / 180.0f;
+                float cosA = cosf(rad);
+                float sinA = sinf(rad);
+
+                // Transform 4 corners of cropRect by rotation around center
+                auto rotPt = [&](float x, float y) -> fz_point {
+                    float dx = x - cx;
+                    float dy = y - cy;
+                    return fz_make_point(cx + cosA * dx - sinA * dy, cy + sinA * dx + cosA * dy);
+                };
+                fz_point c0 = rotPt(cropX0, cropY0);
+                fz_point c1 = rotPt(cropX0 + cropW, cropY0);
+                fz_point c2 = rotPt(cropX0 + cropW, cropY0 + cropH);
+                fz_point c3 = rotPt(cropX0, cropY0 + cropH);
+
+                // Find axis-aligned bbox of rotated corners
+                float rx0 = fz_min(fz_min(c0.x, c1.x), fz_min(c2.x, c3.x));
+                float ry0 = fz_min(fz_min(c0.y, c1.y), fz_min(c2.y, c3.y));
+                float rx1 = fz_max(fz_max(c0.x, c1.x), fz_max(c2.x, c3.x));
+                float ry1 = fz_max(fz_max(c0.y, c1.y), fz_max(c2.y, c3.y));
+                fz_rect rotatedBBox = fz_make_rect(rx0, ry0, rx1, ry1);
+
+                // All geometry above is normalized to a ZERO-ORIGIN box: the view/layout/tile
+                // math (FzCreateViewCtm ignores origin) assumes origin (0,0); a non-origin
+                // box renders blank. Store MediaBox/CropBox as [0 0 W H] raw PDF user space.
+                fz_rect zeroOriginBox =
+                    fz_make_rect(0, 0, rotatedBBox.x1 - rotatedBBox.x0, rotatedBBox.y1 - rotatedBBox.y0);
+
+                // Build XObject content stream:
+                // q <translate -cropX0, -cropY0> cm <original_contents> Q
+                // This shifts the crop rect to origin in XObject space [0, cropW] x [0, cropH]
+                str::Builder xobjContent;
+                xobjContent.Append("q\n");
+                // Inner cm: six operands (the old 2-operand "%g %g cm" is a PDF
+                // syntax error that drops the whole XObject stream → blank page).
+                // Translation in PDF user space (y-up): crop lower-left to origin.
+                xobjContent.Append(fmt("1 0 0 1 %g %g cm\n", -x0_pdf, -y0_pdf));
+
+                // Get original page contents
+                pdf_obj* origContents = pdf_page_contents(ctx, pdfpage);
+                if (origContents) {
+                    pdf_keep_obj(ctx, origContents);
+                    // Read the page content stream(s). /Contents may be an array of
+                    // streams — pdf_load_stream throws "object is not a stream" on it.
+                    fz_buffer* buf = nullptr;
+                    fz_stream* cstm = pdf_open_contents_stream(ctx, epdf->pdfdoc, origContents);
+                    if (cstm) {
+                        buf = fz_read_all(ctx, cstm, 1024);
+                        fz_drop_stream(ctx, cstm);
+                    }
+                    if (buf) {
+                        // Append the original content stream
+                        unsigned char* data = nullptr;
+                        size_t len = fz_buffer_storage(ctx, buf, &data);
+                        if (data && len > 0) {
+                            xobjContent.Append(Str((const char*)data, (int)len));
+                        }
+                        fz_drop_buffer(ctx, buf);
+                    }
+                    pdf_drop_obj(ctx, origContents);
+                }
+
+                xobjContent.Append("\nQ\n");
+
+                // Create XObject content buffer
+                Str xobjStr = xobjContent.TakeStr();
+                fz_buffer* xobjBuf = fz_new_buffer_from_copied_data(ctx, (const unsigned char*)xobjStr.s, xobjStr.len);
+
+                // XObject /BBox = [0, 0, cropW, cropH] (XObject space = crop rect at origin)
+                fz_rect xobjBBox = fz_make_rect(0, 0, cropW, cropH);
+
+                // XObject /Matrix maps XObject space -> parent page space (PDF user space).
+                // M(q) = R(q) + t where q = p_pdf - crop_origin_pdf, R is the rotation
+                // (a b c d = [cosA sinA -sinA cosA]). To land the rotated crop rect
+                // centered in the new zero-origin box [0 0 W H]:
+                //   t = (W/2, H/2) + R(crop_origin_pdf - C_pdf)
+                fz_matrix matrix;
+                matrix.a = cosA;
+                matrix.b = sinA;
+                matrix.c = -sinA;
+                matrix.d = cosA;
+                float dpx = x0_pdf - Cx_pdf;
+                float dpy = y0_pdf - Cy_pdf;
+                matrix.e = zeroOriginBox.x1 / 2 + cosA * dpx - sinA * dpy;
+                matrix.f = zeroOriginBox.y1 / 2 + sinA * dpx + cosA * dpy;
+
+                // XObject resources = page's resources (borrowed reference)
+                pdf_obj* pageRes = pdf_page_resources(ctx, pdfpage);
+                if (pageRes) {
+                    pdf_keep_obj(ctx, pageRes);
+                }
+
+                // Create Form XObject
+                pdf_obj* xobj = pdf_new_xobject(ctx, epdf->pdfdoc, xobjBBox, matrix, pageRes, xobjBuf);
+                fz_drop_buffer(ctx, xobjBuf);
+                if (pageRes) {
+                    pdf_drop_obj(ctx, pageRes);
+                }
+                if (!xobj) {
+                    continue;
+                }
+
+                // Create new page contents stream: q /XObjName Do Q
+                // Generate unique XObject name
+                static int xobjCounter = 0;
+                char xobjName[32];
+                snprintf(xobjName, sizeof(xobjName), "Fm%d", xobjCounter++);
+
+                str::Builder pageContent;
+                pageContent.Append("q\n");
+                pageContent.Append(fmt("/%s Do\n", Str(xobjName)));
+                pageContent.Append("Q\n");
+
+                Str pageContentStr = pageContent.TakeStr();
+                fz_buffer* pageContentBuf =
+                    fz_new_buffer_from_copied_data(ctx, (const unsigned char*)pageContentStr.s, pageContentStr.len);
+
+                // Create new page contents object
+                pdf_obj* newContents = pdf_add_object_drop(ctx, epdf->pdfdoc, pdf_new_dict(ctx, epdf->pdfdoc, 1));
+                pdf_update_stream(ctx, epdf->pdfdoc, newContents, pageContentBuf, 0);
+                fz_drop_buffer(ctx, pageContentBuf);
+
+                // Create new page resources: merge old resources with new XObject
+                pdf_obj* newRes = pdf_new_dict(ctx, epdf->pdfdoc, 2);
+                // Copy all entries from old resources
+                if (pageRes) {
+                    // pageRes was dropped above, need to get it again
+                    pageRes = pdf_page_resources(ctx, pdfpage);
+                    if (pageRes) pdf_keep_obj(ctx, pageRes);
+                }
+                if (pageRes) {
+                    int n = pdf_dict_len(ctx, pageRes);
+                    for (int i = 0; i < n; i++) {
+                        pdf_obj* key = pdf_dict_get_key(ctx, pageRes, i);
+                        pdf_obj* val = pdf_dict_get_val(ctx, pageRes, i);
+                        pdf_keep_obj(ctx, key);
+                        pdf_keep_obj(ctx, val);
+                        pdf_dict_put(ctx, newRes, key, val);
+                        pdf_drop_obj(ctx, key);
+                        pdf_drop_obj(ctx, val);
+                    }
+                    pdf_drop_obj(ctx, pageRes);
+                }
+                // Add /XObject sub-dict with our Form XObject
+                pdf_obj* xobjDict = pdf_new_dict(ctx, epdf->pdfdoc, 1);
+                pdf_obj* nameObj = pdf_new_name(ctx, xobjName);
+                pdf_keep_obj(ctx, xobj);
+                pdf_dict_put(ctx, xobjDict, nameObj, xobj);
+                pdf_drop_obj(ctx, nameObj);
+                pdf_drop_obj(ctx, xobj); // xobjDict now owns it
+                pdf_obj* xobjKey = pdf_new_name(ctx, "XObject");
+                pdf_dict_put(ctx, newRes, xobjKey, xobjDict);
+                pdf_drop_obj(ctx, xobjKey);
+                pdf_drop_obj(ctx, xobjDict);
+
+                // Replace page /Contents and /Resources
+                pdf_dict_put_drop(ctx, pageObj, PDF_NAME(Contents), newContents);
+                pdf_dict_put_drop(ctx, pageObj, PDF_NAME(Resources), newRes);
+
+                // Write MediaBox/CropBox directly as raw PDF user space [0 0 W H].
+                // pdf_set_page_box would route through the page CTM (fitz y-down)
+                // and the two calls diverge (the CropBox call sees the just-written
+                // MediaBox). Raw dict writes are deterministic and identical.
+                pdf_dict_put_rect(ctx, pageObj, PDF_NAME(MediaBox), zeroOriginBox);
+                pdf_dict_put_rect(ctx, pageObj, PDF_NAME(CropBox), zeroOriginBox);
+
+                // Note: /Rotate is left unchanged (stays at currentRotate)
+            }
+        }
+    }
+    fz_catch(ctx) {
+        fz_report_error(ctx);
+    }
+}
+
+// Apply pending page geometry edits immediately (for instant visual deskew).
+// This applies the same transforms as ApplyPendingGeometryEdits but does NOT
+// clear pendingGeomEdits or modifiedPageGeometry — those remain as the dirty
+// flag for the save path. Sets appliedInMemory=true so save skips re-applying.
+// Two-pass: (1) apply edits to PDF under docLock; (2) invalidate caches under
+// pagesLock+renderLock (correct lock order) to update mediabox, drop page and
+// displayList so next render picks up new geometry.
+bool EngineMupdf::ApplyPendingGeometryEditsNow() {
+    if (!pdfdoc || len(pendingGeomEdits) == 0) {
+        return false;
+    }
+    fz_context* ctx = Ctx();
+    bool ok = false;
+
+    // Pass 1: apply edits to PDF (needs docLock)
+    {
+        ScopedRecursiveMutex scope(&docLock);
+        fz_try(ctx) {
+            for (PageGeomEdit& edit : pendingGeomEdits) {
+                if (edit.pageNo < 1 || edit.pageNo > pageCount) {
+                    continue;
+                }
+                FzPageInfo* pageInfo = pages[edit.pageNo - 1];
+                if (!pageInfo) {
+                    continue;
+                }
+                // Load the page on demand — it may not have been rendered yet.
+                // Without this the edit was silently dropped.
+                if (!pageInfo->page) {
+                    fz_try(ctx) {
+                        pageInfo->page = fz_load_page(ctx, _doc, edit.pageNo - 1);
+                    }
+                    fz_catch(ctx) {
+                        fz_report_error(ctx);
+                    }
+                }
+                if (!pageInfo->page) {
+                    continue;
+                }
+                pdf_page* pdfpage = pdf_page_from_fz_page(ctx, pageInfo->page);
+                if (!pdfpage) {
+                    continue;
+                }
+                pdf_obj* pageObj = pdfpage->obj;
+                if (!pageObj) {
+                    continue;
+                }
+
+                // Capture pristine state at FIRST apply for this page (s64: RestorePageGeometry).
+                // We capture before any modifications so we can revert to original geometry.
+                PagePristineState* pristine = nullptr;
+                for (PagePristineState& ps : pristinePageStates) {
+                    if (ps.pageNo == edit.pageNo) {
+                        pristine = &ps;
+                        break;
+                    }
+                }
+                if (!pristine) {
+                    PagePristineState ps;
+                    ps.pageNo = edit.pageNo;
+                    // Keep references to original objects
+                    ps.pageDict = pageObj;
+                    pdf_keep_obj(ctx, ps.pageDict);
+                    ps.contents = pdf_page_contents(ctx, pdfpage);
+                    if (ps.contents) pdf_keep_obj(ctx, ps.contents);
+                    ps.resources = pdf_page_resources(ctx, pdfpage);
+                    if (ps.resources) pdf_keep_obj(ctx, ps.resources);
+                    ps.mediaBox = pdf_bound_page(ctx, pdfpage, FZ_MEDIA_BOX);
+                    ps.cropBox = pdf_bound_page(ctx, pdfpage, FZ_CROP_BOX);
+                    pdf_obj* rotateObj = pdf_dict_gets(ctx, pageObj, "Rotate");
+                    if (rotateObj && pdf_is_int(ctx, rotateObj)) {
+                        ps.rotate = pdf_to_int(ctx, rotateObj);
+                    } else {
+                        ps.rotate = 0;
+                    }
+                    ps.hasState = true;
+                    pristinePageStates.Append(ps);
+                    pristine = &pristinePageStates[len(pristinePageStates) - 1];
+                }
+
+                // Get current rotation from /Rotate key (default 0)
+                int currentRotate = 0;
+                pdf_obj* rotateObj = pdf_dict_gets(ctx, pageObj, "Rotate");
+                if (rotateObj && pdf_is_int(ctx, rotateObj)) {
+                    currentRotate = pdf_to_int(ctx, rotateObj);
+                }
+
+                float angleDeg = edit.angleDeg;
+
+                // Check if angle is effectively a multiple of 90 degrees (R2 path)
+                float rem = fmodf(fabsf(angleDeg), 90.0f);
+                bool is90Multiple = (rem < 0.01f || rem > 89.99f);
+
+                if (is90Multiple) {
+                    // R2 path: round to nearest 90 and use /Rotate + CropBox transform
+                    int rotateDelta = (int)lroundf(angleDeg / 90.0f) * 90;
+                    int newRotate = (currentRotate + rotateDelta) % 360;
+                    if (newRotate < 0) newRotate += 360;
+                    pdf_dict_put_int(ctx, pageObj, PDF_NAME(Rotate), newRotate);
+
+                    // Set CropBox to the cropRectPage (in original page coords).
+                    // Note: pdf_set_page_box expects coordinates in the page's coordinate space.
+                    // If we just changed /Rotate, the page's coordinate space is rotated.
+                    // The cropRectPage from FinalizeAlign is in the ORIGINAL page coords (before rotation).
+                    // We need to transform it to the rotated page's coordinate space.
+                    // For 90-degree multiples: swap W/H and adjust origin.
+                    fz_rect cropBox = ToFzRect(edit.cropRectPage);
+                    if (rotateDelta == 90 || rotateDelta == -270) {
+                        // 90 deg CCW: (x,y) -> (-y, x) relative to center
+                        fz_rect mb = pdf_bound_page(ctx, pdfpage, FZ_MEDIA_BOX);
+                        float cx = (mb.x0 + mb.x1) / 2;
+                        float cy = (mb.y0 + mb.y1) / 2;
+                        float x = cropBox.x0 - cx;
+                        float y = cropBox.y0 - cy;
+                        float w = cropBox.x1 - cropBox.x0;
+                        float h = cropBox.y1 - cropBox.y0;
+                        cropBox.x0 = cx - y - h;
+                        cropBox.y0 = cy + x;
+                        cropBox.x1 = cropBox.x0 + h;
+                        cropBox.y1 = cropBox.y0 + w;
+                    } else if (rotateDelta == 180 || rotateDelta == -180) {
+                        // 180 deg: (x,y) -> (-x, -y) relative to center
+                        fz_rect mb = pdf_bound_page(ctx, pdfpage, FZ_MEDIA_BOX);
+                        float cx = (mb.x0 + mb.x1) / 2;
+                        float cy = (mb.y0 + mb.y1) / 2;
+                        float x = cropBox.x0 - cx;
+                        float y = cropBox.y0 - cy;
+                        float w = cropBox.x1 - cropBox.x0;
+                        float h = cropBox.y1 - cropBox.y0;
+                        cropBox.x0 = cx - x - w;
+                        cropBox.y0 = cy - y - h;
+                        cropBox.x1 = cropBox.x0 + w;
+                        cropBox.y1 = cropBox.y0 + h;
+                    } else if (rotateDelta == 270 || rotateDelta == -90) {
+                        // 270 deg CCW (90 CW): (x,y) -> (y, -x) relative to center
+                        fz_rect mb = pdf_bound_page(ctx, pdfpage, FZ_MEDIA_BOX);
+                        float cx = (mb.x0 + mb.x1) / 2;
+                        float cy = (mb.y0 + mb.y1) / 2;
+                        float x = cropBox.x0 - cx;
+                        float y = cropBox.y0 - cy;
+                        float w = cropBox.x1 - cropBox.x0;
+                        float h = cropBox.y1 - cropBox.y0;
+                        cropBox.x0 = cx + y;
+                        cropBox.y0 = cy - x - w;
+                        cropBox.x1 = cropBox.x0 + h;
+                        cropBox.y1 = cropBox.y0 + w;
+                    }
+                    // For rotateDelta == 0, cropBox stays as-is (original coords)
+
+                    pdf_set_page_box(ctx, pdfpage, FZ_CROP_BOX, cropBox);
+                    // R2: mediabox unchanged, mark as empty
+                    edit.newMediabox = RectF();
+                } else {
+                    // R3 path: arbitrary angle deskew via Form XObject
+                    // Keep /Rotate unchanged (factor existing /Rotate into page transform if needed)
+                    // For simplicity, assume currentRotate == 0 here; if not, the content
+                    // stream transform would need to account for it. This is a known limitation.
+
+                    // Read the page boxes (PDF user space, y-up). The R3 transform is
+                    // generated entirely in PDF user space — mixing in fitz (y-down)
+                    // coordinates corrupts both the matrix translation and the inner cm.
+                    pdf_obj* boxObj = pdf_dict_get_inheritable(ctx, pageObj, PDF_NAME(CropBox));
+                    if (!boxObj || !pdf_is_array(ctx, boxObj)) {
+                        boxObj = pdf_dict_get_inheritable(ctx, pageObj, PDF_NAME(MediaBox));
+                    }
+                    fz_rect cbPdf = boxObj ? pdf_to_rect(ctx, boxObj) : fz_make_rect(0, 0, 612, 792);
+                    float cbX0 = fz_min(cbPdf.x0, cbPdf.x1);
+                    float cbY1 = fz_max(cbPdf.y0, cbPdf.y1);
+
+                    // Crop rect in original page coordinates (fitz page space, y-down)
+                    fz_rect cropRect = ToFzRect(edit.cropRectPage);
+                    float cropX0 = cropRect.x0;
+                    float cropY0 = cropRect.y0;
+                    float cropW = cropRect.x1 - cropRect.x0;
+                    float cropH = cropRect.y1 - cropRect.y0;
+                    float cropY1 = cropRect.y1;
+
+                    // Crop rect in PDF user space (y-up, cropbox-anchored)
+                    float x0_pdf = cbX0 + cropX0;
+                    float y0_pdf = cbY1 - cropY1;
+                    float Cx_pdf = cbX0 + (cropX0 + cropRect.x1) / 2;
+                    float Cy_pdf = cbY1 - (cropY0 + cropY1) / 2;
+
+                    // Compute rotated bbox of the crop rect
+                    float cx = cropX0 + cropW / 2;
+                    float cy = cropY0 + cropH / 2;
+                    float rad = angleDeg * (float)M_PI / 180.0f;
+                    float cosA = cosf(rad);
+                    float sinA = sinf(rad);
+
+                    // Transform 4 corners of cropRect by rotation around center
+                    auto rotPt = [&](float x, float y) -> fz_point {
+                        float dx = x - cx;
+                        float dy = y - cy;
+                        return fz_make_point(cx + cosA * dx - sinA * dy, cy + sinA * dx + cosA * dy);
+                    };
+                    fz_point c0 = rotPt(cropX0, cropY0);
+                    fz_point c1 = rotPt(cropX0 + cropW, cropY0);
+                    fz_point c2 = rotPt(cropX0 + cropW, cropY0 + cropH);
+                    fz_point c3 = rotPt(cropX0, cropY0 + cropH);
+
+                    // Find axis-aligned bbox of rotated corners
+                    float rx0 = fz_min(fz_min(c0.x, c1.x), fz_min(c2.x, c3.x));
+                    float ry0 = fz_min(fz_min(c0.y, c1.y), fz_min(c2.y, c3.y));
+                    float rx1 = fz_max(fz_max(c0.x, c1.x), fz_max(c2.x, c3.x));
+                    float ry1 = fz_max(fz_max(c0.y, c1.y), fz_max(c2.y, c3.y));
+                    fz_rect rotatedBBox = fz_make_rect(rx0, ry0, rx1, ry1);
+
+                    // All geometry above is normalized to a ZERO-ORIGIN box: the view/layout/tile
+                    // math (FzCreateViewCtm ignores origin) assumes origin (0,0); a
+                    // non-origin box renders blank. Store MediaBox/CropBox as [0 0 W H] raw PDF user space.
+                    fz_rect zeroOriginBox =
+                        fz_make_rect(0, 0, rotatedBBox.x1 - rotatedBBox.x0, rotatedBBox.y1 - rotatedBBox.y0);
+
+                    // Build XObject content stream:
+                    // q <translate -cropX0, -cropY0> cm <original_contents> Q
+                    // This shifts the crop rect to origin in XObject space [0, cropW] x [0, cropH]
+                    str::Builder xobjContent;
+                    xobjContent.Append("q\n");
+                    // Inner cm: six operands (the old 2-operand "%g %g cm" is a PDF
+                    // syntax error that drops the whole XObject stream → blank page).
+                    // Translation in PDF user space (y-up): crop lower-left to origin.
+                    xobjContent.Append(fmt("1 0 0 1 %g %g cm\n", -x0_pdf, -y0_pdf));
+
+                    // Get original page contents
+                    pdf_obj* origContents = pdf_page_contents(ctx, pdfpage);
+                    if (origContents) {
+                        pdf_keep_obj(ctx, origContents);
+                        // Read the page content stream(s). /Contents may be an array of
+                        // streams — pdf_load_stream throws "object is not a stream" on it.
+                        fz_buffer* buf = nullptr;
+                        fz_stream* cstm = pdf_open_contents_stream(ctx, pdfdoc, origContents);
+                        if (cstm) {
+                            buf = fz_read_all(ctx, cstm, 1024);
+                            fz_drop_stream(ctx, cstm);
+                        }
+                        if (buf) {
+                            // Append the original content stream
+                            unsigned char* data = nullptr;
+                            size_t len = fz_buffer_storage(ctx, buf, &data);
+                            if (data && len > 0) {
+                                xobjContent.Append(Str((const char*)data, (int)len));
+                            }
+                            fz_drop_buffer(ctx, buf);
+                        }
+                        pdf_drop_obj(ctx, origContents);
+                    }
+
+                    xobjContent.Append("\nQ\n");
+
+                    // Create XObject content buffer
+                    Str xobjStr = xobjContent.TakeStr();
+                    fz_buffer* xobjBuf =
+                        fz_new_buffer_from_copied_data(ctx, (const unsigned char*)xobjStr.s, xobjStr.len);
+
+                    // XObject /BBox = [0, 0, cropW, cropH] (XObject space = crop rect at origin)
+                    fz_rect xobjBBox = fz_make_rect(0, 0, cropW, cropH);
+
+                    // XObject /Matrix maps XObject space -> parent page space (PDF user space).
+                    // M(q) = R(q) + t where q = p_pdf - crop_origin_pdf, R is the rotation
+                    // (a b c d = [cosA sinA -sinA cosA]). To land the rotated crop rect
+                    // centered in the new zero-origin box [0 0 W H]:
+                    //   t = (W/2, H/2) + R(crop_origin_pdf - C_pdf)
+                    fz_matrix matrix;
+                    matrix.a = cosA;
+                    matrix.b = sinA;
+                    matrix.c = -sinA;
+                    matrix.d = cosA;
+                    float dpx = x0_pdf - Cx_pdf;
+                    float dpy = y0_pdf - Cy_pdf;
+                    matrix.e = zeroOriginBox.x1 / 2 + cosA * dpx - sinA * dpy;
+                    matrix.f = zeroOriginBox.y1 / 2 + sinA * dpx + cosA * dpy;
+
+                    // XObject resources = page's resources (borrowed reference)
+                    pdf_obj* pageRes = pdf_page_resources(ctx, pdfpage);
+                    if (pageRes) {
+                        pdf_keep_obj(ctx, pageRes);
+                    }
+
+                    // Create Form XObject
+                    pdf_obj* xobj = pdf_new_xobject(ctx, pdfdoc, xobjBBox, matrix, pageRes, xobjBuf);
+                    fz_drop_buffer(ctx, xobjBuf);
+                    if (pageRes) {
+                        pdf_drop_obj(ctx, pageRes);
+                    }
+                    if (!xobj) {
+                        continue;
+                    }
+
+                    // Create new page contents stream: q /XObjName Do Q
+                    // Generate unique XObject name
+                    static int xobjCounter = 0;
+                    char xobjName[32];
+                    snprintf(xobjName, sizeof(xobjName), "Fm%d", xobjCounter++);
+
+                    str::Builder pageContent;
+                    pageContent.Append("q\n");
+                    pageContent.Append(fmt("/%s Do\n", Str(xobjName)));
+                    pageContent.Append("Q\n");
+
+                    Str pageContentStr = pageContent.TakeStr();
+                    fz_buffer* pageContentBuf =
+                        fz_new_buffer_from_copied_data(ctx, (const unsigned char*)pageContentStr.s, pageContentStr.len);
+
+                    // Create new page contents object
+                    pdf_obj* newContents = pdf_add_object_drop(ctx, pdfdoc, pdf_new_dict(ctx, pdfdoc, 1));
+                    pdf_update_stream(ctx, pdfdoc, newContents, pageContentBuf, 0);
+                    fz_drop_buffer(ctx, pageContentBuf);
+
+                    // Create new page resources: merge old resources with new XObject
+                    pdf_obj* newRes = pdf_new_dict(ctx, pdfdoc, 2);
+                    // Copy all entries from old resources
+                    if (pageRes) {
+                        // pageRes was dropped above, need to get it again
+                        pageRes = pdf_page_resources(ctx, pdfpage);
+                        if (pageRes) pdf_keep_obj(ctx, pageRes);
+                    }
+                    if (pageRes) {
+                        int n = pdf_dict_len(ctx, pageRes);
+                        for (int i = 0; i < n; i++) {
+                            pdf_obj* key = pdf_dict_get_key(ctx, pageRes, i);
+                            pdf_obj* val = pdf_dict_get_val(ctx, pageRes, i);
+                            pdf_keep_obj(ctx, key);
+                            pdf_keep_obj(ctx, val);
+                            pdf_dict_put(ctx, newRes, key, val);
+                            pdf_drop_obj(ctx, key);
+                            pdf_drop_obj(ctx, val);
+                        }
+                        pdf_drop_obj(ctx, pageRes);
+                    }
+                    // Add /XObject sub-dict with our Form XObject
+                    pdf_obj* xobjDict = pdf_new_dict(ctx, pdfdoc, 1);
+                    pdf_obj* nameObj = pdf_new_name(ctx, xobjName);
+                    pdf_keep_obj(ctx, xobj);
+                    pdf_dict_put(ctx, xobjDict, nameObj, xobj);
+                    pdf_drop_obj(ctx, nameObj);
+                    pdf_drop_obj(ctx, xobj); // xobjDict now owns it
+                    pdf_obj* xobjKey = pdf_new_name(ctx, "XObject");
+                    pdf_dict_put(ctx, newRes, xobjKey, xobjDict);
+                    pdf_drop_obj(ctx, xobjKey);
+                    pdf_drop_obj(ctx, xobjDict);
+
+                    // Replace page /Contents and /Resources
+                    pdf_dict_put_drop(ctx, pageObj, PDF_NAME(Contents), newContents);
+                    pdf_dict_put_drop(ctx, pageObj, PDF_NAME(Resources), newRes);
+
+                    // Write MediaBox/CropBox directly as raw PDF user space [0 0 W H].
+                    // Raw dict writes are deterministic and identical; pdf_set_page_box
+                    // would route through the page CTM and diverge between the two calls.
+                    pdf_dict_put_rect(ctx, pageObj, PDF_NAME(MediaBox), zeroOriginBox);
+                    pdf_dict_put_rect(ctx, pageObj, PDF_NAME(CropBox), zeroOriginBox);
+
+                    // Note: /Rotate is left unchanged (stays at currentRotate)
+                    // Store new mediabox for cache update in pass 2
+                    edit.newMediabox = ToRectF(zeroOriginBox);
+                }
+            }
+            ok = true;
+        }
+        fz_catch(ctx) {
+            fz_report_error(ctx);
+            ok = false;
+        }
+    }
+
+    if (!ok) {
+        return false;
+    }
+
+    // Pass 2: invalidate caches (needs pagesLock + renderLock, correct order)
+    {
+        ScopedRecursiveMutex ps(&pagesLock);
+        ScopedMutex rl(&renderLock);
+        for (PageGeomEdit& edit : pendingGeomEdits) {
+            if (edit.pageNo < 1 || edit.pageNo > pageCount) {
+                continue;
+            }
+            FzPageInfo* pageInfo = pages[edit.pageNo - 1];
+            if (!pageInfo) {
+                continue;
+            }
+            // Update mediabox cache if changed (R3 path)
+            if (!edit.newMediabox.IsEmpty()) {
+                pageInfo->mediabox = edit.newMediabox;
+            }
+            // Drop cached page so it reloads with new geometry
+            if (pageInfo->page) {
+                fz_drop_page(ctx, pageInfo->page);
+                pageInfo->page = nullptr;
+            }
+            // Drop cached display list so it rebuilds with new page
+            if (pageInfo->displayList) {
+                fz_drop_display_list(ctx, pageInfo->displayList);
+                pageInfo->displayList = nullptr;
+            }
+            // Mark elements for rebuild (annotations, links, etc.)
+            pageInfo->elementsNeedRebuilding = true;
+        }
+    }
+
+    appliedInMemory = true;
+    return true;
+}
+
+#if !defined(TUMATRA_APP)
+// Stub for PdfFilter/PdfPreview builds: they don't compile EngineMupdf_Preview.cpp
+// (gRenderCache + UI-layer deps unavailable there). Main TumatraPDF build defines
+// TUMATRA_APP and uses the full implementation in EngineMupdf_Preview.cpp instead.
+bool EngineMupdf::RestorePreviewIfNeeded(DisplayModel*) {
+    return true;
+}
+#endif
+
 // re-save current pdf document using mupdf (as opposed to just saving the data)
 // this is used after the PDF was modified by the user (e.g. by adding / changing
 // annotations).
 // if filePath is not given, we save under the same name
 // TODO: if the file is locked, this might fail.
+// dm: optional DisplayModel for preview gating (s64-R2) - if provided, reverts
+// any uncommitted preview geometry edits before saving.
 bool EngineMupdfSaveUpdated(EngineBase* engine, Str path, const ShowErrorCb& showErrorFunc, const void* saveOpts,
-                            bool forceSave) {
+                            bool forceSave, struct DisplayModel* dm) {
     ReportIf(!engine);
     if (!engine) {
         return false;
@@ -6759,6 +7636,20 @@ bool EngineMupdfSaveUpdated(EngineBase* engine, Str path, const ShowErrorCb& sho
         logf("[save] dropped %d corrupt annot(s) targeting invalid pages\n", dropped);
     }
 
+    // Preview gating (s64-R2): revert any uncommitted preview geometry edits
+    // before saving, so only promoted (committed) edits are persisted.
+    if (dm) {
+        epdf->RestorePreviewIfNeeded(dm);
+    }
+
+    // Apply pending page geometry edits (rotation + crop) before saving.
+    // This must happen before pdf_save_document so the changes are persisted.
+    // If edits were already applied in-memory (instant visual deskew), skip
+    // re-applying to avoid double-transform.
+    if (len(epdf->pendingGeomEdits) > 0 && !epdf->appliedInMemory) {
+        ApplyPendingGeometryEdits(epdf);
+    }
+
     bool ok = false;
     fz_var(ok);
     fz_try(ctx) {
@@ -6786,6 +7677,12 @@ bool EngineMupdfSaveUpdated(EngineBase* engine, Str path, const ShowErrorCb& sho
         epdf->modifiedAnnotations = false;
         epdf->modifiedOutline = false;
         epdf->outlineEdits.Reset();
+        epdf->appliedInMemory = false;
+        epdf->modifiedPageGeometry = false;
+        for (EngineMupdf::PageGeomEdit& e : epdf->pendingGeomEdits) {
+            // free any duplicated strings if needed (currently no Str members)
+        }
+        epdf->pendingGeomEdits.Reset();
     }
     return ok;
 }
@@ -6994,7 +7891,7 @@ bool EngineMupdfHasUnsavedAnnotations(EngineBase* engine) {
     if (!epdf || !epdf->pdfdoc) {
         return false;
     }
-    return epdf->modifiedAnnotations;
+    return epdf->modifiedAnnotations || epdf->modifiedPageGeometry || epdf->modifiedOutline;
 }
 
 bool EngineMupdfSupportsAnnotations(EngineBase* engine) {

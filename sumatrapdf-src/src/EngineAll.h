@@ -70,7 +70,8 @@ bool EngineMupdfSupportsAnnotations(EngineBase*);
 bool EngineMupdfIsEncrypted(EngineBase* engine);
 Str EngineMupdfGetPassword(EngineBase* engine);
 bool EngineMupdfSaveUpdated(EngineBase* engine, Str path, const ShowErrorCb& showErrorFunc,
-                            const void* saveOpts = nullptr, bool forceSave = false);
+                            const void* saveOpts = nullptr, bool forceSave = false,
+                            struct DisplayModel* dm = nullptr);
 Annotation* EngineMupdfGetAnnotationAtPos(EngineBase*, int pageNo, PointF pos, Annotation*);
 Annotation* EngineMupdfGetWidgetAtPos(EngineBase*, int pageNo, PointF pos);
 Annotation* EngineMupdfGetAdjacentWidget(EngineBase*, Annotation* cur, bool forward);

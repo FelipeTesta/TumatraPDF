@@ -33,10 +33,22 @@
 #include "Menu.h"
 #include "Accelerators.h"
 #include "Theme.h"
+#include "Toolbar.h"
+#include "SvgIcons.h"
 #include "FilterHighlightDraw.h"
 
 static void LayoutTocContainer(MainWindow* win);
+static void TocToolbarCreate(MainWindow* win);
 static void TocAddBookmark(MainWindow* win);
+static void UnlinkTocItem(TocItem* root, TocItem* item);
+static void LinkTocItem(TocItem* root, TocItem* parent, TocItem* item, TocItem* beforeSibling);
+void ReloadTocTree(WindowTab* tab, Str selTitle = nullptr, int selPageNo = 0, TocItem* itemToFree = nullptr);
+
+// Command ids carried by the two TOC toolbar buttons. CmdBookmarkAdd is the
+// existing add-bookmark command; the reorder id is custom (no menu collision).
+static constexpr int kTocToolbarCmdAdd = CmdBookmarkAdd; // 531
+static constexpr int kTocToolbarCmdReorder = 9001;       // custom toggle
+
 static void ShowBookmarkRenameDialog(MainWindow* win, TocItem* dti);
 static LRESULT CALLBACK WndProcTocTree(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR /*subclassId*/,
                                        DWORD_PTR data);
@@ -273,6 +285,12 @@ static GoToTocLinkData* NewGoToTocLinkData(MainWindow* win, TocItem* tocItem, bo
         return nullptr;
     }
 
+    // pageNo-only entry (dest==nullptr, e.g. Add-created bookmark): still navigable
+    if (!dest && pageNo >= 1) {
+        logf("[toc] NewGoToTocLinkData pageNo-only title='%s' pageNo=%d -> data pageNo=%d dest=nullptr\n",
+             tocItem->title, pageNo, pageNo);
+    }
+
     auto* data = new GoToTocLinkData;
     data->ctrl = win->ctrl;
     data->tab = win->CurrentTab();
@@ -305,6 +323,8 @@ static void GoToTocLink(GoToTocLinkData* d) {
     // make sure that the tree item that the user selected
     // isn't unselected in UpdateTocSelection right again
     win->tocKeepSelection = true;
+    logf("[toc] GoToTocLink pageNo=%d dest=%p selectInTree=%d\n", d->pageNo, (const void*)d->dest,
+         (int)d->selectInTree);
     if (d->dest) {
         ctrl->HandleLink(d->dest, win->linkHandler);
     } else if (d->pageNo > 0) {
@@ -370,6 +390,9 @@ static void GoToTocTreeItem(MainWindow* win, TreeItem ti, bool allowExternal) {
     TocItem* tocItem = (TocItem*)ti;
     bool validPage = (tocItem->pageNo > 0);
     bool isScroll = IsScrollToLink(tocItem->GetPageDestination());
+    logf("[toc] GoToTocTreeItem item=%p title='%s' pageNo=%d dest=%p validPage=%d isScroll=%d allowExternal=%d\n",
+         (const void*)ti, tocItem->title ? tocItem->title : StrL(""), tocItem->pageNo,
+         (const void*)tocItem->GetPageDestination(), (int)validPage, (int)isScroll, (int)allowExternal);
     if (validPage || (allowExternal || isScroll)) {
         // delay changing the page until the tree messages have been handled
         auto* data = NewGoToTocLinkData(win, tocItem, false);
@@ -382,7 +405,9 @@ static void GoToTocTreeItem(MainWindow* win, TreeItem ti, bool allowExternal) {
 }
 
 void ClearTocBox(MainWindow* win) {
+    logf("[toc] ClearTocBox: ENTER tocLoaded=%d\n", (int)win->tocLoaded);
     if (!win->tocLoaded) {
+        logf("[toc] ClearTocBox: early exit - not loaded\n");
         return;
     }
 
@@ -402,6 +427,7 @@ void ClearTocBox(MainWindow* win) {
     }
 
     win->currPageNo = 0;
+    logf("[toc] ClearTocBox: EXIT\n");
 }
 
 void ToggleTocBox(MainWindow* win) {
@@ -949,6 +975,7 @@ static void TocContextMenu(ContextMenuEvent* ev) {
     if (dest) {
         pageNo = PageDestGetPageNo(dti->dest);
     }
+    logf("[toc] TocContextMenu: ENTER dti=%s pageNo=%d\n", dti ? dti->title : "(null)", pageNo);
 
     WindowTab* tab = win->CurrentTab();
     HMENU popup = BuildMenuFromDef(menuDefContextToc, CreatePopupMenu(), nullptr);
@@ -1062,24 +1089,59 @@ static void TocContextMenu(ContextMenuEvent* ev) {
             break;
         case CmdBookmarkDelete:
             if (dti) {
+                logf("[toc] CmdBookmarkDelete: ENTER title='%s' pageNo=%d\n", dti->title, dti->pageNo);
+                // Capture survivor for selection restore (next sibling, else parent, else null)
+                TocItem* survivor = dti->next ? dti->next : dti->parent;
+                Str selTitle = survivor ? str::Dup(survivor->title) : nullptr;
+                int selPageNo = survivor ? survivor->pageNo : 0;
+                int delPageNo = dti->pageNo;
+                Str delTitle = str::Dup(dti->title);
+                // Mutate cached tree: unlink the item (do NOT free yet - async reload may still reference it)
                 if (auto* t = win->CurrentTab()) {
+                    if (t->currToc && t->currToc->root) {
+                        UnlinkTocItem(t->currToc->root, dti);
+                    }
                     if (auto* engine = t->GetEngine()) {
-                        engine->OutlineEdit(2, dti->pageNo, dti->title, StrL(""), 0);
+                        engine->OutlineEdit(2, delPageNo, delTitle, StrL(""), 0);
                     }
                 }
+                // Reload with survivor's title/pageNo (null if no survivor), pass dti to free after reload
+                if (auto* t = win->CurrentTab()) {
+                    ReloadTocTree(t, selTitle, selPageNo, dti);
+                }
+                str::Free(delTitle);
+                logf("[toc] CmdBookmarkDelete: EXIT\n");
             }
             break;
         case CmdBookmarkUpdate:
             if (dti) {
+                logf("[toc] CmdBookmarkUpdate: ENTER title='%s' pageNo=%d -> newPageNo=%d\n", dti->title, dti->pageNo,
+                     win->ctrl->CurrentPageNo());
+                int newPageNo = win->ctrl->CurrentPageNo();
+                // Mutate cached tree: update pageNo and dest
                 if (auto* t = win->CurrentTab()) {
+                    if (t->currToc) {
+                        dti->pageNo = newPageNo;
+                        if (dti->dest && !dti->destNotOwned) {
+                            delete dti->dest;
+                        }
+                        dti->dest = NewSimpleDest(newPageNo, RectF(), 0.f);
+                        dti->destNotOwned = false;
+                    }
                     if (auto* engine = t->GetEngine()) {
-                        engine->OutlineEdit(3, dti->pageNo, dti->title, StrL(""), win->ctrl->CurrentPageNo());
+                        engine->OutlineEdit(3, dti->pageNo, dti->title, StrL(""), newPageNo);
                     }
                 }
+                // Reload with updated title/pageNo
+                if (auto* t = win->CurrentTab()) {
+                    ReloadTocTree(t, dti->title, newPageNo);
+                }
+                logf("[toc] CmdBookmarkUpdate: EXIT\n");
             }
             break;
         case CmdBookmarkRename:
             if (dti) {
+                logf("[toc] CmdBookmarkRename: ENTER title='%s' pageNo=%d\n", dti->title, dti->pageNo);
                 ShowBookmarkRenameDialog(win, dti);
             }
             break;
@@ -1100,6 +1162,7 @@ static void TocContextMenu(ContextMenuEvent* ev) {
         default:
             break;
     }
+    logf("[toc] TocContextMenu: EXIT\n");
 }
 
 static void OnTocCustomDraw(TreeView::CustomDrawEvent* /*ev*/);
@@ -1124,14 +1187,26 @@ static void AutoExpandTopLevelItems(TocItem* root) {
     }
 }
 
+static void SetTocTreeOwner(TocItem* item, TocTree* tree) {
+    for (; item; item = item->next) {
+        item->ownerTree = tree;
+        if (item->child) {
+            SetTocTreeOwner(item->child, tree);
+        }
+    }
+}
+
 void LoadTocTree(MainWindow* win) {
+    logf("[toc] LoadTocTree: ENTER tocLoaded=%d\n", (int)win->tocLoaded);
     WindowTab* tab = win->CurrentTab();
     if (!tab) {
         ReportIf(true);
+        logf("[toc] LoadTocTree: no tab\n");
         return;
     }
 
     if (win->tocLoaded) {
+        logf("[toc] LoadTocTree: early exit - already loaded\n");
         return;
     }
 
@@ -1148,8 +1223,13 @@ void LoadTocTree(MainWindow* win) {
 
     auto* tocTree = tab->ctrl->GetToc();
     if (!tocTree || !tocTree->root) {
+        logf("[toc] LoadTocTree: no tocTree or no root\n");
         return;
     }
+
+    // mark all items with owning tree for O(1) validity check
+    logf("[toc] LoadTocTree: calling SetTocTreeOwner\n");
+    SetTocTreeOwner(tocTree->root, tocTree);
 
     tab->currToc = tocTree;
 
@@ -1167,12 +1247,13 @@ void LoadTocTree(MainWindow* win) {
     SetInitialExpandState(tocTree->root, tab->tocState);
     AutoExpandTopLevelItems(tocTree->root->child);
 
+    logf("[toc] LoadTocTree: calling SetTreeModel\n");
     treeView->SetTreeModel(tocTree);
+    logf("[toc] LoadTocTree: SetTreeModel done\n");
 
     treeView->onCustomDraw = MkFunc1Void(OnTocCustomDraw);
     LayoutTocContainer(win);
-    // uint fl = RDW_ERASE | RDW_FRAME | RDW_INVALIDATE | RDW_ALLCHILDREN;
-    // RedrawWindow(hwnd, nullptr, nullptr, fl);
+    logf("[toc] LoadTocTree: EXIT\n");
 }
 
 static TocItem* FindTocItemByTitleAndPage(TocItem* item, Str title, int pageNo) {
@@ -1193,49 +1274,148 @@ static TocItem* FindTocItemByTitleAndPage(TocItem* item, Str title, int pageNo) 
 // selection on the same entry when it's still there.
 // Must not return while anything still points into the old tree: the caller
 // deletes it as soon as we're done.
-void ReloadTocTree(WindowTab* tab) {
-    MainWindow* win = tab ? tab->win : nullptr;
-    if (!win) {
+// Async reload task data
+struct ReloadTocTaskData {
+    WindowTab* tab = nullptr;
+    TempStr selTitle = nullptr;
+    int selPageNo = 0;
+    int currPageNo = 0;
+    TocItem* itemToFree = nullptr; // unlinked item to free after reload completes
+    ~ReloadTocTaskData() {
+        str::Free(selTitle);
+        if (itemToFree) FreeTocItemRec(nullptr, itemToFree);
+    }
+};
+
+static void ReloadTocTreeAsync(ReloadTocTaskData* d) {
+    AutoDelete delData(d);
+    WindowTab* tab = d->tab;
+    if (!tab) {
+        logf("[toc] ReloadTocTreeAsync: no tab\n");
         return;
     }
+    MainWindow* win = tab->win;
+    if (!win) {
+        logf("[toc] ReloadTocTreeAsync: no win\n");
+        return;
+    }
+    logf("[toc] ReloadTocTreeAsync: ENTER (tocReloadPending=%d tocReloading=%d tocLoaded=%d currTab=%p tab=%p)\n",
+         (int)win->tocReloadPending, (int)win->tocReloading, (int)win->tocLoaded, (void*)win->CurrentTab(), (void*)tab);
     // the tree view only ever shows the current tab; another tab picks up the
     // new tree when it's switched to
     if (win->CurrentTab() != tab || !win->tocLoaded) {
+        logf("[toc] ReloadTocTreeAsync: early exit - not current tab or not loaded\n");
         tab->currToc = nullptr;
+        win->tocReloadPending = false;
+        win->tocReloading = false;
         return;
     }
+
+    win->tocReloading = true;
+    logf("[toc] ReloadTocTreeAsync: tocReloading=true, calling ClearTocBox\n");
 
     // the items are about to be freed, so remember the selection the way the
     // user sees it rather than by pointer
     TreeView* treeView = win->tocTreeView;
-    TempStr selTitle = nullptr;
-    int selPageNo = 0;
-    if (treeView) {
-        auto* sel = (TocItem*)treeView->GetSelection();
-        if (sel) {
-            selTitle = str::DupTemp(sel->title);
-            selPageNo = sel->pageNo;
-        }
-    }
-    int currPageNo = win->currPageNo;
 
     ClearTocBox(win);
+    logf("[toc] ReloadTocTreeAsync: ClearTocBox done, calling LoadTocTree\n");
     LoadTocTree(win);
+    logf("[toc] ReloadTocTreeAsync: LoadTocTree done\n");
 
     if (!treeView || !tab->currToc) {
+        logf("[toc] ReloadTocTreeAsync: early exit - no treeView or currToc\n");
+        win->tocReloading = false;
+        win->tocReloadPending = false;
         return;
     }
     TocItem* toSelect = nullptr;
-    if (selTitle) {
-        toSelect = FindTocItemByTitleAndPage(tab->currToc->root, selTitle, selPageNo);
+    if (d->selTitle) {
+        toSelect = FindTocItemByTitleAndPage(tab->currToc->root, d->selTitle, d->selPageNo);
     }
     if (toSelect) {
+        logf("[toc] ReloadTocTreeAsync: selecting item title='%s' pageNo=%d\n", toSelect->title, toSelect->pageNo);
         treeView->SelectItem((TreeItem)toSelect);
         SetTocMultiHighlight(win, treeView, toSelect);
+        // Ensure the selected item is visible (scroll into view if needed)
+        HTREEITEM hSel = treeView->GetHandleByTreeItem((TreeItem)toSelect);
+        if (hSel) {
+            TreeView_EnsureVisible(treeView->hwnd, hSel);
+        }
+    } else {
+        // nothing matched (or nothing was selected): fall back to the current page
+        logf("[toc] ReloadTocTreeAsync: no item to select, calling UpdateTocSelection currPageNo=%d\n", d->currPageNo);
+        UpdateTocSelection(win, d->currPageNo);
+    }
+
+    win->tocReloading = false;
+    win->tocReloadPending = false;
+    logf("[toc] ReloadTocTreeAsync: EXIT (tocReloadPending=%d tocReloading=%d)\n", (int)win->tocReloadPending,
+         (int)win->tocReloading);
+}
+
+// Reload the TOC tree after OutlineEdit invalidates it.
+// Debounced: posts an async task instead of rebuilding synchronously to avoid
+// selection-restore loops and UI thread wedging.
+// If selTitle/selPageNo are provided, they are used for selection restore instead
+// of reading from the TreeView (which may point to already-freed TocItems after
+// OutlineEdit deletes the cached tocTree).
+void ReloadTocTree(WindowTab* tab, Str selTitle, int selPageNo, TocItem* itemToFree) {
+    MainWindow* win = tab ? tab->win : nullptr;
+    if (!win) {
+        logf("[toc] ReloadTocTree: no win\n");
         return;
     }
-    // nothing matched (or nothing was selected): fall back to the current page
-    UpdateTocSelection(win, currPageNo);
+
+    // Take ownership of selTitle: Dup once at the choke point so every exit
+    // path frees a heap pointer and the async task data owns a stable copy.
+    // Callers may pass TempStr (arena view) or a heap Str — both are safe here.
+    if (selTitle) {
+        selTitle = str::Dup(selTitle);
+    }
+
+    // the tree view only ever shows the current tab; another tab picks up the
+    // new tree when it's switched to
+    if (win->CurrentTab() != tab || !win->tocLoaded) {
+        logf("[toc] ReloadTocTree: not current tab or not loaded (currTab=%p tab=%p tocLoaded=%d)\n",
+             (void*)win->CurrentTab(), (void*)tab, (int)win->tocLoaded);
+        tab->currToc = nullptr;
+        if (selTitle) str::Free(selTitle);
+        if (itemToFree) FreeTocItemRec(nullptr, itemToFree);
+        return;
+    }
+
+    // already have a pending reload? nothing to do
+    if (win->tocReloadPending) {
+        logf("[toc] ReloadTocTree: already pending, skipping\n");
+        if (selTitle) str::Free(selTitle);
+        if (itemToFree) FreeTocItemRec(nullptr, itemToFree);
+        return;
+    }
+    logf("[toc] ReloadTocTree: posting async task (tocReloadPending=%d tocReloading=%d)\n", (int)win->tocReloadPending,
+         (int)win->tocReloading);
+    win->tocReloadPending = true;
+
+    TreeView* treeView = win->tocTreeView;
+    auto* data = new ReloadTocTaskData;
+    data->tab = tab;
+    data->itemToFree = itemToFree;
+    // Use provided selection (captured BEFORE OutlineEdit deleted tocTree) if available,
+    // otherwise fall back to reading from TreeView (for callers that don't call OutlineEdit first)
+    if (selTitle) {
+        data->selTitle = selTitle;
+        data->selPageNo = selPageNo;
+    } else if (treeView) {
+        auto* sel = (TocItem*)treeView->GetSelection();
+        if (sel) {
+            data->selTitle = str::Dup(sel->title);
+            data->selPageNo = sel->pageNo;
+        }
+    }
+    data->currPageNo = win->currPageNo;
+
+    auto fn = MkFunc0<ReloadTocTaskData>(ReloadTocTreeAsync, data);
+    uitask::Post(fn, "TaskReloadTocTree");
 }
 
 // TODO: use https://docs.microsoft.com/en-us/windows/win32/api/wingdi/nf-wingdi-getobject?redirectedfrom=MSDN
@@ -1264,6 +1444,11 @@ static bool HasTocFilter(MainWindow* win) {
     return len(words) > 0;
 }
 
+// Forward declaration: checks if a TocItem belongs to the current tree model.
+// Defined below OnTocCustomDraw. Used to guard against stale TocItem* pointers
+// after OutlineEdit deletes the cached tocTree.
+static bool IsTocItemInCurrentTree(TreeView* tv, TocItem* item);
+
 // POSTPAINT: redraw title (optional filter highlight), optional right-aligned
 // page label, and multi-match "current page" highlight (issue #4642).
 static void DrawTocItemPostPaint(TreeView::CustomDrawEvent* ev, MainWindow* win) {
@@ -1271,8 +1456,11 @@ static void DrawTocItemPostPaint(TreeView::CustomDrawEvent* ev, MainWindow* win)
     if (!tocItem || !tocItem->title) {
         return;
     }
-
     TreeView* tv = ev->treeView;
+    // Guard against stale TocItem* from freed tocTree.
+    if (!IsTocItemInCurrentTree(tv, tocItem)) {
+        return;
+    }
     Rect labelRect{};
     if (!tv->GetItemRect(ev->treeItem, true, labelRect)) {
         return;
@@ -1397,6 +1585,18 @@ static void DrawTocItemPostPaint(TreeView::CustomDrawEvent* ev, MainWindow* win)
     }
 }
 
+// Check if a TocItem pointer is valid (belongs to the current tree model).
+// After OutlineEdit deletes the cached tocTree, TreeView items still hold
+// stale TocItem* pointers in lParam. This validates before dereferencing.
+// Uses ownerTree back-pointer for O(1) check (avoids O(n) tree walk).
+static bool IsTocItemInCurrentTree(TreeView* tv, TocItem* item) {
+    if (!tv || !tv->treeModel || !item) {
+        return false;
+    }
+    TocTree* tt = (TocTree*)tv->treeModel;
+    return item->ownerTree == tt;
+}
+
 // https://docs.microsoft.com/en-us/windows/win32/controls/about-custom-draw
 // https://docs.microsoft.com/en-us/windows/win32/api/commctrl/ns-commctrl-nmtvcustomdraw
 void OnTocCustomDraw(TreeView::CustomDrawEvent* ev) {
@@ -1420,6 +1620,12 @@ void OnTocCustomDraw(TreeView::CustomDrawEvent* ev) {
             return;
         }
         TreeView* tv = ev->treeView;
+        // Guard against stale TocItem* from freed tocTree (OutlineEdit deletes
+        // tocTree but TreeView items still hold old lParam). Skip custom draw
+        // for items not in the current model to avoid use-after-free.
+        if (!IsTocItemInCurrentTree(tv, tocItem)) {
+            return;
+        }
         bool isTreeSelected = (cd->uItemState & CDIS_SELECTED) != 0;
         if (!isTreeSelected) {
             HTREEITEM hSel = TreeView_GetSelection(tv->hwnd);
@@ -1487,7 +1693,30 @@ static void TocTreeClick(TreeView::ClickEvent* ev) {
     // TocTreeSelectionChanged. Clicking the item that is already selected fires
     // no selection-change notification, so handle that here to let the user
     // re-click the current bookmark to jump back to its page (#2465).
+
+    // re-run the hit-test so we can log whether the click landed on an item row
+    DWORD htFlags = 0;
+    HTREEITEM hHit = nullptr;
+    {
+        TVHITTESTINFO ht{};
+        ht.pt.x = ev->mouseWindow.x;
+        ht.pt.y = ev->mouseWindow.y;
+        TreeView_HitTest(ev->treeView->hwnd, &ht);
+        hHit = ht.hItem;
+        htFlags = ht.flags;
+    }
+    TocItem* ti = (TocItem*)ev->treeItem;
+    logf(
+        "[toc] TocTreeClick isDblClick=%d htFlags=0x%x hHit=%p treeItem=%p handledBySelChange=%d mouse=(%d,%d) "
+        "title='%s' pageNo=%d\n",
+        (int)ev->isDblClick, (unsigned)htFlags, (const void*)hHit, (const void*)ev->treeItem, (int)handledBySelChange,
+        ev->mouseWindow.x, ev->mouseWindow.y, ti ? ti->title : StrL(""), ti ? ti->pageNo : -1);
+
     if (ev->isDblClick || !ev->treeItem || handledBySelChange) {
+        return;
+    }
+    // Guard against stale TocItem* from freed tocTree.
+    if (!IsTocItemInCurrentTree(ev->treeView, ti)) {
         return;
     }
     MainWindow* win = FindMainWindowByHwnd(ev->treeView->hwnd);
@@ -1504,6 +1733,24 @@ static void TocTreeSelectionChanged(TreeView::SelectionChangedEvent* ev) {
         ReportIf(true);
         return;
     }
+    // Suppress selection handling while async TOC reload is in progress
+    // (prevents selection-restore loops that wedge the UI thread).
+    logf(
+        "[toc] TocTreeSelectionChanged: ENTER tocReloading=%d tocReloadPending=%d byMouse=%d byKeyboard=%d action=%d\n",
+        (int)win->tocReloading, (int)win->tocReloadPending, (int)ev->byMouse, (int)ev->byKeyboard,
+        (int)ev->nmtv->action);
+    if (win->tocReloading) {
+        logf("[toc] TocTreeSelectionChanged: guard hit - tocReloading=true, returning\n");
+        return;
+    }
+    TocItem* sel = (TocItem*)ev->selectedItem;
+    TocItem* prev = (TocItem*)ev->prevSelectedItem;
+    logf(
+        "[toc] TocTreeSelectionChanged byMouse=%d byKeyboard=%d action=%d selected=%p title='%s' pageNo=%d prev=%p "
+        "prevPageNo=%d\n",
+        (int)ev->byMouse, (int)ev->byKeyboard, (int)ev->nmtv->action, (const void*)ev->selectedItem,
+        sel ? sel->title : StrL(""), sel ? sel->pageNo : -1, (const void*)ev->prevSelectedItem,
+        prev ? prev->pageNo : -1);
 
     // When the focus is set to the toc window the first item in the treeview is automatically
     // selected and a TVN_SELCHANGEDW notification message is sent with the special code pnmtv->action ==
@@ -1513,7 +1760,17 @@ static void TocTreeSelectionChanged(TreeView::SelectionChangedEvent* ev) {
     // the function TreeView_DeleteAllItems after deletion of the item.
     bool shouldHandle = ev->byKeyboard || ev->byMouse;
     if (!shouldHandle) {
+        logf("[toc] TocTreeSelectionChanged: not byMouse/byKeyboard, returning\n");
         return;
+    }
+    // Guard against stale TocItem* from freed tocTree.
+    if (sel && !IsTocItemInCurrentTree(ev->treeView, sel)) {
+        logf("[toc] TocTreeSelectionChanged: selected item not in current tree, clearing\n");
+        sel = nullptr;
+    }
+    if (prev && !IsTocItemInCurrentTree(ev->treeView, prev)) {
+        logf("[toc] TocTreeSelectionChanged: prev item not in current tree, clearing\n");
+        prev = nullptr;
     }
     if (ev->byMouse) {
         // remember that this click already navigated, so the following
@@ -1521,7 +1778,8 @@ static void TocTreeSelectionChanged(TreeView::SelectionChangedEvent* ev) {
         gTocSelChangedByMouseClick = true;
     }
     bool allowExternal = ev->byMouse;
-    GoToTocTreeItem(win, ev->selectedItem, allowExternal);
+    GoToTocTreeItem(win, (TreeItem)sel, allowExternal);
+    logf("[toc] TocTreeSelectionChanged: EXIT\n");
 }
 
 // Tab / Ctrl+Tab focus movement (also reused by Favorites tree)
@@ -1618,9 +1876,19 @@ static void LayoutTocContainer(MainWindow* win) {
         return;
     }
     Rect rc = HwndWindowRect(win->hwndTocBox);
-    win->tocLayout->Layout(Tight(Size{rc.dx, rc.dy}));
-    win->tocLayout->SetBounds(Rect{0, 0, rc.dx, rc.dy});
+    int stripDy = 0;
+    if (win->hwndTocReBar && ::IsWindow(win->hwndTocReBar)) {
+        stripDy = (int)HwndWindowRect(win->hwndTocReBar).dy;
+        SetWindowPos(win->hwndTocReBar, nullptr, 0, 0, rc.dx, stripDy, SWP_NOZORDER | SWP_NOACTIVATE);
+    }
+    // toolbar strip sits above the Bookmarks label; the label/filter/tree
+    // layout starts below the strip.
+    Rect content{0, stripDy, rc.dx, rc.dy - stripDy};
+    win->tocLayout->Layout(Tight(Size{rc.dx, rc.dy - stripDy}));
+    win->tocLayout->SetBounds(content);
 }
+
+static void TocReorderToggle(MainWindow* win);
 
 static LRESULT CALLBACK WndProcTocBox(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR /*subclassId*/,
                                       DWORD_PTR /*data*/) {
@@ -1640,11 +1908,21 @@ static LRESULT CALLBACK WndProcTocBox(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp,
             LayoutTocContainer(win);
             break;
 
-        case WM_COMMAND:
-            if (LOWORD(wp) == IDC_TOC_LABEL_WITH_CLOSE) {
+        case WM_COMMAND: {
+            int cmd = LOWORD(wp);
+            if (cmd == kTocToolbarCmdAdd) {
+                TocAddBookmark(win);
+                return TRUE;
+            }
+            if (cmd == kTocToolbarCmdReorder) {
+                TocReorderToggle(win);
+                return TRUE;
+            }
+            if (cmd == IDC_TOC_LABEL_WITH_CLOSE) {
                 ToggleTocBox(win);
             }
             break;
+        }
         default:
             break;
     }
@@ -1768,6 +2046,8 @@ static void ApplyTocFilter(MainWindow* win, Str filter) {
         c->parent = wrapRoot;
     }
     auto* filteredTree = new TocTree(wrapRoot);
+    // mark filtered tree items with owning tree for O(1) validity check
+    SetTocTreeOwner(wrapRoot, filteredTree);
     win->tocFilteredTree = filteredTree;
     treeView->SetTreeModel(filteredTree);
 }
@@ -1822,6 +2102,129 @@ static LRESULT CALLBACK WndProcTocFilterEdit(HWND hwnd, UINT msg, WPARAM wp, LPA
         return 0;
     }
     return DefSubclassProc(hwnd, msg, wp, lp);
+}
+
+static void TocReorderToggle(MainWindow* win);
+
+// Native ReBar+Toolbar strip for the TOC panel header: Add bookmark + Reorder
+// toggle. Mirrors EditToolbarCreate (ReBar+Toolbar, TBSTYLE_EX_MIXEDBUTTONS,
+// text-only buttons, theme colors via ToolbarSubclassPaint). The strip is a
+// child of hwndTocBox; WndProcTocBox positions it at the top of the toc box
+// (above the Bookmarks label) on WM_SIZE.
+static void TocToolbarCreate(MainWindow* win) {
+    if (win->hwndTocToolbar) {
+        return; // already created
+    }
+    HINSTANCE hinst = GetModuleHandle(nullptr);
+    HWND hwndParent = win->hwndTocBox;
+    bool isRtl = IsUIRtl();
+
+    DWORD style = WS_CHILD | WS_CLIPCHILDREN | WS_CLIPSIBLINGS | RBS_VARHEIGHT;
+    if (IsCurrentThemeDefault()) {
+        style |= WS_BORDER | RBS_BANDBORDERS;
+    }
+    style |= CCS_NODIVIDER | CCS_NOPARENTALIGN;
+    DWORD exStyle = WS_EX_TOOLWINDOW;
+    if (isRtl) {
+        exStyle |= WS_EX_LAYOUTRTL;
+    }
+    HWND hwndRebar =
+        CreateWindowExW(exStyle, REBARCLASSNAME, nullptr, style, 0, 0, 0, 0, hwndParent, nullptr, hinst, nullptr);
+    ToolbarSetupSecondaryRebar(hwndRebar);
+    ToolbarSubclassSecondaryRebar(win, hwndRebar);
+
+    style = WS_CHILD | WS_CLIPSIBLINGS | TBSTYLE_TOOLTIPS | TBSTYLE_FLAT | TBSTYLE_LIST | CCS_NODIVIDER |
+            CCS_NOPARENTALIGN | TBSTYLE_WRAPABLE;
+    exStyle = 0;
+    if (isRtl) {
+        exStyle |= WS_EX_LAYOUTRTL;
+    }
+    HWND hwndToolbar =
+        CreateWindowExW(exStyle, TOOLBARCLASSNAME, nullptr, style, 0, 0, 0, 0, hwndRebar, nullptr, hinst, nullptr);
+    TbSetButtonStructSize(hwndToolbar, sizeofi(TBBUTTON));
+
+    DWORD tbEx = TbGetExtendedStyle(hwndToolbar);
+    tbEx |= TBSTYLE_EX_MIXEDBUTTONS;
+    TbSetExtendedStyle(hwndToolbar, tbEx);
+
+    // Unconditionally strip comctl32 v6 themes so NM_CUSTOMDRAW clrText/font
+    // are honored under any Windows theme (same as CreateToolbar2)
+    SetWindowTheme(hwndToolbar, L"", L"");
+
+    struct TocToolbarButton {
+        int cmdId;
+        Str toolTip;
+        bool isToggle;
+    };
+    static TocToolbarButton kTocToolbarButtons[] = {
+        {kTocToolbarCmdAdd, _TRN("Add"), false},
+        {kTocToolbarCmdReorder, _TRN("Reorder"), true},
+    };
+    constexpr int kTocToolbarButtonsCount = dimof(kTocToolbarButtons);
+
+    TBBUTTON tbButtons[kTocToolbarButtonsCount];
+    for (int i = 0; i < kTocToolbarButtonsCount; i++) {
+        const TocToolbarButton& bi = kTocToolbarButtons[i];
+        TBBUTTON b{};
+        b.idCommand = bi.cmdId;
+        // text-only buttons: I_IMAGENONE (TbIcon::Text), NOT 0 — no image list
+        b.iBitmap = (int)TbIcon::Text;
+        b.fsState = TBSTATE_ENABLED;
+        b.fsStyle = BTNS_BUTTON | BTNS_SHOWTEXT | BTNS_AUTOSIZE;
+        if (bi.isToggle) {
+            b.fsStyle |= BTNS_CHECK;
+        }
+        Str s = trans::GetTranslation(bi.toolTip);
+        b.iString = (INT_PTR)CWStrTemp(s);
+        tbButtons[i] = b;
+    }
+    TbAddButtons(hwndToolbar, kTocToolbarButtonsCount, tbButtons);
+
+    // Post-add text-button sizing: comctl derives BTNS_SHOWTEXT widths lazily,
+    // so pin explicit cx = label+pad so labels never truncate (ellipsis).
+    PostAddTextButtonSizing(win, hwndToolbar);
+
+    int iconSize = DpiScale(hwndParent, gGlobalPrefs->toolbarSize);
+    iconSize = RoundUp(iconSize, 4);
+    TbSetBitmapSize(hwndToolbar, Size(iconSize, iconSize));
+    TbSetButtonSize(hwndToolbar, Size(iconSize, iconSize));
+
+    ShowWindow(hwndToolbar, SW_SHOW);
+
+    REBARBANDINFOW rbBand{};
+    rbBand.cbSize = sizeof(REBARBANDINFOW);
+    rbBand.fMask = RBBIM_STYLE | RBBIM_CHILD | RBBIM_CHILDSIZE;
+    rbBand.fStyle = RBBS_FIXEDSIZE | RBBS_VARIABLEHEIGHT;
+    if (IsAppThemed() && IsCurrentThemeDefault()) {
+        rbBand.fStyle |= RBBS_CHILDEDGE;
+    }
+    rbBand.hbmBack = nullptr;
+    rbBand.lpText = (WCHAR*)L"Toc Toolbar";
+    rbBand.hwndChild = hwndToolbar;
+    Rect rc0 = TbGetItemRect(hwndToolbar, 0);
+    rbBand.cxMinChild = rc0.dx;
+    rbBand.cyMinChild = rc0.dy + (2 * rc0.y);
+    rbBand.cx = 0;
+    SendMessageW(hwndRebar, RB_INSERTBAND, (WPARAM)-1, (LPARAM)&rbBand);
+
+    // Size rebar to panel width so the WRAPABLE toolbar sees the real width.
+    {
+        Rect rcBox = HwndClientRect(hwndParent);
+        SetWindowPos(hwndRebar, nullptr, 0, 0, rcBox.dx, rc0.dy + (2 * rc0.y), SWP_NOZORDER | SWP_NOMOVE);
+    }
+    // Second pass after rebar resize once the real wrap width is known.
+    PostAddTextButtonSizing(win, hwndToolbar);
+
+    win->hwndTocReBar = hwndRebar;
+    win->hwndTocToolbar = hwndToolbar;
+
+    // Paint subclass wipes comctl's white button face + label and re-draws
+    // text centered with theme colors; also draws the checked underline.
+    ToolbarSubclassPaint(win, hwndToolbar);
+
+    ShowWindow(hwndRebar, SW_SHOW);
+
+    logf("[toc] toolbar strip created with %d buttons\n", kTocToolbarButtonsCount);
 }
 
 void CreateToc(MainWindow* win) {
@@ -1887,29 +2290,9 @@ void CreateToc(MainWindow* win) {
     vbox->alignMain = MainAxisAlign::MainStart;
     vbox->alignCross = CrossAxisAlign::Stretch;
 
-    // top button row: Add bookmark + Reorder toggle (disabled this round, s43-b)
-    auto* btnRow = new HBox();
-    btnRow->alignMain = MainAxisAlign::MainStart;
-    {
-        Button::CreateArgs a;
-        a.parent = win->hwndTocBox;
-        a.font = GetAppFont(win->hwndFrame);
-        a.text = _TRA("Add bookmark");
-        a.ownerDrawn = true;
-        auto* bAdd = new Button();
-        bAdd->onClick = MkFunc0(TocAddBookmark, win);
-        btnRow->AddChild(bAdd);
-    }
-    {
-        Button::CreateArgs a;
-        a.parent = win->hwndTocBox;
-        a.font = GetAppFont(win->hwndFrame);
-        a.text = _TRA("Reorder (s43-b)");
-        a.ownerDrawn = true;
-        auto* bReorder = new Button();
-        btnRow->AddChild(bReorder);
-    }
-    vbox->AddChild(btnRow);
+    // native toolbar strip (Add + Reorder toggle) above the Bookmarks label;
+    // it's a child of hwndTocBox, positioned at top by WndProcTocBox on WM_SIZE
+    TocToolbarCreate(win);
 
     vbox->AddChild(l);
     vbox->AddChild(filterEdit);
@@ -1932,12 +2315,61 @@ static void TocAddBookmark(MainWindow* win) {
     if (pageNo < 1) {
         return;
     }
+    logf("[toc] TocAddBookmark: ENTER pageNo=%d\n", pageNo);
     TempStr title = fmt("Page %d", pageNo);
     if (auto* tab = win->CurrentTab()) {
         if (auto* engine = tab->GetEngine()) {
+            // 1) Record the edit in the persistent log (for save-time replay)
             engine->OutlineEdit(1, 0, StrL(""), title, pageNo);
+            // 2) Mutate the cached in-memory tocTree directly so it shows immediately
+            if (tab->currToc && tab->currToc->root) {
+                TocItem* root = tab->currToc->root;
+                // Find the real root (skip the dummy root added by GetToc)
+                TocItem* realRoot = root->child;
+                TocItem* last = realRoot;
+                while (last && last->next) {
+                    last = last->next;
+                }
+                TocItem* newItem = AllocTocItem(nullptr, title, pageNo);
+                newItem->id = ++tab->currTocIdCounter; // we'll add this counter
+                newItem->isOpenDefault = false;
+                newItem->isOpenToggled = false;
+                newItem->fontFlags = 0;
+                newItem->color = kColorUnset;
+                newItem->dest = NewSimpleDest(pageNo, RectF(), 0.f);
+                if (last) {
+                    last->next = newItem;
+                } else {
+                    realRoot = newItem;
+                    root->child = realRoot;
+                }
+                logf("[toc] TocAddBookmark: added item title='%s' pageNo=%d\n", title, pageNo);
+            }
+            // 3) Reload and select the new item (it's at the end of the list)
+            ReloadTocTree(tab, title, pageNo); // pass new item's title/pageNo to select it
         }
     }
+    logf("[toc] TocAddBookmark: EXIT\n");
+}
+
+// Toggle TOC drag-reorder mode ON/OFF. Drag-reorder on tree left-click is
+// only active while ON; while OFF clicks pass through to normal TreeView
+// behavior (selection + click-nav). Logs the transition for sumlog so the
+// user can confirm the mode without opening the panel.
+static void TocReorderToggle(MainWindow* win) {
+    if (!win) {
+        logf("[toc] TocReorderToggle: no win\n");
+        return;
+    }
+    logf("[toc] TocReorderToggle: ENTER tocReorderMode=%d\n", (int)win->tocReorderMode);
+    win->tocReorderMode = !win->tocReorderMode;
+    if (win->hwndTocToolbar) {
+        // sync the native Reorder button's checked state (underline when ON)
+        TbSetButtonChecked(win->hwndTocToolbar, kTocToolbarCmdReorder, win->tocReorderMode);
+        HwndInvalidate(win->hwndTocToolbar, true);
+    }
+    logf("[toc] Reorder %s", win->tocReorderMode ? StrL("ON") : StrL("OFF"));
+    logf("[toc] TocReorderToggle: EXIT tocReorderMode=%d\n", (int)win->tocReorderMode);
 }
 
 // Modal rename dialog for a bookmark (s43-b). Self-contained here (not in
@@ -1952,6 +2384,27 @@ struct RenameDialogState {
     bool ok = false;
 };
 
+// Subclass on the EDIT control: forward VK_RETURN/VK_ESCAPE as WM_COMMAND
+// IDOK/IDCANCEL to the dialog so Enter commits the rename even though focus
+// lives in the edit (IsDialogMessageW does not route it here). This makes the
+// ok-path (st.ok/st.done) fire on Enter. WM_COMMAND IDOK/IDCANCEL handlers in
+// RenameDialogWndProc do the actual commit/cancel.
+static LRESULT CALLBACK RenameEditWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR /*subclassId*/,
+                                          DWORD_PTR ref) {
+    auto* st = (RenameDialogState*)ref;
+    if (st && msg == WM_KEYDOWN) {
+        if (wp == VK_RETURN) {
+            SendMessageW(GetParent(hwnd), WM_COMMAND, IDOK, 0);
+            return 0;
+        }
+        if (wp == VK_ESCAPE) {
+            SendMessageW(GetParent(hwnd), WM_COMMAND, IDCANCEL, 0);
+            return 0;
+        }
+    }
+    return DefSubclassProc(hwnd, msg, wp, lp);
+}
+
 static LRESULT CALLBACK RenameDialogWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR /*subclassId*/,
                                             DWORD_PTR ref) {
     auto* st = (RenameDialogState*)ref;
@@ -1961,8 +2414,12 @@ static LRESULT CALLBACK RenameDialogWndProc(HWND hwnd, UINT msg, WPARAM wp, LPAR
     if (msg == WM_COMMAND) {
         if (LOWORD(wp) == IDOK) {
             WCHAR buf[512] = {};
-            GetWindowTextW(st->hEdit, buf, len(buf));
-            st->newName = WStr(buf, lstrlenW(buf));
+            // buf is zero-initialized so len(buf) == 0 here; pass the capacity explicitly.
+            // Dup the text: buf dies with this stack frame and the caller reads st->newName later.
+            int n = GetWindowTextW(st->hEdit, buf, dimofi(buf));
+            wstr::Free(st->newName);
+            st->newName = wstr::Dup(WStr(buf, n));
+            logf("[toc] CmdBookmarkRename: IDOK rawEditLen=%d name='%s'\n", n, ToUtf8Temp(st->newName));
             st->ok = true;
             st->done = true;
             DestroyWindow(hwnd);
@@ -1973,6 +2430,49 @@ static LRESULT CALLBACK RenameDialogWndProc(HWND hwnd, UINT msg, WPARAM wp, LPAR
             DestroyWindow(hwnd);
             return 0;
         }
+    }
+    if (msg == WM_KEYDOWN && wp == VK_RETURN) {
+        // Enter key pressed - trigger OK (dialog is not a real dialog so IsDialogMessageW doesn't route it)
+        WCHAR buf[512] = {};
+        int n = GetWindowTextW(st->hEdit, buf, dimofi(buf));
+        wstr::Free(st->newName);
+        st->newName = wstr::Dup(WStr(buf, n));
+        logf("[toc] CmdBookmarkRename: VK_RETURN rawEditLen=%d name='%s'\n", n, ToUtf8Temp(st->newName));
+        st->ok = true;
+        st->done = true;
+        DestroyWindow(hwnd);
+        return 0;
+    }
+    if (msg == WM_KEYDOWN && wp == VK_ESCAPE) {
+        st->done = true;
+        DestroyWindow(hwnd);
+        return 0;
+    }
+    if (msg == WM_CTLCOLOREDIT || msg == WM_CTLCOLORSTATIC || msg == WM_CTLCOLORDLG) {
+        HDC hdc = (HDC)wp;
+        COLORREF colBg = ThemeWindowControlBackgroundColor();
+        static HBRUSH sBgBrush = nullptr;
+        static COLORREF sBgColor = 0;
+        if (sBgBrush && sBgColor != colBg) {
+            DeleteObject(sBgBrush);
+            sBgBrush = nullptr;
+        }
+        if (!sBgBrush) {
+            sBgColor = colBg;
+            sBgBrush = CreateSolidBrush(colBg);
+        }
+        SetBkColor(hdc, colBg);
+        SetTextColor(hdc, ThemeWindowTextColor());
+        return (LRESULT)sBgBrush;
+    }
+    if (msg == WM_ERASEBKGND) {
+        HDC hdc = (HDC)wp;
+        RECT rc;
+        GetClientRect(hwnd, &rc);
+        HBRUSH br = CreateSolidBrush(ThemeWindowControlBackgroundColor());
+        FillRect(hdc, &rc, br);
+        DeleteObject(br);
+        return 1;
     }
     if (msg == WM_DESTROY) {
         st->done = true;
@@ -2026,31 +2526,52 @@ static void ShowBookmarkRenameDialog(MainWindow* win, TocItem* dti) {
                   editX + btnW + DpiScale(win->hwndFrame, 12), btnY, btnW, btnH, hwnd, (HMENU)IDCANCEL,
                   GetModuleHandleW(nullptr), nullptr);
 
+    // Dark-mode the title bar and child controls (edit, buttons) - must run AFTER
+    // the children exist, dmlib subclasses/themes the children present at call time.
+    ApplyDarkModeToPopupWindow(hwnd);
+
     SetFocus(hEdit);
 
     RenameDialogState st{};
     st.hEdit = hEdit;
-    UINT_PTR subclassId = NextSubclassId();
-    SetWindowSubclass(hwnd, RenameDialogWndProc, subclassId, (DWORD_PTR)&st);
+    UINT_PTR dlgSubclassId = NextSubclassId();
+    UINT_PTR editSubclassId = NextSubclassId();
+    SetWindowSubclass(hwnd, RenameDialogWndProc, dlgSubclassId, (DWORD_PTR)&st);
+    SetWindowSubclass(hEdit, RenameEditWndProc, editSubclassId, (DWORD_PTR)&st);
 
     MSG msg;
     while (!st.done && GetMessageW(&msg, nullptr, 0, 0)) {
-        if (!IsDialogMessageW(hwnd, &msg)) {
-            TranslateMessage(&msg);
-            DispatchMessageW(&msg);
-        }
+        TranslateMessage(&msg);
+        DispatchMessageW(&msg);
     }
-    RemoveWindowSubclass(hwnd, RenameDialogWndProc, subclassId);
+    RemoveWindowSubclass(hEdit, RenameEditWndProc, editSubclassId);
+    RemoveWindowSubclass(hwnd, RenameDialogWndProc, dlgSubclassId);
     DestroyWindow(hwnd);
+
+    logf("[toc] CmdBookmarkRename: RESULT st.ok=%d st.done=%d newName.len=%d newName=%s\n", (int)st.ok, (int)st.done,
+         st.newName.len, ToUtf8Temp(st.newName));
 
     if (st.ok && st.newName.s && st.newName.len > 0 && !str::Eq(ToUtf8Temp(st.newName), dti->title)) {
         if (auto* tab = win->CurrentTab()) {
             if (auto* engine = tab->GetEngine()) {
                 TempStr newTitle = ToUtf8Temp(st.newName);
-                engine->OutlineEdit(4, dti->pageNo, dti->title, newTitle, dti->pageNo);
+                Str oldTitle = str::Dup(dti->title); // capture old title BEFORE mutation
+                logf("[toc] CmdBookmarkRename: ENTER old='%s' new='%s' pageNo=%d st.ok=%d newName.len=%d\n",
+                     Str(oldTitle), newTitle, dti->pageNo, (int)st.ok, st.newName.len);
+                // Mutate cached tree: update title (leak old title - dies with tree; avoids arena-free mismatch)
+                if (tab->currToc) {
+                    dti->title = str::Dup(newTitle);
+                }
+                // OutlineEdit matches by targetTitle; pass OLD title, then new title
+                engine->OutlineEdit(4, dti->pageNo, oldTitle, newTitle, dti->pageNo);
+                // Reload with NEW title as selection
+                ReloadTocTree(tab, newTitle, dti->pageNo);
+                str::Free(oldTitle);
+                logf("[toc] CmdBookmarkRename: EXIT\n");
             }
         }
     }
+    wstr::Free(st.newName);
 }
 
 // --- TOC bookmark drag-reorder (s43-b) --------------------------------------
@@ -2134,14 +2655,18 @@ static void MoveTocItem(MainWindow* win, TocItem* source, TocItem* target, bool 
     if (!source || source == target) {
         return;
     }
+    logf("[toc] MoveTocItem: ENTER source='%s' pageNo=%d target=%s farLeft=%d\n", source->title, source->pageNo,
+         target ? target->title : "(null)", (int)farLeft);
     TreeView* tv = win->tocTreeView;
     TocTree* tt = tv ? (TocTree*)tv->treeModel : nullptr;
     if (!tt || !tt->root) {
+        logf("[toc] MoveTocItem: EXIT no tree\n");
         return;
     }
     TocItem* root = tt->root;
     // never reparent under oneself or a descendant (would create a cycle)
     if (target && IsAncestor(source, target)) {
+        logf("[toc] MoveTocItem: EXIT ancestor check failed\n");
         return;
     }
     UnlinkTocItem(root, source);
@@ -2156,14 +2681,20 @@ static void MoveTocItem(MainWindow* win, TocItem* source, TocItem* target, bool 
         }
     }
     LinkTocItem(root, newParent, source, beforeSibling);
-    // invalidate the cached toc tree so GetToc rebuilds; mark the doc modified
+    // Invalidate the cached toc tree so GetToc rebuilds; mark the doc modified
     if (auto* tab = win->CurrentTab()) {
         if (auto* engine = tab->GetEngine()) {
+            // Capture selection (the moved item) for reload; source->title is a
+            // live heap Str owned by the item, ReloadTocTree Dup's it for the task.
             engine->OutlineEdit(5, source->pageNo, source->title, newParent ? newParent->title : StrL(""),
                                 newParent ? newParent->pageNo : 0, farLeft && target ? target->pageNo : 0,
                                 farLeft && target ? target->title : StrL(""));
+            // Pass captured selection to ReloadTocTree so it can restore
+            // selection without reading from dangling TreeView items.
+            ReloadTocTree(tab, source->title, source->pageNo);
         }
     }
+    logf("[toc] MoveTocItem: EXIT\n");
 }
 
 // width (in DPI-scaled px) of the far-left strip on the tree that unindents
@@ -2184,6 +2715,13 @@ static LRESULT CALLBACK WndProcTocTree(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp
             Point pt{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
             TreeItem ti = tv->GetItemAt(pt.x, pt.y);
             if (ti == TreeModel::kNullItem || !ti) {
+                break;
+            }
+            if (!win->tocReorderMode) {
+                // Reorder OFF: let the TreeView see the click so selection +
+                // click-nav work. Returning 0 here swallowed every left click
+                // on ALL TOC items and broke bookmark navigation (s43-b
+                // regression). Pass through to DefSubclassProc.
                 break;
             }
             TocItem* item = (TocItem*)ti;
@@ -2223,14 +2761,19 @@ static LRESULT CALLBACK WndProcTocTree(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp
             TreeItem tti = tv->GetItemAt(pt.x, pt.y);
             TocItem* target = (tti == TreeModel::kNullItem || !tti) ? nullptr : (TocItem*)tti;
             int newGuideY = -1;
+            bool newFarLeft = false;
             if (target) {
                 Rect rc{};
                 if (tv->GetItemRect((TreeItem)target, false, rc)) {
-                    newGuideY = rc.y;
+                    newFarLeft = (pt.x < TocFarLeftStripWidth(hwnd));
+                    // child drop (farLeft=false): guide line at BOTTOM of item (insert after)
+                    // sibling drop (farLeft=true): guide line at TOP of item (boundary line)
+                    newGuideY = newFarLeft ? rc.y : rc.y + rc.dy;
                 }
             }
-            if (newGuideY != win->tocDragGuideY) {
+            if (newGuideY != win->tocDragGuideY || newFarLeft != win->tocDragFarLeft) {
                 win->tocDragGuideY = newGuideY;
+                win->tocDragFarLeft = newFarLeft;
                 HwndScheduleRepaint(hwnd);
             }
             return 0;
@@ -2245,7 +2788,9 @@ static LRESULT CALLBACK WndProcTocTree(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp
                 Point pt{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
                 TreeItem tti = tv->GetItemAt(pt.x, pt.y);
                 target = (tti == TreeModel::kNullItem || !tti) ? nullptr : (TocItem*)tti;
-                farLeft = target && (pt.x < TocFarLeftStripWidth(hwnd));
+                // Use the stored drag state (synced with the painted guide line in WM_MOUSEMOVE)
+                // so the visual guide always matches the actual drop result.
+                farLeft = target && win->tocDragFarLeft;
                 int oldGuide = win->tocDragGuideY;
                 win->tocDragItem = nullptr;
                 win->tocDragGuideY = -1;
@@ -2272,7 +2817,10 @@ static LRESULT CALLBACK WndProcTocTree(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp
                     GetClientRect(hwnd, &rc);
                     HPEN hPen = CreatePen(PS_SOLID, 2, RGB(255, 255, 255));
                     HPEN hOld = (HPEN)SelectObject(hdc, hPen);
-                    MoveToEx(hdc, 0, win->tocDragGuideY, nullptr);
+                    // farLeft=true -> sibling drop: FULL item width line.
+                    // farLeft=false -> child drop: HALF/indented line (one tree level in).
+                    int lineStartX = win->tocDragFarLeft ? 0 : DpiScale(hwnd, 16);
+                    MoveToEx(hdc, lineStartX, win->tocDragGuideY, nullptr);
                     LineTo(hdc, rc.right, win->tocDragGuideY);
                     SelectObject(hdc, hOld);
                     DeleteObject(hPen);

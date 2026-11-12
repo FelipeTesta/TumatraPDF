@@ -24,6 +24,7 @@ import {
   postMessage,
   sendText,
   captureWindowToPng,
+  captureWindowMenuToPng,
   getSystemMetrics,
   getWindowRect,
   readWindowDCColumn,
@@ -39,7 +40,7 @@ import {
   VK_ESCAPE,
 } from "./winapi.ts";
 
-export { captureWindowToPng };
+export { captureWindowToPng, captureWindowMenuToPng };
 
 export const FRAME_CLASS = "SUMATRA_PDF_FRAME";
 export const CANVAS_CLASS = "SUMATRA_PDF_CANVAS";
