@@ -58,8 +58,13 @@ export enum ControlCommand {
   TestBookmarkMove = 63,
   TestAlignQueue = 64,
   TestGeomSave = 65,
+  // TestAlignApply = 66: int pageNo, float angleDeg, float cropX, float cropY, float cropDx, float cropDy
+  //   -> EngineMupdf::ApplyPreviewGeometry (gated preview; NOT a direct pending-geometry apply)
   TestAlignApply = 66,
+  // TestAlignCommit = 67: int pageNo [, string outPath] -> promote preview to pending;
+  //   if outPath given, also EngineMupdfSaveUpdated to outPath (pristine if no preview)
   TestAlignCommit = 67,
+  // TestAlignDiscard = 68: int pageNo -> DiscardPreview on live engine
   TestAlignDiscard = 68,
   TestGetPageNo = 69,
   TestTocToolbarButton = 70,

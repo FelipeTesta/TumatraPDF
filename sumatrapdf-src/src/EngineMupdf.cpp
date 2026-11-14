@@ -6855,6 +6855,11 @@ static void ApplyPendingGeometryEdits(EngineMupdf* epdf) {
             // Check if angle is effectively a multiple of 90 degrees (R2 path)
             float rem = fmodf(fabsf(angleDeg), 90.0f);
             bool is90Multiple = (rem < 0.01f || rem > 89.99f);
+            // R9e: rotatedCrop must NOT take the R2 (/Rotate+CropBox) path — it ignores rotatedCrop
+            // and shifts/clips the box. Route any rotated crop through R3 (Form XObject).
+            if (edit.rotatedCrop) {
+                is90Multiple = false;
+            }
 
             if (is90Multiple) {
                 // R2 path: round to nearest 90 and use /Rotate + CropBox transform
@@ -6912,7 +6917,30 @@ static void ApplyPendingGeometryEdits(EngineMupdf* epdf) {
                 }
                 // For rotateDelta == 0, cropBox stays as-is (original coords)
 
-                pdf_set_page_box(ctx, pdfpage, FZ_CROP_BOX, cropBox);
+                // R2 rotateDelta==0 (pure crop, no rotation): write BOTH MediaBox
+                // and CropBox as the crop box at its TRUE location, converted from
+                // fitz page space (y-down, origin top-left of mediabox) to PDF user
+                // space (y-up, origin bottom-left):
+                //   x_pdf = mb.x0 + x_fitz
+                //   y_pdf = mb.y1 - y_fitz   (flip: top edge in fitz -> top in PDF)
+                // Skipping pdf_set_page_box which routes through the page CTM and
+                // causes box divergence on any second call. Matches R3 path.
+                // OLD (buggy): wrote zero-origin [0 0 W H], dropping the crop
+                // translation/origin -> Apply cut a different region than the drawn
+                // box (BUG 1, s64-R8).
+                if (rotateDelta == 0) {
+                    fz_rect mb = pdf_bound_page(ctx, pdfpage, FZ_MEDIA_BOX);
+                    float pdfX0 = mb.x0 + cropBox.x0;
+                    float pdfY0 = mb.y1 - cropBox.y1; // crop bottom edge -> PDF bottom
+                    float pdfX1 = mb.x0 + cropBox.x1;
+                    float pdfY1 = mb.y1 - cropBox.y0; // crop top edge   -> PDF top
+                    fz_rect trueOriginBox = fz_make_rect(pdfX0, pdfY0, pdfX1, pdfY1);
+                    pdf_dict_put_rect(ctx, pageObj, PDF_NAME(MediaBox), trueOriginBox);
+                    pdf_dict_put_rect(ctx, pageObj, PDF_NAME(CropBox), trueOriginBox);
+                    edit.newMediabox = ToRectF(trueOriginBox);
+                } else {
+                    pdf_set_page_box(ctx, pdfpage, FZ_CROP_BOX, cropBox);
+                }
             } else {
                 // R3 path: arbitrary angle deskew via Form XObject
                 // Keep /Rotate unchanged (factor existing /Rotate into page transform if needed)
@@ -7214,6 +7242,11 @@ bool EngineMupdf::ApplyPendingGeometryEditsNow() {
                 // Check if angle is effectively a multiple of 90 degrees (R2 path)
                 float rem = fmodf(fabsf(angleDeg), 90.0f);
                 bool is90Multiple = (rem < 0.01f || rem > 89.99f);
+                // R9e: rotatedCrop must NOT take the R2 (/Rotate+CropBox) path — it ignores rotatedCrop
+                // and shifts/clips the box. Route any rotated crop through R3 (Form XObject).
+                if (edit.rotatedCrop) {
+                    is90Multiple = false;
+                }
 
                 if (is90Multiple) {
                     // R2 path: round to nearest 90 and use /Rotate + CropBox transform
@@ -7311,6 +7344,10 @@ bool EngineMupdf::ApplyPendingGeometryEditsNow() {
                     float rad = angleDeg * (float)M_PI / 180.0f;
                     float cosA = cosf(rad);
                     float sinA = sinf(rad);
+                    // MuPDF's content parser rejects scientific notation (cos(90°) prints as
+                    // -4.37e-08 -> "unknown keyword"); snap tiny sin/cos to 0.
+                    if (fabsf(cosA) < 1e-4f) cosA = 0.0f;
+                    if (fabsf(sinA) < 1e-4f) sinA = 0.0f;
 
                     // Transform 4 corners of cropRect by rotation around center
                     auto rotPt = [&](float x, float y) -> fz_point {
@@ -7330,11 +7367,15 @@ bool EngineMupdf::ApplyPendingGeometryEditsNow() {
                     float ry1 = fz_max(fz_max(c0.y, c1.y), fz_max(c2.y, c3.y));
                     fz_rect rotatedBBox = fz_make_rect(rx0, ry0, rx1, ry1);
 
-                    // All geometry above is normalized to a ZERO-ORIGIN box: the view/layout/tile
-                    // math (FzCreateViewCtm ignores origin) assumes origin (0,0); a
-                    // non-origin box renders blank. Store MediaBox/CropBox as [0 0 W H] raw PDF user space.
-                    fz_rect zeroOriginBox =
-                        fz_make_rect(0, 0, rotatedBBox.x1 - rotatedBBox.x0, rotatedBBox.y1 - rotatedBBox.y0);
+                    // R9 rotated crop: output page = box dims [0 0 W H], content rotated to box alignment.
+                    // Plain R3 (align): output = rotated bbox of the crop rect.
+                    fz_rect zeroOriginBox;
+                    if (edit.rotatedCrop) {
+                        zeroOriginBox = fz_make_rect(0, 0, cropW, cropH);
+                    } else {
+                        zeroOriginBox =
+                            fz_make_rect(0, 0, rotatedBBox.x1 - rotatedBBox.x0, rotatedBBox.y1 - rotatedBBox.y0);
+                    }
 
                     // Build XObject content stream:
                     // q <translate -cropX0, -cropY0> cm <original_contents> Q
@@ -7345,6 +7386,17 @@ bool EngineMupdf::ApplyPendingGeometryEditsNow() {
                     // syntax error that drops the whole XObject stream → blank page).
                     // Translation in PDF user space (y-up): crop lower-left to origin.
                     xobjContent.Append(fmt("1 0 0 1 %g %g cm\n", -x0_pdf, -y0_pdf));
+                    // R9 rotated crop: clip to the rotated selection box (not the
+                    // axis-aligned local AABB). Xobject space has box center at
+                    // (cropW/2, cropH/2); the box is local rect rotated PDF -angleDeg
+                    // (screen/fitz CW +angleDeg == PDF y-up rotation by -angleDeg).
+                    if (edit.rotatedCrop) {
+                        float halfW = cropW * 0.5f, halfH = cropH * 0.5f;
+                        float cA = cosA, sA = sinA; // snapped copies (no e-notation in stream)
+                        xobjContent.Append(fmt("q\n1 0 0 1 %g %g cm\n", halfW, halfH));
+                        xobjContent.Append(fmt("%g %g %g %g 0 0 cm\n", cA, -sA, sA, cA));
+                        xobjContent.Append(fmt("%g %g %g %g re\nW n\nQ\n", -halfW, -halfH, cropW, cropH));
+                    }
 
                     // Get original page contents
                     pdf_obj* origContents = pdf_page_contents(ctx, pdfpage);
@@ -7378,7 +7430,17 @@ bool EngineMupdf::ApplyPendingGeometryEditsNow() {
                         fz_new_buffer_from_copied_data(ctx, (const unsigned char*)xobjStr.s, xobjStr.len);
 
                     // XObject /BBox = [0, 0, cropW, cropH] (XObject space = crop rect at origin)
-                    fz_rect xobjBBox = fz_make_rect(0, 0, cropW, cropH);
+                    fz_rect xobjBBox;
+                    if (edit.rotatedCrop) {
+                        // Content clipped to the rotated box; BBox must enclose it
+                        // (axis-aligned bounds of the rotated rect, centered on the box).
+                        float halfW = cropW * 0.5f, halfH = cropH * 0.5f;
+                        float bw = cropW * fabsf(cosA) + cropH * fabsf(sinA);
+                        float bh = cropW * fabsf(sinA) + cropH * fabsf(cosA);
+                        xobjBBox = fz_make_rect(halfW - bw / 2, halfH - bh / 2, halfW + bw / 2, halfH + bh / 2);
+                    } else {
+                        xobjBBox = fz_make_rect(0, 0, cropW, cropH);
+                    }
 
                     // XObject /Matrix maps XObject space -> parent page space (PDF user space).
                     // M(q) = R(q) + t where q = p_pdf - crop_origin_pdf, R is the rotation

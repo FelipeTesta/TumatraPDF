@@ -344,6 +344,7 @@ export const commands = [
     "CmdBookmarkDelete", "Delete Bookmark",
     "CmdBookmarkUpdate", "Update Bookmark Page",
     "CmdBookmarkRename", "Rename Bookmark",
+    "CmdArchPageCrop", "Arch: Page Crop (image-editor bounding box)",
     "CmdNone", "Do nothing",
 ];
 

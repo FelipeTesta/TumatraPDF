@@ -268,9 +268,12 @@ export const WM_COPYDATA = 0x004a;
 // button messages
 export const BM_CLICK = 0x00f5;
 // toolbar messages
-export const TB_BUTTONCOUNT = 0x041e;
-export const TB_GETBUTTON = 0x0417;
+export const TB_BUTTONCOUNT = 0x0418; // WM_USER + 24 (was 0x041e = TB_SETBUTTONSIZE, returned 0)
+export const TB_GETBUTTON = 0x0417; // WM_USER + 23
 export const TB_GETITEMRECT = 0x044f;
+export const TB_GETSTATE = 0x040b; // WM_USER + 11 (was 0x0411 = TB_SETSTATE, corrupted fsState!)
+export const TB_SETSTATE = 0x0411; // WM_USER + 17 (kept for reference — do NOT call as a reader)
+export const TB_ISBUTTONCHECKED = 0x0408; // WM_USER + 8
 // TBBUTTON (64-bit) = 24 bytes: idCommand is the 2nd int (offset 4)
 export const kTbbButtonBytes = 6; // Int32Count
 

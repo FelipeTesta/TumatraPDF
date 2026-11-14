@@ -238,8 +238,8 @@ struct MainWindow {
     Vec<TocItem*> tocMatchingItems;
     // TOC bookmark drag-reorder state (s43-b): item being dragged + guide line.
     TocItem* tocDragItem = nullptr;
-    int tocDragGuideY = -1; // tree-view client y of the horizontal drop guide, -1 = hidden
-    Point tocDragStart{};   // drag start mouse pos, tree-view client coords
+    int tocDragGuideY = -1;      // tree-view client y of the horizontal drop guide, -1 = hidden
+    Point tocDragStart{};        // drag start mouse pos, tree-view client coords
     bool tocDragFarLeft = false; // true = sibling drop (full line), false = child drop (half line)
     // TOC drag-reorder mode (s51-d): drag-reorder ONLY while ON (default OFF).
     // When OFF, left-click on a tree item passes through to normal TreeView
@@ -410,7 +410,7 @@ struct MainWindow {
     };
     struct ArchToolsState {
         int toolMode =
-            0; // 0=off, 1=scale, 2=measure, 3=radius (3 clicks), 4=reference line (2 clicks), 5=align (2-point line)
+            0; // 0=off, 1=scale, 2=measure, 3=radius (3 clicks), 4=reference line (2 clicks), 5=align, 6=page crop
         int unit = 2; // 0=mm,1=cm,2=m,3=in,4=ft
 
         // Per-page scale state
@@ -450,7 +450,20 @@ struct MainWindow {
         PointF point3;       // radius arc bulge point (mode 3)
         int dragLine = 0;    // 0 none, 1 first point placed, 2 done
         AlignLine alignLine; // ephemeral align result (toolMode 5)
-        bool snap = true;    // default true
+        // Page-crop overlay state (toolMode 6): image-editor-style bounding box in
+        // fitz page space (y-down). cropBboxPage is the live box; cleared on Apply /
+        // tool switch; full-page mediabox is drawn on activation.
+        RectF cropBboxPage{};         // current box, page coords (fitz page space)
+        bool cropBboxDefined = false; // true when a box is being shown / edited
+        float cropAngle = 0.0f; // crop rotation deg, screen/fitz convention (y-down). Box painted rotated by this;
+                                // engine applies rotatedCrop when != 0.
+        float cropRotateStartAngle = 0.0f; // angle at rotate-drag press (for delta computation)
+        bool cropRotating = false;         // true while a rotate drag (started outside poly) is active
+        int cropDragState = 0;             // 0 idle, 1 dragging (resize or move or rotate)
+        int cropResizeHandle = 0;          // ResizeHandle cast to int while dragging
+        Point cropDragStartScreen{};       // screen pt where the drag started
+        RectF cropBboxStartPage{};         // box snapshot at drag start (for revert on ESC)
+        bool snap = true;                  // default true
         // Idempotency guard for CmdArchAlign: a second dispatch within ~100ms
         // of the first, with no canvas interaction in between, is a rapid
         // double-post (Edit toolbar check button) and is ignored so a single
@@ -585,6 +598,12 @@ struct MainWindow {
         int dragEdge = 0;       // 0 = move inside, 1..8 = edge/handle
         PointF dragStartPage{}; // mouse pos (page coords) when the drag began
         RectF dragStartBbox{};  // bbox when the drag began
+        // TUMATRA-FORK(s64-R9g): temporary view constraints while edit mode is on.
+        // suspended = we turned it off; restore on edit-off iff still off (user
+        // re-enabling mid-edit is left alone). Bound to the tab suspended on.
+        bool trimSuspended = false;    // marginTrimEnabled was on -> we toggled it off
+        bool twoColsSuspended = false; // viewportCropV2Enabled was on -> we toggled it off
+        Str suspendTabPath{};          // filePath of the tab suspension was applied to
     } editTools;
     // --- end edit tools state ---
 

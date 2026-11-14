@@ -1474,15 +1474,23 @@ static void ExecuteControlRequest(ControlRequest* req) {
         }
 
         case ControlCmd::TestAlignApply: {
-            // Queue geometry edit + apply instantly + return page mediabox
+            // Real gated preview path: EngineMupdf::ApplyPreviewGeometry
+            // (s64-R2). Stores previewGeomEdit for later promote/discard — does
+            // NOT promote to pendingGeomEdits (that is TestAlignCommit's job).
+            // Optional 7th arg: int rotatedCrop (0/1) for R9 rotated page crop.
             i32 pageNo = 0;
             float angleDeg = 0;
             float cropX = 0, cropY = 0, cropDx = 0, cropDy = 0;
+            i32 rotatedCrop = 0;
             if (!IntArg(req, 0, pageNo) || !FloatArg(req, 1, angleDeg) || !FloatArg(req, 2, cropX) ||
                 !FloatArg(req, 3, cropY) || !FloatArg(req, 4, cropDx) || !FloatArg(req, 5, cropDy)) {
                 AppendError(req,
                             "TestAlignApply expects int pageNo, float angleDeg, float cropX, float cropY, float "
-                            "cropDx, float cropDy");
+                            "cropDx, float cropDy [, int rotatedCrop]");
+                break;
+            }
+            if (len(req->args) > 6 && !IntArg(req, 6, rotatedCrop)) {
+                AppendError(req, "TestAlignApply rotatedCrop must be 0/1");
                 break;
             }
             if (len(gWindows) == 0) {
@@ -1495,49 +1503,34 @@ static void ExecuteControlRequest(ControlRequest* req) {
                 AppendError(req, "TestAlignApply no-engine");
                 break;
             }
-            // Get mediabox BEFORE apply
-            RectF mbBefore = engine->PageMediabox(pageNo);
-            RectF cropRect{cropX, cropY, cropDx, cropDy};
-            if (!engine->QueuePageGeometry(pageNo, angleDeg, cropRect)) {
-                AppendError(req, "TestAlignApply queue failed (page may have annotations)");
+            EngineMupdf* em = AsEngineMupdf(engine);
+            if (!em) {
+                AppendError(req, "TestAlignApply not-pdf-engine");
                 break;
             }
-            EngineMupdf* em = AsEngineMupdf(engine);
-            if (em) {
-                em->modifiedPageGeometry = true;
-            }
-            // Apply instantly (instant visual deskew), then mirror the full
-            // FinalizeAlign tail (Canvas.cpp): drop stale RenderCache bitmaps,
-            // rebuild page info, relayout keeping the view anchor and repaint.
-            // Otherwise the test control command would leave the canvas showing
-            // the pre-edit bitmap.
-            bool applied = engine->ApplyPendingGeometryEditsNow();
             DisplayModel* dm = win->AsFixed();
-            if (applied && dm) {
-                if (gRenderCache) {
-                    gRenderCache->FreeForDisplayModel(dm);
-                }
-                dm->BuildPagesInfo();
-                dm->RelayoutKeepingView();
-                ToolbarUpdateStateForWindow(win, false);
-            }
-            // Get mediabox AFTER apply
-            RectF mbAfter = engine->PageMediabox(pageNo);
-            // Build result: applied flag + before/after mediabox
+            RectF cropRect{cropX, cropY, cropDx, cropDy};
+            bool applied = em->ApplyPreviewGeometry(pageNo, angleDeg, cropRect, dm, rotatedCrop != 0);
+            RectF mb = engine->PageMediabox(pageNo);
             str::Builder sb;
             sb.Append(fmt("applied=%d\n", applied ? 1 : 0));
-            sb.Append(fmt("before=%.2f,%.2f,%.2f,%.2f\n", mbBefore.x, mbBefore.y, mbBefore.dx, mbBefore.dy));
-            sb.Append(fmt("after=%.2f,%.2f,%.2f,%.2f\n", mbAfter.x, mbAfter.y, mbAfter.dx, mbAfter.dy));
+            sb.Append(fmt("mediabox=%.2f,%.2f,%.2f,%.2f\n", mb.x, mb.y, mb.dx, mb.dy));
             AppendTestResult(req, 0, sb.TakeStr());
             break;
         }
 
         case ControlCmd::TestAlignCommit: {
-            // Promote preview to pending (commit for save)
+            // Promote preview to pending (commit for save). Optional 2nd arg:
+            // outPath — if supplied, also save the live engine to that path.
+            // With no outPath this is promote-only (requires a live preview).
             i32 pageNo = 0;
             if (!IntArg(req, 0, pageNo)) {
-                AppendError(req, "TestAlignCommit expects int pageNo");
+                AppendError(req, "TestAlignCommit expects int pageNo [, string outPath]");
                 break;
+            }
+            Str outPath;
+            if (len(req->args) > 1) {
+                outPath = StringArg(req, 1);
             }
             if (len(gWindows) == 0) {
                 AppendError(req, "TestAlignCommit no-window");
@@ -1550,17 +1543,33 @@ static void ExecuteControlRequest(ControlRequest* req) {
                 break;
             }
             EngineMupdf* em = AsEngineMupdf(dm->GetEngine());
-            if (!em || !em->hasPreviewGeomEdit || em->previewGeomEdit.pageNo != pageNo) {
-                AppendError(req, "TestAlignCommit no-preview-on-page");
+            if (!em) {
+                AppendError(req, "TestAlignCommit not-pdf-engine");
                 break;
             }
-            if (em->PromotePreviewToPending(pageNo)) {
-                em->hasPreviewGeomEdit = false;
-                em->modifiedPageGeometry = true;
-                em->previewGeomEdit = EngineMupdf::PageGeomEdit{};
-                AppendTestResult(req, 0, StrL("committed\n"));
+            bool promoted = false;
+            if (em->hasPreviewGeomEdit && em->previewGeomEdit.pageNo == pageNo) {
+                promoted = em->PromotePreviewToPending(pageNo);
+                if (promoted) {
+                    em->hasPreviewGeomEdit = false;
+                    em->modifiedPageGeometry = true;
+                    em->previewGeomEdit = EngineMupdf::PageGeomEdit{};
+                }
+            }
+            if (outPath) {
+                // Save the live engine (promoted edits, or pristine if none).
+                // apply-without-commit leaves no pending edits -> saved file pristine.
+                bool ok = EngineMupdfSaveUpdated(dm->GetEngine(), outPath, Func1<Str>{}, nullptr, false);
+                str::Builder sb;
+                sb.Append(fmt("saved=%d\n", ok ? 1 : 0));
+                sb.Append(fmt("promoted=%d\n", promoted ? 1 : 0));
+                AppendTestResult(req, ok ? 0 : 1, sb.TakeStr());
             } else {
-                AppendError(req, "TestAlignCommit promote-failed");
+                if (promoted) {
+                    AppendTestResult(req, 0, StrL("committed\n"));
+                } else {
+                    AppendError(req, "TestAlignCommit no-preview-on-page");
+                }
             }
             break;
         }

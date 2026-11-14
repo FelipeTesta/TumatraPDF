@@ -22,7 +22,10 @@ extern "C" {
 // Apply a preview geometry edit in-memory for visual feedback (s64-R2).
 // Does NOT add to pendingGeomEdits — this is for preview only.
 // Stores the edit in previewGeomEdit for later promote/discard.
-bool EngineMupdf::ApplyPreviewGeometry(int pageNo, float angleDeg, RectF cropRectPage, DisplayModel* dm) {
+// rotatedCrop: rotated page crop (R9) — output boxes [0 0 W H], content rotated
+// to box alignment (angleDeg = box angle). Only meaningful for non-90-multiple.
+bool EngineMupdf::ApplyPreviewGeometry(int pageNo, float angleDeg, RectF cropRectPage, DisplayModel* dm,
+                                       bool rotatedCrop) {
     if (!pdfdoc || pageNo < 1 || pageNo > pageCount) {
         return false;
     }
@@ -118,6 +121,12 @@ bool EngineMupdf::ApplyPreviewGeometry(int pageNo, float angleDeg, RectF cropRec
 
                             float rem = fmodf(fabsf(angleDeg), 90.0f);
                             is90Multiple = (rem < 0.01f || rem > 89.99f);
+                            // R9e: rotatedCrop must NOT take the R2 (/Rotate+CropBox) path — R2
+                            // ignores rotatedCrop and shifts/clips the box (text lost, wrong boxes).
+                            // Route any rotated crop through R3 (Form XObject, boxes [0 0 W H]).
+                            if (rotatedCrop) {
+                                is90Multiple = false;
+                            }
 
                             if (is90Multiple) {
                                 // R2 path
@@ -164,7 +173,30 @@ bool EngineMupdf::ApplyPreviewGeometry(int pageNo, float angleDeg, RectF cropRec
                                     cropBox.x1 = cropBox.x0 + h;
                                     cropBox.y1 = cropBox.y0 + w;
                                 }
-                                pdf_set_page_box(ctx, pdfpage, FZ_CROP_BOX, cropBox);
+                                // R2 rotateDelta==0 (pure crop, no rotation): write BOTH
+                                // MediaBox and CropBox as the crop region at its TRUE location,
+                                // converted from fitz page space (y-down, origin top-left of
+                                // mediabox) to PDF user space (y-up, origin bottom-left):
+                                //   x_pdf = mb.x0 + x_fitz
+                                //   y_pdf = mb.y1 - y_fitz   (flip: top edge in fitz -> top in PDF)
+                                // Skipping pdf_set_page_box which routes through the page CTM
+                                // and causes box divergence on any second call (save path).
+                                // OLD (buggy): wrote zero-origin [0 0 W H], dropping the crop
+                                // translation/origin -> Apply cut a different region than the drawn
+                                // box (BUG 1, s64-R8).
+                                if (rotateDelta == 0) {
+                                    fz_rect mb = pdf_bound_page(ctx, pdfpage, FZ_MEDIA_BOX);
+                                    float pdfX0 = mb.x0 + cropBox.x0;
+                                    float pdfY0 = mb.y1 - cropBox.y1; // crop bottom edge -> PDF bottom
+                                    float pdfX1 = mb.x0 + cropBox.x1;
+                                    float pdfY1 = mb.y1 - cropBox.y0; // crop top edge   -> PDF top
+                                    zeroOriginBox = fz_make_rect(pdfX0, pdfY0, pdfX1, pdfY1);
+                                    pdf_dict_put_rect(ctx, pageObj, PDF_NAME(MediaBox), zeroOriginBox);
+                                    pdf_dict_put_rect(ctx, pageObj, PDF_NAME(CropBox), zeroOriginBox);
+                                } else {
+                                    pdf_set_page_box(ctx, pdfpage, FZ_CROP_BOX, cropBox);
+                                }
+                                ok = true;
                             } else {
                                 // R3 path - arbitrary angle via Form XObject
                                 pdf_obj* boxObj = pdf_dict_get_inheritable(ctx, pageObj, PDF_NAME(CropBox));
@@ -192,6 +224,10 @@ bool EngineMupdf::ApplyPreviewGeometry(int pageNo, float angleDeg, RectF cropRec
                                 float rad = angleDeg * (float)M_PI / 180.0f;
                                 float cosA = cosf(rad);
                                 float sinA = sinf(rad);
+                                // MuPDF's content parser rejects scientific notation (cos(90°) prints
+                                // as -4.37e-08 -> "unknown keyword"); snap tiny sin/cos to 0.
+                                if (fabsf(cosA) < 1e-4f) cosA = 0.0f;
+                                if (fabsf(sinA) < 1e-4f) sinA = 0.0f;
 
                                 auto rotPt = [&](float x, float y) -> fz_point {
                                     float dx = x - cx;
@@ -209,12 +245,32 @@ bool EngineMupdf::ApplyPreviewGeometry(int pageNo, float angleDeg, RectF cropRec
                                 float ry1 = fz_max(fz_max(c0.y, c1.y), fz_max(c2.y, c3.y));
                                 fz_rect rotatedBBox = fz_make_rect(rx0, ry0, rx1, ry1);
 
-                                zeroOriginBox = fz_make_rect(0, 0, rotatedBBox.x1 - rotatedBBox.x0,
-                                                             rotatedBBox.y1 - rotatedBBox.y0);
+                                // R9 rotated crop: output page = box dims [0 0 W H] (axis-aligned),
+                                // content rotated by angleDeg so box axes become straight.
+                                // Plain R3 (align): output = rotated bbox of the crop rect.
+                                if (rotatedCrop) {
+                                    zeroOriginBox = fz_make_rect(0, 0, cropW, cropH);
+                                } else {
+                                    zeroOriginBox = fz_make_rect(0, 0, rotatedBBox.x1 - rotatedBBox.x0,
+                                                                 rotatedBBox.y1 - rotatedBBox.y0);
+                                }
 
                                 str::Builder xobjContent;
                                 xobjContent.Append("q\n");
                                 xobjContent.Append(fmt("1 0 0 1 %g %g cm\n", -x0_pdf, -y0_pdf));
+                                // R9 rotated crop: clip to the rotated selection box (not the
+                                // axis-aligned local AABB). Xobject space has box center at
+                                // (cropW/2, cropH/2); the box is local rect rotated PDF -angleDeg
+                                // (screen/fitz CW +angleDeg == PDF y-up rotation by -angleDeg).
+                                // Without this clip the output shows the AABB-rotated content with
+                                // empty corners and drops the selection's corner content.
+                                if (rotatedCrop) {
+                                    float halfW = cropW * 0.5f, halfH = cropH * 0.5f;
+                                    float cA = cosA, sA = sinA; // snapped copies (no e-notation in stream)
+                                    xobjContent.Append(fmt("q\n1 0 0 1 %g %g cm\n", halfW, halfH));
+                                    xobjContent.Append(fmt("%g %g %g %g 0 0 cm\n", cA, -sA, sA, cA));
+                                    xobjContent.Append(fmt("%g %g %g %g re\nW n\nQ\n", -halfW, -halfH, cropW, cropH));
+                                }
 
                                 pdf_obj* origContents = pdf_page_contents(ctx, pdfpage);
                                 if (origContents) {
@@ -242,7 +298,18 @@ bool EngineMupdf::ApplyPreviewGeometry(int pageNo, float angleDeg, RectF cropRec
                                 fz_buffer* xobjBuf =
                                     fz_new_buffer_from_copied_data(ctx, (const unsigned char*)xobjStr.s, xobjStr.len);
 
-                                fz_rect xobjBBox = fz_make_rect(0, 0, cropW, cropH);
+                                fz_rect xobjBBox;
+                                if (rotatedCrop) {
+                                    // Content is clipped to the rotated box; BBox must enclose it
+                                    // (axis-aligned bounds of the rotated rect, centered on the box).
+                                    float halfW = cropW * 0.5f, halfH = cropH * 0.5f;
+                                    float bw = cropW * fabsf(cosA) + cropH * fabsf(sinA);
+                                    float bh = cropW * fabsf(sinA) + cropH * fabsf(cosA);
+                                    xobjBBox =
+                                        fz_make_rect(halfW - bw / 2, halfH - bh / 2, halfW + bw / 2, halfH + bh / 2);
+                                } else {
+                                    xobjBBox = fz_make_rect(0, 0, cropW, cropH);
+                                }
 
                                 fz_matrix matrix;
                                 matrix.a = cosA;
@@ -338,7 +405,11 @@ bool EngineMupdf::ApplyPreviewGeometry(int pageNo, float angleDeg, RectF cropRec
         ScopedMutex rl(&renderLock);
         FzPageInfo* pageInfo = pages[pageNo - 1];
         if (pageInfo) {
-            if (!is90Multiple) { // R3 changes mediabox
+            // R3 always changes mediabox; R2 rotateDelta==0 (pure crop) now also
+            // writes the crop box at its true location (zeroOriginBox set above, with
+            // origin + y-flip into PDF user space). R2 with rotation keeps mediabox
+            // unchanged (/Rotate + CropBox only; zeroOriginBox stays [0 0 0 0]).
+            if (zeroOriginBox.x1 > 0.0f && zeroOriginBox.y1 > 0.0f) {
                 pageInfo->mediabox = ToRectF(zeroOriginBox);
             }
             if (pageInfo->page) {
@@ -357,14 +428,19 @@ bool EngineMupdf::ApplyPreviewGeometry(int pageNo, float angleDeg, RectF cropRec
     previewGeomEdit.pageNo = pageNo;
     previewGeomEdit.angleDeg = angleDeg;
     previewGeomEdit.cropRectPage = cropRectPage;
-    // For R3, newMediabox is set; for R2, it's empty
-    if (!is90Multiple) {
+    previewGeomEdit.rotatedCrop = rotatedCrop;
+    // newMediabox set for R3 (pure crop via Form XObject, zero-origin box with
+    // XObject transform compensating) and R2 rotateDelta==0 (pure crop, box at
+    // true location with origin + y-flip); empty for R2 with rotation
+    // (/Rotate + CropBox only, mediabox unchanged).
+    if (zeroOriginBox.x1 > 0.0f && zeroOriginBox.y1 > 0.0f) {
         previewGeomEdit.newMediabox = ToRectF(zeroOriginBox);
     } else {
         previewGeomEdit.newMediabox = RectF();
     }
     hasPreviewGeomEdit = true;
-    appliedInMemory = true; // live doc has been modified
+    appliedInMemory = true;      // live doc has been modified
+    modifiedPageGeometry = true; // preview is an unsaved change -> dirty dot lights (s64-R5 bug 4)
 
     // Invalidate render cache and relayout
     if (dm && gRenderCache) {
@@ -401,7 +477,7 @@ bool EngineMupdf::DiscardPreview(int pageNo, DisplayModel* dm) {
     if (!hasPreviewGeomEdit || previewGeomEdit.pageNo != pageNo) {
         return false;
     }
-    // Restore pristine state (same as RestorePageGeometryForAlign)
+    // Restore pristine state (same as EngineMupdf::RestorePageGeometry)
     bool ok = RestorePageGeometry(pageNo, dm);
     if (ok) {
         hasPreviewGeomEdit = false;

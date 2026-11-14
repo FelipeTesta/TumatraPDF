@@ -1,0 +1,202 @@
+digraph NomacsTools {
+    // ============================================================
+    // nomacs (Qt/C++ ImageLounge) — two tools architecture
+    // Port reference for TumatraPDF Win32 PDF reader.
+    // Clusters: A = Crop Image, B = Image Transform / Rotate,
+    //           C = Crop rotate control, S = shared state & coordinate transforms.
+    // Node labels: Class/Function \n file:line (verbatim names).
+    // Edge labels: calls | signal | reads | writes | owns | base-of | connect.
+    // Every file:line verified by grep in TEMP\nomacs\ImageLounge\src.
+    // ============================================================
+
+    rankdir=TB;
+    node [shape=box, style=rounded, fontname="Consolas", fontsize=10];
+    edge [fontname="Consolas", fontsize=9];
+    compound=true;
+
+    // ============================================================
+    // Shared cluster: state & coordinate transforms
+    // ============================================================
+    subgraph cluster_shared {
+        label="SHARED: state & coordinate transforms (DkEditableRect, DkWidgets.h:448)";
+        color="#673ab7";
+
+        s_rect [label="DkEditableRect (base of DkCropWidget)\nDkWidgets.h:448 class\nmousePress/move/release + rect bookkeeping", fillcolor="#d1c4e9", style=filled];
+        s_set  [label="setWorldTransform / setImageTransform\nDkWidgets.h:476 / :481", fillcolor="#e1bee7", style=filled];
+        s_w    [label="QTransform *mWorldTform\nDkWidgets.h:530", fillcolor="#f3e5f5", style=filled];
+        s_i    [label="QTransform *mImgTform\nDkWidgets.h:529", fillcolor="#f3e5f5", style=filled];
+        s_tt   [label="QTransform mTtform\nDkWidgets.h:531", fillcolor="#f3e5f5", style=filled];
+        s_rt   [label="QTransform mRtform\nDkWidgets.h:532", fillcolor="#f3e5f5", style=filled];
+        s_rot  [label="DkRotatingRect (rect+angle, rotate about center)\nDkMath.cpp:36 ctor\ngetDiagonal:68 getCenter:189 getAngle:262\ngetTransform:283 rotate:400", fillcolor="#e1bee7", style=filled];
+        s_orig [label="DkImageStorage::mOriginal (pristine QImage)\nDkImageStorage.h:302", fillcolor="#e1bee7", style=filled];
+        s_edt  [label="DkImageContainer::mEdited (dirty flag)\nDkImageContainer.h:131", fillcolor="#e1bee7", style=filled];
+        s_ri   [label="DkImage::rotateImage(img, angle)\nDkImageStorage.cpp:397\nQTransform::rotate + QImage::transformed\nSmoothTransformation, bounds expand, transparent fill", fillcolor="#c8e6c9", style=filled];
+
+        s_set -> s_w  [label="writes"];
+        s_set -> s_i  [label="writes"];
+        s_rect -> s_tt [label="reads/writes"];
+        s_rect -> s_rt [label="reads/writes"];
+        s_rot -> s_ri  [label="angle feeds"];
+        s_ri -> s_orig [label="reads mOriginal"];
+        s_ri -> s_edt  [label="writes mEdited dirty"];
+    }
+
+    // ============================================================
+    // Cluster A: Crop Image pipeline
+    // ============================================================
+    subgraph cluster_crop {
+        label="CLUSTER A: Crop Image pipeline (DkCropWidget + overlay + Apply/cancel/ESC)";
+        color="#4caf50";
+
+        a_widget  [label="DkCropWidget : public DkEditableRect\nDkWidgets.h:549 class\nctor DkWidgets.cpp:1973\nowns DkCropToolBar + DkRectWidget", fillcolor="#c8e6c9", style=filled];
+        a_toolbar [label="DkCropToolBar\nDkToolbars.cpp:831 ctor\nsetAspectRatio:1029 setRect:1035\nonCropActionTriggered=Apply:1040\nonCancelActionTriggered=ESC/cancel:1045\nonAngleBoxValueChanged:1067\nconnect mCropRect->updateRectSignal:1011", fillcolor="#bbdefb", style=filled];
+        a_rect    [label="DkRectWidget (current crop rect + spinboxes)\nDkBasicWidgets.h:250\nctor:758 setRect:765 updateRect:803 createLayout:808", fillcolor="#bbdefb", style=filled];
+        a_viewport[label="DkViewPort::cropImage(rect, bgCol, cropToMetaData)\nDkViewPort.cpp:2021\n-> imgC->cropImage(rect,bgCol,cropToMetaData) :2030 (applies the cut)", fillcolor="#bbdefb", style=filled];
+        a_connect [label="connect cropImageSignal -> cropImage\nDkControlWidget.cpp:286", fillcolor="#e1bee7", style=filled];
+
+        a_press   [label="mousePressEvent (DkEditableRect)\nDkWidgets.cpp:1714\ngrab handle/corner vs interior\nsetCursor resize/move", fillcolor="#fff9c4", style=filled];
+        a_move    [label="mouseMoveEvent (DkEditableRect)\nDkWidgets.cpp:1737\nresize corner/edge OR move interior\ncontainsPoint(poly) hit-test\nsetCursor SizeAll/ClosedHand", fillcolor="#fff9c4", style=filled];
+        a_release [label="mouseReleaseEvent (DkEditableRect)\nDkWidgets.cpp:1855\ncommit rect -> emit signals", fillcolor="#fff9c4", style=filled];
+
+        a_emitSig [label="emit cropImageSignal(rect, bgCol, cropToMetadata)\nDkWidgets.cpp:2031", fillcolor="#c8e6c9", style=filled];
+        a_emitUpd [label="emit updateRectSignal(rect())\nDkWidgets.cpp:1887 (toolbar stays in sync)", fillcolor="#c8e6c9", style=filled];
+
+        a_apply   [label="Apply: onCropActionTriggered\nDkToolbars.cpp:1040 -> DkCropWidget::crop()\n-> cropImageSignal -> DkViewPort::cropImage\ncut applied (DkRotatingRect -> image transform)", fillcolor="#c8e6c9", style=filled];
+        a_cancel  [label="Cancel / ESC: onCancelActionTriggered\nDkToolbars.cpp:1045 -> hideSignal\nrect discarded, no cut applied", fillcolor="#ffcdd2", style=filled];
+
+        a_aspect  [label="Aspect-ratio control\nsetAspectRatio:1029\nonRatioBoxCurrentIndexChanged:1102\nonHor/VerValBoxValueChanged:1136/1130\nswapAction:1060", fillcolor="#e1bee7", style=filled];
+        a_style   [label="stylesheet.css dark theme\noverlay fill + 8 resize handles + rotate handle\ncursor styling (SizeAll/ClosedHand/Cross)", fillcolor="#e1bee7", style=filled];
+
+        // ownership / lifecycle
+        a_widget -> a_toolbar [label="owns"];
+        a_widget -> a_rect    [label="owns/reads rect"];
+        a_toolbar -> a_connect [label="configures"];
+        a_connect -> a_widget [label="signal: cropImageSignal"];
+        a_connect -> a_viewport [label="connect: cropImage"];
+
+        a_press -> a_move -> a_release;
+        a_release -> a_emitSig [label="commit rect"];
+        a_release -> a_emitUpd [label="sync toolbar"];
+        a_emitSig -> a_apply   [label="calls"];
+        a_emitSig -> a_cancel  [label="ESC cancels", color="#d32f2f", style=dashed];
+        a_toolbar -> a_apply   [label="Apply click"];
+        a_toolbar -> a_cancel  [label="Cancel/ESC click"];
+        a_toolbar -> a_aspect  [label="writes ratio"];
+        a_style -> a_widget    [label="styles overlay+handles", style=dashed];
+        a_style -> a_toolbar   [label="styles buttons", style=dashed];
+        a_widget -> a_viewport [label="calls imgC->cropImage (applies cut)", labeldistance=2];
+    }
+
+    // ============================================================
+    // Cluster B: Image Transform / Rotate pipeline
+    // ============================================================
+    subgraph cluster_rotate {
+        label="CLUSTER B: Image Transform / Rotate (DkRotateManipulator -> rotateImage)";
+        color="#2196f3";
+
+        b_reg   [label="DkManipulators: register mpl_rotate\nDkManipulators.cpp:190\nQSharedPointer<DkRotateManipulator>", fillcolor="#e1bee7", style=filled];
+        b_manip [label="DkRotateManipulator : DkBaseManipulatorExt\nDkManipulatorsIpl.h:163 class\nctor :306  mAngle member\nsetAngle(int) :321 (replaces mAngle)\nangle() :330\napply(const QImage&) :311 -> rotateImage", fillcolor="#c8e6c9", style=filled];
+        b_angle [label="int mAngle (total angle)\nDkManipulatorsIpl.cpp:321 setAngle", fillcolor="#f3e5f5", style=filled];
+        b_apply [label="apply(const QImage &img) const\nDkManipulatorsIpl.cpp:311\nreturn DkImage::rotateImage(img, angle()) :313\nrotates ORIGINAL with TOTAL angle", fillcolor="#bbdefb", style=filled];
+        b_rotImg[label="DkImage::rotateImage(img, angle)\nDkImageStorage.cpp:397\nQTransform::rotate + QImage::transformed\nSmoothTransformation\nbounds EXPAND, transparent fill", fillcolor="#bbdefb", style=filled];
+
+        b_widget[label="DkRotateWidget\nDkManipulatorWidgets.cpp:336 ctor\nmanipulator() :344 -> DkRotateManipulator\ncreateLayout:349", fillcolor="#bbdefb", style=filled];
+        b_slider[label="DkSlider angle fine-tune\nDkManipulatorWidgets.cpp:351 slider\nconnect valueChanged:355\nonAngleSliderValueChanged(int val):361", fillcolor="#fff9c4", style=filled];
+
+        b_reg -> b_manip [label="owns mpl_rotate"];
+        b_manip -> b_angle [label="writes mAngle (setAngle replaces)"];
+        b_slider -> b_widget [label="calls onAngleSliderValueChanged"];
+        b_widget -> b_manip [label="reads manipulator()"];
+        b_manip -> b_apply [label="calls apply()"];
+        b_apply -> b_rotImg [label="calls rotateImage(img,angle())"];
+        b_rotImg -> s_rot   [label="angle + rect about center", style=dashed];
+        b_rotImg -> s_orig  [label="reads mOriginal"];
+        b_rotImg -> s_edt   [label="writes mEdited dirty"];
+    }
+
+    // ============================================================
+    // Cluster C: Crop rotate control
+    // ============================================================
+    subgraph cluster_crop_rotate {
+        label="CLUSTER C: Crop rotate control (angle spinbox + drag rotate + rotated cut)";
+        color="#ff9800";
+
+        c_spinbox [label="DkCropToolBar::mAngleBox : QDoubleSpinBox\nDkToolbars.h:302 member\ncpp:941 range -180..180 deg, suffix deg", fillcolor="#bbdefb", style=filled];
+        c_valChg  [label="onAngleBoxValueChanged(double val)\nDkToolbars.cpp:1067\nemit angleSignal(DK_DEG2RAD * val)", fillcolor="#fff9c4", style=filled];
+        c_angleSig[label="DkCropToolBar::angleSignal(double) signal\nDkToolbars.h:285 (radians)", fillcolor="#e1bee7", style=filled];
+        c_angleChg[label="angleChanged(double val) slot\nDkToolbars.cpp:1072\nnormalizes to [-90,90] deg; mAngleBox->setValue(blockSignals)", fillcolor="#bbdefb", style=filled];
+        c_connAng [label="connect cropToolbar->angleSignal → lambda setAngle(angle)\nDkWidgets.cpp:1992-1994 (DkCropWidget::createToolbar)", fillcolor="#e1bee7", style=filled];
+        c_setAngle[label="DkEditableRect::setAngle(angle, apply)\nDkWidgets.cpp:1935\nmRtform.rotateRadians(angle); emit angleSignal(mRect.getAngle()+angle)", fillcolor="#c8e6c9", style=filled];
+        c_wAngSig [label="DkEditableRect::angleSignal(double) signal\nDkWidgets.h:497 → connect to cropToolbar->angleChanged :1999", fillcolor="#e1bee7", style=filled];
+        c_mState  [label="DkEditableRect::mState enum\nDkWidgets.h:462-467\n{do_nothing, initializing, rotating, moving, scaling}", fillcolor="#e1bee7", style=filled];
+        c_rotPress[label="mousePressEvent :1714-1735\ninside poly → moving; click OUTSIDE poly → rotating\nno dedicated rotate handle (verify)", fillcolor="#fff9c4", style=filled];
+        c_rotCur  [label="mRotatingCursor (rotating-cursor.svg 24px)\nDkWidgets.cpp:1446 ctor\nshown on hover outside poly :1759", fillcolor="#bbdefb", style=filled];
+        c_rotDrag [label="mouseMoveEvent rotating :1794-1810\nangle = xn.angle() - xt.angle() about rect center\nShift → snap to 22.5 deg steps (CV_PI*0.125)", fillcolor="#fff9c4", style=filled];
+        c_applyT  [label="mouseRelease → applyTransform() :1855\n:1878-1888 mRect.transform(mTtform, mRtform)\nemit updateRectSignal(rect()) :1887", fillcolor="#c8e6c9", style=filled];
+        c_crop    [label="DkCropWidget::crop(bool) :2017\nmat = mRtform * devicePixelRatioF()\npoly = mat.map(mRect.getPoly())\nDkRotatingRect rect; rect.setPoly(poly)", fillcolor="#c8e6c9", style=filled];
+        c_emit    [label="emit cropImageSignal(rect, bgCol, cropToMetadata)\nQTimer::singleShot(0) :2031\nthen setVisible(false) :2035 → rect + angle cleared", fillcolor="#c8e6c9", style=filled];
+        c_cropVP  [label="DkViewPort::cropImage(rect, bgCol, cropToMetaData)\nDkViewPort.cpp:2021\n→ imgC->cropImage(rect,bgCol,cropToMetaData) :2030", fillcolor="#bbdefb", style=filled];
+        c_cropIC  [label="DkImageContainer::cropImage(rect, col, cropToMetaData)\nDkImageContainer.cpp:95\n!cropToMetadata → DkImage::cropToImage(image(),rect,col) :98\n→ setImage(\"Cropped\"); else saveRectToXMP(rect)", fillcolor="#bbdefb", style=filled];
+        c_cropImg [label="DkImage::cropToImage(src, rect, fillColor)\nDkImageStorage.cpp:1192 (decl :152)\nrect.getTransform(tForm, cImgSize) :1196", fillcolor="#c8e6c9", style=filled];
+        c_getTf   [label="DkRotatingRect::getTransform(tForm, size)\nDkMath.cpp:283\ntForm = rotateRadians(-angle) + translate to upper-left\nsize = rotated rect dims", fillcolor="#f3e5f5", style=filled];
+        c_fast    [label="inscribed && !rotated → src.copy(cropRect)\n:1217-1219 axis-aligned copy, no interpolation", fillcolor="#c8e6c9", style=filled];
+        c_paint   [label="else: QImage img = cImgSize, fill fillColor (alpha<255 → transparent)\nQPainter: setWorldTransform(tForm), CompositionMode_Source\ndrawImage(QPoint{}, src) :1241-1249\n→ axis-aligned output; rotated cut painted straight\nNO counter-rotate back (verify)", fillcolor="#c8e6c9", style=filled];
+        c_reset   [label="setVisible(false) → mRect = DkRotatingRect()\nDkEditableRect::setVisible :1963\nESC/cancel hides widget → angle + rect cleared", fillcolor="#ffcdd2", style=filled];
+        c_spinRst [label="setVisible(true) → mAngleBox->setValue(0)\nDkToolbars.cpp:1023", fillcolor="#bbdefb", style=filled];
+        c_short   [label="cropAction \"Crop (ENTER)\" :896-898\ncancelAction \"Cancel (ESC)\" :900-902\npan = P :905\nNO angle shortcut (verify)", fillcolor="#e1bee7", style=filled];
+
+        // internal rotate flow
+        c_spinbox -> c_valChg [label="valueChanged"];
+        c_valChg -> c_angleSig [label="emit"];
+        c_angleSig -> c_connAng [label="connect"];
+        c_connAng -> c_setAngle [label="calls setAngle"];
+        c_setAngle -> c_wAngSig [label="emit angleSignal"];
+        c_wAngSig -> c_angleChg [label="updates spinbox"];
+        c_angleChg -> c_spinbox [label="setValue"];
+        c_mState -> c_rotPress [label="reads state"];
+        c_rotPress -> c_rotDrag [label="drag"];
+        c_rotCur -> c_rotPress [label="cursor style", style=dashed];
+        c_rotDrag -> c_setAngle [label="setAngle(angle,false)"];
+        c_rotDrag -> c_applyT [label="release commits"];
+        c_applyT -> c_mState [label="do_nothing", style=dashed];
+        c_crop -> c_emit [label="QTimer::singleShot(0)"];
+        c_emit -> c_cropVP [label="signal: cropImageSignal"];
+        c_cropVP -> c_cropIC [label="calls"];
+        c_cropIC -> c_cropImg [label="calls cropToImage"];
+        c_cropImg -> c_getTf [label="reads transform"];
+        c_cropImg -> c_fast [label="branch"];
+        c_cropImg -> c_paint [label="branch"];
+        c_crop -> c_reset [label="setVisible(false)"];
+        c_reset -> c_spinRst [label="next show resets", style=dashed];
+    }
+
+    // ============================================================
+    // Cross-cluster flow links
+    // ============================================================
+    a_widget -> s_rect [label="base-of", style=dashed];
+    s_rot -> a_widget [label="crop rect is a DkRotatingRect", style=dashed];
+    b_widget -> s_rot [label="shares DkRotatingRect math", style=dashed];
+    s_orig -> a_viewport [label="crop reads pristine image", style=dotted];
+    a_apply -> b_rotImg [label="cut+rotate both write mEdited", style=dotted, color="#d32f2f"];
+
+    // Cluster C <-> Cluster A cross-links
+    a_toolbar -> c_spinbox  [label="owns mAngleBox"];
+    c_angleChg -> a_toolbar [label="slot updates mAngleBox"];
+    c_connAng  -> a_widget  [label="connect in createToolbar"];
+    c_setAngle -> a_widget  [label="method of base DkEditableRect"];
+    c_rotPress -> a_press   [label="mousePress: outside poly → rotating"];
+    c_rotDrag  -> a_move    [label="mouseMove: rotating branch"];
+    c_applyT   -> a_release [label="mouseRelease → applyTransform"];
+    c_crop     -> a_apply   [label="crop() = Apply path"];
+    c_reset    -> a_cancel  [label="cancelSignal → hide → rect cleared"];
+    c_short    -> a_toolbar [label="ENTER/ESC actions"];
+    c_getTf    -> s_rot     [label="DkRotatingRect math", style=dashed];
+}
+
+// ============================================================
+// Legend
+// ============================================================
+// fillcolor: #c8e6c9 = action/commit, #bbdefb = UI/widget, #fff9c4 = mouse event,
+// #e1bee7 = state/data, #f3e5f5 = transform member, #ffcdd2 = cancel/discard.
+// Edge labels: calls | signal | reads | writes | owns | base-of | connect.
+// Solid = active flow, dashed = styling/structural, dotted = cross-reference.

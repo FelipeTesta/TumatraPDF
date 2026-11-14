@@ -665,6 +665,7 @@ void ToolbarUpdateStateForWindow(MainWindow* win, bool setButtonsVisibility) {
     SetToolbarButtonCheckedState(win, CmdMarginTrimToggle, dmChecked ? dmChecked->marginTrimEnabled : false);
     // Crop Align (moved to Edit toolbar): sync checked state from archTools.toolMode
     SetToolbarButtonCheckedState(win, CmdArchAlign, win->archTools.toolMode == 5);
+    SetToolbarButtonCheckedState(win, CmdArchPageCrop, win->archTools.toolMode == 6);
 
     // reposition the floating find bar over the search icon (and hide it if the
     // current document doesn't support find) when toolbar buttons change

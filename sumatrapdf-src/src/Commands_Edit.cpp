@@ -35,6 +35,7 @@ extern "C" {
 #include "SumatraPDF.h"
 #include "Tabs.h"
 #include "MainWindow.h"
+#include "Commands_ArchTools.h"
 #include "WindowTab.h"
 #include "EditAnnotations.h"
 #include "Toolbar.h"
@@ -130,11 +131,8 @@ void EditToolbarCreate(MainWindow* win) {
         Str toolTip;
     };
     static ToolbarButtonInfo2 gEditToolbarButtons[] = {
-        {CmdEditAddText, _TRN("+Text")},
-        {CmdEditAddImage, _TRN("+Img")},
-        {CmdEditImageCrop, _TRN("Crop")},
-        {CmdArchAlign, _TRN("Crop Align")},
-        {CmdEditImageApply, _TRN("Apply")},
+        {CmdEditAddText, _TRN("+Text")},      {CmdEditAddImage, _TRN("+Img")},    {CmdEditImageCrop, _TRN("Crop Img")},
+        {CmdArchPageCrop, _TRN("Page Crop")}, {CmdArchAlign, _TRN("Crop Align")}, {CmdEditImageApply, _TRN("Apply")},
     };
     constexpr int kEditToolbarButtonsCount = dimof(gEditToolbarButtons);
 
@@ -147,8 +145,8 @@ void EditToolbarCreate(MainWindow* win) {
         b.iBitmap = (int)TbIcon::Text;
         b.fsState = TBSTATE_ENABLED;
         b.fsStyle = BTNS_BUTTON | BTNS_SHOWTEXT | BTNS_AUTOSIZE;
-        // Crop and Crop Align are toggles: need BTNS_CHECK for the visual checked state
-        if (bi.cmdId == CmdEditImageCrop || bi.cmdId == CmdArchAlign) {
+        // Crop, Page Crop and Crop Align are toggles: need BTNS_CHECK for the visual checked state
+        if (bi.cmdId == CmdEditImageCrop || bi.cmdId == CmdArchPageCrop || bi.cmdId == CmdArchAlign) {
             b.fsStyle |= BTNS_CHECK;
         }
         Str s = trans::GetTranslation(bi.toolTip);
@@ -981,6 +979,68 @@ void EditToolsSelectImageFromMenu(MainWindow* win, int pageNo, int imageIdx, Rec
     HwndInvalidate(win->hwndCanvas);
 }
 
+// TUMATRA-FORK(s64-R9g): Edit ON temporarily disables trim (marginTrimEnabled)
+// + two-columns (viewportCropV2Enabled) via the same WM_COMMAND toggle paths the
+// toolbar buttons use, so relayout/cache/scrollbar/toolbar state stay consistent.
+// Remembers what WE suspended; on Edit OFF restores ONLY those, and only if the
+// user did not re-enable them in the meantime (clobber guard). Per-tab state:
+// the suspension is bound to the tab it was applied on; if the active document
+// changed while edit was on, restore is skipped (flags cleared, logged) rather
+// than touching another document.
+static void ApplyEditToolsViewConstraints(MainWindow* win, bool editOn) {
+    auto& st = win->editTools;
+    if (editOn) {
+        DisplayModel* dm = win->AsFixed();
+        if (!dm) {
+            st.trimSuspended = false;
+            st.twoColsSuspended = false;
+            str::FreePtr(&st.suspendTabPath);
+            logf("[edit] R9g: view constraints skipped (no fixed document)\n");
+            return;
+        }
+        WindowTab* tab = win->CurrentTab();
+        str::FreePtr(&st.suspendTabPath);
+        st.suspendTabPath = (tab && tab->filePath) ? str::Dup(tab->filePath) : Str{};
+        st.trimSuspended = dm->marginTrimEnabled;
+        st.twoColsSuspended = dm->viewportCropV2Enabled;
+        if (st.trimSuspended) {
+            PostMessageW(win->hwndFrame, WM_COMMAND, CmdMarginTrimToggle, 0);
+            logf("[edit] R9g: trim suspended (edit on)\n");
+        }
+        if (st.twoColsSuspended) {
+            PostMessageW(win->hwndFrame, WM_COMMAND, CmdViewportCropV2Toggle, 0);
+            logf("[edit] R9g: two-columns suspended (edit on)\n");
+        }
+        return;
+    }
+    DisplayModel* dm = win->AsFixed();
+    WindowTab* tab = win->CurrentTab();
+    bool sameDoc = tab && tab->filePath && st.suspendTabPath && str::Eq(tab->filePath, st.suspendTabPath);
+    if (dm && sameDoc) {
+        if (st.trimSuspended) {
+            if (!dm->marginTrimEnabled) {
+                PostMessageW(win->hwndFrame, WM_COMMAND, CmdMarginTrimToggle, 0);
+                logf("[edit] R9g: trim restored (edit off)\n");
+            } else {
+                logf("[edit] R9g: trim left on (user re-enabled during edit)\n");
+            }
+        }
+        if (st.twoColsSuspended) {
+            if (!dm->viewportCropV2Enabled) {
+                PostMessageW(win->hwndFrame, WM_COMMAND, CmdViewportCropV2Toggle, 0);
+                logf("[edit] R9g: two-columns restored (edit off)\n");
+            } else {
+                logf("[edit] R9g: two-columns left on (user re-enabled during edit)\n");
+            }
+        }
+    } else if (st.trimSuspended || st.twoColsSuspended) {
+        logf("[edit] R9g: restore skipped (active document changed while edit was on)\n");
+    }
+    st.trimSuspended = false;
+    st.twoColsSuspended = false;
+    str::FreePtr(&st.suspendTabPath);
+}
+
 // ---- command dispatch ------------------------------------------------------
 
 // HandleCmdEditToolsToggle — toggle edit mode on/off
@@ -997,12 +1057,16 @@ static void HandleCmdEditToolsToggle(MainWindow* win) {
         if (win->flashcard.on) {
             PostMessageW(win->hwndFrame, WM_COMMAND, CmdFlashcardToggle, 0);
         }
+        // TUMATRA-FORK(s64-R9g): trim + two-columns fight edit/crop/align
+        ApplyEditToolsViewConstraints(win, true);
         RelayoutFrame(win, true, -1);
     } else {
         EditToolsClearPendingImage(win);
         EditToolsClearImageEdits(win);
         win->editTools.cropMode = false;
         EditToolbarDestroy(win);
+        // TUMATRA-FORK(s64-R9g): restore only what we suspended
+        ApplyEditToolsViewConstraints(win, false);
         if (win->hwndCanvas) {
             SetCursor(LoadCursor(nullptr, IDC_ARROW));
         }
@@ -1062,8 +1126,8 @@ static void HandleCmdRepairDocumentFile(MainWindow* win) {
     repairOpts.do_compress = 1;
     repairOpts.do_compress_images = 1;
     repairOpts.do_compress_fonts = 1;
-    repairOpts.do_garbage = 2;   // renumber objects
-    repairOpts.do_clean = 1;     // clean content streams
+    repairOpts.do_garbage = 2; // renumber objects
+    repairOpts.do_clean = 1;   // clean content streams
 
     auto fn = MkFunc1Void(RepairSaveErrorCb);
     bool ok = EngineMupdfSaveUpdated(engine, tmpPath, fn, &repairOpts, true);
@@ -1099,12 +1163,11 @@ static void HandleCmdRepairDocumentFile(MainWindow* win) {
         file::Delete(tmpPath);
         if (err == ERROR_SHARING_VIOLATION || err == ERROR_ACCESS_DENIED) {
             MessageBoxW(win->hwndFrame,
-                L"Repair Document File\n\n"
-                L"The original file could not be replaced because it is open in "
-                L"another program or access was denied.\n\n"
-                L"The original file was not modified.",
-                L"Repair Document File",
-                MB_OK | MB_ICONWARNING | MB_TASKMODAL);
+                        L"Repair Document File\n\n"
+                        L"The original file could not be replaced because it is open in "
+                        L"another program or access was denied.\n\n"
+                        L"The original file was not modified.",
+                        L"Repair Document File", MB_OK | MB_ICONWARNING | MB_TASKMODAL);
         } else {
             EditNotify(win, StrL("Repair failed: could not replace original file"));
         }
@@ -1142,7 +1205,24 @@ bool HandleCommandEdit(MainWindow* win, int cmd) {
             }
             HandleCmdEditImageCrop(win);
             return true;
+        case CmdArchPageCrop:
+            // Page crop (arch tool): toggle the image-editor page bbox. Routed here
+            // because SumatraPDF.cpp (read-only) has no FrameOnCommand case for it.
+            HandleCmdArchPageCrop(win);
+            return true;
         case CmdEditImageApply:
+            // Page crop (toolMode 6): commit the live bbox preview.
+            if (win->archTools.toolMode == 6 && win->archTools.cropBboxDefined) {
+                HandleCmdArchAlignApply(win);
+                return true;
+            }
+            // Align (toolMode 5): commit the in-memory preview FinalizeAlign created.
+            // editTools.on is false in arch-tool modes, so don't gate on it here.
+            // HandleCmdArchAlignApply no-ops when there's no preview to commit.
+            if (win->archTools.toolMode == 5) {
+                HandleCmdArchAlignApply(win);
+                return true;
+            }
             if (!win->editTools.on) {
                 return true;
             }

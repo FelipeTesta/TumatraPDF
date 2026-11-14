@@ -327,6 +327,7 @@ Available in [pre-release](https://www.sumatrapdfreader.org/prerelease) builds.
 - `CmdToggleInverseSearch` : "Toggle Inverse Search"
 - `CmdToggleLinks` : "Toggle Show Links"
 - `CmdToggleShowAnnotations` : "Toggle Show Annotations"
+- `CmdArchPageCrop` : "Page Crop" (image-editor page bounding box; Edit bar button)
 
 ## 3.5.2 (2023-10-25)
 

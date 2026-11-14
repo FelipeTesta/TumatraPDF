@@ -102,7 +102,6 @@ constexpr int kRenderDelayShowNotif = 500;
 // Forward declarations
 class EngineMupdf;
 struct DisplayModel;
-static void RestorePageGeometryForAlign(EngineMupdf* em, int pageNo, DisplayModel* dm);
 
 // A laser pointer is a session mode, not a setting: it's turned on to point
 // things out during a presentation and off again afterwards, and an app that
@@ -1446,6 +1445,193 @@ static LPWSTR GetCursorForResizeHandle(ResizeHandle handle) {
     }
 }
 
+// Get the resize handle at the given point for the page-crop bounding box
+// Inverse-rotate screen pt into box-local (axis-aligned) page frame, then run the
+// same axis-aligned handle hit-test as R8. Returns which handle in LOCAL space.
+// (boxPage is fitz page space y-down; cropAngle is screen/fitz deg y-down).
+static ResizeHandle GetCropResizeHandleAt(MainWindow* win, Point pt, RectF boxPage, int pageNo) {
+    DisplayModel* dm = win->AsFixed();
+    if (!dm) {
+        return ResizeHandle::None;
+    }
+    const float PI = 3.14159265358979323846f;
+    // screen pt -> page space
+    Rect screenPt{pt.x, pt.y, 1, 1};
+    RectF pagePt = dm->CvtFromScreen(screenPt, pageNo);
+    float cx = boxPage.x + boxPage.dx * 0.5f;
+    float cy = boxPage.y + boxPage.dy * 0.5f;
+    float rad = win->archTools.cropAngle * PI / 180.0f;
+    float cosA = cosf(rad), sinA = sinf(rad);
+    // rotate by -theta into local frame: x' = cos*dx + sin*dy ; y' = -sin*dx + cos*dy
+    float dx = pagePt.x - cx, dy = pagePt.y - cy;
+    float lx = cx + cosA * dx + sinA * dy;
+    float ly = cy - sinA * dx + cosA * dy;
+    // tolerance: screen handle half-size converted to page units (approx uniform)
+    RectF tolX = dm->CvtFromScreen(Rect{(int)(pt.x + kResizeHandleSize), pt.y, 1, 1}, pageNo);
+    float tol = fabsf(tolX.x - pagePt.x);
+    if (tol < 1.0f) tol = (float)kResizeHandleSize;
+    RectF r = boxPage; // axis-aligned local rect [x, y, w, h]
+    bool nearLeft = lx >= r.x - tol && lx <= r.x + tol;
+    bool nearRight = lx >= r.x + r.dx - tol && lx <= r.x + r.dx + tol;
+    bool nearTop = ly >= r.y - tol && ly <= r.y + tol;
+    bool nearBottom = ly >= r.y + r.dy - tol && ly <= r.y + r.dy + tol;
+    bool betweenX = lx >= r.x + tol && lx <= r.x + r.dx - tol;
+    bool betweenY = ly >= r.y + tol && ly <= r.y + r.dy - tol;
+    if (nearLeft && nearTop) return ResizeHandle::TopLeft;
+    if (nearRight && nearTop) return ResizeHandle::TopRight;
+    if (nearRight && nearBottom) return ResizeHandle::BottomRight;
+    if (nearLeft && nearBottom) return ResizeHandle::BottomLeft;
+    if (betweenX && nearTop) return ResizeHandle::Top;
+    if (nearRight && betweenY) return ResizeHandle::Right;
+    if (betweenX && nearBottom) return ResizeHandle::Bottom;
+    if (nearLeft && betweenY) return ResizeHandle::Left;
+    return ResizeHandle::None;
+}
+
+// Rotate grip: circle drawn just below the bottom-edge-midpoint handle (local point
+// (0, +h/2 + offset), transformed by R(cropAngle) about the box center). All grip math is
+// done in SCREEN space so the offset/radius stay constant in px regardless of zoom; screen
+// and page axes share orientation (both y-down), so the local v axis direction is identical.
+constexpr int kCropRotateGripOffsetPx = 20; // px below bottom edge midpoint along local +v axis
+constexpr int kCropRotateGripRadiusPx = 7;  // hit radius (paint radius 6 + slop)
+
+// Screen position of the rotate grip for the given box (bottom edge midpoint + offset along
+// the local height axis). Used by paint + hit-test.
+static Point GetCropRotateGripScreen(MainWindow* win, RectF boxPage, int pageNo) {
+    DisplayModel* dm = win->AsFixed();
+    const float PI = 3.14159265358979323846f;
+    float halfH = boxPage.dy * 0.5f;
+    float rad = win->archTools.cropAngle * PI / 180.0f;
+    float cosA = cosf(rad), sinA = sinf(rad);
+    float vx = -sinA, vy = cosA; // local +v axis (height axis) in page/screen space
+    PointF midPage{boxPage.x + boxPage.dx * 0.5f + vx * halfH, boxPage.y + boxPage.dy * 0.5f + vy * halfH};
+    Point mid = dm->CvtToScreen(pageNo, midPage);
+    return Point{mid.x + (int)(vx * kCropRotateGripOffsetPx), mid.y + (int)(vy * kCropRotateGripOffsetPx)};
+}
+
+// Hit-test the rotate grip circle (screen-space distance check).
+static bool CropRotateGripHit(MainWindow* win, Point pt, RectF boxPage, int pageNo) {
+    Point g = GetCropRotateGripScreen(win, boxPage, pageNo);
+    float dx = (float)(pt.x - g.x), dy = (float)(pt.y - g.y);
+    return (dx * dx + dy * dy) <= (float)(kCropRotateGripRadiusPx * kCropRotateGripRadiusPx);
+}
+
+// Compute the resized/moved crop box from the drag delta. Resize deltas are
+// inverse-rotated into the box-local (axis-aligned) frame so width/height adjust
+// along the box's own axes; interior move translates in page space. Clamped to
+// the page mediabox and a 20x20 page-unit min size.
+static RectF CalculateCropResizedRect(MainWindow* win, int x, int y) {
+    DisplayModel* dm = win->AsFixed();
+    int pageNo = dm->CurrentPageNo();
+    Rect screenPt{x, y, 1, 1};
+    RectF pagePt = dm->CvtFromScreen(screenPt, pageNo);
+    RectF orig = win->archTools.cropBboxStartPage;
+    Rect startScreen{win->dragStart.x, win->dragStart.y, 1, 1};
+    RectF startPage = dm->CvtFromScreen(startScreen, pageNo);
+    float deltaX = pagePt.x - startPage.x;
+    float deltaY = pagePt.y - startPage.y;
+    // inverse-rotate delta into box-local frame (R(-theta))
+    const float PI = 3.14159265358979323846f;
+    float rad = win->archTools.cropAngle * PI / 180.0f;
+    float cosA = cosf(rad), sinA = sinf(rad);
+    float dlx = cosA * deltaX + sinA * deltaY;  // along local x (width) axis
+    float dly = -sinA * deltaX + cosA * deltaY; // along local y (height) axis
+    RectF r = orig;
+    auto handle = (ResizeHandle)win->archTools.cropResizeHandle;
+    bool moveLeft =
+        handle == ResizeHandle::TopLeft || handle == ResizeHandle::Left || handle == ResizeHandle::BottomLeft;
+    bool moveRight =
+        handle == ResizeHandle::TopRight || handle == ResizeHandle::Right || handle == ResizeHandle::BottomRight;
+    bool moveTop = handle == ResizeHandle::TopLeft || handle == ResizeHandle::Top || handle == ResizeHandle::TopRight;
+    bool moveBottom =
+        handle == ResizeHandle::BottomLeft || handle == ResizeHandle::Bottom || handle == ResizeHandle::BottomRight;
+    const float kMinSize = 20.0f;
+    bool isCorner = (handle == ResizeHandle::TopLeft || handle == ResizeHandle::TopRight ||
+                     handle == ResizeHandle::BottomLeft || handle == ResizeHandle::BottomRight);
+    if (isCorner) {
+        // Proportional corner resize: dominant local axis wins; the other axis follows with
+        // the box's local w/h aspect ratio (dw = du, dh = du * h/w). The opposite corner stays
+        // anchored via the shared anchor-shift block below (it works off r.dx/r.dy deltas).
+        float gu = moveRight ? dlx : -dlx;  // width growth (positive = growing)
+        float gv = moveBottom ? dly : -dly; // height growth (positive = growing)
+        float du = fabsf(gu) >= fabsf(gv) ? gu : gv;
+        float aspect = orig.dy / orig.dx; // h/w
+        float newW = orig.dx + du;
+        if (newW < kMinSize) {
+            newW = kMinSize;
+        }
+        float newH = newW * aspect;
+        if (newH < kMinSize) {
+            newH = kMinSize;
+            newW = newH / aspect;
+        }
+        r.dx = newW;
+        r.dy = newH;
+        if (moveLeft) {
+            r.x = orig.x + orig.dx - newW;
+        }
+        if (moveTop) {
+            r.y = orig.y + orig.dy - newH;
+        }
+    } else {
+        if (moveLeft) {
+            r.x = orig.x + dlx;
+            r.dx = orig.dx - dlx;
+            if (r.dx < kMinSize) {
+                r.x = orig.x + orig.dx - kMinSize;
+                r.dx = kMinSize;
+            }
+        }
+        if (moveRight) {
+            r.dx = orig.dx + dlx;
+            r.dx = std::max(r.dx, kMinSize);
+        }
+        if (moveTop) {
+            r.y = orig.y + dly;
+            r.dy = orig.dy - dly;
+            if (r.dy < kMinSize) {
+                r.y = orig.y + orig.dy - kMinSize;
+                r.dy = kMinSize;
+            }
+        }
+        if (moveBottom) {
+            r.dy = orig.dy + dly;
+            r.dy = std::max(r.dy, kMinSize);
+        }
+    }
+    if (handle != ResizeHandle::None) {
+        // Rotated box: keep the OPPOSITE local edge/corner anchored. The local
+        // axes are u=(cosA,sinA) (width) and v=(-sinA,cosA) (height) in page space.
+        // Resizing only edits w/h; without shifting the box center along u/v by
+        // half the size delta, the center moves along page axes and the box
+        // shrinks/grows from the wrong edge (bug: opposite edge floats).
+        float cx0 = orig.x + orig.dx * 0.5f, cy0 = orig.y + orig.dy * 0.5f;
+        float duU = r.dx - orig.dx, duV = r.dy - orig.dy;
+        float su = (moveRight ? duU : (moveLeft ? -duU : 0.0f)) * 0.5f;
+        float sv = (moveBottom ? duV : (moveTop ? -duV : 0.0f)) * 0.5f;
+        float ncx = cx0 + su * cosA - sv * sinA;
+        float ncy = cy0 + su * sinA + sv * cosA;
+        r.x = ncx - r.dx * 0.5f;
+        r.y = ncy - r.dy * 0.5f;
+    }
+    if (handle == ResizeHandle::None) {
+        // Interior drag: translate the whole box in page space (rotation-invariant).
+        r.x = orig.x + deltaX;
+        r.y = orig.y + deltaY;
+    }
+    // Clamp to the page mediabox (page space).
+    RectF mb = dm->GetEngine()->PageMediabox(pageNo);
+    if (r.x < mb.x) r.x = mb.x;
+    if (r.y < mb.y) r.y = mb.y;
+    if (r.Right() > mb.Right()) r.x = mb.Right() - r.dx;
+    if (r.Bottom() > mb.Bottom()) r.y = mb.Bottom() - r.dy;
+    if (r.dx < kMinSize) r.dx = kMinSize;
+    if (r.dy < kMinSize) r.dy = kMinSize;
+    LogInfo("[crop] resize: handle=%d dlx=%.1f dly=%.1f rect=%.1f,%.1f,%.1f,%.1f angle=%.1f\n", (int)handle, dlx, dly,
+            r.x, r.y, r.dx, r.dy, win->archTools.cropAngle);
+    return r;
+}
+
 // return true if this was annotation dragging
 static bool StopDraggingAnnotation(MainWindow* win, int x, int y, bool aborted) {
     Annotation* annot = win->annotationBeingDragged;
@@ -1760,10 +1946,16 @@ static int TrimCollectVisibleLines(MainWindow* win, DisplayModel* dm, TrimLineCa
 static void OnMouseMove(MainWindow* win, int x, int y, WPARAM key) {
     // Track mouse position for erase mode overlay
     win->archTools.mousePos = Point{x, y};
+    // TUMATRA-FORK(s64-R9f): align owns clicks on scanned pages — while Crop Align is
+    // active, image-drag/capture/trim drags started before it was toggled must not
+    // hijack the move stream.
+    const bool alignMode = gGlobalPrefs->archToolsEnabled && win->archTools.toolMode == 5;
+    // TUMATRA-FORK(s64-R9i): crop owns the move stream on scanned pages too (toolMode==6)
+    const bool cropMode = gGlobalPrefs->archToolsEnabled && win->archTools.toolMode == 6;
 
     // Capture tool: live-update the drag rect in PAGE coords while dragging,
     // so the preview survives pan/zoom (point1/point2 arch semantics).
-    if (win->captureTool.on && win->mouseAction == MouseAction::Dragging && win->AsFixed()) {
+    if (!alignMode && !cropMode && win->captureTool.on && win->mouseAction == MouseAction::Dragging && win->AsFixed()) {
         DisplayModel* dm = win->AsFixed();
         int pageNo = win->captureTool.pageNo; // rect belongs to the page it started on
         if (!dm->ValidPageNo(pageNo)) pageNo = dm->CurrentPageNo();
@@ -1781,12 +1973,12 @@ static void OnMouseMove(MainWindow* win, int x, int y, WPARAM key) {
     }
 
     // Edit mode: live bbox drag on the selected image
-    if (win->editTools.dragEditIdx >= 0) {
+    if (!alignMode && !cropMode && win->editTools.dragEditIdx >= 0) {
         EditToolsImageDragMove(win, x, y);
         return;
     }
 
-    if (win->trimDragging) {
+    if (!alignMode && !cropMode && win->trimDragging) {
         auto* dm = win->AsFixed();
         if (dm) {
             // the dragged line may belong to a neighbor page (context-aware
@@ -1889,6 +2081,72 @@ static void OnMouseMove(MainWindow* win, int x, int y, WPARAM key) {
             }
             ScheduleRepaint(win, 0);
             return;
+        }
+    }
+
+    // Arch page-crop: live resize/move of the page bounding box (toolMode 6).
+    // Box + handles are drawn in screen space; drag deltas are applied in page
+    // space so both operands stay in the same space.
+    if (gGlobalPrefs->archToolsEnabled && win->archTools.toolMode == 6 && win->AsFixed() && !(key & MK_RBUTTON) &&
+        win->archTools.cropBboxDefined) {
+        DisplayModel* dm = win->AsFixed();
+        int pageNo = dm->CurrentPageNo();
+        if (dm->ValidPageNo(pageNo)) {
+            if (win->archTools.cropDragState == 1) {
+                if (GetAsyncKeyState(VK_ESCAPE) & 0x8000) {
+                    // ESC cancels the drag: revert box + reset angle.
+                    win->archTools.cropBboxPage = win->archTools.cropBboxStartPage;
+                    win->archTools.cropAngle = 0.0f;
+                    if (GetCapture() == win->hwndCanvas) {
+                        ReleaseCapture();
+                    }
+                    win->mouseAction = MouseAction::None;
+                    win->archTools.cropDragState = 0;
+                    win->archTools.cropResizeHandle = 0;
+                    win->archTools.cropRotating = false;
+                    ScheduleRepaint(win, 0);
+                    return;
+                }
+                if (win->archTools.cropRotating) {
+                    // Rotate drag: cropAngle = startAngle + (cur angle - start angle) about center.
+                    Rect screenPt{x, y, 1, 1};
+                    RectF pagePt = dm->CvtFromScreen(screenPt, pageNo);
+                    float cx = win->archTools.cropBboxPage.x + win->archTools.cropBboxPage.dx * 0.5f;
+                    float cy = win->archTools.cropBboxPage.y + win->archTools.cropBboxPage.dy * 0.5f;
+                    const float PI = 3.14159265358979323846f;
+                    float curAng = atan2f(pagePt.y - cy, pagePt.x - cx) * 180.0f / PI;
+                    float startAng = atan2f(win->dragStart.y - cy, win->dragStart.x - cx) * 180.0f / PI;
+                    // dragStart is screen; convert to page for consistent center. Recompute start page.
+                    Rect startScreen{win->dragStart.x, win->dragStart.y, 1, 1};
+                    RectF startPage = dm->CvtFromScreen(startScreen, pageNo);
+                    startAng = atan2f(startPage.y - cy, startPage.x - cx) * 180.0f / PI;
+                    float newAngle = win->archTools.cropRotateStartAngle + (curAng - startAng);
+                    // Wrap to [-180, 180] so UI/paint never sees absurd angles
+                    newAngle = fmodf(newAngle + 540.0f, 360.0f) - 180.0f;
+                    if (GetAsyncKeyState(VK_SHIFT) & 0x8000) {
+                        newAngle = roundf(newAngle / 22.5f) * 22.5f;
+                    }
+                    win->archTools.cropAngle = newAngle;
+                    LogInfo("[crop] rotate: angle=%.1f (start box angle=%.1f, delta=%.1f)\n", newAngle,
+                            win->archTools.cropRotateStartAngle, curAng - startAng);
+                    win->dragPrevPos = Point{x, y};
+                    ScheduleRepaint(win, 0);
+                    return;
+                }
+                win->archTools.cropBboxPage = CalculateCropResizedRect(win, x, y);
+                win->dragPrevPos = Point{x, y};
+                ScheduleRepaint(win, 0);
+                return;
+            }
+            // Hover: resize cursor over a handle, crosshair over the rotate grip, else arrow.
+            ResizeHandle h = GetCropResizeHandleAt(win, Point{x, y}, win->archTools.cropBboxPage, pageNo);
+            if (h != ResizeHandle::None) {
+                SetCursor(LoadCursor(nullptr, GetCursorForResizeHandle(h)));
+            } else if (CropRotateGripHit(win, Point{x, y}, win->archTools.cropBboxPage, pageNo)) {
+                SetCursor(LoadCursor(nullptr, IDC_CROSS));
+            } else {
+                SetCursor(LoadCursor(nullptr, IDC_ARROW));
+            }
         }
     }
 
@@ -2305,7 +2563,17 @@ static float ArchPointSegDist(float px, float py, float ax, float ay, float bx, 
 static void OnMouseLeftButtonDown(MainWindow* win, int x, int y, WPARAM key) {
     // lf("Left button clicked on %d %d", x, y);
     logf("OnMouseLeftButtonDown: wp=0x%x at (%d,%d)\n", (int)key, x, y);
-    if (win->trimConfigMode != 0) {
+    // TUMATRA-FORK(s64-R9f): align owns clicks on scanned pages — when Crop Align is
+    // active, clicks must reach the align handler (or be dropped), never editTools /
+    // selection / annotation consumers. A scanned page is a full-page image, so the
+    // editTools image branch matches every click there.
+    const bool alignMode = gGlobalPrefs->archToolsEnabled && win->archTools.toolMode == 5;
+    // TUMATRA-FORK(s64-R9i): crop owns clicks on scanned pages — same rule for Page Crop
+    // (toolMode==6). The editTools image branch matches every click on a full-page
+    // background image, so it must yield to the crop handler; clicks the crop handler
+    // does not consume are dropped before the annotation/link/selection consumers below.
+    const bool cropMode = gGlobalPrefs->archToolsEnabled && win->archTools.toolMode == 6;
+    if (!alignMode && !cropMode && win->trimConfigMode != 0) {
         auto* dm = win->AsFixed();
         if (dm) {
             TrimLineCand cands[10];
@@ -2339,7 +2607,7 @@ static void OnMouseLeftButtonDown(MainWindow* win, int x, int y, WPARAM key) {
     // Capture tool: start a region drag in PAGE coords when capture mode is on.
     // page coords (survive pan/zoom) are cloned from arch tools; converting
     // screen->page here (not screen->screen) avoids the pan/zoom rect bug.
-    if (win->captureTool.on && win->AsFixed()) {
+    if (!alignMode && !cropMode && win->captureTool.on && win->AsFixed()) {
         DisplayModel* dm = win->AsFixed();
         int pageNo = dm->CurrentPageNo();
         if (dm->ValidPageNo(pageNo)) {
@@ -2358,7 +2626,7 @@ static void OnMouseLeftButtonDown(MainWindow* win, int x, int y, WPARAM key) {
 
     // Edit mode: an armed clipboard image is placed by the next left-click
     // on a page (click-to-place; +Img or Ctrl+V arms it)
-    if (win->editTools.on && win->editTools.pendingImage) {
+    if (!alignMode && !cropMode && win->editTools.on && win->editTools.pendingImage) {
         if (EditToolsPlacePendingImage(win, x, y)) {
             return; // consumed by edit mode placement
         }
@@ -2366,7 +2634,7 @@ static void OnMouseLeftButtonDown(MainWindow* win, int x, int y, WPARAM key) {
 
     // Edit mode: in-page image bbox editing — click an image to select it,
     // or start dragging a handle of the selected bbox (crop/resize/move)
-    if (win->editTools.on && !win->editTools.pendingImage) {
+    if (!alignMode && !cropMode && win->editTools.on && !win->editTools.pendingImage) {
         if (EditToolsImageMouseDown(win, x, y)) {
             if (win->editTools.dragEditIdx >= 0) {
                 SetCapture(win->hwndCanvas);
@@ -2377,7 +2645,9 @@ static void OnMouseLeftButtonDown(MainWindow* win, int x, int y, WPARAM key) {
     }
 
     // Arch Tools: erase mode — works whenever Arch Tools is ON, regardless of draw mode
-    if (gGlobalPrefs->archToolsEnabled && win->archTools.on && win->AsFixed()) {
+    // TUMATRA-FORK(s64-R9f): skipped in align mode — align owns the click
+    // TUMATRA-FORK(s64-R9i): skipped in crop mode too
+    if (!alignMode && !cropMode && gGlobalPrefs->archToolsEnabled && win->archTools.on && win->AsFixed()) {
         DisplayModel* dm = win->AsFixed();
         int pageNo = dm->CurrentPageNo();
         if (dm->ValidPageNo(pageNo) && (GetAsyncKeyState('E') & 0x8000)) {
@@ -2565,23 +2835,24 @@ static void OnMouseLeftButtonDown(MainWindow* win, int x, int y, WPARAM key) {
                     return;
                 }
             } else if (win->archTools.toolMode == 5) {
-                // Align mode: 2-point line → angle + axis decision → cropRectPage
+                // Align mode: ONE line per session — draw line → apply (absolute angle,
+                // from pristine, single Fm0). After a preview is applied, further line
+                // drawing on this page is IGNORED until the user discards via ESC or
+                // toggles Crop Align OFF (reset to pristine), then they may draw again.
                 if (win->archTools.dragLine == 0) {
-                    // First click: start drawing
-                    // If there's already an applied geometry edit for this page, restore pristine first
-                    // to prevent cumulative corruption (s64: reset on second draw).
+                    // First click: start drawing. Ignore if this page already has an
+                    // active align preview; the user must ESC / toggle-off to reset first.
                     EngineMupdf* em = AsEngineMupdf(dm->GetEngine());
-                    if (em) {
-                        for (const auto& edit : em->pendingGeomEdits) {
-                            if (edit.pageNo == pageNo && em->appliedInMemory) {
-                                LogInfo("[arch +%llums] Align: restoring pristine geometry for page %d before new draw",
-                                        (unsigned long long)ArchElapsedMs(), pageNo);
-                                RestorePageGeometryForAlign(em, pageNo, dm);
-                                break;
-                            }
-                        }
+                    bool previewActive = em && em->hasPreviewGeomEdit && em->previewGeomEdit.pageNo == pageNo;
+                    if (previewActive) {
+                        LogInfo(
+                            "[arch +%llums] Align: ignoring draw — page %d already has a preview applied "
+                            "(discard via ESC / toggle-off first)",
+                            (unsigned long long)ArchElapsedMs(), pageNo);
+                        return; // no drag start; wait for user to discard/reset
                     }
                     win->archTools.point1 = pagePt;
+                    win->archTools.point2 = pagePt; // avoid a garbage line on the down-paint
                     win->archTools.dragLine = 1;
                     win->archTools.dragStartPos = Point{x, y};
                     win->archTools.dragMoved = false;
@@ -2613,6 +2884,74 @@ static void OnMouseLeftButtonDown(MainWindow* win, int x, int y, WPARAM key) {
                 }
             }
         }
+    }
+
+    // TUMATRA-FORK(s64-R9f): align owns clicks on scanned pages — a click the align
+    // handler didn't consume (page invalid, or dragLine==2 after a finalize) is dropped
+    // here instead of falling through to annotation/link/selection handling.
+    if (alignMode) {
+        return;
+    }
+
+    // Arch page-crop: start resizing/moving the page bounding box (toolMode 6).
+    // The box is created on activation (full page); here we just begin the drag.
+    if (gGlobalPrefs->archToolsEnabled && win->archTools.toolMode == 6 && win->AsFixed() && !(key & MK_RBUTTON)) {
+        DisplayModel* dm = win->AsFixed();
+        int pageNo = dm->CurrentPageNo();
+        if (dm->ValidPageNo(pageNo) && win->archTools.cropBboxDefined) {
+            RectF box = win->archTools.cropBboxPage;
+            ResizeHandle handle = GetCropResizeHandleAt(win, Point{x, y}, box, pageNo);
+            win->archTools.cropResizeHandle = (int)handle;
+            // Hit-test order: (a) resize handles, (b) rotate grip circle, (c) inside poly = move,
+            // (d) outside = nothing. Rotation lives ONLY on the dedicated grip now (s64-R9e) —
+            // outside-poly clicks no longer rotate (they used to snap cropAngle to the absolute
+            // cursor angle = the "jump" bug).
+            const float PI = 3.14159265358979323846f;
+            Rect screenPt{x, y, 1, 1};
+            RectF pagePt = dm->CvtFromScreen(screenPt, pageNo);
+            float cx = box.x + box.dx * 0.5f, cy = box.y + box.dy * 0.5f;
+            float rad = win->archTools.cropAngle * PI / 180.0f;
+            float cosA = cosf(rad), sinA = sinf(rad);
+            float dx = pagePt.x - cx, dy = pagePt.y - cy;
+            float lx = cx + cosA * dx + sinA * dy;
+            float ly = cy - sinA * dx + cosA * dy;
+            bool inside = (lx >= box.x && lx <= box.x + box.dx && ly >= box.y && ly <= box.y + box.dy);
+            bool grip = (handle == ResizeHandle::None) && CropRotateGripHit(win, Point{x, y}, box, pageNo);
+            if (handle != ResizeHandle::None) {
+                // resize (existing R8 path). Handles always win over rotate:
+                // never leave a stale rotate flag set from a previous gesture.
+                win->archTools.cropRotating = false;
+            } else if (grip) {
+                // Rotate drag on the grip. Store the box angle at press; the move handler adds
+                // (curAng - startAng) as a RELATIVE delta — cropAngle is never overwritten
+                // absolutely (s64-R9e jump fix).
+                win->archTools.cropRotating = true;
+                win->archTools.cropRotateStartAngle = win->archTools.cropAngle;
+            } else if (inside) {
+                win->archTools.cropRotating = false; // move interior
+            } else {
+                // Outside the box and not on the grip: nothing.
+                LogInfo("[crop] mouse-down: outside box, no action (toolMode=6)");
+                return;
+            }
+            LogInfo("[crop] mouse-down: cropResizeHandle=%d grip=%d inside=%d -> rotating=%d (toolMode=6)",
+                    win->archTools.cropResizeHandle, grip ? 1 : 0, inside ? 1 : 0, win->archTools.cropRotating ? 1 : 0);
+            win->archTools.cropDragState = 1;
+            win->dragStart = Point{x, y};
+            win->dragPrevPos = Point{x, y};
+            win->archTools.cropBboxStartPage = win->archTools.cropBboxPage;
+            SetCapture(win->hwndCanvas);
+            win->mouseAction = MouseAction::Dragging;
+            ScheduleRepaint(win, 0);
+            return;
+        }
+    }
+
+    // TUMATRA-FORK(s64-R9i): crop owns clicks on scanned pages — a click the crop
+    // handler didn't consume (outside the box, or no crop drag started) is dropped
+    // here instead of falling through to annotation/link/selection handling.
+    if (cropMode) {
+        return;
     }
 
     if (IsRightDragging(win)) {
@@ -2860,114 +3199,6 @@ static void FinalizeArchMeasurement(MainWindow* win, DisplayModel* /*dm*/, int p
     ScheduleRepaint(win, 0);
 }
 
-// Restore page geometry to pristine state (s64: reset on second align draw).
-// Reverts the page to its original state before any geometry edits were applied.
-// Called before starting a new align line on a page that already has applied geometry.
-static void RestorePageGeometryForAlign(EngineMupdf* em, int pageNo, DisplayModel* dm) {
-    if (!em || !em->pdfdoc || pageNo < 1 || pageNo > em->pageCount) {
-        return;
-    }
-    fz_context* ctx = em->Ctx();
-    if (!ctx) return;
-
-    // Find pristine state for this page
-    EngineMupdf::PagePristineState* pristine = nullptr;
-    for (int i = 0; i < len(em->pristinePageStates); i++) {
-        if (em->pristinePageStates[i].pageNo == pageNo) {
-            pristine = &em->pristinePageStates[i];
-            break;
-        }
-    }
-    if (!pristine || !pristine->hasState) {
-        return; // No pristine state captured
-    }
-
-    // Pass 1: restore PDF objects under docLock
-    {
-        ScopedRecursiveMutex scope(&em->docLock);
-        fz_try(ctx) {
-            FzPageInfo* pageInfo = em->pages[pageNo - 1];
-            if (!pageInfo || !pageInfo->page) {
-                // Load the page if needed
-                fz_try(ctx) {
-                    pageInfo->page = fz_load_page(ctx, em->_doc, pageNo - 1);
-                }
-                fz_catch(ctx) {
-                    fz_report_error(ctx);
-                }
-            }
-            if (pageInfo && pageInfo->page) {
-                pdf_page* pdfpage = pdf_page_from_fz_page(ctx, pageInfo->page);
-                if (pdfpage) {
-                    pdf_obj* pageObj = pdfpage->obj;
-                    if (pageObj) {
-                        // Restore original /Contents
-                        if (pristine->contents) {
-                            pdf_dict_put(ctx, pageObj, PDF_NAME(Contents), pristine->contents);
-                        }
-                        // Restore original /Resources (removes added XObject)
-                        if (pristine->resources) {
-                            pdf_dict_put(ctx, pageObj, PDF_NAME(Resources), pristine->resources);
-                        }
-                        // Restore original MediaBox and CropBox
-                        pdf_dict_put_rect(ctx, pageObj, PDF_NAME(MediaBox), pristine->mediaBox);
-                        pdf_dict_put_rect(ctx, pageObj, PDF_NAME(CropBox), pristine->cropBox);
-                        // Restore original /Rotate
-                        pdf_dict_put_int(ctx, pageObj, PDF_NAME(Rotate), pristine->rotate);
-                    }
-                }
-            }
-        }
-        fz_catch(ctx) {
-            fz_report_error(ctx);
-        }
-    }
-
-    // Pass 2: invalidate caches under pagesLock+renderLock
-    {
-        ScopedRecursiveMutex ps(&em->pagesLock);
-        ScopedMutex rl(&em->renderLock);
-        FzPageInfo* pageInfo = em->pages[pageNo - 1];
-        if (pageInfo) {
-            // Restore mediabox cache to original
-            pageInfo->mediabox = ToRectF(pristine->mediaBox);
-            // Drop cached page so it reloads with original geometry
-            if (pageInfo->page) {
-                fz_drop_page(ctx, pageInfo->page);
-                pageInfo->page = nullptr;
-            }
-            // Drop cached display list
-            if (pageInfo->displayList) {
-                fz_drop_display_list(ctx, pageInfo->displayList);
-                pageInfo->displayList = nullptr;
-            }
-            pageInfo->elementsNeedRebuilding = true;
-        }
-    }
-
-    // Clear the pending geometry edit for this page
-    for (int i = 0; i < len(em->pendingGeomEdits); i++) {
-        if (em->pendingGeomEdits[i].pageNo == pageNo) {
-            em->pendingGeomEdits.RemoveAtFast(i);
-            break;
-        }
-    }
-    // Update modifiedPageGeometry flag
-    bool anyLeft = false;
-    for (const EngineMupdf::PageGeomEdit& e : em->pendingGeomEdits) {
-        if (e.pageNo > 0) { anyLeft = true; break; }
-    }
-    em->modifiedPageGeometry = anyLeft;
-    em->appliedInMemory = anyLeft; // if no edits left, not applied in memory
-
-    // Invalidate render cache and relayout (mirrors FinalizeAlign tail)
-    if (gRenderCache) {
-        gRenderCache->FreeForDisplayModel(dm);
-    }
-    dm->BuildPagesInfo();
-    dm->RelayoutKeepingView();
-}
-
 // FinalizeAlign — compute angle vs nearer axis, rotation to axis-align the line,
 // and the page crop rect (mediabox rotated so the line is axis-aligned, mediabox
 // W:H preserved). Ephemeral result stored in win->archTools.alignLine.
@@ -2984,6 +3215,7 @@ static void FinalizeAlign(MainWindow* win, DisplayModel* dm, int pageNo) {
     al.p1 = p1;
     al.p2 = p2;
     al.defined = (len > 1.0f);
+
     if (!al.defined) {
         win->archTools.dragLine = 0;
         ScheduleRepaint(win, 0);
@@ -3014,14 +3246,38 @@ static void FinalizeAlign(MainWindow* win, DisplayModel* dm, int pageNo) {
     }
 
     // Rotation (degrees, + = CCW) to bring the line onto the chosen axis.
-    float rotation = al.axis == 0 ? -angleToVertical : -angleToHorizontal;
-    float rad = rotation * 3.141592653589793f / 180.0f;
+    // R7: single absolute angle from pristine (no delta-sum accumulation).
+    // s64-R9h sign chain: screen-CW angle theta = -phi (PDF rotation phi). The horizontal branch
+    // needs phi = +angleToHorizontal (theta = -beta zeroes the final polar beta'), so its residual
+    // is +angleToHorizontal; the vertical branch was already exact with -angleToVertical.
+    float residual = al.axis == 0 ? -angleToVertical : +angleToHorizontal;
+    float totalAngle = residual;
+    float rad = totalAngle * 3.141592653589793f / 180.0f;
     float c = cosf(rad), s = sinf(rad);
 
     // Crop rect: mediabox rotated by `rad` about page center → axis-aligned bbox,
     // clamped to mediabox, then scaled to preserve mediabox W:H.
+    // Crop rect must be derived from the ORIGINAL page mediabox so the bbox
+    // never compounds across fine-tunes (s64-R6). After an R3 apply,
+    // PageMediabox() returns the grown rotated box; use pristine state when
+    // captured, else the live mediabox (pre-first-apply). cropRectPage stays in
+    // ORIGINAL page coords (EngineMupdf.cpp:6869/7242).
     EngineBase* engine = dm->GetEngine();
-    RectF mediabox = engine->PageMediabox(pageNo);
+    EngineMupdf* em = AsEngineMupdf(dm->GetEngine());
+    RectF origMediabox{};
+    if (em) {
+        for (const auto& ps : em->pristinePageStates) {
+            if (ps.pageNo == pageNo && ps.hasState) {
+                origMediabox = RectF{ps.mediaBox.x0, ps.mediaBox.y0, ps.mediaBox.x1 - ps.mediaBox.x0,
+                                     ps.mediaBox.y1 - ps.mediaBox.y0};
+                break;
+            }
+        }
+    }
+    if (origMediabox.dx <= 0.0f || origMediabox.dy <= 0.0f) {
+        origMediabox = engine->PageMediabox(pageNo);
+    }
+    RectF mediabox = origMediabox;
     PointF center{(mediabox.x + mediabox.Right()) / 2.0f, (mediabox.y + mediabox.Bottom()) / 2.0f};
     PointF corners[4] = {
         PointF{mediabox.x, mediabox.y},
@@ -3065,27 +3321,68 @@ static void FinalizeAlign(MainWindow* win, DisplayModel* dm, int pageNo) {
     // Does NOT add to pendingGeomEdits (committed edits for save).
     // Preview is promoted on Apply button click, discarded on panel close/tool switch.
     if (dm && dm->GetEngine()) {
-        EngineMupdf* em = AsEngineMupdf(dm->GetEngine());
-        if (em && em->ApplyPreviewGeometry(pageNo, rotation, bbox, dm)) {
-            // Preview applied successfully - visual deskew active
-            // Note: modifiedPageGeometry NOT set (not committed for save)
+        if (em && em->ApplyPreviewGeometry(pageNo, totalAngle, bbox, dm)) {
+            // Preview applied successfully - visual deskew active.
+            // Note: modifiedPageGeometry NOT set (not committed for save).
             ToolbarUpdateStateForWindow(win, false);
+        } else {
+            // Page has engine annotations (flashcard/highlight) — reject silently
+            // to avoid annotation coordinate drift. Show UI notification.
+            FzPageInfo* pageInfo = nullptr;
+            // Quick check: try to get page info from engine
+            if (pageNo >= 1 && pageNo <= em->pageCount) {
+                pageInfo = em->pages[pageNo - 1];
+            }
+            if (pageInfo && (pageInfo->annotsLoaded)) {
+                bool hasAnnot = false;
+                for (auto* annot : pageInfo->annotations) {
+                    if (annot && annot->pdfannot) {
+                        hasAnnot = true;
+                        break;
+                    }
+                }
+                for (auto* widget : pageInfo->widgets) {
+                    if (widget && widget->pdfannot) {
+                        hasAnnot = true;
+                        break;
+                    }
+                }
+                if (hasAnnot) {
+                    NotificationCreateArgs nargs;
+                    nargs.hwndParent = win->hwndCanvas;
+                    nargs.groupId = kNotifActionResponse;
+                    nargs.warning = true;
+                    nargs.timeoutMs = 5000;
+                    nargs.delayInMs = 500;
+                    nargs.noClose = true;
+                    Str fmtStr = _TRA("Crop Align: page has annotations and cannot be realigned");
+                    nargs.msg = fmt(fmtStr.s);
+                    ShowNotification(nargs);
+                }
+            }
         }
     }
 
-    win->archTools.dragLine = 0; // ready for next align
+    win->archTools.dragLine = 0; // ready for next align (after discard/reset)
     LogInfo(
         "[arch +%llums] FinalizeAlign: page=%d p1=(%.2f,%.2f) p2=(%.2f,%.2f) angle=%.1f° axis=%d "
         "crop=(%.2f,%.2f,%.2f,%.2f)",
         (unsigned long long)ArchElapsedMs(), pageNo, p1.x, p1.y, p2.x, p2.y, al.measuredAngleDeg, al.axis,
         al.cropRectPage.x, al.cropRectPage.y, al.cropRectPage.dx, al.cropRectPage.dy);
+    // R7: after a single apply the align line disappears; the page content is
+    // deskewed in place. The user draws a new line only after ESC / toggle-off reset.
+    win->archTools.alignLine = MainWindow::AlignLine{};
     ScheduleRepaint(win, 0);
 }
 
 static void OnMouseLeftButtonUp(MainWindow* win, int x, int y, WPARAM key) {
+    // TUMATRA-FORK(s64-R9f): align owns clicks on scanned pages — see OnMouseLeftButtonDown
+    const bool alignMode = gGlobalPrefs->archToolsEnabled && win->archTools.toolMode == 5;
+    // TUMATRA-FORK(s64-R9i): crop owns the up stream on scanned pages too (toolMode==6)
+    const bool cropMode = gGlobalPrefs->archToolsEnabled && win->archTools.toolMode == 6;
     // Capture tool: finish a region drag -> copy to clipboard at doc DPI,
     // then auto-exit capture mode.
-    if (win->captureTool.on && win->mouseAction == MouseAction::Dragging && win->AsFixed() &&
+    if (!alignMode && !cropMode && win->captureTool.on && win->mouseAction == MouseAction::Dragging && win->AsFixed() &&
         GetCapture() == win->hwndCanvas) {
         ReleaseCapture();
         win->mouseAction = MouseAction::None;
@@ -3102,7 +3399,7 @@ static void OnMouseLeftButtonUp(MainWindow* win, int x, int y, WPARAM key) {
     }
 
     // Edit mode: finish the image bbox drag
-    if (win->editTools.dragEditIdx >= 0) {
+    if (!alignMode && !cropMode && win->editTools.dragEditIdx >= 0) {
         if (GetCapture() == win->hwndCanvas) {
             ReleaseCapture();
         }
@@ -3112,7 +3409,7 @@ static void OnMouseLeftButtonUp(MainWindow* win, int x, int y, WPARAM key) {
         return;
     }
 
-    if (win->trimDragging) {
+    if (!alignMode && !cropMode && win->trimDragging) {
         if (GetCapture() == win->hwndCanvas) ReleaseCapture();
         win->trimDragging = false;
         win->trimConfigDragLine = 0;
@@ -3207,6 +3504,25 @@ static void OnMouseLeftButtonUp(MainWindow* win, int x, int y, WPARAM key) {
             }
             return;
         }
+    }
+
+    // Arch page-crop: end the drag (toolMode 6). The box stays on the canvas until
+    // Apply commits it or a tool switch / ESC discards it.
+    if (gGlobalPrefs->archToolsEnabled && win->archTools.toolMode == 6 && win->archTools.cropDragState == 1 &&
+        GetCapture() == win->hwndCanvas) {
+        ReleaseCapture();
+        win->mouseAction = MouseAction::None;
+        win->archTools.cropDragState = 0;
+        win->archTools.cropResizeHandle = 0;
+        win->archTools.cropRotating = false;
+        ScheduleRepaint(win, 0);
+    }
+
+    // TUMATRA-FORK(s64-R9i): crop owns the up stream — a release the crop drag
+    // didn't consume is dropped here so selection/annotation consumers below
+    // never fire while the crop tool is active.
+    if (cropMode) {
+        return;
     }
 
     DisplayModel* dm = win->AsFixed();
@@ -4574,9 +4890,13 @@ static void OnPaintDocument(MainWindow* win) {
         // no-flicker skip only matters for a full repaint of an empty buffer.
         bool partialPaint = paintRc.dx < win->buffer->rect.dx || paintRc.dy < win->buffer->rect.dy;
         if (!gNoFlickerRender || shouldPaint || showFocus || partialPaint) {
-            // Arch Tools: draw scale line, measurements, and in-progress line INTO offscreen buffer BEFORE Flush
-            // to prevent flicker. Gated by archToolsOn (not archToolMode).
-            if (gGlobalPrefs->archToolsEnabled && win->archTools.on && win->AsFixed()) {
+            // Arch Tools: draw scale line, measurements, align line / drag preview,
+            // and page-crop overlay INTO offscreen buffer BEFORE Flush to prevent
+            // flicker. Align (toolMode 5) and page crop (toolMode 6) are activated
+            // from the Edit bar without setting archTools.on, so they are gated by
+            // toolMode too (not only by archTools.on).
+            if (gGlobalPrefs->archToolsEnabled && win->AsFixed() &&
+                (win->archTools.on || win->archTools.toolMode == 5 || win->archTools.toolMode == 6)) {
                 auto* dm = win->AsFixed();
                 int curPageNo = dm->CurrentPageNo();
                 auto& scaleState = win->archTools.GetScaleForPage(curPageNo);
@@ -4594,7 +4914,8 @@ static void OnPaintDocument(MainWindow* win) {
                 // and all GDI+ object construction entirely
                 bool nothingToDraw = !scaleState.scaleSet && !hasMeasurementOnPage && win->archTools.dragLine <= 0 &&
                                      !win->archTools.eraseMode && !win->captureTool.on &&
-                                     !(win->archTools.toolMode == 5 && win->archTools.alignLine.defined);
+                                     !(win->archTools.toolMode == 5 && win->archTools.alignLine.defined) &&
+                                     !win->archTools.cropBboxDefined;
                 if (!nothingToDraw) {
                     HDC bufHdc = win->buffer->GetDC();
                     Gdiplus::Graphics gs(bufHdc);
@@ -4750,13 +5071,114 @@ static void OnPaintDocument(MainWindow* win) {
                         }
                     }
 
+                    // Page-crop overlay (toolMode 6): nomacs "Crop Image" parity.
+                    // Rotated box: corners = center ± R(θ)·(±w/2, ±h/2). Overlay outside
+                    // the rotated poly (clip-exclude), accent border + 8 rotated handles.
+                    if (win->archTools.toolMode == 6 && win->archTools.cropBboxDefined && dm->ValidPageNo(curPageNo)) {
+                        RectF box = win->archTools.cropBboxPage;
+                        float halfW = box.dx * 0.5f, halfH = box.dy * 0.5f;
+                        PointF centerPage{box.x + halfW, box.y + halfH};
+                        Point center = dm->CvtToScreen(curPageNo, centerPage);
+                        const float PI = 3.14159265358979323846f;
+                        float rad = win->archTools.cropAngle * PI / 180.0f;
+                        float cosA = cosf(rad), sinA = sinf(rad);
+                        auto rot = [&](float lx, float ly) -> Gdiplus::Point {
+                            float wx = cosA * lx - sinA * ly;
+                            float wy = sinA * lx + cosA * ly;
+                            Point p = dm->CvtToScreen(curPageNo, PointF{centerPage.x + wx, centerPage.y + wy});
+                            return Gdiplus::Point(p.x, p.y);
+                        };
+                        // 4 corners screen space: TL, TR, BR, BL
+                        Gdiplus::Point corners[4] = {
+                            rot(-halfW, -halfH),
+                            rot(halfW, -halfH),
+                            rot(halfW, halfH),
+                            rot(-halfW, halfH),
+                        };
+                        // Page bounds (overlay extents).
+                        RectF mb = dm->GetEngine()->PageMediabox(curPageNo);
+                        Point pageTL = dm->CvtToScreen(curPageNo, PointF{mb.x, mb.y});
+                        Point pageBR = dm->CvtToScreen(curPageNo, PointF{mb.Right(), mb.Bottom()});
+
+                        // Theme colors.
+                        COLORREF colBg = ThemeWindowBackgroundColor();
+                        COLORREF colEdge = ThemeEdgeColor();
+                        COLORREF colTxt = ThemeWindowTextColor();
+                        auto translucent = [](COLORREF c, BYTE alpha) {
+                            return Gdiplus::Color(alpha, GetRValue(c), GetGValue(c), GetBValue(c));
+                        };
+                        Gdiplus::Color overlayCol = translucent(colBg, 150); // dim outside region
+                        Gdiplus::Color borderCol = translucent(colEdge, 255);
+                        Gdiplus::Color handleFillCol = translucent(colTxt, 230);
+                        Gdiplus::Color handleBorderCol = translucent(colEdge, 255);
+
+                        // ---- Overlay OUTSIDE the rotated poly (clip-exclude) ----
+                        Gdiplus::GraphicsPath boxPath;
+                        boxPath.AddLine(corners[0], corners[1]);
+                        boxPath.AddLine(corners[1], corners[2]);
+                        boxPath.AddLine(corners[2], corners[3]);
+                        boxPath.AddLine(corners[3], corners[0]);
+                        boxPath.CloseFigure();
+                        gs.SetClip(&boxPath, Gdiplus::CombineModeExclude);
+                        Gdiplus::SolidBrush overlayBrush(overlayCol);
+                        gs.FillRectangle(&overlayBrush, (float)pageTL.x, (float)pageTL.y, (float)(pageBR.x - pageTL.x),
+                                         (float)(pageBR.y - pageTL.y));
+                        gs.ResetClip();
+
+                        // ---- Accent border (4 lines through rotated corners) ----
+                        Gdiplus::Pen cropBoxPen(borderCol, 2.0f);
+                        for (int i = 0; i < 4; i++) {
+                            gs.DrawLine(&cropBoxPen, (float)corners[i].X, (float)corners[i].Y,
+                                        (float)corners[(i + 1) % 4].X, (float)corners[(i + 1) % 4].Y);
+                        }
+
+                        // ---- 8 handles (4 corners + 4 edge midpoints, rotated) ----
+                        int hs = kResizeHandleSize / 2;
+                        Gdiplus::SolidBrush handleBrush(handleFillCol);
+                        Gdiplus::Pen handlePen(handleBorderCol, 1.0f);
+                        PointF mids[4] = {PointF{0, -halfH}, PointF{halfW, 0}, PointF{0, halfH}, PointF{-halfW, 0}};
+                        Gdiplus::Point handlePts[8];
+                        for (int i = 0; i < 4; i++) handlePts[i] = corners[i];
+                        for (int i = 0; i < 4; i++) handlePts[4 + i] = rot(mids[i].x, mids[i].y);
+                        for (int i = 0; i < 8; i++) {
+                            gs.FillRectangle(&handleBrush, (float)handlePts[i].X - hs, (float)handlePts[i].Y - hs,
+                                             (float)(hs * 2), (float)(hs * 2));
+                            gs.DrawRectangle(&handlePen, (float)handlePts[i].X - hs, (float)handlePts[i].Y - hs,
+                                             (float)(hs * 2), (float)(hs * 2));
+                        }
+
+                        // ---- Rotate grip: circle below the bottom-edge-midpoint handle ----
+                        // PowerPoint-style grip; faint guide line from the bottom edge midpoint
+                        // to the circle. Dragging it rotates the box (relative delta, no jump).
+                        Gdiplus::Point botMid = rot(0, halfH);
+                        Point gripPt = GetCropRotateGripScreen(win, box, curPageNo);
+                        {
+                            static Gdiplus::Pen guidePen(translucent(colEdge, 110), 1.0f);
+                            gs.DrawLine(&guidePen, (float)botMid.X, (float)botMid.Y, (float)gripPt.x, (float)gripPt.y);
+                            int gr = 6;
+                            static Gdiplus::Pen gripPen(translucent(colEdge, 255), 2.0f);
+                            gs.DrawEllipse(&gripPen, (float)gripPt.x - gr, (float)gripPt.y - gr, (float)gr * 2,
+                                           (float)gr * 2);
+                            static Gdiplus::Pen crossPen(translucent(colTxt, 200), 1.0f);
+                            gs.DrawLine(&crossPen, (float)gripPt.x - 3, (float)gripPt.y, (float)gripPt.x + 3,
+                                        (float)gripPt.y);
+                            gs.DrawLine(&crossPen, (float)gripPt.x, (float)gripPt.y - 3, (float)gripPt.x,
+                                        (float)gripPt.y + 3);
+                        }
+                    }
+
                     // Arch align preview: line + dashed translucent crop rect + "%.1f°" readout.
                     // Gated on toolMode==5 so ESC / mode switch hides the preview.
                     if (win->archTools.toolMode == 5 && win->archTools.alignLine.defined &&
                         win->archTools.alignLine.pageNo == curPageNo && dm->ValidPageNo(curPageNo)) {
                         MainWindow::AlignLine& al = win->archTools.alignLine;
-                        Point p1s = dm->CvtToScreen(curPageNo, al.p1);
-                        Point p2s = dm->CvtToScreen(curPageNo, al.p2);
+                        // R7: align line drawn as-is (no post-apply rotation by total
+                        // angle). After a single apply the line is cleared in
+                        // FinalizeAlign, so this block only renders the live drag /
+                        // pre-apply line.
+                        PointF p1page = al.p1, p2page = al.p2;
+                        Point p1s = dm->CvtToScreen(curPageNo, p1page);
+                        Point p2s = dm->CvtToScreen(curPageNo, p2page);
                         static Gdiplus::Pen alignPen(Gdiplus::Color(255, 170, 0, 255), 2); // purple
                         static Gdiplus::SolidBrush alignBrush(Gdiplus::Color(255, 170, 0, 255));
                         int r = 4;
@@ -4783,6 +5205,23 @@ static void OnPaintDocument(MainWindow* win) {
                         gs.FillRectangle(&bgBrush, bgRect);
                         gs.DrawString(label, -1, &fontReg, Gdiplus::PointF(bgRect.X + 4, bgRect.Y + 2),
                                       &measureTextBrush);
+                    }
+
+                    // Arch align drag preview: live rubber-band line between point1 and
+                    // point2 while the user drags. alignLine.defined is only set in
+                    // FinalizeAlign (after release), so during drag (dragLine==1) we draw
+                    // point1->point2 directly so the user sees the line being drawn
+                    // (measure/scale-like). point2 is updated live in OnMouseMove, so each
+                    // repaint extends the line to the cursor.
+                    if (win->archTools.toolMode == 5 && win->archTools.dragLine == 1 && dm->ValidPageNo(curPageNo)) {
+                        Point p1s = dm->CvtToScreen(curPageNo, win->archTools.point1);
+                        Point p2s = dm->CvtToScreen(curPageNo, win->archTools.point2);
+                        static Gdiplus::Pen alignDragPen(Gdiplus::Color(255, 170, 0, 255), 2); // purple
+                        static Gdiplus::SolidBrush alignDragBrush(Gdiplus::Color(255, 170, 0, 255));
+                        int r = 4;
+                        gs.DrawLine(&alignDragPen, p1s.x, p1s.y, p2s.x, p2s.y);
+                        gs.FillEllipse(&alignDragBrush, p1s.x - r, p1s.y - r, 2 * r, 2 * r);
+                        gs.FillEllipse(&alignDragBrush, p2s.x - r, p2s.y - r, 2 * r, 2 * r);
                     }
 
                     // Erase mode: draw red "+" crosshair overlay at mouse position
@@ -6865,6 +7304,44 @@ LRESULT CALLBACK WndProcCanvas(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 }
             }
             return 0;
+
+        case WM_KEYDOWN:
+            // ESC cancels an in-progress align drag, or discards an applied align
+            // preview (resets the page to pristine) so the user can draw a new line.
+            if (wp == VK_ESCAPE && gGlobalPrefs->archToolsEnabled && win->archTools.toolMode == 5 && win->AsFixed()) {
+                DisplayModel* dm = win->AsFixed();
+                int pageNo = dm->CurrentPageNo();
+                if (dm->ValidPageNo(pageNo)) {
+                    EngineMupdf* em = AsEngineMupdf(dm->GetEngine());
+                    bool previewActive = em && em->hasPreviewGeomEdit && em->previewGeomEdit.pageNo == pageNo;
+                    if (previewActive) {
+                        em->DiscardPreview(pageNo, dm); // restores pristine + clears preview state
+                        LogInfo("[arch +%llums] Align: ESC discarded preview, page %d reset to pristine",
+                                (unsigned long long)ArchElapsedMs(), pageNo);
+                    }
+                    // ESC in toolMode==5 keeps the tool ON (toolMode unchanged) —
+                    // distinguishes from FrameOnKeydown (SumatraPDF.cpp:8223) which
+                    // zeroes toolMode and logs "Esc cancel: draw mode cancelled".
+                    LogInfo("[arch +%llums] Esc discard (tool stays on), page %d toolMode=%d",
+                            (unsigned long long)ArchElapsedMs(), pageNo, win->archTools.toolMode);
+                    // Cancel any in-progress drag and clear ALL align drag state
+                    // (point1/point2 too, so no stale pair paints on next draw).
+                    // toolMode stays 5 — draw stays enabled, no re-toggle needed.
+                    win->archTools.point1 = PointF{};
+                    win->archTools.point2 = PointF{};
+                    win->archTools.alignLine = MainWindow::AlignLine{};
+                    win->archTools.dragLine = 0;
+                    win->archTools.dragMoved = false;
+                    win->archTools.dragStartPos = Point{};
+                    win->mouseAction = MouseAction::None;
+                    if (GetCapture() == win->hwndCanvas) {
+                        ReleaseCapture();
+                    }
+                    ScheduleRepaint(win, 0);
+                }
+                return 0;
+            }
+            return DefWindowProc(hwnd, msg, wp, lp);
 
         case WM_GETOBJECT:
             // UI Automation root for screen readers (Narrator, NVDA, …).

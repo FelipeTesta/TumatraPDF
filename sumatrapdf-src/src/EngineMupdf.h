@@ -208,10 +208,11 @@ class EngineMupdf : public EngineBase {
     // pending page geometry edits (rotation + crop) to be applied at save.
     // one entry per page; re-queueing on the same page overrides the previous.
     struct PageGeomEdit {
-        int pageNo = 0;       // 1-based
-        float angleDeg = 0.f; // rotation delta (+ = CCW)
-        RectF cropRectPage;   // crop rect in original page coordinates
-        RectF newMediabox;    // new mediabox after apply (empty = unchanged)
+        int pageNo = 0;           // 1-based
+        float angleDeg = 0.f;     // rotation delta (+ = CCW)
+        RectF cropRectPage;       // crop rect in original page coordinates
+        RectF newMediabox;        // new mediabox after apply (empty = unchanged)
+        bool rotatedCrop = false; // rotated crop: output boxes [0 0 w h], content rotated to box alignment
     };
     Vec<PageGeomEdit> pendingGeomEdits;
 
@@ -219,14 +220,14 @@ class EngineMupdf : public EngineBase {
     // Captured at FIRST in-memory apply so we can revert to original geometry
     // before re-applying a new align line (prevents cumulative corruption).
     struct PagePristineState {
-        int pageNo = 0;              // 1-based
-        pdf_obj* pageDict = nullptr; // kept ref to original page dict
-        pdf_obj* contents = nullptr; // kept ref to original /Contents
-        pdf_obj* resources = nullptr;// kept ref to original /Resources
-        fz_rect mediaBox;            // original MediaBox
-        fz_rect cropBox;             // original CropBox
-        int rotate = 0;              // original /Rotate
-        bool hasState = false;       // true if captured
+        int pageNo = 0;               // 1-based
+        pdf_obj* pageDict = nullptr;  // kept ref to original page dict
+        pdf_obj* contents = nullptr;  // kept ref to original /Contents
+        pdf_obj* resources = nullptr; // kept ref to original /Resources
+        fz_rect mediaBox;             // original MediaBox
+        fz_rect cropBox;              // original CropBox
+        int rotate = 0;               // original /Rotate
+        bool hasState = false;        // true if captured
     };
     Vec<PagePristineState> pristinePageStates;
 
@@ -293,7 +294,8 @@ class EngineMupdf : public EngineBase {
     bool QueuePageGeometry(int pageNo, float angleDeg, RectF cropRectPage) override;
     bool ApplyPendingGeometryEditsNow() override;
     // Preview gating (s64-R2): visual preview without committing to save
-    bool ApplyPreviewGeometry(int pageNo, float angleDeg, RectF cropRectPage, DisplayModel* dm);
+    bool ApplyPreviewGeometry(int pageNo, float angleDeg, RectF cropRectPage, DisplayModel* dm,
+                              bool rotatedCrop = false);
     bool PromotePreviewToPending(int pageNo);
     bool DiscardPreview(int pageNo, DisplayModel* dm);
     bool RestorePageGeometry(int pageNo, DisplayModel* dm);

@@ -8204,24 +8204,39 @@ static bool FrameOnKeydown(MainWindow* win, WPARAM key, LPARAM lp) {
             } else {
                 // Cancel draw mode
                 int oldMode = win->archTools.toolMode;
-                win->archTools.toolMode = 0;
+                // TUMATRA-FORK(s64-R7d): ESC in align keeps tool ON (toolMode stays 5).
+                // FrameOnKeydown is the live ESC path when canvas lacks focus; Canvas.cpp
+                // R7c consumes ESC when canvas has focus. Discard preview + reset drag
+                // state, but do NOT zero toolMode so align stays enabled for redraw.
+                bool isAlign = (win->archTools.toolMode == 5);
+                if (!isAlign) {
+                    win->archTools.toolMode = 0;
+                    win->archTools.scaleLineDefined = false;
+                    win->archTools.eraseMode = false;
+                    UpdateToolbar2State(win);
+                }
                 win->archTools.dragLine = 0;
-                win->archTools.scaleLineDefined = false;
-                win->archTools.eraseMode = false;
-                // TUMATRA-FORK(s50): ESC cancels align mode: clears alignLine ephemeral result
-                // upstream re-apply: keep clear here next to toolMode=0/dragLine=0; gate paint on toolMode==5 so ESC
-                // hides preview.
-                win->archTools.alignLine = MainWindow::AlignLine{}; // clear ephemeral align result
+                win->archTools.dragMoved = false;
+                win->archTools.dragStartPos = Point{};
+                win->archTools.alignLine = MainWindow::AlignLine{};
                 win->archTools.point1 = PointF{0, 0};
                 win->archTools.point2 = PointF{0, 0};
                 if (GetCapture() == win->hwndCanvas) {
                     ReleaseCapture();
                 }
                 win->mouseAction = MouseAction::None;
-                UpdateToolbar2State(win);
                 ScheduleRepaint(win, 0);
-                LogInfo("[arch +%llums] Esc cancel: draw mode cancelled, was mode=%d", (unsigned long long)ArchElapsedMs(),
-                        oldMode);
+                int alignPage = 0;
+                if (isAlign) {
+                    if (DisplayModel* d = win->AsFixed()) {
+                        alignPage = d->CurrentPageNo();
+                    }
+                    LogInfo("[arch +%llums] Esc discard (tool stays on), page %d", (unsigned long long)ArchElapsedMs(),
+                            alignPage);
+                } else {
+                    LogInfo("[arch +%llums] Esc cancel: draw mode cancelled, was mode=%d",
+                            (unsigned long long)ArchElapsedMs(), oldMode);
+                }
             }
             // s64-R2: if there's an uncommitted align preview, discard it on ESC
             DisplayModel* dm = win->AsFixed();

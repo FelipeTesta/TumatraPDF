@@ -351,6 +351,7 @@ static SeqStrings gCommandNames =
     "CmdBookmarkDelete\0"
     "CmdBookmarkUpdate\0"
     "CmdBookmarkRename\0"
+    "CmdArchPageCrop\0"
     "CmdNone\0"
     "\0";
 
@@ -690,6 +691,7 @@ static i32 gCommandIds[] = {
     CmdBookmarkDelete,
     CmdBookmarkUpdate,
     CmdBookmarkRename,
+    CmdArchPageCrop,
     CmdNone,
 };
 
@@ -1029,6 +1031,7 @@ SeqStrings gCommandDescriptions =
     "Delete Bookmark\0"
     "Update Bookmark Page\0"
     "Rename Bookmark\0"
+    "Arch: Page Crop (image-editor bounding box)\0"
     "Do nothing\0"
     "\0";
 // clang-format on

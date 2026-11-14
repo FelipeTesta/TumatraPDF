@@ -1,4 +1,126 @@
-﻿## 2026-11-12 (s62) - Ghost bookmark deletable: op=2 empty-target now removes empty-title ghost (corrupt-file repair)
+﻿## 2026-11-13 (s64-R9) — Page Crop rotated (nomacs parity)
+
+### Fixed
+- s64-R9h: Crop Align horizontal-axis residual sign fix (tilt doubled instead of zeroed: -44 -> -88, +40 -> +80, -5 -> -10); horizontal branch needed phi=+angleToHorizontal (screen-CW theta=-phi) — Canvas.cpp residual now `axis == 0 ? -angleToVertical : +angleToHorizontal`; vertical branch was exact.
+- s64-R9f: Crop Align unusable on scanned pages — editTools image branch (editTools.on + click over full-page image) returned early BEFORE toolMode==5 align handler, every click consumed. Fix: alignMode const (archToolsEnabled && toolMode==5) gates trim/capture/editTools/erase consumers in mouse down/move/up + consume-guard drops unconsumed align clicks (dragLine==2 etc) before annotation/link/selection consumers; toolMode==0 unchanged. Probe ad-hoc-s64-align-scan PASS (Align lifecycle in log, image consumption absent). toolMode==6 (Page Crop) same interception class NOT gated — separate fix candidate.
+- s64-R9i: Page Crop (toolMode==6) unusable on scanned/image pages for the same reason — editTools image branch ate every crop click; unconsumed crop clicks (outside box) leaked into annotation/link/selection consumers. Fix mirrors R9f: cropMode const (archToolsEnabled && toolMode==6) gates trim/capture/editTools/erase in mouse down/move/up; consume-guards drop unconsumed crop clicks/releases before annotation/link/selection consumers (crop drag state itself untouched; toolMode==5 alignMode logic unchanged). Probe ad-hoc-s64-crop-scan PASS ([crop] mouse-down inside=1, imageDragPrepared absent). NOTE: cropMode consume-guards added in BOTH Down and Up (R9f had no Up guard) because the crop up-block did not return.
+- Canvas.cpp rotate jump (s64-R9e): mouse-down stored cropRotateStartAngle = cropAngle + atan2(startPt), move added (cur−start) on top → absolute angle double-counted, box snapped/jumped ("perde a posição do mouse"). Now press stores cropAngle only; move applies pure relative delta + fmodf wrap to [−180,180]; Shift snap 22.5° kept.
+- Engine rotated crop @ ±90 (s64-R9e): 90-multiples took R2 (/Rotate+CropBox) path which IGNORES rotatedCrop → CropBox shifted, text clipped, ±90 outputs identical+broken. is90Multiple now forced false when edit.rotatedCrop (both ApplyPendingGeometryEdits sites + ApplyPreviewGeometry) → R3 Form XObject straightens box at any angle. MuPDF content parser rejects scientific notation — tiny cos/sin (cos 90° = −4.37e-08) snapped to 0.0f (e-notation → "unknown keyword", ops dropped).
+- Canvas.cpp hit-test (s64-R9c): stale cropRotating flag — handle branch + toolMode==6 mouse-up block now reset it; handle click never rotates (handle lookup FIRST, rotate-outside test only after handle miss).
+- Canvas.cpp resize anchor local-frame (s64-R9d): opposite corner floated wrong on rotated boxes — resize delta now inverse-rotated into box-local axes and box center shifts by half the local delta along local u/v axes; opposite edge/corner stationary (θ=0 reduces to R8; θ=−15° probe: opposite BR corner drift 3.5pt, x-axis 0.9pt — rest = page-edge y-clamp, expected).
+- EngineMupdf.cpp + EngineMupdf_Preview.cpp rotatedCrop XObject clip (s64-R9d): clip was axis-aligned local AABB → tilted-square seam, selection corner content lost, AABB content outside selection shown — now rotated `re W n` clip path (translate W/2,H/2, rotate PDF −θ) + /BBox = axis-aligned bounds of rotated rect. Rotation sign was validated correct (PyMuPDF line dir (1.0,0) at matching angle; angle=0 unchanged R8, mediabox 100,200,312,492).
+
+### Added
+- Canvas.cpp (s64-R9e): dedicated rotate grip — circle below bottom-edge-midpoint handle (local (0, +h/2 + 20px), offset in screen px, radius 6px paint / 7px hit), faint guide line from bottom-mid handle to circle, crosshair. Hit order: resize handles → grip → inside=move → OUTSIDE = NOTHING (outside-poly rotate gesture REMOVED). Grip = powerPoint-style.
+- Canvas.cpp (s64-R9e): corner handles proportional resize — dominant local axis du wins, dh = du·(h/w), w/h aspect preserved, opposite corner anchor (shared anchor-shift block); edge-midpoint handles stay single-axis. Hover cursor: grip=IDC_CROSS.
+- MainWindow.h ArchToolsState: cropAngle (deg, screen/fitz y-down), cropRotateStartAngle, cropRotating.
+- Canvas.cpp: box painted rotated polygon (center ± R(θ)·(±w/2,±h/2)); 4 border lines + 8 rotated handles (theme colors alpha 150/255/230); overlay outside poly via GraphicsPath clip-exclude; GetCropResizeHandleAt inverse-rotates pt to box-local frame, axis-aligned hit-test; CalculateCropResizedRect inverse-rotates drag delta into local axes; drag-down outside poly → rotate mode (startAngle + Δatan2, Shift snap 22.5°); ESC resets cropAngle=0.
+- EngineMupdf.h PageGeomEdit: rotatedCrop flag.
+- EngineMupdf_Preview.cpp: ApplyPreviewGeometry(..., rotatedCrop) → zero-origin boxes [0 0 W H], content matrix +angleDeg (align sign); stores flag.
+- EngineMupdf.cpp save path: rotatedCrop → same zero-origin boxes [0 0 W H].
+- Commands_ArchTools.cpp: crop apply passes cropAngle + rotatedCrop=(cropAngle!=0), clears cropAngle=0 after promote.
+- SumatraControl.cpp: TestAlignApply optional 7th arg rotatedCrop (0/1).
+- tests/tmp/s64/ad-hoc-s64-rotated-crop.ts headless structural test (rotated [0 0 412 592] fm=1; angle=0 R8 preserved [100 100 512 692]).
+- tests/tmp/s64/sign_probe2.py PyMuPDF + named-pipe sign probe.
+- s64-R9g: Edit ON temporarily disables trim (dm->marginTrimEnabled) + two-columns (dm->viewportCropV2Enabled), restored on Edit OFF — suspend/restore via the same WM_COMMAND toggle paths (relayout/cache/toolbar consistent). Restore only-if-still-off (clobber guard) + same-doc filePath binding; user re-enable mid-edit survives Edit OFF; restore skipped+logged when active doc changed. Probe ad-hoc-s64-r9g.ts PASS (log markers, dm-level). Note: toolbar button visual state re-syncs via toggle handlers; not asserted separately (TB_GETSTATE constant corruption fixed in tests/winapi.ts — 0x040b).
+
+### Verified
+- Build 0/0 (0 warn, 0 err); MD5 AB51CE566C4DE88F24F0AA62A7165597 (out/dbg64 == Compiled; MD5 changes per incremental build).
+- s64-R9e GUI probe ad-hoc-s64-rotate-grip.ts PASS: corner drag → w/h ratio 0.7728 vs 0.7727 (drift 0.0000); grip drag +20° → [crop] rotate log ramps 4.9→20.0 from start 0.0 (NO JUMP), ends at start+20; grip circle + guide line visible (vision check on r9e-grip-rotated.png).
+- s64-R9e engine sign probe (asymmetric fixture AB/red square, TestAlignApply rotatedCrop=1 + TestAlignCommit): ±10 text dir (0.985,∓0.174) = content rotated by −θ for +θ box (box straightened), ±90 SAME orientation class after R3 routing — sign flip NOT needed; 180° symptom traced to rotate-jump feeding absolute wild angles.
+- Build 0/0 (0 warn, 0 err); MD5 D5109D81D75274E53021FAF4CAD84828 (out/dbg64 == Compiled).
+- PyMuPDF sign probe: mediabox=cropbox=[0 0 412 592], single Fm0, nonwhite 0.1%, sign +angleDeg.
+- Regressions --no-build PASS: issue-2799, align-deskew, s64-apply-gating, s64-esc-real, s64-crop.
+
+### Notes
+- Sign chosen: +angleDeg (content matrix cosA/sinA, align sign per s64-R6). Box tilted +10° → output content straight to box axes.
+- GUI grip + proportional probes PASS + vision-verified (headless PNG check); user live validation is the only acceptance gate.
+
+## 2026-11-13 (s64-R8) — Page Crop nomacs parity + wrong-cut fix
+
+### Root cause
+- R2 (rotateDelta==0) raw-dict write in EngineMupdf.cpp + EngineMupdf_Preview.cpp dropped crop origin (wrote [0 0 cropW cropH]) and never y-flipped fitz y-down cropBox to PDF y-up via mediabox → cut region ≠ drawn box.
+
+### Fixed
+- EngineMupdf.cpp + EngineMupdf_Preview.cpp: R2 rotateDelta==0 writes real PDF-space rect in BOTH paths: pdfX0=mb.x0+cropBox.x0; pdfY0=mb.y1−cropBox.y1; pdfX1=mb.x0+cropBox.x1; pdfY1=mb.y1−cropBox.y0. Cut region == drawn box exactly (mediabox 100,200,312,492 for fitz box [100,100,412,592]).
+- Canvas.cpp paint (~:4863-4890): nomacs-parity overlay — 4 darkened strips outside region (ThemeWindowBackgroundColor alpha 150) + 2px ThemeEdgeColor border + 8 handles (ThemeWindowTextColor alpha 230).
+
+### Added
+- ad-hoc-s64-crop.ts (headless wrong-cut check via -dbg-control + PyMuPDF render), ad-hoc-s64-gui.ts (GUI overlay + 8-handle screenshots, passes).
+
+### Verified
+- Build 0/0; MD5 CE247DB15D95C491F715594904398A56C9E083F13147C66A0428DB80C749FC77 (out/dbg64 == Compiled).
+- Regressions --no-build PASS: issue-2799, align-deskew, bookmark-edit, apply-gating, esc-frame.
+
+### Notes
+- Coordinate-space lesson: fitz cropBox is y-down page space; PDF mediabox is y-up — origin must be preserved, not zeroed; y_pdf = mb.y1 − cropBox.y1 flip.
+
+## 2026-11-13 (s64-R7d) — Crop Align ESC discard keeps tool ON via live frame path
+
+### Root cause
+- Key-handler liveness is decided by FOCUS policy: canvas clicks call HwndSetFocus(hwndFrame) (Canvas.cpp:2779/:3629/:4389) -> canvas never has keyboard focus -> ESC goes to FRAME -> FrameOnKeydown (SumatraPDF.cpp:8185-8258). FrameOnKeydown :8207 zeros toolMode=0 on ESC for ANY toolMode incl 5 ("Esc cancel: draw mode cancelled"), turning align OFF and forcing re-toggle.
+- SumatraPDF.cpp READ-ONLY ban lifted THIS ROUND for a MINIMAL surgical edit of the align ESC sub-branch only (~:8211-8234).
+
+### Fixed
+- SumatraPDF.cpp (SANCTIONED edit, marker `// TUMATRA-FORK(s64):`, ~25 changed lines incl comments): FrameOnKeydown align (toolMode==5) ESC sub-branch KEEPS preview discard (s64-R2 block ~:8241-8253 untouched) + adds drag-state cleanup mirroring Canvas.cpp R7c (dragLine=0, dragMoved=false, dragStartPos=Point{}, alignLine={}, point1/point2=PointF{}, mouseAction=None); REMOVES toolMode=0 zeroing so tool stays ON (toolMode=5), immediate redraw allowed; logs "Esc discard (tool stays on), page %d". Non-align modes unchanged. Canvas.cpp R7c handler unchanged (belt-and-suspenders; consumes ESC when canvas has focus).
+
+### Verified
+- Build 0/0 (0 warn, 0 err); MD5 0D05C41C6C94720C93437447BD250078 (out/dbg64 == Compiled)
+- Honest E2E tests/tmp/s64/ad-hoc-s64-esc-frame.ts PASS: real focus flow, WM_KEYDOWN VK_ESCAPE posted to hwndFrame (NO canvas SetFocus); TestAlignCommit reports no-preview (discarded); re-apply TestAlignApply works (state reset); sumlog contains "Esc discard (tool stays on)" and NOT "draw mode cancelled".
+- Regressions --no-build PASS: issue-2799, ad-hoc-align-deskew, ad-hoc-bookmark-edit, ad-hoc-s64-apply-gating, ad-hoc-s64-esc-real
+
+### Notes
+- Lesson: key-handler liveness is decided by FOCUS policy — validate with real window targeting; SumatraPDF.cpp exception protocol (sanctioned minimal edit, marker-tagged).
+
+## 2026-11-13 (s64-R7c) — Crop Align ESC keeps tool ON (toolMode=5)
+
+### Root cause
+- SumatraPDF.cpp:8207 FrameOnKeydown WM_KEYDOWN VK_ESCAPE sets `win->archTools.toolMode = 0` for ANY toolMode != 0, including 5. User log proof: `[arch +4406ms] Esc cancel: draw mode cancelled, was mode=5` then toolbar button OFF, user forced to re-toggle. SumatraPDF.cpp is READ-ONLY — cannot fix there.
+
+### Fixed
+- Canvas.cpp: WndProcCanvas WM_KEYDOWN VK_ESCAPE (line ~7033) already keeps toolMode=5, returns 0 (consumes ESC when canvas has focus), so FrameOnKeydown never runs. Extended log to distinguish: added `[arch +%llums] Esc discard (tool stays on), page %d toolMode=%d` on every ESC in toolMode==5 — vs FrameOnKeydown's `[arch] Esc cancel: draw mode cancelled`.
+- No toolMode zero, no HandleCmdArchAlign call, no toolbar toggle-off on ESC.
+
+### Verified
+- Build 0/0 (clang-format on Canvas.cpp — n/a, not installed); MD5 b78b9fb8b4bda56d44320e2a710188e7 (out/dbg64 == Compiled)
+- Real-GUI E2E: tests/tmp/s64/ad-hoc-s64-esc-real.ts PASS (draw→ESC→draw→ESC, TestAlignCommit: committed/no-preview/committed/no-preview, toolbar button stays ON)
+- Regressions --no-build PASS: issue-2799, ad-hoc-align-deskew, ad-hoc-bookmark-edit, ad-hoc-s64-apply-gating
+
+### Notes
+- User live validation: draw line → ESC → draw new line without re-toggle (both work). Real ESC key (postMessage WM_KEYDOWN VK_ESCAPE to focused canvas) confirmed.
+
+## 2026-11-13 (s64-R7b) — Crop Align ESC full-reset + draw re-enable
+
+### Fixed
+- ESC in Crop Align (toolMode==5) now clears ALL align drag state after DiscardPreview: point1/point2 reset to PointF{}, dragLine=0, dragMoved=false, dragStartPos=Point{}, alignLine cleared, ReleaseCapture if capture was ours, mouseAction=None. toolMode UNCHANGED (stays 5) so next draw starts from state 0 WITHOUT re-toggle. Fixes stale-drag-state trap where ESC mid-drag left capture stuck or stale point pair blocking next draw.
+- Canvas.cpp: WndProcCanvas WM_KEYDOWN VK_ESCAPE handler (line ~7033) extended to reset point1/point2/dragMoved/dragStartPos in addition to existing alignLine/dragLine/capture cleanup.
+
+### Verified
+- Build 0/0 (clang-format on Canvas.cpp); MD5 FA91C2C54E3D6E6149F589B4E0D6CD37 (out/dbg64 == Compiled)
+- E2E: tests/tmp/s64/ad-hoc-s64-esc-reset.ts PASS (draw1→ESC→draw2→ESC, TestAlignCommit: committed/no-preview/committed/no-preview)
+- Regressions --no-build PASS: ad-hoc-align-deskew, issue-2799, ad-hoc-bookmark-edit
+
+### Notes
+- User live validation pending: draw line → ESC → draw new line without re-toggle (both work)
+
+## 2026-11-13 (s64-R6) — Crop Align Fine-Tune + nomacs Reference
+
+### Added
+- Fine-tune straightening: 2nd+ drawn line measures RESIDUAL angle in current (righted) view; rotations SUM; each apply computed FROM ORIGINAL pristine page with TOTAL angle → single Fm0, mediabox = AABB of original rotated by total (no compounding bbox growth)
+- Per-page alignAppliedAngle + alignAppliedPageNo state (ArchToolsState); reset on page change/discard/toggle-off
+- Straightened align line: finalized line rendered rotated by total angle about page center
+- nomacs reference studied (TEMP/nomacs clone): DkRotateManipulator (DkManipulatorsIpl.cpp:306) same model (single mAngle, apply from original); DkRotatingRect center-axis crop
+
+### Changed
+- R5 absolute-angle behavior REPLACED by incremental total-angle accumulation (sign convention: PDF y-up angle = signed image-space deviation; apply -40° rights a -40°-tilted line)
+
+### Verified
+- Build 0/0, MD5 58B9B4E40A1D4A3426809458DD5EDE69; ad-hoc-s64-finetune.ts PASS (no compounding, single Fm0), apply-gating E/F PASS, GUI drag repro PASS, align-deskew/issue-2799/bookmark-edit PASS
+
+### Notes
+- Remaining: user live validation; Page Crop wrong-cut bbox deferred; R2 90° latent
+
+## 2026-11-12 (s62) - Ghost bookmark deletable: op=2 empty-target now removes empty-title ghost (corrupt-file repair)
 
 ### Fixed
 - **BUG: ghost bookmark survives delete+save (user live on s61 build):** user's file (corrupted pre-s60 by the op=3 empty-title bug) contains an empty-title outline entry; user deletes it in the UI (`CmdBookmarkDelete: ENTER title='' pageNo=-1`) but s61's op=2 empty-target early-skip prevented replay -> ghost never left the file -> reappeared on every reload. Rename itself confirmed working on s61 (`IDOK rawEditLen=5 name='TESTE'`).

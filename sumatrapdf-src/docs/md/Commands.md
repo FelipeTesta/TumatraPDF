@@ -363,6 +363,15 @@ CmdDebugShowFitContentArea,,Debug: Show Fit Content Area,"outlines in red the ar
 CmdNone,,Do nothing,
 ```
 
+## Arch Tools
+
+```commands
+Command IDs,Keyboard shortcuts,Command Palette,Notes
+CmdArchAlign,,Crop Align,"Arch tool: draw a 2-point line to deskew the page (preview + Apply). Arch Tools toolbar button."
+CmdArchAlignApply,,Crop Align: Apply,"Commits the current arch preview (align rotation or page crop) for save."
+CmdArchPageCrop,,Page Crop,"Arch tool: image-editor page bounding box over the current page. Drag the 8 handles to resize/move; Apply commits the crop. Edit bar button."
+```
+
 ## Deprecated or internal
 
 ```commands
