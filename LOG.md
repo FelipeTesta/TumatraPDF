@@ -23,6 +23,7 @@
 - tests/tmp/s64/ad-hoc-s64-rotated-crop.ts headless structural test (rotated [0 0 412 592] fm=1; angle=0 R8 preserved [100 100 512 692]).
 - tests/tmp/s64/sign_probe2.py PyMuPDF + named-pipe sign probe.
 - s64-R9g: Edit ON temporarily disables trim (dm->marginTrimEnabled) + two-columns (dm->viewportCropV2Enabled), restored on Edit OFF — suspend/restore via the same WM_COMMAND toggle paths (relayout/cache/toolbar consistent). Restore only-if-still-off (clobber guard) + same-doc filePath binding; user re-enable mid-edit survives Edit OFF; restore skipped+logged when active doc changed. Probe ad-hoc-s64-r9g.ts PASS (log markers, dm-level). Note: toolbar button visual state re-syncs via toggle handlers; not asserted separately (TB_GETSTATE constant corruption fixed in tests/winapi.ts — 0x040b).
+- s64-R9j: toolbar save icon replaced with nomacs-style floppy (fill->currentColor); resized to tabler-style stroke weight per user feedback (first filled 160px glyph rendered oversized/heavy vs neighbors; final: 24x24 viewBox, stroke-width 1, fill=none, ~2px padding — shell w/ top-right fold + shutter + notch + label; SvgIcons.cpp gIconSave).
 
 ### Verified
 - Build 0/0 (0 warn, 0 err); MD5 AB51CE566C4DE88F24F0AA62A7165597 (out/dbg64 == Compiled; MD5 changes per incremental build).
@@ -119,6 +120,7 @@
 
 ### Notes
 - Remaining: user live validation; Page Crop wrong-cut bbox deferred; R2 90° latent
+- s64-R5 (backfill — entry was never written; TODO.md held the only record): 4 live-validated GUI bugs FIXED (2026-11-13) — (1) selection coords after righting: ApplyPreviewGeometry already mirrors pending-edits tail (drop cached page + FreeForDisplayModel + BuildPagesInfo + RelayoutKeepingView), no code change; (2) toggle-off did NOT discard: HandleCmdArchAlign now calls DiscardArchPreview(win) unconditionally on oldMode==5 (was gated on never-true toolMode != 5); (3) repeated line draw accumulated rotation: 2nd-draw reset also handles preview state (hasPreviewGeomEdit), restores from PagePristineState → single Fm0; apply1==apply2==apply3 verified via ad-hoc-s64-align-verify.ts; (4) 🔴 dirty dot not lighting: ApplyPreviewGeometry sets modifiedPageGeometry=true → EngineMupdfHasUnsavedAnnotations lights tab dot; DiscardPreview clears. Build 0 err/0 warn; regressions ad-hoc-align-deskew/bookmark-edit/issue-2799 PASS.
 
 ## 2026-11-12 (s62) - Ghost bookmark deletable: op=2 empty-target now removes empty-title ghost (corrupt-file repair)
 
@@ -1681,7 +1683,8 @@ No bulk merge fixture test (needs real Drive conflicted-copy fixture). F3 remain
 - `TB_GETSTATE` takes a COMMAND id, not an index (index ÔåÆ returns -1).
 - `withControlledSumatra`'s quit-timeout error MASKS the fn's own throw ÔÇö log stages inside fn before blaming the quit.
 - issue-5869.ts parse regex (`^idx=... rect=(\S+) text=`) no longer matches the dump line (style/cx fields were added since; now `enabled` too) ÔÇö suspect for its open failure; fix the parse when taking the UI-flake group.
-- Coordination: commit 80de1ac (other agent, "flashcard study time tracking + Home stats UI") swept this session's Toolbar.cpp work into its batch ÔÇö verified complete on HEAD (button line 82, anchor walk, enabled dump, no TEMP debug left). LOG/TODO untouched by it.
+- Coordination: commit 80de1ac (other agent, "flashcard study time tracking + Home stats UI") swept this session's Toolbar.cpp work into its batch — verified complete on HEAD (button line 82, anchor walk, enabled dump, no TEMP debug left). LOG/TODO untouched by it.
+- Backfill (2026-11-13 TODO consolidation): flashcard study-time tracking shipped in commits 80de1ac (2026-10-25: FlashcardStats.h/.cpp 100Hz Study timer, 60s/card cap, flashcard-stats.txt sidecar `date sec cards`, per-book FileState.flashcardStudyTimeSec, Home "Flashcards" tab + `Read: Xh Ym / Flashcards: Xh Ym` calendar hover + peru study-time graph line) and 62b11fc (2026-10-26: session timer trio + card counts — cards-rated details in s36-az) — no LOG entry at the time.
 
 ## 2026-10-24 (s36-au) ÔÇö debug-only graceful-quit exit code 5 fixed (GDI+ statics vs atexit)
 
@@ -4480,6 +4483,7 @@ TumatraPDF/
 
 - Rebuild: msbuild vs2022\TumatraPDF.sln /t:TumatraPDF /p:Configuration=Debug /p:Platform=x64 /m
 - Verify EXE name: out/dbg64/TumatraPDF.exe
+- Backfill (2026-11-13 TODO consolidation): user-visible label pass "Sumatra" → "Tumatra" shipped — `src/SumatraPDF.cpp` ("SumatraPDF - Printers", "SumatraPDF Documentation", `_TRA("SumatraPDF crashed")` x2, crash message body), `src/SumatraDialogs.cpp` (`_TRA("SumatraPDF Options")`), `src/Flags.cpp` (`_TRA("SumatraPDF - Show Printers")`), `src/Installer.cpp` (`L"SumatraPDF"` window titles x2), `src/SumatraStartup.cpp` (`L"SumatraPDF"`, `L"SumatraPDF installer"`, `L"SumatraPDF installer usage"`), `src/MainWindowCreate.cpp` (comment + default-app notice), `src/Commands.cpp` ("Help: SumatraPDF Website", "Help: About SumatraPDF...", "SumatraPDF File Picker"). Non-label internals (exe names, window classes, registry/CLSID, .rc) intentionally NOT renamed — see TODO.md `## Sumatra → Tumatra — non-label items`.
 
 ## 2026-08-11 ÔÇö Feature 1: AutoScroll Implemented (Direct Core Integration)
 

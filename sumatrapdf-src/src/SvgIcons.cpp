@@ -109,13 +109,18 @@ static const char* gIconZoomOut =
   <line x1="21" y1="21" x2="15" y2="15" />
 </svg>)";
 
-// https://github.com/tabler/tabler-icons/blob/master/icons/floppy-disk.svg
+// nomacs-style save floppy redrawn to our tabler conventions (user feedback:
+// filled 160px glyph rendered oversized/heavy vs neighbors). Same identity as
+// nomacs ImageLounge src/img/save.svg: shell w/ top-right corner fold, top
+// shutter (∩), write-protect notch, bottom label (∩ mirrored). 24x24 viewBox,
+// stroke-width 1, fill="none", 2px padding — matches gIconPrint & co
 static const char* gIconSave =
     R"(<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" stroke-width="1" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round">
-  <path stroke="none" d="M0 0h24v24H0z"/>
+  <rect x="0" y="0" width="24" height="24" stroke="none"></rect>
   <path d="M18 20h-12a2 2 0 0 1 -2 -2v-12a2 2 0 0 1 2 -2h9l5 5v9a2 2 0 0 1 -2 2" />
-  <circle cx="12" cy="13" r="2" />
-  <polyline points="4 8 10 8 10 4" />
+  <path d="M9 4v5h6v-5" />
+  <path d="M13 4v3.5" />
+  <path d="M9 20v-8h6V20" />
 </svg>)";
 
 // https://github.com/tabler/tabler-icons/blob/master/icons/rotate-2.svg - modified

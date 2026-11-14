@@ -16,7 +16,8 @@ Branch: `fix/home-responsiveness` — worktree created from `fix/profile-sync-ca
 - [ ] Verify — rebuild (`bun cmd/build.ts`, workdir `sumatrapdf-src/`); 7-size resize sweep (1680×1000 → 620×380) with the same probe method; confirm: no overlap at low heights, heatmap fits or band cleanly dropped, toolbar usable at narrow widths, list-view toggle sanity, empty state; dark theme (light if applicable).
 - [ ] Informativos — `LOG.md` entry (Fixed/Changed), `TODO.md` check items closed, `FLOW/homepage.dot`; commit only on explicit command.
 
-## Referencias Opensource
+## Open-source references
+
 1. https://github.com/nomacs/nomacs
 
 ## Execution queue (effort/gain)
@@ -24,27 +25,27 @@ Branch: `fix/home-responsiveness` — worktree created from `fix/profile-sync-ca
 User-locked order:
 
 1. **Bookmarks Improve** (spec pointer → `## Bookmarks Improve` below).
-2. **Edit/Align** (spec pointer → `## Edit/` below, PT verbatim).
+2. **Edit/Align** (spec pointer → `## Edit/` below).
 3. **Page Counting Format** (spec pointer → `## Page Counting Format` below).
 
 4. USER validation queue: capture tool Shift+S (s39, documented §Capture tool), Repair Document File (s42, steps in its section below), Profile Sync dark cascade (s40: import/cloud-revert windows), TOC Reorder toggle crash fix (LOG s54-b: selected bookmark + click items + Reorder on real build/machine).
 
-## Lista vertical de abas
+## Vertical tab list
 
-Do lado esquerdo do botão minimizar, vamos incluir um botão `🧾`, a ideia é exibir a lista de abas abertas em formato de lista vertical, ou seja:
+Next to the minimize button, add a `🧾` button: show the list of open tabs as a vertical list, e.g.:
 
 ```
-Aba1
-Aba2
-Aba3
+Tab1
+Tab2
+Tab3
 ```
 
-Dessa forma melhorando a leitura dos nomes dos arquivos grandes. Clicar na aba da lista redireciona a aba ativa para a aba clicada.
+Goal: make reading long file names easier. Clicking a tab in the list focuses that tab.
 
 ## OTHER FEATURES
 
-[ ] - Incluir no settings una opção para desabilitar o botão `scan mode` do toolbar; garantir a adaptação dos outros botões no espaço ao fazer isso;
-[ ] - Revisar README para constar todas novas funcionalidades, mapear tudo pelo LOG; aproveitar e caveman-compress os conteúdos para ficarem bem objetivos, baixa verbosidade;
+- [ ] Add a settings option to disable the toolbar `scan mode` button; other buttons must adapt to the freed space.
+- [ ] Review README to list all new features, mapped from LOG; caveman-compress contents for objectivity and low verbosity.
 
 ## Performance optimizations (verified 2026-11-04, evidence LOG s38)
 
@@ -52,24 +53,10 @@ Source: external agent's perf map (archived TEMP/performance-code-arch.dot), cla
 
 - [ ] **OPT-7** coordinate-space guards (START): `#if isDebug` asserts in `DisplayModel::CvtToScreen/CvtFromScreen` + TC2 colX consistency check (debug-only, no behavior change; prerequisite for OPT-3). STATUS: in progress s38-o1.
 - [ ] **OPT-6** perf regression tests: cache hit rate, RelayoutFrame frequency, trim/crop toggle latency; ad-hoc tests, fail on >5% regression. STATUS: baseline tests shipped (startup/cache-behavior/toggle-latency); CI fail-gate metrics (cache hit rate, relayout frequency) need new C++ control cmds — residual open.
-- [x] **OPT-5** WebView2 memory budget flags: cap Chromium baseline (shared env already exists — WebView.cpp gSharedEnvironment). STATUS: flags shipped [--js-flags=--max-old-space-size=256, --disk-cache-size=33554432] at WebView.cpp:1922-1938 AdditionalBrowserArguments (user verify pending).
 - [ ] (DEFER) OPT-1 adaptive cache cap — after OPT-7; needs memory accounting + tests.
 - [ ] (DEFER) OPT-3 partial trim-cache invalidate — real gain (Full FreeForDisplayModel storm, RenderCache.cpp:426) but stale-tile risk on rect.y shift; needs stamping/versioning.
-- [x] (REJECTED) OPT-2 true LRU — hash-rejection reasons sound (no STL base/, compaction invalidates positions).
-- [x] (REJECTED) OPT-4 TC2 tile dedup — premise wrong: left/right render different page halves (colX shift RenderCache.cpp:347-368); dedup would show wrong half.
 
-## Findings status — audited 2026-11-04
-
-### Closed (verified)
-
-- Toolbar critical ordering — all 4 toolbars strip theme before `TbAddButtons` (`Toolbar.cpp:2907/:3076`, `FlashcardToolbar.cpp:465`, `Commands_Edit.cpp:126`). s36-ax lineage.
-- Dark Mode Epoch legacy path dead — `ToolbarApplyThemeToRebar` (`Toolbar.cpp:3181`) uncalled; epoch bumped by `ApplyThemeColorsToDarkMode` (`Theme.cpp`).
-- ASan `build-asan.ts` targets `TumatraPDF.sln` correctly.
-- Settings names-blob migration fixed (s36-br, commit `6df3dc3`).
-- dmlib rebar interception fixed (`ToolbarArchEditRebarSubclassProc` + `TBSTYLE_EX_MIXEDBUTTONs`, user-verified s36-bb lineage).
-- Flashcard annotation author-token rule → AGENTS.md §12 (2026-10-18).
-- TC2 un-routed engine-> sites all verified physical, zero edits — Commands_Edit.cpp:726, Commands_Flashcard.cpp:324, RenderCache.cpp:506, RenderCache.cpp:1212 (LOG s37-a).
-- WebView2 adapter — complete: `docs/md/WebView2-Adapter-Pattern.md` + `TestMarkdownAdapter=55` wired in `cmd/control.ts`/`SumatraControl.cpp` (LOG s37-c/s37-d); read-side residual noted (no mutation path exercised).
+## Findings status — audited 2026-11-04 (closed findings archived to LOG)
 
 ### Open (live)
 
@@ -82,7 +69,6 @@ Source: external agent's perf map (archived TEMP/performance-code-arch.dot), cla
 
 ## Dependency updates — open items
 
-- [x] **Suite baseline (pre-existing, NOT caused by the dependency batch) — RESOLVED (s36-au/ay/ba/bb), 0 entries fail.** History in LOG s36-au/ay/ba/bb (shutdown group, issue-5869, unit-tests exit 1, UI/timing). See LOG.
 - [ ] If a real dependency regression appears: bisect by patch group (the 27 patches in `ext/patches/` are the only local delta over pristine mupdf 1.28.5; reverse-apply state: 22 applied / 19 absent / 6 conflict).
 - [ ] Bun `1.3.14 → 1.4.3` (build/test scripts only) after re-running the suite. Bun version not pinned in repo files (`cmd/package.json` has no version).
 - [ ] **F6 — explicitly deferred**: harfbuzz/freetype only when mupdf bumps its pins (mupdf 1.28.5 pins exactly our versions — upgrading independently diverges from the combination Artifex tests). UnRAR metadata drift: `ext/versions.txt` says 7.1.6 but `ext/unrar/version.hpp` reports RARVER 7.11.0 — verify against rarlab before any change.
@@ -99,21 +85,6 @@ Source: external agent's perf map (archived TEMP/performance-code-arch.dot), cla
 - [ ] User confirm on a real book: autoscroll acceptance over TC2 (1L→1R→2L→2R, no jump), drag speed, OCR text selection per column. The three s35 fixes (stall-on-hover, drag-slow, per-column selection) are code-verified + E2E PASS — see LOG s35/s36-l.
 
 ## Flashcards
-
-- [x] Timer capture core (shipped):
-  - Study timer (100Hz tick) starts when study mode is ON, stops when OFF
-  - Per-card cap: 60 seconds — stops counting time for that card (user advances manually, NO auto-advance)
-  - Main total (flashcard-stats.txt sidecar, keyed by date) — survives rename/delete/move
-  - Per-book reference: FileState.flashcardStudyTimeSec (persisted with file history)
-  - No time captured while revealMode is ON
-  - Files added: FlashcardStats.h/.cpp, timer ID kFlashcardStudyTimerID=16 in Canvas.h
-
-- [x] Home page: "Flashcards" tab under "Most Read" space (same structure as Read, showing book list + flashcard times)
-- [x] Calendar hover label: show "Read: Xh Ym / Flashcards: Xh Ym" for each day
-- [x] Graph: add peru-colored line for flashcard study time (separate from reading time)
-- [x] Study time capture (STATS, no visual feedback): while study mode is ON and the answer is NOT revealed, credit time to the stats. Each card contributes at most 60s (per-card cap; the accumulator resets on card advance). Main total (flashcard-stats.txt sidecar, keyed by date) survives rename/delete/move; per-book reference: FileState.flashcardStudyTimeSec.
-- [x] Study SESSION timer (like autoscroll's, user-configured): checkbox + "Timer:" + minutes edit (default 30) in the flashcard secondary toolbar (CmdFlashcardStudyTimerToggle / CmdFlashcardStudyTimerEdit). When enabled at Study start, a 2px silver progress line at the bottom of the screen shrinks symmetrically toward the center over the session duration (fullscreen: bottom of screen; windowed: ~48px above the taskbar). On expiry: study session ends, beep + "∴" overlay (3s, same as autoscroll). The session timer is INDEPENDENT of the 60s/card stats cap.
-- [x] Cards-rated counts (s36-az): every rating (incl. Again) counts 1 card; sidecar gains a cards column (`flashcard-stats.txt`: `date sec cards`, 2-col legacy reads as 0), per-book `FileState.flashcardCardsDone`; Home flashcards ranking shows "N cards / time" and the totals line uses the user format `Flashcards: Today N cards / Xh Ym | Total: N cards / Xh Ym`.
 
 ### Tests
 
@@ -180,45 +151,37 @@ Scratch E2E harnesses live in `tests/tmp/` (gitignored): s34-replace/paint/crop/
 
 ## Memory Performance Optimization (from performance.dot analysis 2026-11-04)
 
-**Arquivo de referência:** `TEMP/performance-code-arch.dot` — mapa completo de arquitetura de memória, CPU hotspots, custos de ferramentas, profiling tooling.
+**Reference:** `TEMP/performance-code-arch.dot` — full map of memory architecture, CPU hotspots, tool costs, profiling tooling.
 
-### Gargalos Críticos Identificados
+### Critical bottlenecks identified
 
-| #   | Componente              | Consumo                        | Causa Raiz                                                                                                                    |
-| --- | ----------------------- | ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
-| 1   | **RenderCache tiles**   | 128 × 1–4 MB = **~512 MB máx** | Cache primário; Gdiplus::Bitmap 32bpp PARGB; TC2 dobra chaves (virtual pages left/right); Trim/Crop invalidam cache no toggle |
-| 2   | **MuPDF `fz_context`**  | 10–50 MB/engine                | Allocator/store/device cache + page cache; per-thread pool clona contextos                                                    |
-| 3   | **WebView2 (Markdown)** | 100–300 MB processo separado   | Chromium isolado; Contrast/auto-scroll usam JS/CSS overlay                                                                    |
-| 4   | **GDI+ bitmaps órfãos** | Vaza se cleanup falhar         | Ref-count em `PutTile`/`DropCacheEntry`/`BlitPixmap`; `darkModeEpoch` invalidação em massa                                    |
+| #   | Component               | Consumption                  | Root cause                                                                                                              |
+| --- | ----------------------- | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| 1   | **RenderCache tiles**   | 128 × 1–4 MB = **~512 MB max** | Primary cache; Gdiplus::Bitmap 32bpp PARGB; TC2 doubles keys (virtual pages left/right); Trim/Crop invalidate cache on toggle |
+| 2   | **MuPDF `fz_context`**  | 10–50 MB/engine               | Allocator/store/device cache + page cache; per-thread pool clones contexts                                              |
+| 3   | **WebView2 (Markdown)** | 100–300 MB separate process   | Isolated Chromium; Contrast/auto-scroll use JS/CSS overlay                                                              |
+| 4   | **GDI+ orphan bitmaps** | Leaks if cleanup fails        | Ref-count in `PutTile`/`DropCacheEntry`/`BlitPixmap`; `darkModeEpoch` mass invalidation                                 |
 
-### Impacto das Ferramentas do Toolbar no Consumo
+### Toolbar tool memory impact
 
-| Ferramenta        | Efeito Memória                                                                      | CPU                                 |
-| ----------------- | ----------------------------------------------------------------------------------- | ----------------------------------- |
-| **Contrast**      | PDF: layered child (WS_EX_LAYERED) ~0; MD: CSS filter 0                             | Baixo                               |
-| **Crop v2 (TC2)** | Dobra virtual pages → chaves cache duplicadas left/right; `colGap` overlap          | Médio (roteamento virtual↔physical) |
-| **Trim**          | `ShouldCacheRendering=true`; `FreeForDisplayModel()` no toggle → re-render completo | Alto no toggle                      |
-| **Flashcards**    | MuPDF highlight annots + opaque mask GDI+ alpha blend; JSON per-doc                 | Baixo                               |
-| **Arch Tools**    | Vetores page coords (pequeno); SVG export aloca temp                                | Baixo                               |
-| **AutoScroll**    | Timer tick → cached blit ~1ms/frame; ETA overlay layered window                     | 60fps target = 16.6ms budget        |
-| **Tabs**          | `VirtWnd` por aba; Home pinned idx 0 → ≥2 tabs/doc; tab groups live-sync            | Baixo                               |
+| Tool              | Memory effect                                                                    | CPU                                        |
+| ----------------- | -------------------------------------------------------------------------------- | ------------------------------------------ |
+| **Contrast**      | PDF: layered child (WS_EX_LAYERED) ~0; MD: CSS filter 0                          | Low                                        |
+| **Crop v2 (TC2)** | Doubles virtual pages → duplicated cache keys left/right; `colGap` overlap       | Medium (virtual↔physical routing)          |
+| **Trim**          | `ShouldCacheRendering=true`; `FreeForDisplayModel()` on toggle → full re-render  | High on toggle                             |
+| **Flashcards**    | MuPDF highlight annots + opaque mask GDI+ alpha blend; JSON per-doc              | Low                                        |
+| **Arch Tools**    | Small page-coord vectors; SVG export allocates temp                              | Low                                        |
+| **AutoScroll**    | Timer tick → cached blit ~1ms/frame; ETA overlay layered window                  | 60fps target = 16.6ms budget               |
+| **Tabs**          | `VirtWnd` per tab; Home pinned idx 0 → ≥2 tabs/doc; tab groups live-sync         | Low                                        |
 
-### Pontos de Otimização Direta (para agente futuro)
-
-- [ ] **Reduzir `MAX_BITMAPS_CACHED` (128 fixo)** → tornar adaptativo por VRAM/working set
-- [ ] **Cache eviction policy** — hoje newest-first O(1) hit; LRU real exigiria hash table (rejeitado: sem STL, compaction, darkModeEpoch)
-- [ ] **Trim/Crop cache preservation** — evitar `FreeForDisplayModel()` full no toggle; invalidar só tiles afetados
-- [ ] **TC2 cache sharing** — left/right columns compartilham mediabox físico; deduplicar tiles idênticos
-- [ ] **WebView2 memory budget** — limitar processos Chromium; `--memory-pressure-off` flags
-- [ ] **Perf regression tests** — `ad-hoc-profile-live-writes.ts` já existe; adicionar métricas cache hit rate, RelayoutFrame freq, working set delta
-
-### Relações Críticas (ver TEMP/performance-code-arch.dot)
+### Critical relations (see TEMP/performance-code-arch.dot)
 
 - `RenderCache` → `fz_pixmap` → `Gdiplus::Bitmap` → `BlitPixmap` (cached path ~1ms)
-- `darkModeEpoch` invalida cache em massa → re-render storm
-- `TrimConfigDialog` TEMP TRIM: snapshot + force OFF enquanto dialog aberto → cache livre mid-dialog
-- `AutoScroll` usa cached blit; non-cached = 23ms SYNC engine render
-- Coordinate space mismatches (PAGE/VIRTUAL/CANVAS-CLIENT/SCREEN) = bug class recorrente
+- `darkModeEpoch` mass-invalidates cache → re-render storm
+- `TrimConfigDialog` TEMP TRIM: snapshot + force OFF while dialog open → cache free mid-dialog
+- `AutoScroll` uses cached blit; non-cached = 23ms SYNC engine render
+- Coordinate space mismatches (PAGE/VIRTUAL/CANVAS-CLIENT/SCREEN) = recurring bug class
+- Optimization candidates tracked at `## Performance optimizations` (OPT-1/3 deferred; OPT-2/4 rejected; OPT-5 shipped; OPT-6 residual CI gate)
 
 ---
 
@@ -226,111 +189,26 @@ Scratch E2E harnesses live in `tests/tmp/` (gitignored): s34-replace/paint/crop/
 
 ### Crop Align
 
-a reorientação não deve aparecer somente quando salvar, isso deve ser reajustado instantaneamente (visualmente falando), o save só ESCREVE a mudança no arquivo original; nos queremos o seguinte comportamento:
+Instant visual deskew: the correction must NOT appear only at save — it must re-adjust instantly (visually); save only WRITES the change to the original file. Desired behavior:
 
-1. página está inclinada "/---/"
-2. Clico `Crop Align`
-3. Ativa o cursor 'x' → clico e arrasto OU clico em dois pontos da página, desenhando uma linha (visualemente similar ao MEASURE ou SCALE)
-4. App endireita a página "|---|" baseado no angulo da linha desenhada, recortando a página na mesma proporção original
-5. acende o 🔴 para sinalizar que o PDF tem alterações; — FIXED s64-R5 bug 4: EngineMupdf::ApplyPreviewGeometry sets modifiedPageGeometry=true on successful preview apply so EngineMupdfHasUnsavedAnnotations (modifiedAnnotations||modifiedPageGeometry||modifiedOutline) lights the tab 🔴; DiscardPreview clears it; commit keeps it lit until save.
+1. page is tilted "/---/"
+2. Click `Crop Align`
+3. Activate cursor 'x' → click and drag OR click two points on the page, drawing a line (visually similar to MEASURE or SCALE)
+4. App straightens the page "|---|" based on the angle of the drawn line, cropping the page to the original proportions
+5. lights the 🔴 tab dot to signal the PDF has unsaved changes
 
-Leia novamente os informativos do projeto e memórias lemma antes de seguir delegando;
+Reference: how this page straightening works: https://easyprotools.com/jpg/jpg-orientation-editor/ — goal is to crop the page similarly;
 
-veja como funciona o alinhamento dessa página: https://easyprotools.com/jpg/jpg-orientation-editor/
-a ideia é recortar a página de forma similar;
+- [ ] 1. line must draw while clicking, similar to `measure`/`scale`
+- [ ] 2. `Crop` button on the same Edit toolbar — a bounding box (like the image editor) that grabs the page edges and allows resizing/cropping the page
 
-
-[] 1. precisa desenhar a linha enquanto eu estiver clicando, similar ao `measure`/`scale`
-[x] 2. desenhar a linha pela segunda vez, RESETA a página para o estado inicial antes de recalcular/renderizar — FIXED s64-R5 bug 3: OnMouseLeftButtonDown (Canvas.cpp) now restores pristine via DiscardPreview (preview state) or RestorePageGeometryForAlign (pending state) whenever appliedInMemory, before placing point1; consecutive same-engine draws no longer accumulate rotation (verified: apply1==apply2==apply3 mediabox via ad-hoc-s64-align-verify.ts). 
-[x] 3. necessario clicar em `Apply` para fixar a alteração da página, ainda antes de salvar, fechar o edit sem apply descarda a modificação — FIXED s64-R5 bug 2: HandleCmdArchAlign toggle-off now calls DiscardArchPreview(win) unconditionally on oldMode==5 (was gated on the never-true `toolMode != 5`), so preview/pending/appliedInMemory all revert to pristine on toggle-off; commit (Apply/TestAlignCommit) keeps edits. Verified via TestAlignDiscard restore-pristine + reapply.
-aproveite
-[] 4. botão `Crop` da mesma barra Edit; a ideia é ser um bounding box (similar ao editor das imagens) que pega os limites da página e permite redimensionar e recortar a página;
-
-
-###
-
-- [x] Crop — done (prior rounds).
-- [x] Align R1 — DONE s50-R1 (2026-11-08): CmdArchAlign=525 dispatch case + handler toolMode=5 in Commands_ArchTools.cpp, alignLine struct + FinalizeAlign math in Canvas.cpp (axis=nearer, aspect-preserved cropRectPage, angle readout), toolbar button, ESC/doc-close clear; 3 `// TUMATRA-FORK(s50):` markers added to SumatraPDF.cpp; build 0 err/0 warn; probe honest limit — mode toggles, posted-coords line not visually verified (DPI ×1.25 trap). PNGs tests/tmp/s50/align-base.png + align-probe.png. LOG s50-R1. lemma fragment saved.
-- [x] Align R2 — DONE s50-R2-Z (2026-11-08): headless TestGeomSave=65 control cmd (QueuePageGeometry + EngineMupdfSaveUpdated to outPath, no window), ad-hoc-align-save.ts PASS (queues 90° rotation+crop on page 1, saves, reopens, extract-text OK). /Rotate honest limit: only multiples of 90°, small angles (5°) round to 0 silently. LOG s50-R2. lemma saved.
-- [x] Align R3 — DONE s50-R3 (2026-11-08): arbitrary-angle deskew at save via Form XObject (Technique A). EngineMupdf.cpp ApplyPendingGeometryEdits split: 90° multiples → /Rotate (R2 unchanged); else → pdf_new_xobject with CTM = T(newBboxCenter) * R(angleDeg) * T(-cropW/2, -cropH/2), XObject content `q -cropX0 -cropY0 cm <orig> Q`, page contents `q /FmN Do Q`, merged Resources, MediaBox/CropBox = rotated bbox. /Rotate unchanged. Exports: pdf_page_contents, pdf_add_object_drop. Test: ad-hoc-align-deskew.ts 5° PASS. Regressions: align-save, bookmark-edit/persist/reorder, repair-replace PASS. LOG s50-R3. lemma saved.
-- [x] Edit toolbar "..." residue — DONE s50-R5 (2026-11-08): investigated Commands_Edit.cpp EditToolbarCreate gEditToolbarButtons — FIRST entry {CmdEditAddText, _TRN("+Text")} is a real wired command (CmdEditAddText -> CmdCreateAnnotFreeText). grep of Toolbar.cpp/Commands_Edit.cpp/MainWindow defaults found no "…"/"…" text placeholder or icon-less text item. Live probe (full-frame PrintWindow PNG, Edit open + Crop Align toggled) confirms NO separate "…" button — residue absent; first Edit item = "+Text" (visual "+Te..." narrow truncation, not debug residue). Nothing to remove/relabel. Crop Align present on Edit toolbar. Probe v2 tests/tmp/s50r5/probe-crop-align.ts PASS: fabricated valid 2-page PDF verified loaded (Ping + title) before UI, TestToolbarButtons control cmd (no enumChildWindows hang), PNG at tests/tmp/s50r5-probe/s50r5-probe-frame.png. Build 0 err/0 warn. Honest limit: Edit toolbar confirmed visually via PNG only (control-pipe text dump covers main toolbar hwndToolbar).
-- [x] Crop Align checked-state sync + +Text truncation — DONE s50-R6 (2026-11-08): (1) Crop Align button on Edit toolbar did not reflect ON state visually. Root cause: HandleCmdArchAlign only called UpdateToolbar2State (syncs Arch toolbar), not Edit toolbar. Fix: added ToolbarUpdateStateForWindow(win, false) in HandleCmdArchAlign (Commands_ArchTools.cpp:113) to sync Edit toolbar checked state from archTools.toolMode==5. NOTE: this fixed checked-state SYNC only, not the instant toggle-off (that is s50-R8 below). (2) "+Text" rendered truncated "+Te...". Root cause: EnforceToolbarTextButtonWidths only cleared BTNS_AUTOSIZE for Autoscroll button; other text buttons retained BTNS_AUTOSIZE so comctl overrode explicit width on later layout passes. Fix: clear BTNS_AUTOSIZE for ALL text buttons when pinning explicit cx (Toolbar.cpp:1390-1408). Build 0 err/0 warn.
-- [x] Crop Align instant-toggle-off (double-dispatch) — DONE s50-R8 (2026-11-08): single click on Edit toolbar "Crop Align" appeared ON then instantly OFF (toolMode 0→5→0, cannot draw). Root cause: rapid double-dispatch of CmdArchAlign (two WM_COMMAND posts <150ms apart) flips toolMode 0→5→0 at HandleCmdArchAlign; confirmed by probe tests/tmp/s50r8/double.ts. Double-post source not isolated (Edit vs Arch toolbar creation/subclass paths near-identical; dmlib third-party). Fix: idempotency guard in HandleCmdArchAlign — second CmdArchAlign within ~100ms of first with no canvas interaction in between is ignored (toolMode stays 5); timestamps alignLastToggleMs/alignCanvasInteractMs added to MainWindow.h ArchToolsState; Canvas mouse-down/move log [arch] + stamp alignCanvasInteractMs when toolMode==5 to prove draw state survives. Build 0 err/0 warn (clang-format applied); probe tests/tmp/s50r8/single.ts (stays ON ≥2s) PASS; probe tests/tmp/s50r8/double.ts (exactly ONE outcome = ON) PASS; ad-hoc-align-save.ts + ad-hoc-align-deskew.ts PASS. LOG s50-R8. USER must validate live on real machine.
-- [x] Crop Align instant visual deskew (apply-at-finalize) — DONE s50-R9 (2026-11-10): deskew now applies INSTANTLY when user finalizes alignment line (click+drag or two clicks). Page rights itself visually ("/---/" → "|---|") in live view without waiting for Ctrl+S. Canvas.cpp FinalizeAlign: after QueuePageGeometry, calls EngineMupdf::ApplyPendingGeometryEditsNow() (new virtual in EngineBase/EngineMupdf) to mutate live PDF doc, then dm->BuildPagesInfo() + dm->RelayoutKeepingView() to rebuild page geometry and refresh view preserving scroll anchor (pattern from ApplyViewportCropV2). EngineMupdfSaveUpdated checks appliedInMemory flag — if true, skips ApplyPendingGeometryEdits (anti-double-apply) and goes straight to pdf_save_document; resets appliedInMemory on success. Aspect ratio preserved (mediabox W:H) per existing FinalizeAlign crop math (lines 2925-2934) — matches jpg-orientation-editor straighten+crop behavior. Zoom clamp via RelayoutKeepingView preserves virtual zoom + view anchor. Guard widened 100ms→500ms (already kAlignToggleGuardMs=500). All [arch] logs use ArchElapsedMs() relative-ms format. Build 0 err/0 warn; ad-hoc-align-deskew.ts (5°) PASS; ad-hoc-align-save.ts (90°) PASS; ad-hoc-bookmark-edit.ts (dirty funnel regression) PASS. LOG s50-R9. USER re-test: click Crop Align → draw line → page rights instantly + 🔴 lights → Ctrl+S writes change (no notification UI).
-- [x] Crop Align s64-R5 — 4 live-validated GUI bugs FIXED (2026-11-13):
-  - bug 1 selection coords incoherent after righting — ApplyPreviewGeometry already mirrors ApplyPendingGeometryEditsNow tail (drop cached page + FreeForDisplayModel + BuildPagesInfo + RelayoutKeepingView); verified page rects rebuild post-apply via TestAlignApply mediabox + TestGetPageNo. No code change needed (tail present); GUI E2E selection validation deferred to user live test (no in-proc selection oracle available headless).
-  - bug 2 toggle-off does NOT discard — Commands_ArchTools.cpp HandleCmdArchAlign: DiscardArchPreview(win) now called unconditionally on oldMode==5 (was gated on never-true `toolMode != 5`), reverting preview/pending/appliedInMemory to pristine regardless of state; commit keeps edits. Verified TestAlignDiscard restores pristine + reapply succeeds.
-  - bug 3 repeated line draw accumulates rotation — Canvas.cpp second-draw reset now also handles preview state (hasPreviewGeomEdit) not just pendingGeomEdits; restores from PagePristineState before re-applying, so consecutive same-engine draws apply from ORIGINAL (single Fm0, angle not doubled). Verified apply1==apply2==apply3 mediabox via ad-hoc-s64-align-verify.ts.
-  - bug 4 🔴 dirty dot not lighting — EngineMupdf_Preview.cpp ApplyPreviewGeometry sets modifiedPageGeometry=true so EngineMupdfHasUnsavedAnnotations lights the tab dot on preview apply; DiscardPreview clears it; commit keeps lit until save.
-  Build 0 err/0 warn (clang-format applied on 3 edited .cpp). ad-hoc-s64-align-verify.ts PASS; regressions ad-hoc-align-deskew PASS, ad-hoc-bookmark-edit PASS, issue-2799 PASS. ad-hoc-align-save.ts (90° headless save) FAILS — pre-existing on branch (uses TestGeomSave/ApplyPendingGeometryEdits, untouched by s64-R5 edits), not a regression. LOG s64-R5.
-
-- [x] Crop Align s64-R6 — fine-tune relative angles that SUM from original (2026-11-13):
-  - model: canvas accumulates TOTAL angle (alignAppliedAngle + alignAppliedPageNo per-page) + engine applies FROM ORIGINAL via single Fm0 (nomacs DkRotateManipulator same model: one mAngle, rotate original). mediabox = AABB of original mediabox rotated by TOTAL — no cumulative bbox growth, no nested Fm0.
-  - Canvas.cpp FinalizeAlign: measured line angle = residual in current view; total = alignAppliedAngle + residual when alignAppliedPageNo==pageNo else residual; first draw on page -> total = residual (today's behavior). cropRect derived from ORIGINAL mediabox (pristinePageStates when captured, else live mediabox). straightened line rendered rotated by total angle about page center (alignPageCenter) in toolMode==5 paint block.
-  - MainWindow.h ArchToolsState: added alignAppliedPageNo (0=none) next to alignAppliedAngle; total of 0 deg no longer mistaken for "no angle yet".
-  - Commands_ArchTools.cpp DiscardArchPreview: also clears alignAppliedPageNo=0.
-  - sign convention (PyMuPDF-verified): PDF y-up rotation = signed image-space deviation; apply -40deg rights a -40deg-tilted line; +10deg rights a 10deg-off-vertical line.
-  - Build 0 err/0 warn (clang-format applied). ad-hoc-s64-finetune.ts PASS (a -45deg == ref -45deg mediabox, c 37deg differs, single Fm0 all); ad-hoc-s64-apply-gating PASS; ad-hoc-s64-align-drag PASS (purple rubber-band); regressions ad-hoc-align-deskew PASS, ad-hoc-bookmark-edit PASS, issue-2799 PASS. LOG s64-R6. USER live test pending (draw line → fine-tune → Apply → save).
-- [x] R7b — ESC in Crop Align (toolMode=5) full-reset + draw re-enable: WndProcCanvas WM_KEYDOWN VK_ESCAPE now clears ALL align drag state after DiscardPreview (point1/point2 reset to zero, dragLine=0, dragMoved=false, dragStartPos cleared, alignLine cleared, ReleaseCapture if held) and KEEPS toolMode==5 so next draw starts from state 0 without re-toggle. Fixes stale-drag-state trap where ESC mid-drag left capture stuck or stale point pair blocking next draw. E2E verified: tests/tmp/s64/ad-hoc-s64-esc-reset.ts (draw1→ESC→draw2→ESC, TestAlignCommit committed/no-preview/committed/no-preview). Build 0 err/0 warn (clang-format on Canvas.cpp). Regressions ad-hoc-align-deskew PASS, issue-2799 PASS, ad-hoc-bookmark-edit PASS. MD5 out/dbg64 == ../Compiled.
-- [x] R7c — ESC in Crop Align keeps tool ON (toolMode=5): root cause SumatraPDF.cpp:8207 FrameOnKeydown zeros toolMode=0 on ESC (READ-ONLY, unfixable there). Fix: Canvas.cpp WndProcCanvas WM_KEYDOWN VK_ESCAPE already returns 0 (consumes ESC when canvas has focus) so FrameOnKeydown never runs; log "[arch] Esc discard (tool stays on)" distinguishes from FrameOnKeydown's "Esc cancel: draw mode cancelled". Real-GUI E2E: tests/tmp/s64/ad-hoc-s64-esc-real.ts PASS (draw→real ESC key→draw→ESC, TestAlignCommit committed/no-preview/committed/no-preview, toolbar stays ON). Build 0/0; MD5 b78b9fb8b4bda56d44320e2a710188e7. Regressions: issue-2799, ad-hoc-align-deskew, ad-hoc-bookmark-edit, ad-hoc-s64-apply-gating all PASS --no-build.
-- [x] Crop Align s64-R7d — ESC discard keeps tool ON via LIVE frame path (2026-11-13): SumatraPDF.cpp FrameOnKeydown align (toolMode==5) ESC sub-branch SANCTIONED edit (marker `// TUMATRA-FORK(s64):`): keeps preview discard + drag-state cleanup mirroring Canvas.cpp R7c (dragLine=0, dragMoved=false, dragStartPos=Point{}, alignLine={}, point1/point2=PointF{}, mouseAction=None); REMOVES toolMode=0 zeroing so tool stays ON (toolMode=5), immediate redraw allowed; logs "Esc discard (tool stays on), page %d". Canvas.cpp R7c unchanged. Build 0/0; MD5 0D05C41C6C94720C93437447BD250078. E2E ad-hoc-s64-esc-frame.ts PASS (real frame-ESC flow via WM_KEYDOWN VK_ESCAPE to hwndFrame, no canvas SetFocus; TestAlignCommit no-preview; re-apply TestAlignApply works; sumlog "Esc discard (tool stays on)", no "draw mode cancelled"). Regressions issue-2799, ad-hoc-align-deskew, ad-hoc-bookmark-edit, ad-hoc-s64-apply-gating, ad-hoc-s64-esc-real PASS --no-build. LOG s64-R7d. Lesson: key-handler liveness decided by FOCUS policy — validate with real window targeting; SumatraPDF.cpp exception protocol (sanctioned minimal edit, marker-tagged).
 
 - [ ] Crop Align s64-R8 — Page Crop nomacs parity + wrong-cut fix (2026-11-13): R2 rotateDelta==0 raw-dict write dropped crop origin + no y-flip (fitz y-down cropBox vs PDF y-up mediabox). Fix: real PDF-space rect in both EngineMupdf.cpp + EngineMupdf_Preview.cpp (pdfX0=mb.x0+cropBox.x0; pdfY0=mb.y1−cropBox.y1; pdfX1=mb.x0+cropBox.x1; pdfY1=mb.y1−cropBox.y0). Cut region == drawn box (mediabox 100,200,312,492 for box [100,100,412,592] fitz). Canvas paint: nomacs-parity overlay — 4 darkened strips outside region (ThemeWindowBackgroundColor alpha 150) + 2px ThemeEdgeColor border + 8 handles (ThemeWindowTextColor alpha 230). Tests ad-hoc-s64-crop.ts (headless) + ad-hoc-s64-gui.ts (GUI screenshots) PASS. Build 0/0. Regressions issue-2799, align-deskew, bookmark-edit, apply-gating, esc-frame PASS --no-build. MD5 CE247DB... (out/dbg64 == Compiled). [ ] user live validation pending: Page Crop box cut == drawn region + nomacs overlay visual.
 
 - [ ] Crop Align s64-R9 — Page Crop rotated (nomacs parity, 2026-11-13): ArchToolsState +cropAngle/rotateStart/rotating; Canvas.cpp rotated polygon border (center ± R(θ)·(±w/2,±h/2)) + 8 rotated handles + GraphicsPath clip-exclude overlay outside poly; GetCropResizeHandleAt inverse-rotates pt to box-local frame for axis-aligned hit-test; CalculateCropResizedRect inverse-rotates drag delta into local axes; drag-down outside poly → rotate mode (startAngle + Δatan2, Shift snap 22.5°); ESC resets cropAngle=0. EngineMupdf.h PageGeomEdit.rotatedCrop; EngineMupdf_Preview.cpp ApplyPreviewGeometry(..,rotatedCrop) → zero-origin boxes [0 0 W H], content matrix +angleDeg (align sign); save path same zero-origin boxes. Commands_ArchTools.cpp crop apply passes cropAngle+rotatedCrop, clears cropAngle=0. SumatraControl.cpp TestAlignApply 7th arg rotatedCrop. Headless test ad-hoc-s64-rotated-crop.ts PASS (rotated [0 0 412 592] fm=1; angle=0 R8 preserved [100 100 512 692]). PyMuPDF sign probe: mb=cb=[0 0 412 592], single Fm0, nonwhite, sign +angleDeg. Build 0/0; MD5 D5109D81D75274E53021FAF4CAD84828. Regressions issue-2799, align-deskew, s64-apply-gating, s64-esc-real, s64-crop PASS --no-build. [ ] user live validation pending: GUI rotate-drag draws diagonal box + rotated handles; vision check.
-- [x] Edit ON view constraints — DONE s64-R9g (2026-11-13): Edit ON temporarily disables trim + two-columns (posted WM_COMMAND toggles); restored on OFF (only-if-still-off clobber guard + same-doc suspendTabPath binding). Probe ad-hoc-s64-r9g.ts PASS; MD5 AF8A4FA6ECB0FD48E77B05BAE43F87FB.
+## Bookmarks Improve — shipped (s43→s62); USER revalidation pending
 
-## Bookmarks Improve — shipped [v1] s43-b (2026-11-06)
-
-
-Done s43-a (engine + UI shell):
-
-- Button 'Add' at TOP of TOC panel: creates "Page N" bookmark at end of list for CURRENT page (TocAddBookmark → EngineMupdf::OutlineEdit add → tocAdded overlay).
-- Right-Click context menu: 'Delete' (item+subtree), 'Update' (clicked bookmark pageNo := current page), 'Rename' (noop placeholder → s43-b).
-- Engine edit layer: EngineBase::HasUnsavedOutline() + OutlineEdit(op,...); modifiedOutline flag + tocAdded overlay; GetToc shows overlay even on outline-less PDFs; dirty state mirrors annotation pipeline → EngineMupdfSaveUpdated triggers Ctrl+S/close-save flow; resets on save/doc-close/FinishLoading.
-- Commands CmdBookmarkAdd=530/Delete=531/Update=532/Rename=533 via gen-commands.ts+gen-code; gated via ctx.hasToc.
-- Tests: ad-hoc-bookmark-edit.ts (2-page outline-less PDF: add → TOC contains entry → dirty=1), registered in before-release.ts. Build 0 err/0 warn; probe PASS.
-
-Done s43-b (reorder + rename + persist):
-
-- Right-Click 'Rename': real modal dialog (ShowBookmarkRenameDialog, local to TableOfContents.cpp) → OutlineEdit op=4 rename → tocTree invalidate + dirty. CmdBookmarkRename=533 wired.
-- Drag-reorder on TOC tree (WndProcTocTree subclass): click-hold past drag threshold arms drag; drop ON item body → 1 indent level deeper (child of target); drop on far-left strip → remove indent level (sibling at target's level); dynamic horizontal WHITE drop-guide line (dragGuideY) painted during drag; WM_LBUTTONUP copies `isDragging` local before ReleaseCapture (TabsCtrl capture-trap). Keyboard tree nav untouched.
-- Outline PDF-write persist: EngineMupdf::outlineEdits serialized edit log replayed into PDF via pdf_new_outline_iterator + fz_outline_iterator_insert/update/delete at save (EngineMupdfSaveUpdated). libsumatrapdf.def exports the iterator symbols so PdfFilter/PdfPreview build 0/0 (s43-a blocker resolved). Ctrl+S / close-prompt save writes bookmarks to disk; reopen shows them. Verified E2E: add 2 → save → reopen → outline present.
-- TestBookmarkSave=62 control command; tests/ad-hoc-bookmark-persist.ts (add → save → reopen → assert persisted) registered in before-release.ts. PASS.
-- Build 0 err/0 warn all 3 targets (TumatraPDF, PdfFilter, PdfPreview). ad-hoc-bookmark-edit.ts PASS (regression).
-
-Done s43-c (reorder/indent persist on disk):
-
-- op=5 reorder-move now written to PDF: PersistOutlineEdits deletes source(targetTitle) then re-inserts under newParent (append as last child) / before moveBefore sibling (far-left unindent) / top-level end via fz_outline_iterator vtable; OutlineEditEntry + OutlineEdit signature carry moveBeforePageNo/moveBeforeTitle; TableOfContents::MoveTocItem passes farLeft target as moveBefore.
-- TestBookmarkMove=63 control cmd (calls same OutlineEdit(5,...) path the drag uses — bypasses posted mouse, honest test-only).
-- tests/ad-hoc-bookmark-reorder.ts: add 3 → reorder+indent → dirty=1 → TestBookmarkSave → dirty=0 → TestGetToc on saved file shows Chapter A(d0)/Chapter C(d1)/Chapter B(d0) persisted + reopen. Registered in before-release.ts. PASS.
-- Build 0 err/0 warn all 3 targets (TumatraPDF, PdfFilter, PdfPreview). Regressions ad-hoc-bookmark-edit.ts + ad-hoc-repair-replace.ts PASS.
-
-Remaining: **FIXED s56 (2026-11-12)** + **FIXED s57 (2026-11-12)** + **FIXED s58 (2026-11-12)** + **FIXED s59 (2026-11-12)**:
-- s56: TOC bookmark cascade (Add/Reorder/Delete/Rename/Update all "dead") — cached tocTree session source of truth; OutlineEdit no longer deletes tree; callers mutate cached tree directly. LOG s56.
-- s57: TOC bookmark add silent-death — `ReloadTocTree` choke-point `str::Dup` of selTitle (TempStr stored raw → invalid free after temp-arena reset); `CmdBookmarkDelete` now `FreeTocItemRec` the unlinked item; `MoveTocItem` passes `source->title` directly. Build 0/0; regressions PASS (issue-2799, ad-hoc-bookmark-edit/reorder/persist, ad-hoc-toc-reorder-crash, ad-hoc-repair-replace). LOG s57.
-- s58: TOC bookmark delete heap corruption (root cause: `UnlinkTocItem` wrong-root param `root->child` + immediate free while TreeView/async referenced + restore re-selected deleted title) → survivor captured before unlink, correct root, free DEFERRED via `ReloadTocTaskData::itemToFree`; `CmdBookmarkRename` entry logging added; drag-reorder guide level: `WM_LBUTTONUP` uses stored `win->tocDragFarLeft` (matches painted guide), `WM_PAINT` draws FULL width for sibling drop (`farLeft=true`) vs indented HALF line (one tree level `DpiScale(hwnd,16)`) for child drop (`farLeft=false`). `ReloadTocTree` aligned to single 4-arg overload (defaulted `itemToFree=nullptr`). Build 0/0; regressions PASS (issue-2799, ad-hoc-bookmark-edit/reorder/persist, ad-hoc-toc-reorder-crash, ad-hoc-repair-replace); headless smoke alive ≥5s/step + clean exit. LOG s58.
-- s59: TOC bookmark P1-P4 fix:
-  - P1 Rename broken (3 bugs): (a) `str::Free(dti->title)` on potentially arena-allocated title → leak-replace fix (dies with tree); (b) `OutlineEdit(4)` called AFTER mutation → targetTitle==newValue; fix: capture oldTitle BEFORE, call OutlineEdit(oldTitle), THEN mutate; (c) Dialog Enter key ignored (not real dialog) → handle WM_KEYDOWN VK_RETURN/ESCAPE in RenameDialogWndProc; added instrumentation log `st.ok=%d newName.len=%d`.
-  - P2 New bookmark dark-theme colors: `TocAddBookmark` hardcoded `color=0` (black) → `kColorUnset` (theme default) so custom draw uses theme colors in dark AND light.
-  - P3 Reorder guide line position (child drop): `WM_MOUSEMOVE` set `newGuideY = rc.y` (top) for ALL drops; child drop (`farLeft=false`) must render at BOTTOM edge (`rc.y + rc.dy`) — a child is appended AFTER the hovered item. Fix: `newGuideY = newFarLeft ? rc.y : rc.y + rc.dy`.
-  - P4 Dirty indicator (🔴) missing after outline edits: `EngineMupdfHasUnsavedAnnotations` only checked annotations+pageGeometry, not `modifiedOutline`; fix: add `|| epdf->modifiedOutline` so tab red dot lights on any bookmark add/delete/rename/update/move.
-  - Build 0/0; regressions PASS (issue-2799, ad-hoc-bookmark-edit/reorder/persist, ad-hoc-toc-reorder-crash, ad-hoc-repair-replace). Deploy MD5 `442D52C8E85A9F3B616424D070E03D83`.
-- s60: TOC bookmark rename Enter dead + dark theme; save-replay ghost bookmark:
-  - P1 Rename: `IsDialogMessageW` did not route `VK_RETURN`→`WM_COMMAND IDOK` to dialog (focus in edit) → `st.ok` never set → ok-path dead. Fix: subclass EDIT (`RenameEditWndProc`) forwards `VK_RETURN`→`WM_COMMAND IDOK`, `VK_ESCAPE`→`WM_COMMAND IDCANCEL`; drop `IsDialogMessageW` from loop (plain `TranslateMessage`/`DispatchMessage`); keep `WM_COMMAND` IDOK/IDCANCEL + `WM_KEYDOWN` as belt-and-suspenders; added `logf "[toc] CmdBookmarkRename: RESULT ...`; dark theme via `ApplyDarkModeToPopupWindow` + `WM_CTLCOLOREDIT`/`WM_CTLCOLORSTATIC` theme brush. (Supersedes s59 P1(c) WM_KEYDOWN-only approach which did not fire.)
-  - P2 Ghost bookmark: `CmdBookmarkUpdate` → `OutlineEdit(3,...,StrL(""),...)` empty newValue made `PersistOutlineEdits` case 3 write `wi.title` empty + `wi.uri=nullptr` → empty-title pageNo=-1 ghost written to file (came back after delete). Fix: case 3 = deliberate no-op skip (page dest not repointable via outline iterator; tocTree holds new pageNo); log skipped op; case 1/4/5 skip empty titles; case 5 null-target move = move to END (top-level append) matching in-memory `MoveTocItem(target=null)`; replay never creates empty-title entries and matches in-memory result. No repair of already-corrupted user files this round.
-  - Build 0/0; regressions PASS (issue-2799, ad-hoc-bookmark-edit/reorder/persist, ad-hoc-toc-reorder-crash, ad-hoc-repair-replace); headless ad-hoc-s60-bookmark-replay PASS (no empty-title entries, count correct). Deploy MD5 `38A0139FB2B389D7B691CF3992C1E15D`.
-- s61: Rename newName empty root cause; rename popup dark theme ordering; ghost replay hardening:
-  - P1 Rename RESULT newName.len=0: zero-init `buf[512]` -> `len(buf)`==0 -> `GetWindowTextW(...,0)` capacity 0 -> empty capture (s60's routing fix reached the handler but captured nothing). Fix: explicit `dimofi(buf)` capacity, `wstr::Dup` heap copy (was dangling stack-view WStr), `wstr::Free` at fn end; `IDOK/VK_RETURN rawEditLen` logs.
-  - P2 Rename popup WHITE in dark: `ApplyDarkModeToPopupWindow` called BEFORE children existed (dmlib themes only present children). Fix: call AFTER child create; popup handles `WM_ERASEBKGND` + `WM_CTLCOLORDLG`; CTLCOL* brush cache keyed on theme color.
-  - P3 Ghost replay: op=2 empty-target early skip; op=5 re-insert never writes empty title (`mvItem.title` null -> skip+log); `OutlineIteratorFind` nullptr on empty titles.
-  - Build 0/0; regressions PASS (issue-2799, ad-hoc-bookmark-edit/reorder/persist, ad-hoc-repair-replace, ad-hoc-s60-bookmark-replay); ad-hoc-toc-reorder-crash 1st FAIL = flaky app-quit timeout, 2x PASS after (6.7s/7.9s), not regression. Deploy MD5 `891A5C85C2A1C7C1115943A25C9392C5`.
-- s62: Ghost bookmark deletable/repairable (op=2 empty-target):
-  - Root cause: s61 op=2 empty-target early-skip made pre-s60-corrupted empty-title ghost UNDELETABLE (`CmdBookmarkDelete title='' pageNo=-1` queued op=2, replay skipped it, ghost rewrote to file on every save).
-  - Fix: `OutlineIteratorFindEmptyTitle` (null/whitespace-title walk); op=2 empty-target now deletes that entry at save (repairs corrupted files); logs removal; non-empty deletes unchanged. New control cmd `TestBookmarkDelete = 69` (i32 pageNo + string title, empty title allowed via `ArgAt` presence check).
-  - Headless repro PASS (tests/tmp/s62/ad-hoc-s62-ghost-repair.ts): fixture ghost + Real One/Two (/Next//Prev sibling links mandatory); TestBookmarkDelete(-1,"") -> Save -> PyMuPDF `get_toc()` on saved file: ghost GONE, real entries intact. In-app dumps skip null-title items — file-level check is authoritative.
-  - Build 0/0; regressions PASS (issue-2799, ad-hoc-bookmark-edit/reorder/persist, ad-hoc-repair-replace, ad-hoc-toc-reorder-crash 4.8s, ad-hoc-s60-bookmark-replay). Deploy MD5 `2BB91FB89D55E0039DDBEF94BA6A0D76`.
-- User live validation on real build/machine: delete the ghost + Ctrl+S once on s62 build -> ghost must vanish permanently; rename Enter (s61, watch `IDOK rawEditLen`) + rename popup dark theme.
+- [ ] USER live validation on real build/machine: on s62 build, delete the ghost bookmark + Ctrl+S once → ghost must vanish permanently; rename Enter (s61, watch `IDOK rawEditLen` log) + rename popup dark theme. (All dev items shipped — see LOG s43-a..s62.)
 
 ## Page Counting Format
 
@@ -338,13 +216,13 @@ The app already displays pages in other counting formats; we need a TOOL to chan
 
 Example: pages 1-50 counted in roman, from page 51 on in decimal → page 51 becomes the new page 1. Typing 1 in the page field lands on physical page 51, making the book/page match exact. We can also create an ABSOLUTE page function to ignore cosmetic counting; in this example: `1` → page 51; `(1)` → page 1.
 
-## Capture tool — shipped [x] v1 (s39)
+## Capture tool — shipped v1 (s39)
 
 Shift+S: draw a rectangle that captures the image inside it at the document's DPI → copy to clipboard.
 
 Residuals (open): no content-pixel verify (clipboard bitmap size only in test), no save-to-file. Capture tool v1 complete: rect in page coords, RenderPageArgs Export at doc DPI, clipboard copy, auto-exit, ESC cancel, doc-close reset, command availability gate.
 
-## Repair document file — shipped [x] v1 (s42, user validate pending)
+## Repair document file — shipped v1 (s42, user validate pending)
 
 Context menu (right-click on document) → "Repair Document File" (below Show Errors): engine-corrected in-place save.
 Mechanism: serialize healed copy to `<original>.repair-tmp` same dir → REOPEN temp and verify error count (parent tree / Optional Content / layer config clear; total must not increase) → atomic `MoveFileExW(REPLACE_EXISTING)` swap (Commands_Edit.cpp:1096) → tab reloads in-place keeping page+scroll. Fail/locked file = MessageBox, original untouched, temp cleaned. NO duplicates left behind.
@@ -378,135 +256,55 @@ Evidence: tests/ad-hoc-repair-replace.ts (damaged PDF on the fly: load errors �
 
 [ ] Bug7 (s36-bz): save corrupts PDF under TC2 — root cause verified + fix deployed (VirtualToPhysical pageNo in Selection.cpp FromRectangle + corrupt-annot guard in EngineMupdfSaveUpdated); user revalidation pending.
 
-[x] Toolbars Flickering — FIXED (s36-bl): lastPackedAvailDx histerese key orphaned when state tables split (sToolbarPackStates @1302 / sToolbarRewrapStates @1632); guard timer 200ms never converged → infinite re-wrap on narrow window. Fix: write to both tables (Toolbar.cpp ~1446). Verification: PNG probes byte-identical after resize; user validation pending. LOG s36-bl.
-
 - [ ] **BUG-3** right-click image context menu: s34 E2E confirmed Replace/Paint/Crop work + submenu visibility fixed; s36-ao live-checked the rest — `Image > Save` works (editor → `<book>_page_1.png`), menus filter correctly, and the silent null-bitmap returns now show a notification (fdcafde). No repro for the "non-image items dead" claim: those items are removed by design (link/comment/attachment). REMAINING: user's exact steps (file + item) to reproduce anything still dead.
-- [ ] **BUG-4** Contrast × Trim Config ONE-SHOT vanish (first trim-config open after launch). Fix v2 (`EnsureContrastOverlayState` invariant + self-healing) deployed 2026-09-22 — awaiting user confirmation of the exact flow; `[contrast]` breadcrumbs in debug build. NOTE (s36-az): the "contrast parou de funcionar" report of 2026-10-25 was root-caused to the save-reload state wipe (FIXED — ReloadDocument now preserves extras; LOG s36-az); if BUG-4's one-shot vanish still reproduces after that fix, it is a separate flow.
+- [ ] **BUG-4** Contrast × Trim Config ONE-SHOT vanish (first trim-config open after launch). Fix v2 (`EnsureContrastOverlayState` invariant + self-healing) deployed 2026-09-22 — awaiting user confirmation of the exact flow; `[contrast]` breadcrumbs in debug build. NOTE (s36-az): the "contrast stopped working" report of 2026-10-25 was root-caused to the save-reload state wipe (FIXED — ReloadDocument now preserves extras; LOG s36-az); if BUG-4's one-shot vanish still reproduces after that fix, it is a separate flow.
 - [ ] **Ctrl+click flashcard highlight opens List** — implemented s34-b (Canvas ctrl+click detects /T author TumatraPDF-Flashcard → FlashcardSidebarShow; turns flashcard mode on if off). USER live-test pending (needs a book with flashcard highlights).
 - [ ] **s34-g user validation pending**: Arch Measure Radius + Ref Line UX, resize-enlarge on a real book, flicker-free drag confirm (shipped + E2E 2026-10-11).
-      [x] ARCH/EDIT secondary toolbars white/blank buttons — FIXED (s36-bb/s36-ax lineage): root cause dmlib intercepts NM_CUSTOMDRAW before subclass chain (LOG s36-bb: only CDDS_POSTPAINT reaches ReBarWndProc); missing TBSTYLE_EX_MIXEDBUTTONs; fix replicated Flashcard pattern — dedicated rebar subclass (ToolbarArchEditRebarSubclassProc, ID 42) installed AFTER dmlib (LIFO→first) handles NM_CUSTOMDRAW wipe+redraw in ITEMPOSTPAINT, TBSTYLE_EX_MIXEDBUTTONs both toolbars, removed conflicting SetWindowSubclass(ReBarWndProc) ID 0; build 0/0; user-verified dark theme + full labels. LOG s36-bb/s36-ax/s36-bl.
 
-## Profile Memory
+## Profile Memory — shipped (F2→F7; F8 partial)
 
-Precisamos armazenar toda a informação de leitura e flashcards do usuário em um mesmo arquivo, esse arquivo precisa ser exportável, sincronizável e importável de outros lugares para caso o usuário transfira para outro computador.
-
-Vamos explorar as possibilidades de compatibilização com o sync do Google Drive, ou seja, eu salvo a minha base de dados de perfil `profile_data` em uma basta synced pelo google drive, e quero sincronizar essa mesma base de dados em outro PC que usa a mesma conta do google drive, precisamos explorar como o google drive trabalha o arquivo quando chegam atualizações desde a nuvem ou quando envia, e mapear um processamento para não corromper os arquivos e funcionar corretamente;
-
-Outro elemento, calcular a possibilidade e etapas para importar o `profile_data` desde o `TumatraPDF_Portable`→`TumatraPDF_Install`;
-
-Arquivo json de memória pode ter um prefixo indetificador: "tumatraPDF-data_"[numero de referencia, se necessario]
+Feature shipped: single profile file `tumatraPDF-data_1.json` (exportable/syncable/importable), Drive-synced folder distribution with atomic replace + conflicted-copy tolerance, Portable→Install import, local 9×8h rolling backups + recovery dialog, overwrite-vs-use-existing conflict UX, Home `⟳ Sync` button + Profile window (s36-bn/bp/bq, LOG). Open items:
 
 - Gap s36-bf: ProfImportLegacy first-run-only — reconciliation of reading-stats.txt/flashcard-stats.txt day rows at startup pending (32reading days from legacy sidecars can go missing; recovery done manually 2026-10-31: added 20261017/20261019 rows to tumatraPDF-data_1.json).
-
-Quando aconteça de falhar a internet e o google drive ficar indisponível temporariamente, precisamos armazenar as novas informações localmente até que volte a conexão e o app substitua o arquivo antigo do drive pela versão mais recente. O sistema do backup também será importante por isso. Vamos criar um backup local a cada +-8 horas e armazenar localmente 9 backups, o botão de recuperar sessão (backup recover) deve dar uma lista de sessões de backup com data e hora para permitir recuperar. Botão 'import' obviamente deve substituir o data local.
-
-Caso eu selecione uma pasta destino para a 'data' e já exista um 'data' anterior nessa pasta, queremos que apareça uma opção: 'sobrescrever' ou 'usar data existente', ou algum mecanismo que fique claro essa distinção.
-
-Podemos incluir na 'home', do lado direito do títuo "Stats", um botão `🔳 Sync` (símbolo + nome, pode escolher um símbolo que combine com o conceito). Clicar no botão abre a janela (ou similar) do flashcard/settings. Obviamente faltam informações nessa janela, podemos completar para deixar mais informativa e trabalhar melhor o visual dos botões e dos campos;
-
-### Plan (s36 detail — F3/F4/F5)
-
-#### F3 — Drive-safe file handling (pre-sync hardening)
-
-Preconditions (verified):
-
-- profile_data file already carries version + lastWriteTs header fields — verify before use (ProfileData.h/.cpp).
-- Atomic local write via temp + MoveFileExW already exists — keep; never write directly to the synced path.
-- Local 9 × 8h rolling backups under <profileDir>/backup/ + ProfileBackupWnd (9-slot dialog, 5s hold + progress) already exist via F2.
-- legacy sidecar import (ProfImportLegacy) runs first-run only — gap fixed by startup reconcile pass below.
-
-[x] Verify version + lastWriteTs exist in file header. (s36-bh/bi/bj)
-[x] Startup load: treat {empty file, partial-JSON, stale lock, Drive placeholder stub} as corrupt → fall back to newest backup under backup/ instead of overwriting the synced path. (s36-bh/bi/bj)
-[x] Startup reconcile pass: compare sidecars (reading-stats.txt, flashcard-stats.txt) + profile, adopt missing day rows (fixes s36-bf gap too). (s36-bh/bi/bj)
-[x] On detected cloud-side revert (lastWriteTs older than newest local backup × N), offer restore prompt using F2 ProfileBackupWnd dialog. (s36-bh/bi/bj)
-[x] Keep atomic write-via-temp+MoveFileExW for local saves; Drive-for-desktop streams/placeholders never receive direct writes. (s36-bh/bi/bj)
-
-Trap/risk: two PCs writing simultaneously → Drive creates "conflicted copy" duplicates, never merges. Plan: never delete conflicted copies; on next load merge by newer lastWriteTs + per-machine day rows already sum-safe ({"DESKTOP-…": sec} attribution). Offline tolerance: keep working locally, push changes when Drive reconnects; local backups remain source of truth for restore.
-
-Verify: kill-restore test with real instance (-appdata does NOT load settings for -for-testing instance), then manual file swap test (simulate cloud revert + corrupt placeholder).
-
-#### F4 — profileDataDir setter (the actual switch)
-
-[x] gen-settings already auto-added profileDataDir — no gen-code change needed. (s36-bi)
-[x] Add cmd-line path or UI to point profileDataDir at a Drive-synced folder. (s36-bi)
-[x] On change: migrate current profile + its backup/ dir, adopt tumatraPDF-data_<numero> naming. (s36-bi)
-[x] Initial-load conflict UX: if a profile already exists in dest dir → dialog "sobrescrever" (overwrite) vs "usar data existente" (use existing), per user desiderata. (s36-bi)
-
-Trap/risk: pointing at an existing dir with stale data can silently clobber user data — overwrite must be explicit opt-in, not default.
-
-Verify: two -appdata-like profiles, alternating dirs; confirm backup/ migrates with the profile.
-
-#### F5 — Portable→Install import
-
-[x] Locate legacy dirs: Portable install dir pattern vs installed %AppData% layout — verify actual layout first (do not assume paths). (s36-bj)
-[x] One-time import wizard or auto-detect on first run of Install build; reuse ProfImport path (books merge newest-wins proven — 2026-10-31 manual merge of 3 legacy json, zero loss). (s36-bj)
-[x] Import replaces local data (user desiderata). (s36-bj)
-
-Trap/risk: Portable path assumptions wrong → import reads empty/missing dirs; must verify layout before shipping.
-
-Verify: copy real Portable data to temp, run import, diff state counts.
-
-### Gap do roadmap original (sessão correta re-exportada 2026-11-01) — itens NÃO cobertos pelo F3/F4/F5 atual
-
-- [x] **F6 — Home botão `🔁 Sync` + janela Profile** (roadmap original F3): botão à direita do título `Stats` na Home; abre janela Profile (molde Config): campos = pasta destino (profileDataDir), nome/versão arquivo, tamanho, última gravação, máquina, nº livros/cards/dias, dica pasta Drive; botões = Salvar Agora (ProfileDataSaveNow), Exportar, Importar, Abrir Pasta, Backups (reusa CmdProfileBackups dialog). + nota: único export atualmente órfão=ProfileDataBackupCount → wire aqui. — DELIVERED s36-bn (+ repair rounds s36-br..)
-- [x] **F7 — Export/Import UI + checksum** (roadmap original F4 UX + F1 spec incompleta): — DELIVERED: (a) checksum s36-bp, (b) Export/Import buttons s36-bq, (c) Replace/Merge/Cancel prompt s36-bq
-      (a) **checksum no header** do tumatraPDF-data_1.json (spec F1 original tinha version/machine/lastWriteMs/checksum; header atual só version/lastWriteTs/machine) = base p/ detecção de corrupção no Drive;
-      (b) Exportar = copiar perfil (primary + opcionais loops de backup) p/ pasta escolhida — caminho natural p/ Drive (user escolhe pasta synced);
-      (c) Import wizard + diálogo sobrescrever-vs-usar-existente quando destino já tem dados (opt-in explícito).
-- [ ] **F8 — Endgame centralização** (transição dual-write → profile é fonte única): migrar FlashcardStudyListDocs p/ iterar livros do perfil; deprecar write dual nos per-book *.json + sidecars QUANDO estável (janela Config flashcard continua lendo fallback legacy); manter per-machine day rows p/ multi-PC.
-  - [x] s36-bs slice1: live stats ticks → profile (ProfileDataAddReadingSec/AddFlashcardSec/AddFlashcardCard + dual-write gate kProfDualWriteSidecars); ad-hoc test registered in before-release.ts (verified s36-bs).
-  - [x] s36-bt slice2: Config flashcard list merges profile-only books (FlashcardStudyListDocs merges gProfile.books rows with no json, dedup by docPath); ConfigClearSelected → ProfileDataDeleteBook(path); ConfigClearAll → ProfileDataClearStudyDocs(); ad-hoc test in before-release.ts (verified s36-bt).
-- [x] NOTA s36-bm: F3 slices 1-3 (reconcile/conflicted-merge/cloud-revert), F4 setter+migração e F5 import Portable→Install silencioso JÁ implementados (branch fix/secondary-toolbars, s36-bf..s36-bj, committed (s36-bm follow-up commits)). Roadmap original consulta: sessão exportada session-3a61b9f2 (Temp).
-
-- **P1-migration (verified s36-bo, degrades perDoc):** `gFileStateInfo` (bloco de nomes em Settings.h ~1700) está SEM "FlashcardStudyTimeSec" (44 campos vs 43 nomes; campos de índice ≥23 deslocados: flashcardCardsDone, invertColors, contrastEnabled ... archScaleStates). Round-trip consistente, mas arquivos PRE-s36-at carregam valores nos campos ERRADOS → `ProfPullHistory` (ProfileData.cpp:1277) snapshot `flashcardStudyTimeSec`/`flashcardCardsDone` errados no perDoc do perfil para usuários que fizeram upgrade com settings antigas. Fix planejado: (1) adicionar `FlashcardStudyTimeSec` ao FIM da tabela FileState em `cmd/gen-settings.ts`; (2) `bun cmd/gen-code.ts`; (3) migration em Settings.cpp LoadSettings() p/ version < 37 deslocando os campos de volta uma posição antes de deserializar. NOTA: campos readingTimeSec (índice 22) NÃO afetados.
+- [ ] **F8 — Endgame centralization** (dual-write → profile as single source): migrate FlashcardStudyListDocs to iterate profile books; deprecate dual-write in per-book *.json + sidecars WHEN stable (flashcard Config window keeps reading legacy fallback); keep per-machine day rows for multi-PC. Slices 1-2 (live stats ticks → profile; Config list merge) shipped s36-bs/s36-bt — LOG.
+- **P1-migration (verified s36-bo, degrades perDoc):** `gFileStateInfo` (names blob in Settings.h ~1700) is MISSING "FlashcardStudyTimeSec" (44 fields vs 43 names; fields at index ≥23 shifted: flashcardCardsDone, invertColors, contrastEnabled ... archScaleStates). Round-trip consistent, but PRE-s36-at files carry values in the WRONG fields → `ProfPullHistory` (ProfileData.cpp:1277) snapshots wrong `flashcardStudyTimeSec`/`flashcardCardsDone` in the profile perDoc for users who upgraded with old settings. Planned fix: (1) append `FlashcardStudyTimeSec` at END of the FileState table in `cmd/gen-settings.ts`; (2) `bun cmd/gen-code.ts`; (3) migration in Settings.cpp LoadSettings() for version < 37 shifting fields back one position before deserializing. NOTE: readingTimeSec (index 22) NOT affected.
 
 ## Tab system
 
-Vamos incluir do lado direito do botão principal no topo da janela, antes de iniciar as abas (a esquerda das abas dos documentos), um botão "Tab Group", a ideia é melhorar e deixar mais dinâmico o Tab group que já existe; Ao clicar, deve exibir como dropdown a lista dos 'Tab groups' já existentes, ao clicar em algum deles, fecha todas os documentos atuais e reabre todos os documentos do tab group selecionado; ao abrir outro documento dentro de um tab group aberto, deve sincronizar automaticamente (salvar) para proximas sessões;
-abrir o app sempre restaura o último tab group usado pelo usuário; se não houver, abrir `new`;
+Add a "Tab Group" button next to the main button at the top of the window, before the tabs begin (left of the document tabs). Goal: make the existing Tab Group dynamic. On click, show a dropdown listing the existing 'Tab groups'; clicking one closes all current documents and reopens all documents of the selected tab group; opening another document inside an open tab group auto-syncs (saves) for future sessions.
 
-'Ctrl+n' abre uma janela com um tab group `New`, ou seja, não sincronizado; nesse caso, se o usuário quiser salvar essa sessão como uma tab group, vamos incluir um botão na lista dropdown `Save`, ao clicar abre um editor/input de texto para nomear o grupo, imediatamente depois disso, o grupo deve sincronizar automaticamente ao fechar ou incluir documentos na sessão; arrastar um documento para fora de uma sessão automaticamente o exclui desse group aberto e inclui em um tab group `new` não sincronizado;
+The app always restores the last tab group used by the user; if none exists, open `new`.
+
+'Ctrl+n' opens a window with a `New` tab group — not synced. To save such a session as a tab group, add a `Save` button to the dropdown list; clicking it opens an editor/input to name the group; immediately after, the group auto-syncs on close or when documents are added to the session. Dragging a document out of a session removes it from that group automatically and moves it into a non-synced `new` tab group.
 
 - [ ] Open (user action): TAB SYSTEM — all dev done s36-bu→s36-co (LOG), awaiting user revalidation on real book. Build 0/0; ad-hoc-tab-session.ts + ad-hoc-tab-session-e2e.ts + ad-hoc-tab-menu.ts PASS.
 
 - [ ] FUTURE (user spec 2026-11-01): per-session reading/flashcard totals on Home tab — sum sessions' aggregated reading/flashcard time per group, independent of books; BIG feature, plan separately.
 
-## Sumatra → Tumatra — labels UI (DONE)
+## Sumatra → Tumatra — non-label items (deep review pending)
 
-Renomeados "Sumatra" → "Tumatra" em strings visíveis ao usuário (labels/títulos/menus):
+Items involving .exe file names, internal window classes, registry/CLSID, installer/uninstaller, path/CLI tests, .rc resources — require case-by-case review before changing (not direct UI labels):
 
-- [x] `src/SumatraPDF.cpp` — `"SumatraPDF - Printers"`, `"SumatraPDF Documentation"`, `_TRA("SumatraPDF crashed")` (x2), corpo da mensagem crash
-- [x] `src/SumatraDialogs.cpp` — `_TRA("SumatraPDF Options")`
-- [x] `src/Flags.cpp` — `_TRA("SumatraPDF - Show Printers")`
-- [x] `src/Installer.cpp` — `L"SumatraPDF"` (título janela, x2)
-- [x] `src/SumatraStartup.cpp` — `L"SumatraPDF"`, `L"SumatraPDF installer"`, `L"SumatraPDF installer usage"`
-- [x] `src/MainWindowCreate.cpp` — comentário + `StrL("SumatraPDF is no longer the default app...")`
-- [x] `src/Commands.cpp` — `"Help: SumatraPDF Website"`, `"Help: About SumatraPDF..."`, `"SumatraPDF File Picker"`
-
-## Sumatra → Tumatra — itens não-label (revisão profunda pendente)
-
-Itens que envolvem nomes de arquivo .exe, classes de janela internas, registry/CLSID, instalador/uninstaller, testes de path/CLI, recursos .rc — requerem revisão case-by-case antes de alterar (não são labels de UI diretos):
-
-- [ ] `src/Installer.cpp:866,890` — `StrL("SumatraPDF.exe.copy")`, `StrL("SumatraPDF.exe")` (nomes de arquivo no instalador)
-- [ ] `src/Uninstaller.cpp:51,63,372,386` — `"SumatraPDF.exe"`, `"SumatraPDF-settings.txt"`, `"Sumatra-Uninstaller.exe"` (arquivos de desinstalação)
-- [ ] `src/RegistryPreview.cpp:194,210` — `StrL("SumatraPDF.exe")`, `StrL("SumatraPDF-data")` (caminhos de registry/preview)
-- [ ] `src/base/tests/File_ut.cpp` — `"SumatraPDF.exe"`, `"SumatraPDF"` (asserts de teste de path)
-- [ ] `src/SumatraUnitTests.cpp` — `"SumatraPDF.exe -bench ..."` (testes de linha de comando)
-- [ ] `src/SumatraPDF.rc:76-80` — arquivo de ícone `SumatraPDF-smaller.ico` (recurso)
-- [ ] `src/TestPlugin.cpp` / `tools/plugin-test.cpp` — `L"SumatraPDF Plugin Test"` (nome do plugin de teste)
-- [ ] Classes de janela internas (manter por compatibilidade Win32, avaliar caso a caso):
+- [ ] `src/Installer.cpp:866,890` — `StrL("SumatraPDF.exe.copy")`, `StrL("SumatraPDF.exe")` (file names in the installer)
+- [ ] `src/Uninstaller.cpp:51,63,372,386` — `"SumatraPDF.exe"`, `"SumatraPDF-settings.txt"`, `"Sumatra-Uninstaller.exe"` (uninstaller files)
+- [ ] `src/RegistryPreview.cpp:194,210` — `StrL("SumatraPDF.exe")`, `StrL("SumatraPDF-data")` (registry/preview paths)
+- [ ] `src/base/tests/File_ut.cpp` — `"SumatraPDF.exe"`, `"SumatraPDF"` (path-test asserts)
+- [ ] `src/SumatraUnitTests.cpp` — `"SumatraPDF.exe -bench ..."` (command-line tests)
+- [ ] `src/SumatraPDF.rc:76-80` — icon file `SumatraPDF-smaller.ico` (resource)
+- [ ] `src/TestPlugin.cpp` / `tools/plugin-test.cpp` — `L"SumatraPDF Plugin Test"` (test plugin name)
+- [ ] Internal window classes (keep for Win32 compatibility, evaluate case-by-case):
   - `src/base/Win.cpp:1906` — `L"SumatraPDFClipboardOwner"`
   - `src/wingui/Wnd.cpp:66` — `L"SumatraWgDefaultWinClass"`
   - `src/previewer/PdfPreview.cpp:372` — `L"SumatraPDF_PreviewPane"`
   - `src/ScreenshotCapture.cpp:25` — `L"SumatraScreenshotOverlay"`
   - `src/SelectionToolbar.cpp:35` — `L"SumatraSelectionToolbar"`
   - `src/RefHoverInternal.h:9` — `L"SumatraPDFRefHover"`
-- [ ] Registry/CLSID/DDE/user-agent (internos do Windows, avaliar impacto de registro/associação de arquivos):
+- [ ] Registry/CLSID/DDE/user-agent (Windows internals; evaluate registry/file-association impact):
   - `src/RegistrySearchFilter.cpp` — `"SumatraPDF IFilter"`, etc.
   - `src/SearchAndDDE.h` — `kSumatraDdeServer L"SUMATRA"`, structs `SumatraOpen*`
   - `src/base/Http_win.cpp:62` / `Http_mac.cpp:53` — user-agent `SumatraPdfHTTP`
   - `src/SumatraLog.cpp:13` / `SumatraLog_posix.cpp:9` — `gLogAppName = StrL("SumatraPDF")`
-  - `src/SumatraPDF.h` — funções `SumatraLaunchBrowser`, `WndProcSumatraFrame`, `GetSumatraDataDirTemp`, etc.
+  - `src/SumatraPDF.h` — functions `SumatraLaunchBrowser`, `WndProcSumatraFrame`, `GetSumatraDataDirTemp`, etc.
 
 ## Vertical_Toolbar (PARKED — DO NOT DO)
 
