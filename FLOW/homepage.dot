@@ -1,4 +1,7 @@
 digraph HomePage {
+    // NOTE (s63, 2026-11-13): this file maps the LEGACY pre-VirtWnd HOME (tiles).
+    // Current paint path: see cluster_s63 near the end (OnPaintAbout → DrawHomePage).
+    // Full rewrite pending — cluster_s63 wins conflicts on paint details.
     rankdir=TB;
     node [shape=box, style=rounded, fontname="Consolas", fontsize=9];
     edge [fontname="Consolas", fontsize=8];
@@ -93,6 +96,19 @@ digraph HomePage {
 
     gen_thumb -> thumb_cache;
     thumb_trigger -> gen_thumb;
+
+    // ===================== s63 UPDATE: CURRENT PAINT PATH =====================
+    subgraph cluster_s63 {
+        label="Current paint path (s63, supersedes UI/relayout above)";
+        color="#2e7d32";
+        style=filled;
+        fillcolor="#e8f5e9";
+
+        s63_flow [label="OnPaintAbout → DrawHomePage (CanvasAboutUI.cpp)\n• double-buffered DC (win->buffer)\n• always full layout (scroll-only cache removed)\n• LayoutHomePage: one origin, -homePageScrollY\n  Stats hdr+⟳Sync → stats band → books hdr+icons\n  → search HWND → thumbs/list\n• tip = fixed footer (never scrolls)", fillcolor="#c8e6c9", style=filled);
+        s63_clip [label="Clip rules (HomePage.cpp)\n• thumbs/list: GDI clip = rcThumbsArea (viewport above tip)\n• chrome/flow: clipped to tip-band top (DrawHomePageLayout)\n• tip painted on top, unclipped (PaintTree)\n• flow elements fully below tip: Visibility::Collapse (hit-test)\n• search HWND: SW_HIDE out of view", fillcolor="#bbdefb", style=filled);
+        s63_removed [label="Removed (s63)\n• ApplyHomeLayoutCache / HomeLayoutCacheMatches\n  HomeLayoutCacheFilesMatch / CollectHomePageFiles\n• SaveHomeLayoutCache kept (thumb fileSize cache only)\n• empty-history x=50 force removed (content centers)", fillcolor="#fff9c4", style=filled);
+        s63_flow -> s63_clip;
+    }
 
     // Cross-refs
     overlay_flag ..> hide_secondary [style=dotted, label="hideSecondaryToolbars"];

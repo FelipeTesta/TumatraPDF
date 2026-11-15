@@ -230,6 +230,25 @@
 - Remaining: user live validation; Page Crop wrong-cut bbox deferred; R2 90° latent
 - s64-R5 (backfill — entry was never written; TODO.md held the only record): 4 live-validated GUI bugs FIXED (2026-11-13) — (1) selection coords after righting: ApplyPreviewGeometry already mirrors pending-edits tail (drop cached page + FreeForDisplayModel + BuildPagesInfo + RelayoutKeepingView), no code change; (2) toggle-off did NOT discard: HandleCmdArchAlign now calls DiscardArchPreview(win) unconditionally on oldMode==5 (was gated on never-true toolMode != 5); (3) repeated line draw accumulated rotation: 2nd-draw reset also handles preview state (hasPreviewGeomEdit), restores from PagePristineState → single Fm0; apply1==apply2==apply3 verified via ad-hoc-s64-align-verify.ts; (4) 🔴 dirty dot not lighting: ApplyPreviewGeometry sets modifiedPageGeometry=true → EngineMupdfHasUnsavedAnnotations lights tab dot; DiscardPreview clears. Build 0 err/0 warn; regressions ad-hoc-align-deskew/bookmark-edit/issue-2799 PASS.
 
+﻿## 2026-11-13 (s63) — Home page responsiveness: single scroll flow, tip-band clip, centered empty state
+
+### Fixed
+- **BUG: HOME not responsive at short/narrow heights (stats band dropped, sections overlapping):** `LayoutHomePage` rewritten as ONE vertical scroll flow — all sections (Stats hdr + ⟳ Sync → stats band → books hdr + view icons + Open link → search → thumbs/list) anchor to a single origin shifted by `-homePageScrollY`. Nothing is hidden/dropped; band always drawn. Old `hdrY` fallback (which let Stats/Sync land on the books header) gone. Tip stays fixed footer; `rcThumbsArea` = fixed viewport above tip (GDI clip); search HWND (`win->hwndHomeSearch`) moves with flow + `SW_HIDE` out of view; overlay scrollbar range = `totalContentDy − viewport`; scroll clamped `[0, totalContentDy − contentBottomY]`.
+- **BUG: scrolled flow painted over the fixed tip footer** (chrome painted after `SelectClipRgn(hdc, nullptr)` restore → books header/stats bottom drew on top of tip at short heights, e.g. 900x500 "Recently Opened" over "Tip: ..."): `DrawHomePageLayout` now clips the chrome pass to the tip-band top via GDI region; tip (child of chrome) is paint-skipped there and painted separately unclipped right after; `HomePageSyncChrome` collapses flow elements fully below the tip (`stats/hdr/syncBtn/booksHdr/thumbView/listView/openDoc/entries`) so clicks over the tip don't hit them — partial elements sliced, not popped.
+- **BUG: scroll-only layout cache fast path desync:** `ApplyHomeLayoutCache`/`HomeLayoutCacheMatches`/`HomeLayoutCacheFilesMatch`/`CollectHomePageFiles` removed — the cache offset thumbnails only, leaving chrome (headers/search) at scroll 0. Full `LayoutHomePage` runs per paint; `OffsetThumbnailLayouts` kept for `HomeSyncLayoutCacheScroll` (keyboard tooltips).
+- **Empty-history HOME stuck left (x=50) on wide windows** (user: "muito espaço vazio do lado direito do graph"): `else if (nFilesForLayout == 0) thumbsStartX = kThumbsMarginLeft` removed — empty-history HOME centers like populated one.
+- **Non-bug: "heatmap overflows right edge" report was a probe artifact:** scratch probes in `tests/tmp/` were DPI-virtualized (bun DPI-unaware; physical window 1.25× larger than reported) — all captures were top-left crops. Fix: `setProcessDpiAware()` added to scratch probes; layout reads `HwndClientRect` (physical). Band fits at all sizes (1252/1551, 992/1298, 992/1098, ~472/798). Month labels intentionally thin out on narrow windows (skip when month block narrower than label+4px, HomeStatsWnd::Paint).
+- Note: HOME wheel scroll works on real history; `-for-testing` has 0 files → `maxScrollY ≈ 0` → deep scroll NOT exercisable headlessly.
+
+### Verified
+- Build 0 err / 0 warn. Deploy copy OK.
+- DPI-aware captures (`tests/tmp/home-overlap-verify.ts`) at 1300x800 / 900x500 / 800x420 (+ scrolled states): zero overlap; books section + search appear on scroll; tip always legible; content centered. `optA-*.png`, `home-*.png` in `%TEMP%\home-analysis\`.
+
+### Remaining
+- Item D: toolbar overflow/clips at narrow widths (pre-existing) — untouched.
+- User validation with populated history (scroll depth, deep scroll, empty vs populated, per-size).
+
+
 ## 2026-11-12 (s62) - Ghost bookmark deletable: op=2 empty-target now removes empty-title ghost (corrupt-file repair)
 
 ### Fixed

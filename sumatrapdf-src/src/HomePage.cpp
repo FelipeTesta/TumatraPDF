@@ -2047,76 +2047,6 @@ static TempStr HomeSearchQueryTemp(MainWindow* win) {
     return HwndGetTextTemp(win->hwndHomeSearch);
 }
 
-static bool HomeLayoutCacheMatches(MainWindow* win, const Rect& rc, Str filterText) {
-    auto& c = gHomeLayoutCache;
-    if (!c.valid) {
-        return false;
-    }
-    if (c.canvasRc != rc) {
-        return false;
-    }
-    if (c.listView != HomePageIsListView()) {
-        return false;
-    }
-    if (c.sortByFreq != (gGlobalPrefs && gGlobalPrefs->homePageSortByFrequentlyRead)) {
-        return false;
-    }
-    if (c.showTips != (gGlobalPrefs && gGlobalPrefs->showTips)) {
-        return false;
-    }
-    if (c.tipIdx != gSelectedTipIdx || c.tipIsPromo != gSelectedIsPromo) {
-        return false;
-    }
-    if (!str::Eq(c.filterText, filterText)) {
-        return false;
-    }
-    // pin/remove/reorder changes FileState pointers or order → invalidate
-    // (nFiles alone is not enough: pin does not change count)
-    return true;
-}
-
-// true if cached thumb FileState* sequence still matches the current file list
-static bool HomeLayoutCacheFilesMatch(const Vec<FileState*>& files) {
-    auto& c = gHomeLayoutCache;
-    if (len(files) != c.nFiles || len(c.thumbs) != c.nFiles) {
-        return false;
-    }
-    for (int i = 0; i < c.nFiles; i++) {
-        if (c.thumbs[i].fs != files[i]) {
-            return false;
-        }
-    }
-    return true;
-}
-
-static void CollectHomePageFiles(MainWindow* win, Vec<FileState*>& fileStates, StrVec& filterWords) {
-    Vec<FileState*> allFileStates;
-    if (gGlobalPrefs->homePageSortByFrequentlyRead) {
-        gFileHistory.GetFrequencyOrder(allFileStates);
-    } else {
-        gFileHistory.GetRecentlyOpenedOrder(allFileStates);
-    }
-
-    TempStr searchQuery = HomeSearchQueryTemp(win);
-    bool hasFilter = searchQuery && searchQuery.s[0];
-    if (hasFilter) {
-        SplitFilterToWords(searchQuery, filterWords);
-    }
-    for (int i = 0; i < len(allFileStates); i++) {
-        FileState* fs = allFileStates[i];
-        if (len(fs->filePath) == 0) {
-            continue;
-        }
-        if (hasFilter) {
-            TempStr baseName = path::GetBaseNameTemp(fs->filePath);
-            if (!FilterMatches(baseName, filterWords)) {
-                continue;
-            }
-        }
-        fileStates.Append(fs);
-    }
-}
-
 static void SaveHomeLayoutCache(const HomePageLayout& l, Str filterText, int scrollY) {
     auto& c = gHomeLayoutCache;
     c.valid = true;
@@ -2148,77 +2078,11 @@ static void SaveHomeLayoutCache(const HomePageLayout& l, Str filterText, int scr
     c.filterWords = l.filterWords;
 }
 
-// rebuild chrome VirtWndText + copy cached geometry into l (no full layout)
-static void ApplyHomeLayoutCache(HomePageLayout& l, int scrollY) {
-    auto& c = gHomeLayoutCache;
-    auto* win = l.win;
-    auto* hdc = l.hdc;
-    bool isRtl = IsUIRtl();
-
-    // clamp scroll using cached content height
-    int maxScrollY = std::max(0, c.totalContentDy - c.thumbsVisibleDy);
-    if (scrollY > maxScrollY) {
-        scrollY = maxScrollY;
-        win->homePageScrollY = scrollY;
-    }
-    if (scrollY < 0) {
-        scrollY = 0;
-        win->homePageScrollY = 0;
-    }
-
-    int dy = c.scrollY - scrollY; // content moves opposite scroll direction
-    OffsetThumbnailLayouts(c.thumbs, dy);
-    c.scrollY = scrollY;
-
-    l.rcThumbsArea = c.rcThumbsArea;
-    l.rcSearchBorder = c.rcSearchBorder;
-    l.rcSearchClear = c.rcSearchClear;
-    l.rcStats = c.rcStats;
-    l.rcBooksHdr = c.rcBooksHdr;
-    l.rcIconOpen = c.rcIconOpen;
-    l.rcIconListView = c.rcIconListView;
-    l.rcIconThumbnailView = c.rcIconThumbnailView;
-    l.rcTip = c.rcTip;
-    l.totalContentDy = c.totalContentDy;
-    l.thumbsVisibleDy = c.thumbsVisibleDy;
-    l.rcTipText = c.rcTipText;
-    l.hasTip = c.hasTip;
-    l.thumbnails = c.thumbs;
-    l.filterWords = c.filterWords;
-
-    l.himlOpen = TbGetImageList(win->hwndToolbar);
-
-    HFONT hdrFont = HdcCreateSimpleFont(hdc, "MS Shell Dlg", 24);
-    HFONT fontText = HdcCreateSimpleFont(hdc, "MS Shell Dlg", 14);
-
-    HomeChromeWnd* chrome = EnsureHomeChrome(win);
-    // D1: the top header is the STATS section title; the books-section title
-    // lives in chrome->booksHdr (restored from c.rcBooksHdr below)
-    VirtWndText* hdr = chrome->hdr;
-    hdr->SetText(_TRA("Stats"));
-    hdr->font = GetPlatformFont(hdrFont);
-    hdr->isRtl = isRtl;
-    hdr->SetBounds(c.rcFreqRead);
-    l.freqRead = hdr;
-
-    Str booksTxt = _TRA("Recently Opened");
-    if (gGlobalPrefs->homePageSortByFrequentlyRead) {
-        booksTxt = _TRA("Frequently Read");
-    }
-    VirtWndText* booksHdr = chrome->booksHdr;
-    booksHdr->SetText(booksTxt);
-    booksHdr->font = GetPlatformFont(hdrFont);
-    booksHdr->isRtl = isRtl;
-    booksHdr->SetBounds(c.rcBooksHdr);
-
-    VirtWndText* openDoc = chrome->openDoc->text;
-    openDoc->SetText(_TRA("Open a document..."));
-    openDoc->font = GetPlatformFont(fontText);
-    openDoc->isRtl = isRtl;
-    openDoc->withUnderline = true;
-    openDoc->SetBounds(c.rcOpenDoc);
-    l.openDoc = openDoc;
-}
+// ApplyHomeLayoutCache() removed: the scroll flow (fix/home-responsiveness)
+// bakes scrollY into every section's Y (headers + thumbs), so the old
+// "offset cached thumb rects only" fast path is invalid. LayoutHomePage()
+// always runs in full now; SaveHomeLayoutCache() still records rcSearchClear
+// etc. (kept from main) for the record; geometry is recomputed each paint.
 
 // after paint, keep lazy fileSize values in the cache for the next frame
 static void SyncHomeLayoutCacheFileSizes(const HomePageLayout& l) {
@@ -2281,7 +2145,6 @@ static void LayoutHomePage(HomePageLayout& l) {
 
     // --- Pre-compute thumbnail grid x offset so header can align with it ---
     // use unfiltered count so layout stays stable when search filters results
-    int nFilesForLayout = len(allFileStates);
     int colsForLayout =
         (rc.dx - kThumbsMarginLeft - kThumbsMarginRight + kThumbsSpaceBetweenX) / (kThumbnailDx + kThumbsSpaceBetweenX);
     int thumbsColsForLayout = std::max(colsForLayout, 1);
@@ -2291,29 +2154,86 @@ static void LayoutHomePage(HomePageLayout& l) {
                         2);
     if (thumbsStartX < DpiScale(hdc, kInnerPadding)) {
         thumbsStartX = DpiScale(hdc, kInnerPadding);
-    } else if (nFilesForLayout == 0) {
-        thumbsStartX = kThumbsMarginLeft;
     }
     int thumbsContentWidth = (thumbsColsForLayout * kThumbnailDx) + ((thumbsColsForLayout - 1) * kThumbsSpaceBetweenX);
+
+    // --- heights skeleton: clamp scroll BEFORE laying out any section ---
+    // every section (stats hdr, band, books hdr, search, thumbs) scrolls as one flow
+    int hdrY0 = DpiScale(hdc, 8);
+    int statsGapY = DpiScale(hdc, 8);
+    int booksSepGapY = DpiScale(hdc, 12);
+    int statsBandDy = DpiScale(hdc, 200);
+    int searchAreaDyPre = DpiScale(hdc, kHeaderSearchGapY + kSearchEditDy + 2 + kSearchThumbnailsGapY);
+
+    Str booksTxt = _TRA("Recently Opened");
+    if (gGlobalPrefs->homePageSortByFrequentlyRead) {
+        booksTxt = _TRA("Frequently Read");
+    }
+
+    HomeChromeWnd* chrome = EnsureHomeChrome(win);
+    VirtWndText* hdr = chrome->hdr;
+    hdr->SetText(_TRA("Stats"));
+    hdr->font = GetPlatformFont(hdrFont);
+    hdr->isRtl = isRtl;
+    hdr->visibility = Visibility::Visible; // always drawn in the scroll flow
+    l.freqRead = hdr;
+    Size statsHdrSize = hdr->GetIdealSize(true);
+
+    VirtWndText* booksHdr = chrome->booksHdr;
+    booksHdr->SetText(booksTxt);
+    booksHdr->font = GetPlatformFont(hdrFont);
+    booksHdr->isRtl = isRtl;
+    booksHdr->visibility = Visibility::Visible; // always drawn in the scroll flow
+    Size booksHdrSize = booksHdr->GetIdealSize(true);
+
+    // tip is a fixed footer (never scrolled); needed for the viewport bottom
+    int tipHeight = 0;
+    HFONT fontTip = HdcCreateSimpleFont(hdc, "MS Shell Dlg", 16);
+    HomeTipWnd* tipWnd = EnsureHomeChrome(l.win)->tip;
+    tipWnd->SetTipLine(SelectedTipLine(), GetPlatformFont(fontTip));
+    VirtRichText* tip = tipWnd->rich;
+    if (tip) {
+        int tipPadding = DpiScale(hdc, 8);
+        tipHeight = tip->MinIntrinsicHeight(thumbsContentWidth) + (2 * tipPadding);
+    }
+    int contentBottomY = std::max(0, rc.dy - tipHeight - DpiScale(hdc, kThumbsMiddleMargin));
+
+    // content height with everything unscrolled (for the scroll clamp)
+    int nFiles = len(fileStates);
+    bool showList = HomePageIsListView();
+    int thumbsContentPadTop = showList ? DpiScale(hdc, 2) : DpiScale(hdc, 5);
+    int thumbsRows = 0;
+    int thumbsContentDy = 0;
+    if (showList) {
+        thumbsRows = nFiles;
+        thumbsContentDy = nFiles * kHomeListRowDy;
+    } else {
+        thumbsRows = (nFiles + thumbsColsForLayout - 1) / thumbsColsForLayout;
+        if (thumbsRows > 0) {
+            thumbsContentDy = (thumbsRows * (kThumbnailDy + kThumbsSpaceBetweenY)) - kThumbsSpaceBetweenY;
+        }
+    }
+    if (thumbsContentDy > 0) {
+        thumbsContentDy += thumbsContentPadTop;
+    }
+    int fixedTop = hdrY0 + statsHdrSize.dy + statsGapY + statsBandDy + booksSepGapY + booksHdrSize.dy + searchAreaDyPre;
+    int totalContentDy = fixedTop + thumbsContentDy;
+    int maxScrollY = std::max(0, totalContentDy - contentBottomY);
+    int scrollY = std::min(std::max(win->homePageScrollY, 0), maxScrollY);
+    win->homePageScrollY = scrollY;
+    int dyLayout = -scrollY;
 
     // --- Step 1: section headers (D1: STATS section on top, books below) ---
     l.himlOpen = TbGetImageList(win->hwndToolbar);
     Rect rcIconView(0, 0, 0, 0);
     ImageList_GetIconSize(l.himlOpen, &rcIconView.dx, &rcIconView.dy);
 
-    HomeChromeWnd* chrome = EnsureHomeChrome(win);
-    int hdrY = DpiScale(hdc, 8);
+    int y0s = hdrY0 + dyLayout; // scrolled origin for the Stats section
     int iconGap = DpiScale(hdc, 4);
     int titleGap = DpiScale(hdc, 8);
 
     // stats section title ("Stats") at the very top, left-aligned with thumbs
-    VirtWndText* hdr = chrome->hdr;
-    hdr->SetText(_TRA("Stats"));
-    hdr->font = GetPlatformFont(hdrFont);
-    l.freqRead = hdr;
-    hdr->isRtl = isRtl;
-    Size txtSize = hdr->GetIdealSize(true);
-    Rect rcHdr(thumbsStartX, hdrY, txtSize.dx, txtSize.dy);
+    Rect rcHdr(thumbsStartX, y0s, statsHdrSize.dx, statsHdrSize.dy);
     hdr->SetBounds(rcHdr);
 
     // "Sync" button next to the Stats header — opens the Profile Sync dialog.
@@ -2333,36 +2253,13 @@ static void LayoutHomePage(HomePageLayout& l) {
     }
     syncBtn->SetBounds(rcSync);
 
-    // --- reading-stats band (FASE B3/D1): its own section under the title,
-    // dropped when the remaining space can't fit books + search + thumbs ---
-    l.rcStats = Rect{};
-    {
-        int statsGapY = DpiScale(hdc, 8);
-        int statsBandDy = DpiScale(hdc, 200);
-        int bandTop = rcHdr.y + rcHdr.dy + statsGapY;
-        int rcDy = rc.dy - DpiScale(hdc, 32); // kThumbsMiddleMargin at the bottom
-        // reserve: books hdr + search area + a usable thumbs region (~140)
-        int reserve = DpiScale(hdc, 140) + DpiScale(hdc, 16) +
-                      DpiScale(hdc, kHeaderSearchGapY + kSearchEditDy + 2 + kSearchThumbnailsGapY);
-        if (rcDy - bandTop - statsBandDy > reserve) {
-            l.rcStats = Rect{thumbsStartX, bandTop, thumbsContentWidth, statsBandDy};
-        }
-    }
+    // --- reading-stats band: always drawn; scrolls with the rest of the flow ---
+    l.rcStats = Rect{thumbsStartX, rcHdr.y + rcHdr.dy + statsGapY, thumbsContentWidth, statsBandDy};
 
     // --- books-section header (recently opened + view icons + open link) ---
-    int sepGapY = DpiScale(hdc, 12);
-    int booksHdrY = l.rcStats.IsEmpty() ? hdrY : l.rcStats.y + l.rcStats.dy + sepGapY;
-    Str txt = _TRA("Recently Opened");
-    if (gGlobalPrefs->homePageSortByFrequentlyRead) {
-        txt = _TRA("Frequently Read");
-    }
-    VirtWndText* booksHdr = chrome->booksHdr;
-    booksHdr->SetText(txt);
-    booksHdr->font = GetPlatformFont(hdrFont);
-    booksHdr->isRtl = isRtl;
-    txtSize = booksHdr->GetIdealSize(true);
+    int booksHdrY = l.rcStats.y + l.rcStats.dy + booksSepGapY;
     int viewIconsDx = (2 * rcIconView.dx) + iconGap;
-    Rect rcBooksHdr(thumbsStartX + viewIconsDx + titleGap, booksHdrY, txtSize.dx, txtSize.dy);
+    Rect rcBooksHdr(thumbsStartX + viewIconsDx + titleGap, booksHdrY, booksHdrSize.dx, booksHdrSize.dy);
     l.rcIconThumbnailView = {thumbsStartX, rcBooksHdr.y + ((rcBooksHdr.dy - rcIconView.dy) / 2), rcIconView.dx,
                              rcIconView.dy};
     l.rcIconListView = {l.rcIconThumbnailView.x + rcIconView.dx + iconGap, l.rcIconThumbnailView.y, rcIconView.dx,
@@ -2382,13 +2279,13 @@ static void LayoutHomePage(HomePageLayout& l) {
     Rect rcIconOpen(0, 0, 0, 0);
     ImageList_GetIconSize(l.himlOpen, &rcIconOpen.dx, &rcIconOpen.dy);
 
-    txt = _TRA("Open a document...");
+    Str txt = _TRA("Open a document...");
     VirtWndText* openDoc = chrome->openDoc->text;
     openDoc->SetText(txt);
     openDoc->font = GetPlatformFont(fontText);
     openDoc->isRtl = isRtl;
     openDoc->withUnderline = true;
-    txtSize = openDoc->GetIdealSize(true);
+    Size txtSize = openDoc->GetIdealSize(true);
 
     int openDocSpacing = DpiScale(hdc, 16);
     rcIconOpen.x = rcBooksHdr.x + rcBooksHdr.dx + openDocSpacing;
@@ -2464,62 +2361,29 @@ static void LayoutHomePage(HomePageLayout& l) {
         int editX = isRtl ? (borderX + 1 + clearDx) : (borderX + 1);
         int editDx = borderDx - 2 - clearDx;
         if (win->hwndHomeSearch) {
-            MoveWindow(win->hwndHomeSearch, editX, editY, editDx, editDy, TRUE);
+            // hide the search HWND when the header row scrolled off the
+            // viewport (scroll flow bakes scrollY into borderY)
+            bool hide = borderY + borderDy < 0 || borderY >= contentBottomY;
+            ShowWindow(win->hwndHomeSearch, hide ? SW_HIDE : SW_SHOW);
+            if (!hide) {
+                // the edit stops short of the "✕" zone so its text never runs under it
+                MoveWindow(win->hwndHomeSearch, editX, editY, editDx, editDy, TRUE);
+            }
         }
     }
     // gap between the header row (which now carries the search box) and the
     // thumbnails
     headerBottomY += searchThumbsGap;
 
-    // --- Step 2: calculate tip area at the bottom (before thumbnails) ---
-    int tipHeight = 0;
-    HFONT fontTip = HdcCreateSimpleFont(hdc, "MS Shell Dlg", 16);
-    HomeTipWnd* tipWnd = EnsureHomeChrome(l.win)->tip;
-    tipWnd->SetTipLine(SelectedTipLine(), GetPlatformFont(fontTip));
-    VirtRichText* tip = tipWnd->rich;
-    if (tip) {
-        int tipPadding = DpiScale(hdc, 8);
-        tipHeight = tip->MinIntrinsicHeight(thumbsContentWidth) + (2 * tipPadding);
-    }
-
-    // --- Step 3: middle area for thumbnails/list ---
-    // content starts directly after headerBottomY (which includes kSearchThumbnailsGapY)
+    // --- Step 3: middle area for thumbnails/list (everything scrolls as one flow) ---
     int thumbsTopY = headerBottomY;
-    int thumbsBottomY = rc.dy - tipHeight - DpiScale(hdc, kThumbsMiddleMargin);
-    int thumbsVisibleDy = std::max(0, thumbsBottomY - thumbsTopY);
 
-    l.rcThumbsArea = {0, thumbsTopY, rc.dx, thumbsVisibleDy};
+    l.rcThumbsArea = {0, 0, rc.dx, contentBottomY}; // clip bounds = fixed viewport
+    l.thumbsVisibleDy = contentBottomY;
+    l.totalContentDy = totalContentDy;
 
-    int nFiles = len(fileStates);
-    bool showList = HomePageIsListView();
-    // Leave room above the first row so RoundRect / selection outline top edges
-    // aren't clipped by rcThumbsArea (they extend a few px upward).
-    int thumbsContentPadTop = showList ? DpiScale(hdc, 2) : DpiScale(hdc, 5);
-    int thumbsRows = 0;
-    int thumbsContentDy = 0;
-    if (showList) {
-        thumbsRows = nFiles;
-        thumbsContentDy = nFiles * kHomeListRowDy;
-    } else {
-        thumbsRows = (nFiles + thumbsColsForLayout - 1) / thumbsColsForLayout;
-        if (thumbsRows > 0) {
-            thumbsContentDy = (thumbsRows * (kThumbnailDy + kThumbsSpaceBetweenY)) - kThumbsSpaceBetweenY;
-        }
-    }
-    if (thumbsContentDy > 0) {
-        thumbsContentDy += thumbsContentPadTop;
-    }
-
-    int scrollY = win->homePageScrollY;
-    int maxScrollY = std::max(0, thumbsContentDy - thumbsVisibleDy);
-    if (scrollY > maxScrollY) {
-        scrollY = maxScrollY;
-        win->homePageScrollY = scrollY;
-    }
-    l.totalContentDy = thumbsContentDy;
-    l.thumbsVisibleDy = thumbsVisibleDy;
-
-    Point ptOff(thumbsStartX, thumbsTopY + thumbsContentPadTop - scrollY);
+    // scroll offset is already baked into thumbsTopY (via dyLayout)
+    Point ptOff(thumbsStartX, thumbsTopY + thumbsContentPadTop);
 
     if (showList) {
         int listX = thumbsStartX;
@@ -3419,10 +3283,18 @@ static void HomePageSyncChrome(HomePageLayout& l) {
     root->needsLayout = false;
     chrome->SetBounds(l.rc);
 
+    // scrolled flow elements fully below the fixed tip footer must not eat clicks
+    // over it (partial elements are sliced by the GDI clip in DrawHomePageLayout)
+    int tipTop = l.hasTip ? l.rcTip.y : l.rc.dy;
+    auto flowVis = [&](const Rect& r) {
+        return (r.IsEmpty() || r.y >= tipTop) ? Visibility::Collapse : Visibility::Visible;
+    };
+
     chrome->tip->Sync(l.rcTip, l.rcTipText);
 
     // reading-stats band (FASE B3): empty bounds = hidden (HitTest false)
     chrome->stats->SetBounds(l.rcStats);
+    chrome->stats->visibility = flowVis(l.rcStats);
 
     // file entries: clipped to the thumbnails band, like the static links were
     HomeEntriesWnd* entries = chrome->entries;
@@ -3439,7 +3311,7 @@ static void HomePageSyncChrome(HomePageLayout& l) {
             str::ReplaceWithCopy(&e->filePath, path);
         }
         Rect rc = HomeEntryRect(t);
-        e->visibility = rc.IsEmpty() ? Visibility::Collapse : Visibility::Visible;
+        e->visibility = (rc.IsEmpty() || rc.y >= tipTop) ? Visibility::Collapse : Visibility::Visible;
         e->SetBounds(rc);
         if (listView) {
             e->removeBtn->visibility = Visibility::Visible;
@@ -3458,18 +3330,23 @@ static void HomePageSyncChrome(HomePageLayout& l) {
 
     chrome->thumbView->pixmap = IconPixmapFromImageList(l.himlOpen, (int)TbIcon::HomeThumbnails);
     chrome->thumbView->SetBounds(l.rcIconThumbnailView);
+    chrome->thumbView->visibility = flowVis(l.rcIconThumbnailView);
     chrome->listView->pixmap = IconPixmapFromImageList(l.himlOpen, (int)TbIcon::HomeList);
     chrome->listView->SetBounds(l.rcIconListView);
+    chrome->listView->visibility = flowVis(l.rcIconListView);
 
     chrome->hdr->textColor = ThemeWindowTextColor();
     // re-apply: the bounds were set before the parent was positioned
     chrome->hdr->SetBounds(l.freqRead->lastBounds);
+    chrome->hdr->visibility = flowVis(chrome->hdr->lastBounds);
 
     chrome->booksHdr->textColor = ThemeWindowTextColor();
     chrome->booksHdr->SetBounds(l.rcBooksHdr);
+    chrome->booksHdr->visibility = flowVis(l.rcBooksHdr);
 
     // re-apply: the bounds were set before the parent was positioned
     chrome->syncBtn->SetBounds(chrome->syncBtn->lastBounds);
+    chrome->syncBtn->visibility = flowVis(chrome->syncBtn->lastBounds);
 
     // one click target covering the icon and the link text
     Rect rcOpen = l.rcIconOpen.Union(l.openDoc->lastBounds);
@@ -3481,6 +3358,7 @@ static void HomePageSyncChrome(HomePageLayout& l) {
     od->text->textColor = ThemeWindowLinkColor();
     // re-apply now that the parent moved: bounds are relative to it
     od->text->SetBounds(l.openDoc->lastBounds);
+    od->visibility = flowVis(rcOpen);
 
     // "?" help button in the bottom-right corner, opening the keyboard
     // shortcuts sheet; sits above the tip band when a tip is showing
@@ -3630,11 +3508,25 @@ static void DrawHomePageLayout(HomePageLayout& l) {
         HdcFillRect(hdc, l.rcTip, ThemeControlBackgroundColor());
     }
 
-    // the chrome (header, view buttons, "Open a document...", help button)
-    // paints last: none of it overlaps the thumbnails, and the help button has
-    // to land on top of the tip band
+    // the chrome (header, view buttons, "Open a document...", help button) paints
+    // last: the scrolled flow is clipped to the tip band top so it never bleeds
+    // into the fixed footer; the tip (child of chrome) is paint-skipped by that
+    // clip (its bounds sit below it) and drawn separately right after, unclipped
     Gfx gfx = GfxFromHdc(hdc);
-    win->homeRoot->Paint(&gfx, l.rc);
+    HomeChromeWnd* chrome = EnsureHomeChrome(win);
+    int tipTop = l.hasTip ? l.rcTip.y : l.rc.dy;
+    HRGN flowClip = CreateRectRgn(0, 0, l.rc.dx, tipTop);
+    if (flowClip) {
+        SelectClipRgn(hdc, flowClip);
+        win->homeRoot->Paint(&gfx, l.rc);
+        SelectClipRgn(hdc, nullptr);
+        DeleteObject(flowClip);
+    } else {
+        win->homeRoot->Paint(&gfx, l.rc);
+    }
+    if (l.hasTip) {
+        chrome->tip->PaintTree(&gfx, {0, 0}, l.rc);
+    }
 }
 
 void DrawHomePage(MainWindow* win, HDC hdc) {
@@ -3647,24 +3539,10 @@ void DrawHomePage(MainWindow* win, HDC hdc) {
     l.win = win;
 
     TempStr filterText = HomeSearchQueryTemp(win);
-    int scrollY = win->homePageScrollY;
-
-    // Prefer the scroll-friendly path: when only scrollY changed, offset cached
-    // thumb rects instead of re-running full LayoutHomePage (was ~30% of scroll CPU).
-    bool usedCache = false;
-    if (HomeLayoutCacheMatches(win, l.rc, filterText)) {
-        Vec<FileState*> files;
-        StrVec filterWords;
-        CollectHomePageFiles(win, files, filterWords);
-        if (HomeLayoutCacheFilesMatch(files)) {
-            ApplyHomeLayoutCache(l, scrollY);
-            usedCache = true;
-        }
-    }
-    if (!usedCache) {
-        LayoutHomePage(l);
-        SaveHomeLayoutCache(l, filterText, win->homePageScrollY);
-    }
+    // chrome elements + search HWND now move with scroll, so always do a full
+    // layout (the old scroll-only cache fast path is gone)
+    LayoutHomePage(l);
+    SaveHomeLayoutCache(l, filterText, win->homePageScrollY);
     // Keep cue "Search N files …" in sync when history changes without recreating the edit.
     UpdateHomeSearchCueBanner(win);
 
