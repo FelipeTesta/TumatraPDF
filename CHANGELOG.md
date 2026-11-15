@@ -6,6 +6,48 @@ history in [LOG.md](LOG.md).
 
 ## Unreleased
 
+## v1.0.17 (2026-11-15)
+
+- **Repair Document File:** Right-click a damaged PDF and choose **Repair Document File** (next to **Show Errors**). TumatraPDF re-saves the document in place with a full, clean rewrite, verifies the error count does not increase, and atomically swaps the corrected file over the original. If anything fails, the original file is left untouched; on success the same page and scroll position are restored.
+
+- **Capture (Shift+S):** Drag a rectangle over the page to copy that region to the clipboard at the document's DPI. The tool auto-exits after the capture; `Esc` cancels.
+
+- **Editable bookmarks:** The Bookmarks panel gains an **Add** button and a **Reorder** toggle. Right-click any bookmark to **Rename**, **Delete** or **Update** it; drag to reorder and indent (a white guide line marks the drop position). All outline edits are written into the PDF on save and survive reopening. First public release.
+
+- **Rotated Page Crop:** Crop a page at any angle straight from the Edit bar. Corner handles resize proportionally, edge midpoints resize on one axis, and a circular rotate grip below the bottom-center rotates the box (`Shift` snaps to 22.5°, ±90° supported). The saved PDF comes out straightened, and `Esc` resets the angle.
+
+- **Crop Align deskew:** Draw a two-point line along a page's baseline (ideal for scanned pages) and the page rights itself instantly; draw further lines to fine-tune against the residual angle, with rotations accumulated from the original page so alignment never compounds. `Esc` discards the preview and keeps the tool on.
+
+- **Scanned pages:** Clicks on scanned (image-only) pages are no longer swallowed by the image drag-out gesture or annotation handling while Crop Align / Page Crop is active.
+
+- **Edit mode and your view settings:** Turning Edit mode on now suspends Trim and Two Columns for the current document; turning it off restores them exactly as they were (same document only).
+
+- **Flashcards:** Study gets a quiet boost on capable machines — an adaptive background prewarmer moves upcoming cards into memory based on your card-switch pace, and silently stands down on weaker hardware. Random study order is now the default for fresh installs, pressing **Again** re-queues the card correctly, study time and ratings are credited to the document being studied (even in cross-document sessions with `Ctrl+Tab`), and flashcard highlights paint at double opacity while the flashcard toolbar is visible with study off.
+
+- **Profile data-root unification:** All reading and study data now lives under one data root — the profile root. Sidecar files (reading/flashcard stats) are copied (never moved, never deleted) to `<root>\stats\` on first launch with the legacy files kept, and `FlashcardStudyDir` is now a legacy-override shim. The Profile Sync dialog gains a **Set Folder** button to point the data root elsewhere; the switch migrates on next launch.
+
+- **Profile Sync:** Importing a profile now merges truly newest-wins per item instead of adopt-absent, and the Import, Cloud Revert and Backups dialogs paint correctly in dark themes.
+
+- **Home:** The Home screen is one vertical scroll flow — nothing drops off in short or narrow windows, the tip band clips cleanly, the empty state is centered, and the search box sits inline on the books header row with a ✕ clear button (falling back below the header on narrow windows). The sync button now shows a multi-line tooltip.
+
+- **Toolbar polish:** Secondary toolbar labels no longer ellipsize ("+Text", "Settings", "Flashcard" all render in full; the Edit, Arch Tools and Flashcards bars pin their text-button widths), the Save button stays visible after leaving fullscreen and after opening a book from Home, and the save icon is a nomacs-style floppy.
+
+- **Tabs:** Dragging a tab paints a white insertion guide line at the drop boundary, and dropping actually reorders the tab bar.
+
+- **Bug fixes:** The flashcard toolbar no longer freezes the app (AppHangB1); flashcard highlight painting on un-zoomed pages no longer trips the debug fatal (an upstream zero-zoom transient); flashcard list/credit edge cases; tab groups now sync to empty when the last tab closes and track renames of the active group; right-click in the tab-group dropdown no longer freezes; outlines corrupted with empty entries are cleaned up on save.
+
+**New commands:**
+
+- `CmdRepairDocumentFile` : "Repair Document File" — re-saves the current PDF in place to repair structural damage, then atomically replaces the original and reloads the same page/scroll
+- `CmdCaptureTool` : "Capture Region to Clipboard" (`Shift+S`) — rectangle capture to the clipboard at document DPI
+- `CmdBookmarkAdd` : "Add Bookmark" — add a bookmark for the current page
+- `CmdBookmarkDelete` : "Delete Bookmark"
+- `CmdBookmarkUpdate` : "Update Bookmark Page"
+- `CmdBookmarkRename` : "Rename Bookmark"
+- `CmdArchAlign` : "Crop Align" — draw a 2-point line to deskew the page (preview + Apply)
+- `CmdArchAlignApply` : "Crop Align: Apply" — commits the current arch preview (align rotation or page crop) for save
+- `CmdArchPageCrop` : "Page Crop" — image-editor page bounding box; Edit bar button
+
 ## v1.0.16 (2026-11-04)
 
 - **Tab Groups:** Save the open documents of a window as a named tab group (session), restore any group on startup or on demand, and groups auto-sync as tabs are added/removed/closed. A toolbar dropdown lists groups with Open here / Open in new window / Rename / Delete / New session; new windows (`Ctrl+N`) start unsynced. Empty groups are first-class and the last-tab close keeps the group empty instead of wiping it.
