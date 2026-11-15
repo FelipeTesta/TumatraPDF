@@ -50,6 +50,10 @@ CmdTocExpandToLevel1,,Bookmarks: Expand to Level 1,"Collapse the Bookmarks tree 
 CmdTocExpandToLevel2,,Bookmarks: Expand to Level 2,"Expand top-level Bookmarks once (context menu), ver 3.7+"
 CmdTocExpandToLevel3,,Bookmarks: Expand to Level 3,"Expand Bookmarks two levels deep (context menu), ver 3.7+"
 CmdTocCollapseSameLevel,,Bookmarks: Collapse Same Level,"Collapse all Bookmarks siblings of the selected/clicked entry (same nesting level), ver 3.7+"
+CmdBookmarkAdd,,Add Bookmark,"TumatraPDF: the Add button in the Bookmarks sidebar adds a 'Page <n>' bookmark pointing at the current page; outline edits are written into the PDF on save"
+CmdBookmarkDelete,,Delete Bookmark,"TumatraPDF: right-click a bookmark in the Bookmarks sidebar and choose 'Delete bookmark' to remove it; outline edits are written into the PDF on save"
+CmdBookmarkUpdate,,Update Bookmark Page,"TumatraPDF: right-click a bookmark in the Bookmarks sidebar and choose 'Update bookmark page' to retarget it to the current page; outline edits are written into the PDF on save"
+CmdBookmarkRename,,Rename Bookmark,"TumatraPDF: right-click a bookmark in the Bookmarks sidebar and choose 'Rename bookmark' to edit its label; outline edits are written into the PDF on save"
 CmdOpenEmbeddedPDF,,Open Embedded PDF,
 CmdSaveEmbeddedFile,,Save Embedded File...,
 CmdCreateShortcutToFile,,Create .lnk Shortcut,
@@ -309,6 +313,7 @@ CmdConvertToPDF,,Convert To PDF,"Convert a comic book, image folder, or single i
 CmdPasteClipboardImage,,Paste Image From Clipboard,"Paste image from clipboard and open it, ver 3.7+"
 CmdShowErrors,,Show Errors,"Show mupdf warnings/errors in right-click context menu, ver 3.7+"
 CmdRepairDocumentFile,,Repair Document File,"Re-save the current PDF in place (mupdf garbage-collect + clean, full rewrite) to repair structural damage, then atomically swap it over the original and reload the same page/scroll; right-click context menu, ver 3.7+"
+CmdCaptureTool,Shift + S,Capture Region to Clipboard,"TumatraPDF: drag a rectangle over the page to copy that region to the clipboard at the document's DPI; auto-exits after capture, Esc cancels; requires a loaded document"
 CmdShowLog,,Show Logs,
 ```
 
