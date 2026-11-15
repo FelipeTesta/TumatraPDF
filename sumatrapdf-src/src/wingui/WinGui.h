@@ -827,11 +827,21 @@ struct TabsCtrl : Wnd {
         int tab2 = -1;
     };
 
+    struct TabMouseDownEvent {
+        TabsCtrl* tabs = nullptr;
+        int tabIdx = -1;
+        // set by the handler when it changed the layout under the cursor (e.g. it
+        // dismissed the home overlay and re-laid out the frame): the click still
+        // counts as a selection but no tab drag is armed
+        bool skipDrag = false;
+    };
+
     using SelectionChangingHandler = Func1<SelectionChangingEvent*>;
     using SelectionChangedHandler = Func1<SelectionChangedEvent*>;
     using ClosedHandler = Func1<ClosedEvent*>;
     using MigrationHandler = Func1<MigrationEvent*>;
     using DraggedHandler = Func1<DraggedEvent*>;
+    using TabMouseDownHandler = Func1<TabMouseDownEvent*>;
 
     int ctrlID = 0;
     bool withToolTips = false;
@@ -864,6 +874,9 @@ struct TabsCtrl : Wnd {
     int tabForceShowSelected = -1;
 
     ClosedHandler onTabClosed;
+    // fires before the selection changes: lets the owner react to a click on a
+    // tab (the already-selected one included) before any switch happens
+    TabMouseDownHandler onTabMouseDown;
     SelectionChangingHandler onSelectionChanging;
     SelectionChangedHandler onSelectionChanged;
     MigrationHandler onTabMigration;

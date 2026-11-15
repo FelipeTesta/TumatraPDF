@@ -29,10 +29,12 @@
 #include "Menu.h"
 #include "TableOfContents.h"
 #include "Tabs.h"
+#include "Flashcard.h"
 #include "TabGroupsManage.h"
 #include "SumatraDialogs.h"
 #include "FileHistory.h"
 #include "Theme.h"
+#include "HomePage.h"
 #include "Translations.h"
 
 // always full path (FullPathInTitle only affects tab/window title text).
@@ -155,6 +157,10 @@ void UpdateTabWidth(MainWindow* win) {
 static void SyncActiveGroupToEmpty(MainWindow* win);
 
 void RemoveTab(WindowTab* tab) {
+    // s64-R9p: bump the flashcard prewarm epoch + drain in-flight worker
+    // jobs BEFORE the tab (and its engine) is torn down - stale warm jobs
+    // would otherwise touch freed engine/dm.
+    FlashcardPrewarmInvalidate();
     UpdateTabFileDisplayStateForTab(tab);
     MainWindow* win = tab->win;
     // Clear arch tools measurements for the closed document (discard on close)
@@ -658,6 +664,18 @@ static void MainWindowTabSelectionChanged(MainWindow* win, TabsCtrl::SelectionCh
     LoadModelIntoTab(tab);
 }
 
+// A click on the tab bar means "show me that tab", so it also dismisses the home
+// overlay when it is up. It runs before the selection changes: with the overlay
+// up, LoadModelIntoTab switches the document but clears the flag without the
+// toolbar restore, and a click on the already-selected tab does not switch
+// anything at all. The restore re-lays out the frame, which moves the tabs under
+// the cursor, so no drag is armed for this click.
+static void MainWindowTabMouseDown(MainWindow* win, TabsCtrl::TabMouseDownEvent* ev) {
+    if (HomePageHideOverlay(win)) {
+        ev->skipDrag = true;
+    }
+}
+
 static void MainWindowTabMigration(MainWindow* win, TabsCtrl::MigrationEvent* ev) {
     WindowTab* tab = win->GetTab(ev->tabIdx);
     MainWindow* releaseWnd = nullptr;
@@ -693,6 +711,7 @@ void CreateTabbar(MainWindow* win) {
 
     TabsCtrl* tabsCtrl = new TabsCtrl();
     tabsCtrl->onTabClosed = MkFunc1(MainWindowTabClosed, win);
+    tabsCtrl->onTabMouseDown = MkFunc1(MainWindowTabMouseDown, win);
     tabsCtrl->onSelectionChanging = MkFunc1(MainWindowTabSelectionChanging, win);
     tabsCtrl->onSelectionChanged = MkFunc1(MainWindowTabSelectionChanged, win);
     tabsCtrl->onContextMenu = MkFunc1Void(TabsContextMenu);

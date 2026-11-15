@@ -538,6 +538,15 @@ static void UpdateAfterDrag(TabsCtrl* tabsCtrl, int tabIdxFrom, int tabIdxTo) {
 void TabsCtrl::OnTabMouseDown(TabWnd* tab, VirtWndMouseEvent& ev) {
     int idx = tab->Idx();
     UpdateHover(idx);
+    if (onTabMouseDown.IsValid()) {
+        TabMouseDownEvent tev;
+        tev.tabs = this;
+        tev.tabIdx = idx;
+        onTabMouseDown.Call(&tev);
+        if (tev.skipDrag) {
+            return;
+        }
+    }
     if (idx != selectedIdx) {
         if (TriggerSelectionChanging(this)) {
             return;

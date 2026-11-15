@@ -232,6 +232,10 @@ void FlashcardApplyStudyOrder(MainWindow* win);
 // Commands_Flashcard.cpp: stop the active study session (queue, index,
 // modes); per-tab caches are kept
 void FlashcardStopSession(MainWindow* win);
+// Commands_Flashcard.cpp: s64-R9p adaptive prewarmer — bump the warm-job
+// epoch and drain in-flight worker jobs (tab close / relayout / order rebuild
+// / annot edits / session end)
+void FlashcardPrewarmInvalidate();
 
 // FlashcardSidebar (in FlashcardSidebar.cpp)
 void FlashcardSidebarCreate(MainWindow* win);

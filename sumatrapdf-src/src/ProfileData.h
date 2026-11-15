@@ -6,11 +6,17 @@
 
 #include "Flashcard.h"
 
-// Single-file "Profile Memory" store: <profileDataDir>\tumatraPDF-data_1.json
+// Single-file "Profile Memory" store: <root>\tumatraPDF-data_1.json
 // consolidates every user-data category (study states, reading/study daily
 // stats, per-document info) so it can be synced, backed up and imported as one
 // unit. The legacy per-book *.json files and the two stats sidecars keep being
 // written as before (dual write) and are imported here.
+// storage layout (s64-R9o): everything lives under ONE data root —
+// ProfileDataGetDataRootTemp(). "<root>\stats\" holds the two sidecars,
+// "<root>\study\" the per-book *.json files (only while the legacy
+// flashcardStudyDir override is unset; a set override keeps resolving per-book
+// files there). Migration of legacy sidecars (next to the settings file) into
+// <root>\stats is copy-only on load; the legacy files are never deleted.
 // Day entries carry per-machine attribution so two machines sharing the file
 // through a synced folder sum exactly, with no double counting.
 
@@ -52,6 +58,13 @@ int ProfileDataStudyDayCards(int dateKey);
 int ProfileDataStudyTotalSec();
 int ProfileDataStudyTotalCards();
 
+// the ONE data-root resolver (s64-R9o): returns the absolute dir (no trailing
+// slash) under which ALL user study data lives — tumatraPDF-data_1.json,
+// stats\ sidecars, study\ per-book JSONs (when flashcardStudyDir is unset),
+// backup\ rolling slots. profileDataDir advanced setting wins; else the
+// per-exe app-data dir. Callers path::JoinTemp() onto it; spaces documented
+// in ProfileData.cpp.
+TempStr ProfileDataGetDataRootTemp();
 // atomic save of tumatraPDF-data_1.json (books, day entries with the current
 // perDoc info pulled from gFileHistory) + cheap rolling backup guard
 void ProfileDataSaveNow();

@@ -4183,6 +4183,10 @@ void LoadModelIntoTab(WindowTab* tab) {
     FlashcardOnTabChanged(win);
     if (win->showHomeOverlay) {
         win->showHomeOverlay = false;
+        // UpdateUiForCurrentTab above refreshed the toolbar while the overlay
+        // was still up, which hides every button except Home. Re-run now that
+        // the overlay is gone, or the buttons (notably Save) stay hidden.
+        ToolbarUpdateStateForWindow(win, true);
     }
 
     // Restore arch tools scale calibration from FileState for the new tab (tab-switch case)
@@ -6686,6 +6690,27 @@ bool RelayoutFrame(MainWindow* win, bool updateToolbars, int sidebarDx) {
             logf("[edit] after reserve rc.y=%d rc.dy=%d\n", rc.y, rc.dy);
         }
     }
+    // comctl re-derives a BTNS_SHOWTEXT button's width from its label on every
+    // layout pass, and the re-derived width is measured with the control's font
+    // at that moment — after the rebar resize above it can come out narrower
+    // than the label, so longer labels get ellipsized ("+Text" -> "+Te..." on
+    // the Edit toolbar as soon as it is shown). Re-pin the measured widths once
+    // the resizes are done. The pass only ever widens and measures the same
+    // strings each time, so it is a no-op when comctl's derivation already fits.
+    if (updateToolbars) {
+        if (win->hwndToolbar) {
+            ToolbarEnforceSecondaryTextWidths(win, win->hwndToolbar);
+        }
+        if (win->archTools.on && win->archTools.hwndToolbar2) {
+            ToolbarEnforceSecondaryTextWidths(win, win->archTools.hwndToolbar2);
+        }
+        if (win->flashcard.on && win->flashcard.hwndToolbarFlashcard) {
+            ToolbarEnforceSecondaryTextWidths(win, win->flashcard.hwndToolbarFlashcard);
+        }
+        if (win->editTools.on && win->editTools.hwndToolbarEdit) {
+            ToolbarEnforceSecondaryTextWidths(win, win->editTools.hwndToolbarEdit);
+        }
+    }
     // in overlay mode the toolbar floats over the canvas and is positioned
     // separately (see PositionOverlayToolbar below); don't touch its visibility
     // here so a relayout doesn't flash it on/off
@@ -8020,6 +8045,13 @@ void ExitFullScreen(MainWindow* win) {
     // show menu bar rebar after layout positions it correctly
     ShowMenuBarRebar(win);
     EndFrameRedrawSuppression(win);
+    // Fullscreen feeds into command visibility (e.g. SupportsAnnotations
+    // requires !isFullScreen, which hides the Save button), but nothing in the
+    // relayout above re-evaluates per-button visibility. Without this refresh
+    // the buttons keep the hidden state computed while fullscreen was on, so
+    // the Save button stays gone until an unrelated full refresh (resize,
+    // document load, tab switch) runs.
+    ToolbarUpdateStateForWindow(win, true);
 }
 
 void ToggleFullScreen(MainWindow* win, bool presentation) {

@@ -178,20 +178,9 @@ LRESULT WndProcCanvasAbout(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, LPAR
                     return 0;
                 }
                 case VK_ESCAPE:
-                    // close the home overlay (per-window overlay mode, no tab)
-                    if (win->showHomeOverlay) {
-                        win->showHomeOverlay = false;
-                        InvalidateRect(win->hwndCanvas, nullptr, TRUE);
-                        SetToolbarButtonCheckedState(win, CmdOpenHome, false);
-                        logf("[home] overlay %s\n", StrL("OFF"));
-                        // D5: same restore job as the CmdOpenHome toggle —
-                        // without this every button stayed hidden after
-                        // closing the overlay with Esc (and the page/timer
-                        // controls with them)
-                        ToolbarUpdateStateForWindow(win, true);
-                        UpdateToolbarPageText(win, win->ctrl ? win->ctrl->PageCount() : -1);
-                        LayoutToolbarChildWindows(win);
-                        EnsureContrastOverlayState(win);
+                    // close the home overlay (per-window overlay mode, no tab);
+                    // the helper restores the toolbar/relayout state too
+                    if (HomePageHideOverlay(win)) {
                         return 0;
                     }
                     break;

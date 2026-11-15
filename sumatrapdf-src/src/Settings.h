@@ -61,7 +61,7 @@ struct Trim {
 // flashcard study settings
 struct FlashcardSettings {
     // if true, flashcard study presents cards in random order instead of
-    // document order
+    // document order; on by default
     bool randomOrder;
     // where new (never rated) cards go relative to due reviews in the
     // study queue: 0 = new first, 1 = new last, 2 = mixed (interleaved
@@ -701,15 +701,22 @@ struct SessionData {
 
 // Preferences are persisted in SumatraPDF-settings.txt
 struct GlobalPrefs {
-    // directory where flashcard study history JSONs are stored (per-book
-    // files, MD5-named). Empty = default app-data dir (FlashcardStudy).
-    // Point it at a cloud-synced folder (e.g. Google Drive) to keep the
-    // histories backed up
+    // LEGACY override: directory where flashcard study history JSONs are
+    // stored (per-book files, MD5-named). Empty (recommended) =
+    // <ProfileDataDir>\study. Set only to keep per-book files in a
+    // separate (e.g. cloud-synced) folder; the profile store already syncs
+    // the same states. Changing it migrates the files
     Str flashcardStudyDir;
-    // directory for the single-file Profile Memory store
-    // (tumatraPDF-data_1.json). Empty = default app-data dir. Point it at
-    // a cloud-synced folder (e.g. Google Drive) so the study histories,
-    // reading stats and per-doc info sync between machines in ONE file
+    // if true, flashcard sessions may preload books of this window's study
+    // session that are not loaded yet (lazy tabs) in the background; off
+    // by default - lazy books load on first visit as usual
+    bool flashcardPreloadSessionBooks;
+    // data ROOT for ALL user study data (s64-R9o): single-file Profile
+    // Memory store (tumatraPDF-data_1.json), the stats\ sidecars
+    // (reading/flashcard stats) and, when FlashcardStudyDir is empty, the
+    // per-book study JSONs under study\. Empty = default app-data dir.
+    // Point it at a cloud-synced folder (e.g. Google Drive) to sync
+    // everything between machines in ONE place
     Str profileDataDir;
     // how pages are laid out by default. The string is the persisted form
     // of DefaultDisplayModeEnum, so it's parsed after deserialization and
@@ -1109,7 +1116,7 @@ static const StructInfo gTrimInfo = {sizeof(Trim),
                                      false};
 
 static const FieldInfo gFlashcardSettingsFields[] = {
-    {offsetof(FlashcardSettings, randomOrder), SettingType::Bool, false},
+    {offsetof(FlashcardSettings, randomOrder), SettingType::Bool, true},
     {offsetof(FlashcardSettings, newCardsPosition), SettingType::Int, 2},
     {offsetof(FlashcardSettings, flashcardMarkerAlpha), SettingType::Int, 10},
 };
@@ -1118,10 +1125,10 @@ static const StructInfo gFlashcardSettingsInfo = {
     3,
     gFlashcardSettingsFields,
     "RandomOrder\0NewCardsPosition\0FlashcardMarkerAlpha",
-    "if true, flashcard study presents cards in random order instead of document order\0where new (never rated) cards "
-    "go relative to due reviews in the study queue: 0 = new first, 1 = new last, 2 = mixed (interleaved "
-    "proportionally)\0alpha (0-255) for the flashcard translucent gray marker. Lower values make the marker more "
-    "subtle. Default 10 for very subtle highlighting.",
+    "if true, flashcard study presents cards in random order instead of document order; on by default\0where new "
+    "(never rated) cards go relative to due reviews in the study queue: 0 = new first, 1 = new last, 2 = mixed "
+    "(interleaved proportionally)\0alpha (0-255) for the flashcard translucent gray marker. Lower values make the "
+    "marker more subtle. Default 10 for very subtle highlighting.",
     false};
 
 static const FieldInfo gWindowMarginFields[] = {
@@ -1818,6 +1825,7 @@ static const FieldInfo gGlobalPrefsFields[] = {
      (intptr_t)"For documentation, see https://www.sumatrapdfreader.org/settings/settings3-7.html"},
     {(size_t)-1, SettingType::Comment, 0},
     {offsetof(GlobalPrefs, flashcardStudyDir), SettingType::String, (intptr_t)""},
+    {offsetof(GlobalPrefs, flashcardPreloadSessionBooks), SettingType::Bool, false},
     {offsetof(GlobalPrefs, profileDataDir), SettingType::String, (intptr_t)""},
     {offsetof(GlobalPrefs, defaultDisplayMode), SettingType::String, (intptr_t)"automatic"},
     {offsetof(GlobalPrefs, defaultZoom), SettingType::String, (intptr_t)"fit page"},
@@ -1967,59 +1975,62 @@ static const FieldInfo gGlobalPrefsFields[] = {
 };
 static const StructInfo gGlobalPrefsInfo = {
     sizeof(GlobalPrefs),
-    149,
+    150,
     gGlobalPrefsFields,
-    "\0\0FlashcardStudyDir\0ProfileDataDir\0DefaultDisplayMode\0DefaultZoom\0DisableJavaScript\0AllowExternalImages\0En"
-    "ableTeXEnhancements\0EscToExit\0FullPathInTitle\0InverseSearchCmdLine\0LazyLoading\0MainWindowBackground\0NoHomeTa"
-    "b\0HomePageSortByFrequentlyRead\0HomePageViewMode\0FilePicker\0ReloadModifiedDocuments\0RememberOpenedFiles\0Remem"
-    "berStatePerDocument\0RestoreSession\0ReuseInstance\0ShowMenubar\0ShowMenubarWithTabs\0ShowTips\0CustomColors\0Show"
-    "Toolbar\0Toolbar\0ToolbarPosition\0SearchUIFloating\0ShowFavorites\0SortFavoritesByName\0ShowToc\0ShowLinks\0AutoS"
-    "crollShowEta\0AutoScrollTimerMinutes\0AutoScrollTimerEnabled\0AutoScrollSpeedMultiplier\0ShowDocumentFocusIndicato"
-    "r\0ShowAnnotationNotification\0ShowTocPageNumbers\0ShowStartPage\0SidebarDx\0Scrollbars\0ScrollbarInSinglePage\0Sm"
-    "oothScroll\0PaddingAfterLastPage\0CitationHoverDelay\0ReadAloudVoiceId\0ReadAloudSpeed\0DisableReadAloud\0DisableA"
-    "IChat\0ArchToolsEnabled\0ArchUnit\0ArchDecimalSeparator\0FastScrollOverScrollbar\0PreventSleepInFullscreen\0TabWid"
-    "th\0Theme\0LastLightTheme\0LastDarkTheme\0DocumentColorsFollowTheme\0TocDy\0ToolbarShowReadAloud\0ToolbarSize\0Tre"
-    "eFontName\0TreeFontSize\0UIFontSize\0DisableAntiAlias\0EngineeringDrawingEnhance\0DisableAutoLinks\0UseSysColors\0"
-    "UseTabs\0SelectionToolbar\0TabsMru\0CtrlTabPre36Behavior\0ZoomLevels\0ZoomIncrement\0\0ViewportCrop\0Trim\0Flashca"
-    "rdSettings\0\0FixedPageUI\0\0EBookUI\0\0ComicBookUI\0\0ImageUI\0\0ChmUI\0\0MarkdownUI\0\0HtmlUI\0\0ClaudeCode\0\0G"
-    "rokBuild\0\0CodexBuild\0\0AntiGravity\0\0AIChatSidebarDx\0\0TranslateToLang\0TranslateFromLang\0TranslateEngine\0"
-    "\0Annotations\0\0ExternalViewers\0\0ForwardSearch\0\0PrinterDefaults\0\0Fullscreen\0\0SelectionHandlers\0\0Shortcu"
-    "ts\0\0Themes\0\0TabGroups\0\0CustomScreenDPI\0\0\0DefaultPasswords\0UiLanguage\0VersionToSkip\0WindowState\0Window"
-    "Pos\0SearchUIWindowPos\0FileStates\0SessionData\0ReopenOnce\0TimeOfLastUpdateCheck\0OpenCountWeek\0PropWinPos\0Che"
-    "ckForUpdates\0\0\0ActiveTabGroup",
-    "\0\0directory where flashcard study history JSONs are stored (per-book files, MD5-named). Empty = default "
-    "app-data dir (FlashcardStudy). Point it at a cloud-synced folder (e.g. Google Drive) to keep the histories backed "
-    "up\0directory for the single-file Profile Memory store (tumatraPDF-data_1.json). Empty = default app-data dir. "
-    "Point it at a cloud-synced folder (e.g. Google Drive) so the study histories, reading stats and per-doc info sync "
-    "between machines in ONE file\0default layout of pages. valid values: automatic, single page, facing, book view, "
-    "continuous, continuous facing, continuous book view\0default zoom. valid values: fit page, fit width, fit height, "
-    "fit content or percent like 100%\0if true, JavaScript in PDF documents is disabled (e.g. form-field calculations "
-    "won't run)\0if true, a PDF may load an image stored in a separate file referenced by name (an external image "
-    "stream); the file must sit next to the PDF. Off by default for security (matches Acrobat)\0if true, show the "
-    "SyncTeX inverse search command line in Settings -> Options, so a double-click in the document can jump to the "
-    "matching line in a LaTeX editor\0if true, Esc key closes SumatraPDF\0if true, show the full path to the document "
-    "in the title bar\0pattern used to launch the LaTeX editor when doing inverse search\0if true, restoring a session "
-    "delays loading each document until its tab is selected\0background color of the area around the document, "
-    "traditionally yellow. Only applies to the Light theme; the default #80fff200 is a marker meaning \"use the "
-    "theme's color\", so setting any other value also colorizes the toolbar and sidebars\0if true, doesn't open Home "
-    "tab\0if true, the home page lists documents by how often they've been opened (the pre-3.6 behavior); if false, "
-    "the most recently opened come first\0valid values: thumbnails, list\0valid values: (empty), os, sumatrapdf\0if "
-    "true, a document will be reloaded automatically whenever it's changed (currently doesn't work for documents shown "
-    "in the ebook UI)\0if true, remember which documents were opened and their display settings\0if true, store "
-    "display settings for each document separately (i.e. everything after UseDefaultState in FileStates)\0if true and "
-    "SessionData isn't empty, that session will be restored at startup\0if true, open documents in the already running "
-    "SumatraPDF instead of starting a new one\0if true, show the menu bar (F9 toggles it; the choice is remembered "
-    "across sessions)\0if true, show the menu bar when using tabs (useTabs = true)\0if true, show tips on the home "
-    "page\0up to 13 custom colors for the background color picker, separated by space (e.g. '#ff0000 #00ff00 "
-    "#0000ff')\0legacy bool for toolbar; if Toolbar is empty, derived as show/hide (internal; use Toolbar "
-    "instead)\0toolbar mode: show (pinned), hide (no toolbar), overlay (toolbar floats over the page, sized to its "
-    "natural width and centered, only shown when the mouse is near it). if empty, derived from ShowToolbar\0where the "
-    "toolbar is placed: top or bottom (applies to both show and overlay modes)\0if true, the find UI is a floating, "
-    "movable window with a results list instead of the compact toolbar overlay\0if true, show the Favorites "
-    "sidebar\0if true, favorites within each file are sorted alphabetically by name (or page label); if false (the "
-    "default), they are sorted by page number\0if true, show the table of contents (Bookmarks) sidebar when the "
-    "document has one\0if true, draw a blue border around links in the document\0Show ETA label during "
-    "auto-scroll\0Autoscroll timer duration in minutes (1-600, 0 = no timer)\0Enable autoscroll auto-stop "
+    "\0\0FlashcardStudyDir\0FlashcardPreloadSessionBooks\0ProfileDataDir\0DefaultDisplayMode\0DefaultZoom\0DisableJavaS"
+    "cript\0AllowExternalImages\0EnableTeXEnhancements\0EscToExit\0FullPathInTitle\0InverseSearchCmdLine\0LazyLoading\0"
+    "MainWindowBackground\0NoHomeTab\0HomePageSortByFrequentlyRead\0HomePageViewMode\0FilePicker\0ReloadModifiedDocumen"
+    "ts\0RememberOpenedFiles\0RememberStatePerDocument\0RestoreSession\0ReuseInstance\0ShowMenubar\0ShowMenubarWithTabs"
+    "\0ShowTips\0CustomColors\0ShowToolbar\0Toolbar\0ToolbarPosition\0SearchUIFloating\0ShowFavorites\0SortFavoritesByN"
+    "ame\0ShowToc\0ShowLinks\0AutoScrollShowEta\0AutoScrollTimerMinutes\0AutoScrollTimerEnabled\0AutoScrollSpeedMultipl"
+    "ier\0ShowDocumentFocusIndicator\0ShowAnnotationNotification\0ShowTocPageNumbers\0ShowStartPage\0SidebarDx\0Scrollb"
+    "ars\0ScrollbarInSinglePage\0SmoothScroll\0PaddingAfterLastPage\0CitationHoverDelay\0ReadAloudVoiceId\0ReadAloudSpe"
+    "ed\0DisableReadAloud\0DisableAIChat\0ArchToolsEnabled\0ArchUnit\0ArchDecimalSeparator\0FastScrollOverScrollbar\0Pr"
+    "eventSleepInFullscreen\0TabWidth\0Theme\0LastLightTheme\0LastDarkTheme\0DocumentColorsFollowTheme\0TocDy\0ToolbarS"
+    "howReadAloud\0ToolbarSize\0TreeFontName\0TreeFontSize\0UIFontSize\0DisableAntiAlias\0EngineeringDrawingEnhance\0Di"
+    "sableAutoLinks\0UseSysColors\0UseTabs\0SelectionToolbar\0TabsMru\0CtrlTabPre36Behavior\0ZoomLevels\0ZoomIncrement"
+    "\0\0ViewportCrop\0Trim\0FlashcardSettings\0\0FixedPageUI\0\0EBookUI\0\0ComicBookUI\0\0ImageUI\0\0ChmUI\0\0Markdown"
+    "UI\0\0HtmlUI\0\0ClaudeCode\0\0GrokBuild\0\0CodexBuild\0\0AntiGravity\0\0AIChatSidebarDx\0\0TranslateToLang\0Transl"
+    "ateFromLang\0TranslateEngine\0\0Annotations\0\0ExternalViewers\0\0ForwardSearch\0\0PrinterDefaults\0\0Fullscreen\0"
+    "\0SelectionHandlers\0\0Shortcuts\0\0Themes\0\0TabGroups\0\0CustomScreenDPI\0\0\0DefaultPasswords\0UiLanguage\0Vers"
+    "ionToSkip\0WindowState\0WindowPos\0SearchUIWindowPos\0FileStates\0SessionData\0ReopenOnce\0TimeOfLastUpdateCheck\0"
+    "OpenCountWeek\0PropWinPos\0CheckForUpdates\0\0\0ActiveTabGroup",
+    "\0\0LEGACY override: directory where flashcard study history JSONs are stored (per-book files, MD5-named). Empty "
+    "(recommended) = <ProfileDataDir>\\study. Set only to keep per-book files in a separate (e.g. cloud-synced) "
+    "folder; the profile store already syncs the same states. Changing it migrates the files\0if true, flashcard "
+    "sessions may preload books of this window's study session that are not loaded yet (lazy tabs) in the background; "
+    "off by default - lazy books load on first visit as usual\0data ROOT for ALL user study data (s64-R9o): "
+    "single-file Profile Memory store (tumatraPDF-data_1.json), the stats\\ sidecars (reading/flashcard stats) and, "
+    "when FlashcardStudyDir is empty, the per-book study JSONs under study\\. Empty = default app-data dir. Point it "
+    "at a cloud-synced folder (e.g. Google Drive) to sync everything between machines in ONE place\0default layout of "
+    "pages. valid values: automatic, single page, facing, book view, continuous, continuous facing, continuous book "
+    "view\0default zoom. valid values: fit page, fit width, fit height, fit content or percent like 100%\0if true, "
+    "JavaScript in PDF documents is disabled (e.g. form-field calculations won't run)\0if true, a PDF may load an "
+    "image stored in a separate file referenced by name (an external image stream); the file must sit next to the PDF. "
+    "Off by default for security (matches Acrobat)\0if true, show the SyncTeX inverse search command line in Settings "
+    "-> Options, so a double-click in the document can jump to the matching line in a LaTeX editor\0if true, Esc key "
+    "closes SumatraPDF\0if true, show the full path to the document in the title bar\0pattern used to launch the LaTeX "
+    "editor when doing inverse search\0if true, restoring a session delays loading each document until its tab is "
+    "selected\0background color of the area around the document, traditionally yellow. Only applies to the Light "
+    "theme; the default #80fff200 is a marker meaning \"use the theme's color\", so setting any other value also "
+    "colorizes the toolbar and sidebars\0if true, doesn't open Home tab\0if true, the home page lists documents by how "
+    "often they've been opened (the pre-3.6 behavior); if false, the most recently opened come first\0valid values: "
+    "thumbnails, list\0valid values: (empty), os, sumatrapdf\0if true, a document will be reloaded automatically "
+    "whenever it's changed (currently doesn't work for documents shown in the ebook UI)\0if true, remember which "
+    "documents were opened and their display settings\0if true, store display settings for each document separately "
+    "(i.e. everything after UseDefaultState in FileStates)\0if true and SessionData isn't empty, that session will be "
+    "restored at startup\0if true, open documents in the already running SumatraPDF instead of starting a new one\0if "
+    "true, show the menu bar (F9 toggles it; the choice is remembered across sessions)\0if true, show the menu bar "
+    "when using tabs (useTabs = true)\0if true, show tips on the home page\0up to 13 custom colors for the background "
+    "color picker, separated by space (e.g. '#ff0000 #00ff00 #0000ff')\0legacy bool for toolbar; if Toolbar is empty, "
+    "derived as show/hide (internal; use Toolbar instead)\0toolbar mode: show (pinned), hide (no toolbar), overlay "
+    "(toolbar floats over the page, sized to its natural width and centered, only shown when the mouse is near it). if "
+    "empty, derived from ShowToolbar\0where the toolbar is placed: top or bottom (applies to both show and overlay "
+    "modes)\0if true, the find UI is a floating, movable window with a results list instead of the compact toolbar "
+    "overlay\0if true, show the Favorites sidebar\0if true, favorites within each file are sorted alphabetically by "
+    "name (or page label); if false (the default), they are sorted by page number\0if true, show the table of contents "
+    "(Bookmarks) sidebar when the document has one\0if true, draw a blue border around links in the document\0Show ETA "
+    "label during auto-scroll\0Autoscroll timer duration in minutes (1-600, 0 = no timer)\0Enable autoscroll auto-stop "
     "timer\0default autoscroll speed multiplier for new documents (last used speed is saved here)\0if true, draw a "
     "focus ring around the document when it has keyboard focus (Tab to the page area)\0if true, show a tip when "
     "hovering an annotation (e.g. \"Highlight annotation. Ctrl+click to edit.\")\0if true, show page numbers (labels) "

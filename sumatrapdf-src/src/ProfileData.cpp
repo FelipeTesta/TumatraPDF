@@ -105,14 +105,31 @@ static TempStr ProfSubstChecksumTemp(Str json, Str hex);
 // forward: F7 export/import — ProfCopyDirTree defined later (rolling-backups section)
 static int ProfCopyDirTree(Str srcDir, TempStr dstDir);
 
+// ---- the ONE data-root resolver (s64-R9o storage unification) ----
+// All user study data hangs off a single data root:
+//   <root>\tumatraPDF-data_1.json   (profile store; see ProfileDataPathTemp)
+//   <root>\stats\reading-stats.txt  (ReadingStats sidecar)
+//   <root>\stats\flashcard-stats.txt (FlashcardStats sidecar)
+//   <root>\study\<md5>.json         (per-book study JSONs, only when the
+//                                    legacy flashcardStudyDir override is UNSET)
+//   <root>\backup\                  (rolling profile backups, F7)
+// Spaces: the returned TempStr is an absolute dir, no trailing slash; callers
+// path::JoinTemp() onto it. profileDataDir (advanced setting) wins when set;
+// otherwise the per-exe app-data dir (installed/portable). A custom root that
+// already exists is never wiped: migration into it is copy-only.
+TempStr ProfileDataGetDataRootTemp() {
+    Str custom = gGlobalPrefs->profileDataDir;
+    if (custom && len(custom) > 0) {
+        return (TempStr)custom.s;
+    }
+    return GetAppDataDirTemp();
+}
+
 // ---- small helpers ----
 
 TempStr ProfileDataPathTemp() {
-    Str custom = gGlobalPrefs->profileDataDir;
-    if (custom && len(custom) > 0) {
-        return path::JoinTemp(Str(custom), kProfileDataFileName);
-    }
-    return GetPathInAppDataDirTemp(kProfileDataFileName);
+    TempStr root = ProfileDataGetDataRootTemp();
+    return path::JoinTemp(root, kProfileDataFileName);
 }
 
 // single parse of the primary profile: version, books, day counts, lastWriteTs.
@@ -473,16 +490,34 @@ static void ProfImportBooksFromDir(Vec<ProfileBook>& outBooks, TempStr dir) {
     FindClose(h);
 }
 
-static void ProfImportLegacy() {
-    ProfImportBooksFromDir(gProfile.books, FlashcardStudyDir());
+// canonical sidecar location is <data-root>\stats\<name>; the legacy sidecar
+// lived next to the settings file. Prefer the new path; fall back to the
+// legacy one read-only when the new one does not exist yet (the stats modules
+// copy legacy -> new on load; this read-only fallback covers profile load,
+// which can run before the stats modules' first touch).
+static TempStr ProfSidecarReadPathTemp(Str name) {
+    TempStr root = ProfileDataGetDataRootTemp();
+    TempStr newPath = path::JoinTemp(path::JoinTemp(root, StrL("stats")), name);
+    if (file::Exists(newPath)) {
+        return newPath;
+    }
     TempStr settingsPath = GetSettingsPathTemp();
     TempStr sideDir = path::GetDirTemp(Str(settingsPath));
-    TempStr rcPath = path::JoinTemp(Str(sideDir), StrL("reading-stats.txt"));
+    TempStr legacyPath = path::JoinTemp(Str(sideDir), name);
+    if (file::Exists(legacyPath)) {
+        return legacyPath;
+    }
+    return newPath;
+}
+
+static void ProfImportLegacy() {
+    ProfImportBooksFromDir(gProfile.books, FlashcardStudyDir());
+    TempStr rcPath = ProfSidecarReadPathTemp(StrL("reading-stats.txt"));
     Str rcText = file::ReadFile(Str(rcPath));
     if (rcText) {
         ProfImportSidecar(rcText, gProfile.readingDaily, false);
     }
-    TempStr fcPath = path::JoinTemp(Str(sideDir), StrL("flashcard-stats.txt"));
+    TempStr fcPath = ProfSidecarReadPathTemp(StrL("flashcard-stats.txt"));
     Str fcText = file::ReadFile(Str(fcPath));
     if (fcText) {
         ProfImportSidecar(fcText, gProfile.studyDaily, true);
@@ -613,14 +648,12 @@ static void ProfImportPortableInstall() {
 // without key dedup, so calling it again would double already-present books.
 // Books merge on first contact via ProfileDataMergeStudyDoc instead.
 static void ProfReconcileSidecars() {
-    TempStr settingsPath = GetSettingsPathTemp();
-    TempStr sideDir = path::GetDirTemp(Str(settingsPath));
     int addedBooks = 0;
     int addedReadingDays = 0;
     int addedStudyDays = 0;
 
     // reading sidecar: "YYYYMMDD <sec>"
-    TempStr rcPath = path::JoinTemp(Str(sideDir), StrL("reading-stats.txt"));
+    TempStr rcPath = ProfSidecarReadPathTemp(StrL("reading-stats.txt"));
     Str rcText = file::ReadFile(Str(rcPath));
     if (rcText) {
         StrVec lines;
@@ -667,7 +700,7 @@ static void ProfReconcileSidecars() {
     }
 
     // study sidecar: "YYYYMMDD <sec> <cards>"
-    TempStr fcPath = path::JoinTemp(Str(sideDir), StrL("flashcard-stats.txt"));
+    TempStr fcPath = ProfSidecarReadPathTemp(StrL("flashcard-stats.txt"));
     Str fcText = file::ReadFile(Str(fcPath));
     if (fcText) {
         StrVec lines;

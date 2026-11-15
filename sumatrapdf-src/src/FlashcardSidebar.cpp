@@ -256,8 +256,8 @@ static void FcListDrawItem(MainWindow* win, const DRAWITEMSTRUCT* dis) {
     FcListEnsureBgBrush();
 
     bool selected = (dis->itemState & ODS_SELECTED) != 0;
-    bool isDark = UseDarkModeLib() && !IsCurrentThemeDefault();
-    COLORREF bg = selected ? (isDark ? RGB(55, 82, 122) : RGB(200, 221, 245)) : ThemeControlBackgroundColor();
+    // TUMATRA-FORK(s64-R9l): selection palette from theme tokens (was hardcoded RGB pairs)
+    COLORREF bg = selected ? ThemeHotBackgroundColor() : ThemeControlBackgroundColor();
     HBRUSH brush = CreateSolidBrush(bg);
     FillRect(dis->hDC, &dis->rcItem, brush);
     DeleteObject(brush);
@@ -268,11 +268,11 @@ static void FcListDrawItem(MainWindow* win, const DRAWITEMSTRUCT* dis) {
     const FcListRow& row = win->flashcard.listaRows[(int)dis->itemID];
 
     i64 now = (i64)time(nullptr) * 1000;
-    COLORREF txtCol = selected ? (isDark ? RGB(240, 240, 240) : RGB(20, 20, 20)) : ThemeWindowTextColor();
+    COLORREF txtCol = ThemeWindowTextColor();
     COLORREF statusCol = FcListStatusColor(row, now);
     if (selected) {
-        // keep the status color readable over the selection background
-        statusCol = isDark ? RGB(255, 183, 77) : RGB(156, 66, 0);
+        // TUMATRA-FORK(s64-R9l): amber highlight from theme, readable over selection bg
+        statusCol = ThemeNotificationsHighlightColor();
     }
 
     HFONT font = GetAppTreeFont(win->hwndFrame);

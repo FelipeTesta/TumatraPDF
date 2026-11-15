@@ -249,6 +249,271 @@ static void BuildFilteredStudyOrder(MainWindow* win) {
          nDue);
 }
 
+// --- s64-R9p adaptive prewarmer (P1+P2) ---
+// Phase 1: EWMA of per-advance card-switch cost (win->flashcard.cardSwitchMsEwma,
+// updated in the FlashcardNavigateToEntry wrapper) drives a prefetch budget
+// N = clamp(round(150/ewma), 0, tierCap). Silent degrade (N=0, no UI) when the
+// machine is weak (tier 0), under memory pressure, or ewma > 400 ms.
+// Phase 2: single BELOW_NORMAL worker thread with a mutex-protected FIFO
+// queue (<=4 jobs in flight, <=2 tile requests, <=2 warm docs per batch). An
+// epoch counter (Interlocked) is bumped on any invalidation — stale jobs
+// no-op. Engine access ONLY via the locked GetFzPageInfo(loadQuick=true)
+// (pagesLock + renderLock); never raw fz ctx / _doc. Tiles only for same-dm
+// near-visible virtual pages via gRenderCache (self-synchronizing).
+struct FcWarmJob {
+    LONG epoch = 0;
+    WindowTab* tab = nullptr;
+    DisplayModel* dm = nullptr;
+    EngineMupdf* engine = nullptr;
+    int pageNo = -1; // physical page
+    Vec<int> extraPages;
+    bool wantTile = false;
+    int vPage = -1; // virtual page (cache key for RequestRendering)
+};
+
+static volatile LONG gFcWarmEpoch = 1;
+static volatile LONG gFcWarmActive = 0; // jobs executing right now
+static CRITICAL_SECTION gFcWarmLock;
+static bool gFcWarmLockInit = false;
+static Vec<FcWarmJob> gFcWarmQueue;
+static HANDLE gFcWarmThread = nullptr;
+static HANDLE gFcWarmSignal = nullptr; // auto-reset: queue possibly non-empty
+static bool gFcWarmStop = false;       // guarded by gFcWarmLock
+
+static int FlashcardPrewarmTierCap() {
+    static int cap = -1;
+    if (cap < 0) {
+        SYSTEM_INFO si;
+        GetSystemInfo(&si);
+        MEMORYSTATUSEX ms;
+        ms.dwLength = sizeof(ms);
+        GlobalMemoryStatusEx(&ms);
+        u64 totalPhys = ms.ullTotalPhys;
+        DWORD cores = si.dwNumberOfProcessors;
+        u64 gb = 1024ull * 1024 * 1024;
+        if (cores <= 2 || totalPhys < 4 * gb) {
+            cap = 0; // weak machine: silent N=0
+        } else if (cores <= 4 || totalPhys < 8 * gb) {
+            cap = 1;
+        } else {
+            cap = 2; // default target N <= 2
+        }
+    }
+    return cap;
+}
+
+static int FlashcardPrewarmBudget(MainWindow* win) {
+    double ewma = win->flashcard.cardSwitchMsEwma;
+    if (ewma > 400.0) {
+        return 0; // switch too slow to benefit — silent degrade
+    }
+    MEMORYSTATUSEX ms;
+    ms.dwLength = sizeof(ms);
+    if (GlobalMemoryStatusEx(&ms) && (ms.dwMemoryLoad >= 85 || ms.ullAvailPhys < 512ull * 1024 * 1024)) {
+        return 0; // memory pressure — silent degrade
+    }
+    int cap = FlashcardPrewarmTierCap();
+    double d = ewma < 1.0 ? 1.0 : ewma;
+    int n = (int)(150.0 / d + 0.5);
+    if (n < 0) {
+        n = 0;
+    }
+    if (n > cap) {
+        n = cap;
+    }
+    return n;
+}
+
+static DWORD WINAPI FlashcardPrewarmWorker(void*) {
+    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
+    for (;;) {
+        FcWarmJob job;
+        bool haveJob = false;
+        EnterCriticalSection(&gFcWarmLock);
+        if (len(gFcWarmQueue) > 0) {
+            job = gFcWarmQueue[0];
+            gFcWarmQueue.RemoveAt(0);
+            if (job.epoch == gFcWarmEpoch && gFcWarmActive < 4) {
+                InterlockedIncrement(&gFcWarmActive);
+                haveJob = true;
+            }
+        } else if (gFcWarmStop) {
+            LeaveCriticalSection(&gFcWarmLock);
+            break;
+        }
+        LeaveCriticalSection(&gFcWarmLock);
+        if (!haveJob) {
+            WaitForSingleObject(gFcWarmSignal, 40);
+            continue;
+        }
+        if (job.engine) {
+            job.engine->GetFzPageInfo(job.pageNo, true);
+            int nExtra = len(job.extraPages);
+            for (int k = 0; k < nExtra; k++) {
+                job.engine->GetFzPageInfo(job.extraPages[k], true);
+            }
+        }
+        if (job.wantTile && job.dm && gRenderCache) {
+            if (job.epoch == gFcWarmEpoch && !job.dm->pauseRendering && job.dm->ValidPageNo(job.vPage)) {
+                gRenderCache->RequestRendering(job.dm, job.vPage);
+            }
+        }
+        InterlockedDecrement(&gFcWarmActive);
+    }
+    return 0;
+}
+
+void FlashcardPrewarmInvalidate() {
+    InterlockedIncrement(&gFcWarmEpoch);
+    if (!gFcWarmLockInit) {
+        return;
+    }
+    EnterCriticalSection(&gFcWarmLock);
+    int dropped = len(gFcWarmQueue);
+    gFcWarmQueue.Reset();
+    LeaveCriticalSection(&gFcWarmLock);
+    // Wait for in-flight jobs to drain — but NEVER longer than ~50 ms with a
+    // real deadline. Sleep(1) inherits the default 15.6ms timer granularity
+    // (this process does not raise it), so a large iteration count here can
+    // freeze the UI for seconds and trip Windows AppHangB1 (s64-R9r).
+    DWORD deadline = GetTickCount() + 50;
+    while (gFcWarmActive > 0 && (int)(GetTickCount() - deadline) < 0) {
+        Sleep(1);
+    }
+    if (dropped > 0) {
+        logf("[fc][perf] prewarm invalidate epoch=%d dropped=%d\n", (int)gFcWarmEpoch, dropped);
+    }
+}
+
+static void FlashcardPrewarmEnsureWorker() {
+    if (!gFcWarmLockInit) {
+        InitializeCriticalSection(&gFcWarmLock);
+        gFcWarmSignal = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+        gFcWarmLockInit = true;
+    }
+    if (gFcWarmThread) {
+        if (WaitForSingleObject(gFcWarmThread, 0) == WAIT_OBJECT_0) {
+            CloseHandle(gFcWarmThread); // previous worker exited on its own
+            gFcWarmThread = nullptr;
+        } else {
+            return;
+        }
+    }
+    gFcWarmStop = false;
+    gFcWarmThread = CreateThread(nullptr, 0, FlashcardPrewarmWorker, nullptr, 0, nullptr);
+    if (!gFcWarmThread) {
+        logf("[fc][perf] prewarm worker create FAILED - sync prefetch floor only\n");
+    } else {
+        logf("[fc][perf] prewarm worker started\n");
+    }
+}
+
+static void FlashcardPrewarmShutdown() {
+    if (!gFcWarmLockInit || !gFcWarmThread) {
+        return;
+    }
+    FlashcardPrewarmInvalidate();
+    EnterCriticalSection(&gFcWarmLock);
+    gFcWarmStop = true;
+    LeaveCriticalSection(&gFcWarmLock);
+    SetEvent(gFcWarmSignal);
+    if (WaitForSingleObject(gFcWarmThread, 500) == WAIT_TIMEOUT) {
+        logf("[fc][perf] prewarm worker did not stop in 500ms - leaving it running\n");
+        return; // never close the handle of a live thread
+    }
+    CloseHandle(gFcWarmThread);
+    gFcWarmThread = nullptr;
+    logf("[fc][perf] prewarm worker stopped\n");
+}
+
+static void FlashcardPrewarmEnqueue(MainWindow* win, int fromIdx) {
+    win->flashcard.prewarmFilledForIdx = fromIdx;
+    auto& order = win->flashcard.studyOrder;
+    if (fromIdx < 0 || fromIdx + 1 >= len(order)) {
+        logf("[fc][perf] prewarm skipped: no next card (fromIdx=%d orderLen=%d)\n", fromIdx, len(order));
+        return;
+    }
+    // idle gate: never enqueue while revealing / dragging / rendering paused
+    if (win->flashcard.revealMode || win->mouseAction != MouseAction::None) {
+        logf("[fc][perf] prewarm skipped: busy (reveal=%d mouseAction=%d)\n", (int)win->flashcard.revealMode,
+             (int)win->mouseAction);
+        return;
+    }
+    FlashcardPrewarmEnsureWorker();
+    double ewma = win->flashcard.cardSwitchMsEwma;
+    int n = FlashcardPrewarmBudget(win);
+    if (n <= 0) {
+        logf("[fc][perf] prewarm skipped: n=0 (budget=0 ewma=%.0f cap=%d)\n", ewma, FlashcardPrewarmTierCap());
+        // still log the epoch line so the probe can confirm the mechanism fired
+        logf("[fc][perf] prewarm epoch=%d n=0 ewma=%.0fms\n", (int)gFcWarmEpoch, ewma);
+        return;
+    }
+    int n2 = n + 2; // d2 window: a couple of entries beyond d1
+    logf("[fc][perf] prewarm epoch=%d n=%d ewma=%.0fms\n", (int)gFcWarmEpoch, n, ewma);
+    int tileReqs = 0, nWarmed = 0;
+    WindowTab* warmed[2] = {nullptr, nullptr};
+    for (int i = fromIdx + 1; i < len(order) && i <= fromIdx + n2; i++) {
+        bool isD1 = i <= fromIdx + n;
+        FlashcardQueueEntry& e = order[i];
+        if (!e.tab || e.cardIdx < 0 || e.cardIdx >= len(e.tab->flashcard.cards)) {
+            continue;
+        }
+        DisplayModel* dm = e.tab->AsFixed();
+        auto* engine = dm ? AsEngineMupdf(dm->GetEngine()) : nullptr;
+        if (!engine) {
+            continue;
+        }
+        bool sameTab = e.tab == win->CurrentTab();
+        // d2 (beyond budget) = other tabs only; same-tab pages are covered
+        // by the sync prefetch floor + d1
+        if (!isD1 && sameTab) {
+            continue;
+        }
+        if (!isD1) {
+            bool known = false;
+            for (int w = 0; w < nWarmed; w++) {
+                if (warmed[w] == e.tab) {
+                    known = true;
+                }
+            }
+            if (!known) {
+                if (nWarmed >= 2) {
+                    continue; // cap: <=2 warm docs per batch
+                }
+                warmed[nWarmed++] = e.tab;
+            }
+        }
+        Flashcard& card = e.tab->flashcard.cards[e.cardIdx];
+        FcWarmJob job;
+        job.epoch = gFcWarmEpoch;
+        job.tab = e.tab;
+        job.dm = dm;
+        job.engine = engine;
+        job.pageNo = card.pageNo;
+        int nExtra = len(card.extraPages);
+        for (int k = 0; k < nExtra; k++) {
+            job.extraPages.Append(card.extraPages[k].pageNo);
+        }
+        if (isD1 && sameTab && tileReqs < 2) {
+            int vPage = dm->PhysicalToVirtualPage(card.pageNo, card.bounds);
+            if (dm->ValidPageNo(vPage) && dm->PageVisibleNearby(vPage)) {
+                job.wantTile = true;
+                job.vPage = vPage;
+                tileReqs++;
+            }
+        }
+        EnterCriticalSection(&gFcWarmLock);
+        if (len(gFcWarmQueue) + gFcWarmActive >= 4) {
+            LeaveCriticalSection(&gFcWarmLock);
+            logf("[fc][perf] prewarm queue full (epoch=%d), job dropped\n", (int)gFcWarmEpoch);
+            break;
+        }
+        gFcWarmQueue.Append(job);
+        LeaveCriticalSection(&gFcWarmLock);
+        SetEvent(gFcWarmSignal);
+    }
+}
+
 // PA3: warm the BITMAP cache (not only the fz page info) for the cards that
 // come next, so advancing is a blit instead of a first-touch tile render.
 // Only the next two entries: RenderCache aborts in-flight renders whose page is
@@ -338,12 +603,14 @@ static void FlashcardPrefetchUpcoming(MainWindow* win, int fromIdx, int count) {
 // active, so Next / advance / back stay coherent with the configuration
 static void FlashcardNavigateToEntry(MainWindow* win, const FlashcardQueueEntry& e, bool centerVertically);
 void FlashcardApplyStudyOrder(MainWindow* win) {
+    FlashcardPrewarmInvalidate(); // order/filter rebuild: stale queued jobs no-op
     if (win->flashcard.studyMode) {
         BuildFilteredStudyOrder(win);
         win->flashcard.revealMode = false;
         if (len(win->flashcard.studyOrder) > 0) {
             win->flashcard.currentCardIdx = 0;
-            FlashcardPrefetchUpcoming(win, 0, 5);
+            FlashcardPrefetchUpcoming(win, 0, FlashcardPrewarmBudget(win));
+            FlashcardPrewarmEnqueue(win, 0);
             FlashcardNavigateToEntry(win, win->flashcard.studyOrder[0], true);
         } else {
             win->flashcard.currentCardIdx = -1;
@@ -360,7 +627,9 @@ void FlashcardApplyStudyOrder(MainWindow* win) {
 // Under TC2 the display uses virtual pages, so route the physical card rect
 // through PhysicalToVirtualForRect first. When centerVertically is set,
 // scroll so the card sits in the middle of the viewport (instant).
-static void FlashcardNavigateToEntry(MainWindow* win, const FlashcardQueueEntry& e, bool centerVertically) {
+// s64-R9p: body of FlashcardNavigateToEntry; the wrapper below times the
+// switch and feeds the EWMA (adaptive prewarmer budget signal).
+static void FlashcardNavigateToEntryInner(MainWindow* win, const FlashcardQueueEntry& e, bool centerVertically) {
     if (!e.tab || e.cardIdx < 0 || e.cardIdx >= len(e.tab->flashcard.cards)) {
         logf("[fc] NavigateToEntry - invalid entry (tab=%p cardIdx=%d)\n", (void*)e.tab, e.cardIdx);
         return;
@@ -408,6 +677,19 @@ static void FlashcardNavigateToEntry(MainWindow* win, const FlashcardQueueEntry&
     }
 }
 
+static void FlashcardNavigateToEntry(MainWindow* win, const FlashcardQueueEntry& e, bool centerVertically) {
+    u64 t0 = GetTickCount64();
+    FlashcardNavigateToEntryInner(win, e, centerVertically);
+    double dt = (double)(GetTickCount64() - t0);
+    if (dt < 0.0) {
+        dt = 0.0;
+    }
+    if (dt > 2000.0) {
+        dt = 2000.0;
+    }
+    win->flashcard.cardSwitchMsEwma = 0.7 * win->flashcard.cardSwitchMsEwma + 0.3 * dt;
+}
+
 // public wrapper for the Lista panel: navigate the CURRENT tab to one of its
 // cards (tab switch is a no-op here — the list shows the current document)
 void FlashcardNavigateToCardInCurrentTab(MainWindow* win, int cardIdx) {
@@ -445,6 +727,7 @@ static void HandleFlashcardRate(MainWindow* win, int rating) {
     // queue so it is presented again (matching Anki's relearning behavior).
     if (rating == 1) {
         win->flashcard.studyOrder.Append(e);
+        FlashcardPrewarmInvalidate();
     }
 
     // Save/update study state in the card's document
@@ -475,8 +758,9 @@ static void HandleFlashcardRate(MainWindow* win, int rating) {
         FlashcardStudySave(e.tab->filePath.s, e.tab->flashcard.studyDoc);
     }
     // count the rated card for the stats (per-document FileState + today's
-    // sidecar bucket — same stores the study-time seconds go to)
-    FlashcardStatsAddCard(win);
+    // sidecar bucket — same stores the study-time seconds go to). Credit the
+    // card's OWNING tab (e.tab), not the focused tab — see FlashcardStats.h.
+    FlashcardStatsAddCard(e.tab);
     logf("[fc] HandleFlashcardRate - rated %d card %d of '%s'\n", rating, e.cardIdx, FlashcardTabLogName(e.tab));
 
     FlashcardToolbarUpdateCount(win);
@@ -502,8 +786,9 @@ static void HandleFlashcardRate(MainWindow* win, int rating) {
              len(win->flashcard.studyOrder));
         // prefetch the upcoming cards BEFORE navigating (page-parse only) so
         // the jump itself is instant
-        FlashcardPrefetchUpcoming(win, win->flashcard.currentCardIdx, 4);
+        FlashcardPrefetchUpcoming(win, win->flashcard.currentCardIdx, FlashcardPrewarmBudget(win));
         FlashcardNavigateToEntry(win, win->flashcard.studyOrder[win->flashcard.currentCardIdx], true);
+        FlashcardPrewarmEnqueue(win, win->flashcard.currentCardIdx);
     }
     MainWindowRerender(win);
 }
@@ -511,6 +796,8 @@ static void HandleFlashcardRate(MainWindow* win, int rating) {
 // Stop the active study session (queue, index, modes) — per-tab caches
 // (cards/states/filter) are kept: they belong to the documents.
 void FlashcardStopSession(MainWindow* win) {
+    FlashcardPrewarmInvalidate();
+    FlashcardPrewarmShutdown();
     win->flashcard.studyMode = false;
     win->flashcard.revealMode = false;
     win->flashcard.currentCardIdx = -1;
@@ -523,6 +810,7 @@ void FlashcardStopSession(MainWindow* win) {
 // lazy-load the new tab's cards if flashcard mode is on (fixes masks from the
 // previous book being painted over the new document) and refresh count/list.
 void FlashcardOnTabChanged(MainWindow* win) {
+    FlashcardPrewarmInvalidate(); // tab switch / doc reload: drop stale warm jobs
     if (!win->flashcard.on) {
         return;
     }
@@ -627,6 +915,7 @@ bool HandleCommandFlashcard(MainWindow* win, int cmd) {
             }
 
             if (annot) {
+                FlashcardPrewarmInvalidate(); // annot add: cards reload, warm jobs stale
                 if (groupToken) {
                     logf("[fc] cross-page cloze: group token %08X spans %d page(s)\n", (u32)groupToken, len(pageNos));
                 }
@@ -654,17 +943,27 @@ bool HandleCommandFlashcard(MainWindow* win, int cmd) {
             win->flashcard.currentCardIdx = -1;
             win->flashcard.studyTimeSec = 0;
             if (win->flashcard.studyMode) {
+                FlashcardPrewarmInvalidate(); // session (re)start: drop stale warm jobs
+                FlashcardPrewarmEnsureWorker();
+                if (gGlobalPrefs->flashcardPreloadSessionBooks) {
+                    logf(
+                        "[fc][perf] flashcardPreloadSessionBooks=on: lazy-tab background load not implemented - lazy "
+                        "books load on first visit\n");
+                }
                 // Build filtered study order (respects scope + per-tab filters)
                 BuildFilteredStudyOrder(win);
                 // Navigate to first card: masked (front state), vertically centered
                 if (len(win->flashcard.studyOrder) > 0) {
                     win->flashcard.currentCardIdx = 0;
-                    FlashcardPrefetchUpcoming(win, 0, 5);
+                    FlashcardPrefetchUpcoming(win, 0, FlashcardPrewarmBudget(win));
+                    FlashcardPrewarmEnqueue(win, 0);
                     FlashcardNavigateToEntry(win, win->flashcard.studyOrder[0], true);
                 }
                 FlashcardStudyTimerStart(win);
             } else {
                 logf("[fc] CmdFlashcardStudy - study OFF\n");
+                FlashcardPrewarmInvalidate();
+                FlashcardPrewarmShutdown();
                 FlashcardStudyTimerStop(win);
             }
             FlashcardToolbarUpdateState(win);
@@ -737,6 +1036,7 @@ bool HandleCommandFlashcard(MainWindow* win, int cmd) {
             win->flashcard.revealMode = false;
             FlashcardToolbarUpdateState(win);
             FlashcardNavigateToEntry(win, win->flashcard.studyOrder[next], true);
+            FlashcardPrewarmEnqueue(win, next);
             MainWindowRerender(win);
             return true;
         }
@@ -862,6 +1162,8 @@ void FlashcardStudyTick(MainWindow* win, HWND hwnd) {
             logf("[fc] StudyTick - session timer expired (%u min), ending study session\n",
                  win->flashcard.studyTimerMinutes);
             // End the session (same as the Study toggle OFF path)
+            FlashcardPrewarmInvalidate();
+            FlashcardPrewarmShutdown();
             win->flashcard.studyMode = false;
             win->flashcard.revealMode = false;
             win->flashcard.currentCardIdx = -1;
@@ -892,9 +1194,20 @@ void FlashcardStudyTick(MainWindow* win, HWND hwnd) {
     }
     // Per-card cap: each card credits at most maxPerCardSec (60s) to the stats.
     // Past the cap we simply stop crediting — the session continues.
+    // studyTimeSec is a WINDOW-level per-card accumulator (reset on advance/
+    // rate), not per-doc attribution, so the cap stays window-level too.
+    // Attribution: the owning tab is resolved from the queue entry `e`
+    // (studyOrder[curIdx].tab) — correct even when the user Ctrl+Tab'd away
+    // from the card's document mid-session. e.tab null/closed → skip the
+    // tick entirely (no credit, no crash).
     if (win->flashcard.studyTimeSec < win->flashcard.maxPerCardSec) {
         win->flashcard.studyTimeSec += 0.01f; // 10ms per tick
-        FlashcardStatsAddSeconds(win, 0.01f);
+        FlashcardStatsAddSeconds(e.tab, 0.01f);
+    }
+    // --- 3. Idle prewarm pump (s64-R9p): one-shot per advance; enqueue is
+    // self-deduping via prewarmFilledForIdx ---
+    if (win->flashcard.currentCardIdx != win->flashcard.prewarmFilledForIdx) {
+        FlashcardPrewarmEnqueue(win, win->flashcard.currentCardIdx);
     }
 }
 
@@ -947,8 +1260,8 @@ static LRESULT CALLBACK FlashcardTimerUIOverlayProc(HWND hwnd, UINT msg, WPARAM 
             if (currentHalfW < 0) {
                 currentHalfW = 0;
             }
-            COLORREF silver = RGB(192, 192, 192);
-            HBRUSH br = CreateSolidBrush(silver);
+            COLORREF lineCol = ThemeWindowTextColor(); // TUMATRA-FORK(s64-R9l): was RGB(192,192,192)
+            HBRUSH br = CreateSolidBrush(lineCol);
             RECT lineRect = {centerX - currentHalfW, lineY, centerX + currentHalfW, lineY + lineH};
             FillRect(hdc, &lineRect, br);
             DeleteObject(br);

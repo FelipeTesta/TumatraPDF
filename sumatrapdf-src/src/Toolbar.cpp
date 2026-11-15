@@ -1055,7 +1055,10 @@ static LRESULT CALLBACK ReBarWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM
                         WCHAR tbuf1[256]{};
                         bi1.pszText = tbuf1;
                         bi1.cchText = dimof(tbuf1);
-                        if (TbGetButtonInfo(hwndToolbar, btnIdx, &bi1)) {
+                        // TB_GETBUTTONINFOW returns the button INDEX — button 0
+                        // is falsy, so a truthy test skips it (see the same trap
+                        // in EnforceToolbarTextButtonWidths). Failure is negative.
+                        if (TbGetButtonInfo(hwndToolbar, btnIdx, &bi1) >= 0) {
                             if (bi1.idCommand > 0 && SendMessageW(hwndToolbar, TB_ISBUTTONCHECKED, bi1.idCommand, 0)) {
                                 col = ThemeWindowTextColor();
                                 SelectObject(custDraw->nmcd.hdc, GetAppTreeFontEx(hwndToolbar, true, false));
@@ -1089,6 +1092,11 @@ static LRESULT CALLBACK ReBarWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM
                         RECT rcBtn{};
                         SendMessageW(hwndToolbar2, TB_GETITEMRECT, idx2, (LPARAM)&rcBtn);
                         WCHAR* txt = txtBuf;
+                        // labels carry leading spaces that reserve the pad (see
+                        // EnforceToolbarTextButtonWidths) — draw the real label
+                        while (*txt == L' ') {
+                            txt++;
+                        }
                         if (bi2.idCommand == CmdAutoScrollToggle) {
                             // this button also hosts the timer trio on its left
                             // (widened for exactly that): keep the label inside
@@ -1097,12 +1105,6 @@ static LRESULT CALLBACK ReBarWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM
                             MainWindow* win2 = FindMainWindowByHwnd(hwndToolbar2);
                             if (win2) {
                                 rcBtn.left += MeasureTimerTrioDx(win2, hwndToolbar2);
-                            }
-                            // the width was reserved by prefixing the label
-                            // with spaces (see AddAllToolbarButtons) — draw
-                            // only the real label, inside the shifted rect
-                            while (*txt == L' ') {
-                                txt++;
                             }
                         }
                         HFONT fnt = (HFONT)SendMessageW(hwndToolbar2, WM_GETFONT, 0, 0);
@@ -1365,13 +1367,31 @@ static void EnforceToolbarTextButtonWidths(MainWindow* win, HWND hwndToolbar) {
         WCHAR txtBuf[256]{};
         bi.pszText = txtBuf;
         bi.cchText = dimof(txtBuf);
-        if (!TbGetButtonInfo(hwndToolbar, i, &bi)) {
+        // TB_GETBUTTONINFOW returns the button INDEX, so button 0 reports 0 —
+        // testing the result for truthiness skipped index 0 everywhere (the
+        // first text button of a toolbar was never widened: "+Text" on the Edit
+        // toolbar stayed at its untruncated-width and rendered "+Te...").
+        // Failure is negative (see TbGetButtonInfo's ReportDebugIf).
+        if (TbGetButtonInfo(hwndToolbar, i, &bi) < 0) {
             continue;
         }
         if (!(bi.fsStyle & BTNS_SHOWTEXT) || !txtBuf[0]) {
             continue;
         }
-        TempStr label = ToUtf8Temp(WStr(txtBuf));
+        // the Flashcard "Study" button reserves room for its embedded timer trio
+        // with leading spaces baked into the label (FlashcardToolbarCreate);
+        // pinning cx and dropping BTNS_AUTOSIZE would collapse that reservation
+        if (bi.idCommand == CmdFlashcardStudy) {
+            continue;
+        }
+        // our labels carry leading spaces that reserve width (see the padding
+        // block below) — measure and re-pad only the real label, else every pass
+        // would add more spaces
+        int nLead = 0;
+        while (txtBuf[nLead] == L' ') {
+            nLead++;
+        }
+        TempStr label = ToUtf8Temp(WStr(txtBuf + nLead));
         Size sz = HwndMeasureText(hwndToolbar, label);
         int pad = DpiScale(win->hwndFrame, 12);
         int needed = sz.dx + pad;
@@ -1382,13 +1402,57 @@ static void EnforceToolbarTextButtonWidths(MainWindow* win, HWND hwndToolbar) {
             needed += MeasureTimerTrioDx(win, hwndToolbar);
             sDbgAutoscrollNeeded = needed;
         }
+        // the pad must be part of the LABEL, not just of cx: comctl re-derives
+        // every BTNS_SHOWTEXT width from the string on its own layout passes
+        // (measured: set=309 -> cx=194) and those passes run after ours, so a
+        // button whose label is exactly as wide as its text comes back
+        // ellipsized ("Flashcard" -> "Flash...", "+Text" -> "+Te...") even
+        // though we pinned cx. Reserving the pad as leading spaces is comctl's
+        // own mechanism (Autoscroll and the Flashcard Study button already use
+        // it) — its derivation then includes the pad, and the draw subclasses
+        // trim the spaces before painting. Measured space width, not an assumed
+        // one: a space is much narrower than an 'n'.
+        bool labelPadded = false;
+        {
+            // Autoscroll is excluded: its label's leading spaces ARE the timer
+            // trio reservation (added by AddAllToolbarButtons) and measured
+            // into `needed` above — rewriting them with pad-only spaces would
+            // shrink the button under the trio.
+            int spaceDx = HwndMeasureText(hwndToolbar, "n n").dx - HwndMeasureText(hwndToolbar, "nn").dx;
+            if (!isAutoscroll && spaceDx > 0) {
+                int nSpaces = (pad + spaceDx - 1) / spaceDx;
+                // the label already carrying exactly this reservation is the
+                // steady state — don't re-set TBIF_TEXT for it (comctl re-lays
+                // out on every text write, and this pass runs during relayouts)
+                labelPadded = true;
+                if (nLead != nSpaces) {
+                    WCHAR padded[256]{};
+                    int nPadded = 0;
+                    for (int k = 0; k < nSpaces && nPadded < dimof(padded) - 1; k++) {
+                        padded[nPadded++] = L' ';
+                    }
+                    for (int k = nLead; txtBuf[k] && nPadded < dimof(padded) - 1; k++) {
+                        padded[nPadded++] = txtBuf[k];
+                    }
+                    TBBUTTONINFOW biTxt{};
+                    biTxt.cbSize = sizeof(biTxt);
+                    biTxt.dwMask = TBIF_TEXT;
+                    biTxt.idCommand = bi.idCommand;
+                    biTxt.pszText = padded;
+                    biTxt.cchText = nPadded;
+                    TbSetButtonInfo(hwndToolbar, bi.idCommand, &biTxt);
+                }
+            }
+        }
         // The explicit cx never sticks for the Autoscroll button: comctl
         // re-derives BTNS_SHOWTEXT widths from the string on every layout pass
         // (measured: set=309 -> cx=194), and the transient wider layout PAINTS,
         // leaving ghost label pixels right of the button when comctl shrinks
         // back. Its width is owned by the leading spaces baked into the label
         // (see AddAllToolbarButtons), which reserve trioDx + slack instead.
-        if ((int)bi.cx < needed) {
+        // Same for every label padded above: the string already carries the
+        // pad, so a cx pin would only fight comctl's (correct) derivation.
+        if (!labelPadded && (int)bi.cx < needed) {
             TBBUTTONINFOW biSet{};
             biSet.cbSize = sizeof(biSet);
             biSet.dwMask = TBIF_SIZE;
@@ -2871,9 +2935,15 @@ TempStr ToolbarButtonsResultTemp(int* exitCodeOut) {
         bool hidden = (bi.fsState & TBSTATE_HIDDEN) != 0;
         bool enabled = (bi.fsState & TBSTATE_ENABLED) != 0;
         bool checked = (bi.fsState & TBSTATE_CHECKED) != 0;
+        // text= carries the real label without the leading pad spaces our width
+        // reservation bakes into the string (tests key their parser on it)
+        int nLead = 0;
+        while (buf[nLead] == L' ') {
+            nLead++;
+        }
         out.Append(fmt("idx=%d cmd=%d hidden=%d enabled=%d checked=%d rect=%d,%d,%d,%d style=0x%02X cx=%d text=%s\n", i,
                        (int)bi.idCommand, hidden ? 1 : 0, enabled ? 1 : 0, checked ? 1 : 0, (int)r.left, (int)r.top,
-                       (int)r.right, (int)r.bottom, (int)bi.fsStyle, (int)bi.cx, ToUtf8Temp(buf)));
+                       (int)r.right, (int)r.bottom, (int)bi.fsStyle, (int)bi.cx, ToUtf8Temp(WStr(buf + nLead))));
     }
     for (int i = 0; i < nTools; i++) {
         TTTOOLINFOW ti{};
@@ -3294,7 +3364,10 @@ static LRESULT CALLBACK ToolbarArchEditRebarSubclassProc(HWND hWnd, UINT uMsg, W
                         WCHAR tbuf1[256]{};
                         bi1.pszText = tbuf1;
                         bi1.cchText = dimof(tbuf1);
-                        if (TbGetButtonInfo(hwndToolbar, btnIdx, &bi1)) {
+                        // TB_GETBUTTONINFOW returns the button INDEX — button 0
+                        // is falsy, so a truthy test skips it (see the same trap
+                        // in EnforceToolbarTextButtonWidths). Failure is negative.
+                        if (TbGetButtonInfo(hwndToolbar, btnIdx, &bi1) >= 0) {
                             if (bi1.idCommand > 0 && SendMessageW(hwndToolbar, TB_ISBUTTONCHECKED, bi1.idCommand, 0)) {
                                 col = ThemeWindowTextColor();
                                 SelectObject(custDraw->nmcd.hdc, GetAppTreeFontEx(hwndToolbar, true, false));
@@ -3324,7 +3397,7 @@ static LRESULT CALLBACK ToolbarArchEditRebarSubclassProc(HWND hWnd, UINT uMsg, W
                         WCHAR txtBuf[256]{};
                         bi2.pszText = txtBuf;
                         bi2.cchText = dimof(txtBuf);
-                        if (!TbGetButtonInfo(hwndToolbar2, idx2, &bi2)) {
+                        if (TbGetButtonInfo(hwndToolbar2, idx2, &bi2) < 0) {
                             return CDRF_DODEFAULT;
                         }
                         if (!(bi2.fsStyle & BTNS_SHOWTEXT) || !txtBuf[0]) return CDRF_DODEFAULT;
@@ -3341,7 +3414,13 @@ static LRESULT CALLBACK ToolbarArchEditRebarSubclassProc(HWND hWnd, UINT uMsg, W
                         HFONT fnt = (HFONT)SendMessageW(hwndToolbar2, WM_GETFONT, 0, 0);
                         HGDIOBJ oldF = SelectObject(custDraw->nmcd.hdc, fnt);
                         SetBkMode(custDraw->nmcd.hdc, TRANSPARENT);
-                        DrawTextW(custDraw->nmcd.hdc, txtBuf, -1, &rcBtn, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+                        // labels carry leading spaces that reserve the pad (see
+                        // EnforceToolbarTextButtonWidths) — draw the real label
+                        WCHAR* txt2 = txtBuf;
+                        while (*txt2 == L' ') {
+                            txt2++;
+                        }
+                        DrawTextW(custDraw->nmcd.hdc, txt2, -1, &rcBtn, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
                         SelectObject(custDraw->nmcd.hdc, oldF);
                         return CDRF_DODEFAULT;
                     }
@@ -3398,7 +3477,12 @@ static LRESULT CALLBACK ToolbarPaintSubclassProc(HWND hWnd, UINT uMsg, WPARAM wP
                     WCHAR tbuf[256]{};
                     bi.pszText = tbuf;
                     bi.cchText = dimof(tbuf);
-                    if (!SendMessageW(hWnd, TB_GETBUTTONINFO, i, (LPARAM)&bi)) continue;
+                    // TbGetButtonInfo, not a raw TB_GETBUTTONINFO: the raw
+                    // constant is the ANSI message, which comctl answers from
+                    // the ANSI struct — the wide query comes back empty, every
+                    // button looked text-less here and this wipe+re-draw never
+                    // ran (comctl's own ellipsized label stood instead)
+                    if (TbGetButtonInfo(hWnd, i, &bi) < 0) continue;
                     if (!(bi.fsStyle & BTNS_SHOWTEXT) || !tbuf[0]) continue;
                     RECT rc{};
                     if (!SendMessageW(hWnd, TB_GETITEMRECT, i, (LPARAM)&rc)) continue;
@@ -3411,7 +3495,13 @@ static LRESULT CALLBACK ToolbarPaintSubclassProc(HWND hWnd, UINT uMsg, WPARAM wP
                     SetBkMode(hdc, TRANSPARENT);
                     HFONT fnt = (HFONT)SendMessageW(hWnd, WM_GETFONT, 0, 0);
                     HGDIOBJ oldF = SelectObject(hdc, fnt);
-                    DrawTextW(hdc, tbuf, -1, &rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+                    // labels carry leading spaces that reserve the pad (see
+                    // EnforceToolbarTextButtonWidths) — draw the real label
+                    WCHAR* txt = tbuf;
+                    while (*txt == L' ') {
+                        txt++;
+                    }
+                    DrawTextW(hdc, txt, -1, &rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
                     SelectObject(hdc, oldF);
                     // checked-state 3px underline (white text color in dark theme)
                     if (bi.fsState & TBSTATE_CHECKED) {

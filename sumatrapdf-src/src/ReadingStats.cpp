@@ -4,8 +4,9 @@
 // Reading-time statistics (FASE B "Stats"): seconds spent reading with
 // auto-scroll active, per document (FileState.readingTimeSec, persisted with
 // the normal file-history settings) and per calendar day (sidecar file
-// "reading-stats.txt" next to the settings file, one "YYYYMMDD <sec>" line
-// per day — deliberately plain text, no JSON dependency).
+// "reading-stats.txt" under the data root's stats\ subdir — s64-R9o unified
+// storage; one "YYYYMMDD <sec>" line per day, deliberately plain text, no JSON
+// dependency).
 
 #include "base/Base.h"
 #include "base/File.h"
@@ -43,10 +44,45 @@ static int DateKeyToday() {
     return (int)st.wYear * 10000 + (int)st.wMonth * 100 + (int)st.wDay;
 }
 
+// canonical sidecar location: <data-root>\stats\reading-stats.txt (s64-R9o)
 static TempStr ReadingStatsPathTemp() {
+    TempStr root = ProfileDataGetDataRootTemp();
+    TempStr statsDir = path::JoinTemp(root, StrL("stats"));
+    return path::JoinTemp(statsDir, StrL("reading-stats.txt"));
+}
+
+// legacy sidecar lived next to the settings file — kept readable as fallback
+// and as the copy source for the one-time migration; never deleted
+static TempStr ReadingStatsLegacyPathTemp() {
     TempStr settingsPath = GetSettingsPathTemp();
-    TempStr dir = path::GetDirTemp(settingsPath);
+    TempStr dir = path::GetDirTemp(Str(settingsPath));
     return path::JoinTemp(dir, StrL("reading-stats.txt"));
+}
+
+// copy-only migration (s64-R9o): on load, if the new sidecar is missing but
+// the legacy one exists, COPY it under <data-root>\stats. Never moves/deletes
+// the legacy file. Best-effort: a failed copy logs and the legacy file is
+// still read via the fallback path.
+static void ReadingStatsMigrateIfNeeded() {
+    TempStr p = ReadingStatsPathTemp();
+    if (file::Exists(p)) {
+        return;
+    }
+    TempStr legacy = ReadingStatsLegacyPathTemp();
+    if (!file::Exists(legacy)) {
+        return;
+    }
+    TempStr root = ProfileDataGetDataRootTemp();
+    TempStr statsDir = path::JoinTemp(root, StrL("stats"));
+    if (!dir::CreateAll(Str(statsDir))) {
+        logf("[stats] could not create '%s', keeping legacy sidecar\n", Str(statsDir));
+        return;
+    }
+    if (file::Copy(Str(p), Str(legacy), true)) {
+        logf("[stats] sidecar migrated to data-root: '%s' -> '%s'\n", Str(legacy), Str(p));
+    } else {
+        logf("[stats] sidecar migration FAILED (legacy kept): '%s'\n", Str(legacy));
+    }
 }
 
 static void ReadingStatsLoadIfNeeded() {
@@ -54,9 +90,15 @@ static void ReadingStatsLoadIfNeeded() {
         return;
     }
     gReadingStats.loaded = true;
+    ReadingStatsMigrateIfNeeded();
     TempStr p = ReadingStatsPathTemp();
     if (!file::Exists(p)) {
-        return;
+        // fallback read: legacy sidecar next to the settings file
+        p = ReadingStatsLegacyPathTemp();
+        if (!file::Exists(p)) {
+            return;
+        }
+        logf("[stats] reading legacy sidecar (new absent): '%s'\n", Str(p));
     }
     Str d = file::ReadFile(p);
     StrVec lines;
@@ -167,6 +209,9 @@ void ReadingStatsFlush(bool force) {
     }
     Str data = sb.TakeStr();
     if (kProfDualWriteSidecars) {
+        TempStr root = ProfileDataGetDataRootTemp();
+        TempStr statsDir = path::JoinTemp(root, StrL("stats"));
+        dir::CreateAll(Str(statsDir));
         file::WriteFile(ReadingStatsPathTemp(), data);
     }
     str::Free(data);

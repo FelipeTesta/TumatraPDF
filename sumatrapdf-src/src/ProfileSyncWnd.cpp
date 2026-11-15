@@ -3,6 +3,9 @@
 #include "base/Dpi.h"
 #include "base/File.h"
 
+#include "Settings.h"
+#include "AppSettings.h"
+#include "GlobalPrefs.h"
 #include "AppTools.h"
 #include "MainWindow.h"
 #include "ProfileBackupWnd.h"
@@ -16,6 +19,22 @@
 
 // gForTesting is set by -for-testing cmd-line flag (SumatraConfig.cpp)
 extern bool gForTesting;
+
+// TUMATRA-FORK(s64-R9l): cached theme-bg brush. WM_CTLCOLOR* must not hand out a fresh
+// CreateSolidBrush per message (GDI leak); re-create only when the theme color changes.
+static HBRUSH ThemeBgBrush() {
+    static HBRUSH sBrush = nullptr;
+    static COLORREF sColor = 0;
+    COLORREF col = ThemeWindowBackgroundColor();
+    if (!sBrush || sColor != col) {
+        if (sBrush) {
+            DeleteObject(sBrush);
+        }
+        sBrush = CreateSolidBrush(col);
+        sColor = col;
+    }
+    return sBrush;
+}
 
 // Import prompt result: IDOK=Replace, 2=Merge, IDCANCEL=Cancel
 static int gImportChoice = IDCANCEL;
@@ -35,7 +54,7 @@ static LRESULT CALLBACK ImportPromptProc(HWND h, UINT m, WPARAM wp, LPARAM lp) {
             HDC hdc = (HDC)wp;
             SetTextColor(hdc, ThemeWindowTextColor());
             SetBkMode(hdc, TRANSPARENT);
-            return (LRESULT)CreateSolidBrush(ThemeWindowBackgroundColor());
+            return (LRESULT)ThemeBgBrush();
         }
         case WM_PAINT: {
             PAINTSTRUCT ps;
@@ -85,7 +104,8 @@ static LRESULT CALLBACK ImportPromptProc(HWND h, UINT m, WPARAM wp, LPARAM lp) {
 }
 
 // Profile Sync modal dialog: read-only status of the profile file
-// (tumatraPDF-data_1.json) plus Save Now / Open Folder / Backups / Close.
+// (tumatraPDF-data_1.json) plus Set Folder (data-root picker, s64-R9o) /
+// Save Now / Open Folder / Backups / Export / Import / Close.
 // Modal pump mirrors ShowProfileBackupsDialog (ProfileBackupWnd.cpp).
 
 struct ProfileSyncDialog {
@@ -364,13 +384,33 @@ static LRESULT CALLBACK SyncWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             HDC hdc = (HDC)wp;
             SetTextColor(hdc, ThemeWindowTextColor());
             SetBkMode(hdc, TRANSPARENT);
-            return (LRESULT)CreateSolidBrush(ThemeWindowBackgroundColor());
+            return (LRESULT)ThemeBgBrush();
         }
         case WM_PAINT:
             SyncPaint(d);
             return 0;
         case WM_COMMAND: {
             int id = LOWORD(wp);
+            if (id == 7) { // Set Folder - change the data root (migrates on next launch)
+                if (gForTesting) {
+                    logf("[profile] set folder skipped (for-testing)\n");
+                    return 0;
+                }
+                TempStr picked;
+                if (!SyncPickFolder(hwnd, picked)) {
+                    return 0; // cancelled or picker failed
+                }
+                // flush pending in-memory profile state into the OLD root
+                // before repointing the setting; the existing ProfEnsureProfileDirAndMigrate
+                // copies primary json + backup\ (copy-only) on next launch
+                ProfileDataSaveNow();
+                str::ReplaceWithCopy(&gGlobalPrefs->profileDataDir, Str(picked));
+                SaveSettings();
+                logf("[profile] data root set to '%s' (migrates on next launch)\n", Str(picked));
+                SyncRefreshRows(d);
+                InvalidateRect(hwnd, nullptr, TRUE);
+                return 0;
+            }
             if (id == 1) { // Save Now
                 ProfileDataSaveNow();
                 SyncRefreshRows(d);
@@ -426,8 +466,7 @@ static LRESULT CALLBACK SyncWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 wc.hInstance = GetModuleHandle(nullptr);
                 wc.lpszClassName = promptClass;
                 wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
-                static HBRUSH sImportPromptBg = CreateSolidBrush(ThemeWindowControlBackgroundColor());
-                wc.hbrBackground = sImportPromptBg;
+                wc.hbrBackground = nullptr; // TUMATRA-FORK(s64-R9l): WM_ERASEBKGND paints the theme surface
                 RegisterClassW(&wc);
                 int w = DpiScale(hwnd, 360);
                 int h = DpiScale(hwnd, 180);
@@ -565,6 +604,8 @@ void ShowProfileSyncDialog(MainWindow* win) {
     contentH += 10 * (rowH + gap); // 10 data rows
     contentH += gap / 2 + rowH;    // hint row
     contentH += gap;               // gap before buttons
+    contentH += btnH;              // button row 0 (data-root picker)
+    contentH += gap;               // gap between button rows
     contentH += btnH;              // button row 1
     contentH += gap;               // gap between button rows
     contentH += btnH;              // button row 2
@@ -612,11 +653,16 @@ void ShowProfileSyncDialog(MainWindow* win) {
     int x6 = clientW - pad - btnW; // Close
     int x5 = x6 - btnW - g;        // Import
     int x4 = x5 - btnW - g;        // Export
-    // row 1 (above): Save Now(1), Open Folder(2), Backups(3)
+    // row 1: Save Now(1), Open Folder(2), Backups(3)
     int by1 = by2 - btnH2 - g;
     int x3 = clientW - pad - btnW; // Backups
     int x2 = x3 - btnW - g;        // Open Folder
     int x1 = x2 - btnW - g;        // Save Now (default)
+    // row 0 (top of button area): Set Folder(7) — data root picker
+    int by0 = by1 - btnH2 - g;
+    int x0 = clientW - pad - btnW; // Set Folder
+    HWND btnSetFolder = CreateWindowW(L"BUTTON", L"Set Folder", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON, x0,
+                                      by0, btnW, btnH2, hwnd, (HMENU)7, GetModuleHandle(nullptr), nullptr);
     HWND btnClose = CreateWindowW(L"BUTTON", L"Close", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON, x6, by2,
                                   btnW, btnH2, hwnd, (HMENU)4, GetModuleHandle(nullptr), nullptr);
     HWND btnImport = CreateWindowW(L"BUTTON", L"Import", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON, x5, by2,
@@ -632,6 +678,7 @@ void ShowProfileSyncDialog(MainWindow* win) {
 
     // disable Windows visual styles on buttons so WM_CTLCOLORBTN theming applies;
     // real BUTTON controls otherwise render with system visual style (light) and ignore our brush
+    SetWindowTheme(btnSetFolder, L"", L"");
     SetWindowTheme(btnClose, L"", L"");
     SetWindowTheme(btnImport, L"", L"");
     SetWindowTheme(btnExport, L"", L"");
@@ -672,8 +719,7 @@ void TestLaunchImportPrompt(MainWindow* owner) {
     wc.hInstance = GetModuleHandle(nullptr);
     wc.lpszClassName = promptClass;
     wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
-    static HBRUSH sImportPromptBg = CreateSolidBrush(ThemeWindowControlBackgroundColor());
-    wc.hbrBackground = sImportPromptBg;
+    wc.hbrBackground = nullptr; // TUMATRA-FORK(s64-R9l): WM_ERASEBKGND paints the theme surface
     RegisterClassW(&wc);
 
     int w = DpiScale(owner->hwndFrame, 360);

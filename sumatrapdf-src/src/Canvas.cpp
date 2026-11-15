@@ -4063,6 +4063,19 @@ static void GetGradientColor(COLORREF a, COLORREF b, float perc, TRIVERTEX* tv) 
 // Draw a border around selected annotation
 static bool gDrawOldStyleAnnotationRect = false;
 
+// s64-R9k: while the flashcard secondary toolbar is visible and study is OFF,
+// paint the reading-mode marker at 2x alpha so cards are easier to spot
+// ("transparencia de 20%" = 0.2; normal marker is ~0.1-ish). TEMPORARY visual
+// aid: goes back to normal as soon as the toolbar is hidden or study starts.
+// Per-window: only windows whose rebar is actually visible get the boost
+// (covers Home/Markdown hiding via RelayoutFrame's hideSecondaryToolbars).
+// State transitions already repaint (CmdFlashcardToggle / CmdFlashcardStudy /
+// HandleFlashcardRate end / session-timer expiry all call MainWindowRerender).
+static bool FlashcardHighlightBoost(MainWindow* win) {
+    return win->flashcard.hwndReBarFlashcard && IsWindowVisible(win->flashcard.hwndReBarFlashcard) &&
+           !win->flashcard.studyMode;
+}
+
 // Paint flashcard highlights (cloze occlusion masks over existing PDF text).
 // Render matrix (never cover text at the wrong moment):
 //   reading            (on, !study)              -> translucent marker, all cards
@@ -4113,7 +4126,10 @@ static void PaintFlashcardMasks(MainWindow* win, DisplayModel* dm, HDC hdc) {
     // Use the flashcard marker alpha setting for subtle highlighting
     // Default alpha 10 makes the gray very transparent; user can adjust 0-255
     u8 markerAlpha = (u8)gGlobalPrefs->flashcardSettings.flashcardMarkerAlpha;
-    Gdiplus::SolidBrush markerBrush(Gdiplus::Color(20, 128, 128, markerAlpha));
+    // s64-R9k: boost the translucent marker 2x while toolbar visible && !study
+    // (see FlashcardHighlightBoost); normal state stays byte-identical to before
+    u8 markerBoost = FlashcardHighlightBoost(win) ? 2 : 1;
+    Gdiplus::SolidBrush markerBrush(Gdiplus::Color((BYTE)(20 * markerBoost), 128, 128, markerAlpha));
     Gdiplus::SolidBrush opaqueGrayBrush(Gdiplus::Color(255, 100, 100, 100));
     Gdiplus::SolidBrush opaqueAccentBrush(GdiRgbFromCOLORREF(colActiveTb));
     Gdiplus::Pen edgePen(GdiRgbFromCOLORREF(colActiveTb), (Gdiplus::REAL)DpiScale(win->hwndCanvas, 2));
@@ -4141,6 +4157,12 @@ static void PaintFlashcardMasks(MainWindow* win, DisplayModel* dm, HDC hdc) {
                 if (!dm->ValidPageNo(vPage)) {
                     continue;
                 }
+                // Skip pages with zero/negative zoom (transient state upstream #2014):
+                // getZoomSafe in CvtToScreen reports FATAL in dbg builds when zoomReal <= 0.
+                const PageInfo* pi = dm->GetPageInfo(vPage);
+                if (!pi || pi->zoomReal <= 0) {
+                    continue;
+                }
                 Rect rc = dm->CvtToScreen(vPage, vr);
                 // cull rects outside the visible viewport: during autoscroll
                 // almost every card is off-screen and drawing it is pure waste
@@ -4157,8 +4179,8 @@ static void PaintFlashcardMasks(MainWindow* win, DisplayModel* dm, HDC hdc) {
                 } else {
                     // Reading / reveal / non-current card: subtle translucent marker
                     // (text stays visible; on reveal the current card shows its original text)
-                    // alpha 20/255 — lighter than the old 30 so the gray reads as a hint
-                    // instead of a block over the text (user 2026-10-22)
+                    // alpha 20/255 (40/255 when FlashcardHighlightBoost is on, s64-R9k) — lighter than the old 30 so
+                    // the gray reads as a hint instead of a block over the text (user 2026-10-22)
                     gs.FillRectangle(&markerBrush, rc.x, rc.y, rc.dx, rc.dy);
                 }
                 if (isActiveCard) {

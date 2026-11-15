@@ -28,6 +28,7 @@ void HomePageOnMouseWheel(MainWindow* win, int delta);
 void HomePageFocusSearch(MainWindow* win);
 void HomePageDestroySearch(MainWindow* win);
 void HomePageDestroyChrome(MainWindow* win);
+bool HomePageHideOverlay(MainWindow* win);
 bool HomePageOnCanvasMessage(MainWindow* win, UINT msg, WPARAM wp, LPARAM lp, LRESULT& res);
 
 void HomePageMoveSelection(MainWindow* win, int dCol, int dRow);

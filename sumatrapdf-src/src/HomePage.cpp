@@ -25,12 +25,15 @@
 #include "ProfileData.h"
 #include "SumatraPDF.h"
 #include "MainWindow.h"
+#include "MainWindowCreate.h"
 #include "Commands.h"
+#include "Canvas.h"
 #include "Accelerators.h"
 #include "CommandPalette.h"
 #include "FilterHighlightDraw.h"
 #include "FileThumbnails.h"
 #include "Menu.h"
+#include "Toolbar.h"
 #include "ToolbarLayout.h"
 #include "TipText.h"
 #include "HomePage.h"
@@ -876,6 +879,7 @@ struct HomePageLayout {
     StrVec filterWords;
     Vec<u8> highlighted;
     Rect rcSearchBorder; // border rect drawn around the edit control
+    Rect rcSearchClear;  // "✕" clear button inside the search box (empty = hidden)
 
     // tip layout
     Rect rcTip;     // background rect for tip area
@@ -945,6 +949,23 @@ struct HomeSyncBtnWnd : VirtWndText {
         align = VirtWndTextAlign::Center;
     }
     ~HomeSyncBtnWnd() override = default;
+
+    void Paint(VirtWndPaintCtx&) override;
+    bool OnMouseDown(VirtWndMouseEvent&) override;
+    bool OnMouseUp(VirtWndMouseEvent&) override;
+    bool OnSetCursor(Point) override;
+    TempStr GetTooltipTemp(Point) override;
+};
+
+// "✕" at the right edge inside the search box: clears the filter. It is a
+// chrome child rather than part of the edit control so the canvas paints it on
+// top of the box's own background, and it only shows while there is a query.
+static Kind kindHomeSearchClearWnd = "homeSearchClearWnd";
+struct HomeSearchClearWnd : VirtWnd {
+    MainWindow* win = nullptr;
+
+    HomeSearchClearWnd() { kind = kindHomeSearchClearWnd; }
+    ~HomeSearchClearWnd() override = default;
 
     void Paint(VirtWndPaintCtx&) override;
     bool OnMouseDown(VirtWndMouseEvent&) override;
@@ -1030,6 +1051,7 @@ struct HomeChromeWnd : VirtWnd {
     HomeOpenDocWnd* openDoc = nullptr;
     HomeHelpBtnWnd* helpBtn = nullptr;
     HomeSyncBtnWnd* syncBtn = nullptr;
+    HomeSearchClearWnd* searchClear = nullptr;
 };
 
 static HomeChromeWnd* EnsureHomeChrome(MainWindow* win);
@@ -1942,7 +1964,10 @@ TempStr HomeStatsWnd::GetTooltipTemp(Point pt) {
     int fcSec = ProfileDataStudyDaySec(dateKey);
     TempStr readT = HomeStatsFormatMinTemp(readSec);
     TempStr fcT = HomeStatsFormatMinTemp(fcSec);
-    return fmt("%d-%02d-%02d: Read: %s | Flashcards: %s", year, mm, dd, Str(readT), Str(fcT));
+    // One value per line: a single-line tip was wider than the gap between the
+    // last heatmap columns and the screen edge, so the right-most cells showed
+    // nothing. Three short lines keep the bubble narrow.
+    return fmt("%d-%02d-%02d\nRead: %s\nFlashcards: %s", year, mm, dd, Str(readT), Str(fcT));
 }
 
 struct HomePageLayoutCache {
@@ -1959,6 +1984,7 @@ struct HomePageLayoutCache {
 
     Rect rcThumbsArea;
     Rect rcSearchBorder;
+    Rect rcSearchClear;
     Rect rcStats;    // reading-stats band (empty = hidden)
     Rect rcBooksHdr; // books-section title rect (D1)
     Rect rcIconOpen;
@@ -2105,6 +2131,7 @@ static void SaveHomeLayoutCache(const HomePageLayout& l, Str filterText, int scr
     str::ReplaceWithCopy(&c.filterText, filterText);
     c.rcThumbsArea = l.rcThumbsArea;
     c.rcSearchBorder = l.rcSearchBorder;
+    c.rcSearchClear = l.rcSearchClear;
     c.rcStats = l.rcStats;
     c.rcBooksHdr = l.rcBooksHdr;
     c.rcIconOpen = l.rcIconOpen;
@@ -2145,6 +2172,7 @@ static void ApplyHomeLayoutCache(HomePageLayout& l, int scrollY) {
 
     l.rcThumbsArea = c.rcThumbsArea;
     l.rcSearchBorder = c.rcSearchBorder;
+    l.rcSearchClear = c.rcSearchClear;
     l.rcStats = c.rcStats;
     l.rcBooksHdr = c.rcBooksHdr;
     l.rcIconOpen = c.rcIconOpen;
@@ -2382,18 +2410,44 @@ static void LayoutHomePage(HomePageLayout& l) {
 
     int headerBottomY = rcBooksHdr.y + rcBooksHdr.dy;
 
-    // --- Position search edit below header ---
+    // --- Search box: inline on the books-header row, right of "Open a
+    // document..." (falls back to the full-width row below when too narrow) ---
     EnsureHomeSearchCreated(win);
     int searchEditDy = DpiScale(hdc, kSearchEditDy);
     int headerSearchGap = DpiScale(hdc, kHeaderSearchGapY);
     int searchThumbsGap = DpiScale(hdc, kSearchThumbnailsGapY);
     {
-        int borderDx = thumbsContentWidth * 3 / 4;
-        borderDx = std::max(borderDx, DpiScale(hdc, 200));
-        int borderX = thumbsStartX + ((thumbsContentWidth - borderDx) / 2);
-        int borderY = headerBottomY + headerSearchGap;
         int borderDy = searchEditDy + 2; // 1px border on each side
+        int clearDx = borderDy - 2;      // square "✕" zone inside the border
+        int rowGap = DpiScale(hdc, 16);
+        int contentX0 = thumbsStartX;
+        int contentX1 = thumbsStartX + thumbsContentWidth;
+        int borderX, borderDx, borderY;
+        if (isRtl) {
+            borderX = contentX0;
+            borderDx = rcOpenDoc.x - rowGap - contentX0;
+        } else {
+            borderX = rcOpenDoc.x + rcOpenDoc.dx + rowGap;
+            borderDx = contentX1 - borderX;
+        }
+        if (borderDx >= DpiScale(hdc, 180)) {
+            // center on the header row (title + view icons + link)
+            int rowTop = std::min(rcBooksHdr.y, rcIconOpen.y);
+            int rowDy = std::max(rcBooksHdr.y + rcBooksHdr.dy, rcIconOpen.y + rcIconOpen.dy) - rowTop;
+            borderY = rowTop + std::max(0, (rowDy - borderDy) / 2);
+            headerBottomY = std::max(headerBottomY, borderY + borderDy);
+        } else {
+            // narrow window: keep the old centered row below the header
+            borderDx = thumbsContentWidth * 3 / 4;
+            borderDx = std::max(borderDx, DpiScale(hdc, 200));
+            borderX = thumbsStartX + ((thumbsContentWidth - borderDx) / 2);
+            borderY = headerBottomY + headerSearchGap;
+            headerBottomY = borderY + borderDy;
+        }
         l.rcSearchBorder = {borderX, borderY, borderDx, borderDy};
+        // "✕" hugs the inner right edge of the box (left in RTL)
+        int clearX = isRtl ? (borderX + 1) : (borderX + borderDx - 1 - clearDx);
+        l.rcSearchClear = {clearX, borderY + 1, clearDx, clearDx};
         // measure font height so we can vertically center the edit
         HFONT editFont = win->hwndHomeSearch ? (HFONT)SendMessage(win->hwndHomeSearch, WM_GETFONT, 0, 0) : nullptr;
         int fontDy = DpiScale(hdc, 14); // fallback when the edit doesn't exist yet
@@ -2406,13 +2460,16 @@ static void LayoutHomePage(HomePageLayout& l) {
         }
         int editDy = std::min(fontDy, searchEditDy);
         int editY = borderY + 1 + ((searchEditDy - editDy) / 2);
+        // the edit stops short of the "✕" zone so its text never runs under it
+        int editX = isRtl ? (borderX + 1 + clearDx) : (borderX + 1);
+        int editDx = borderDx - 2 - clearDx;
         if (win->hwndHomeSearch) {
-            MoveWindow(win->hwndHomeSearch, borderX + 1, editY, borderDx - 2, editDy, TRUE);
+            MoveWindow(win->hwndHomeSearch, editX, editY, editDx, editDy, TRUE);
         }
     }
-    // border is 1px top + 1px bottom = 2px
-    int searchAreaDy = headerSearchGap + searchEditDy + 2 + searchThumbsGap;
-    headerBottomY += searchAreaDy;
+    // gap between the header row (which now carries the search box) and the
+    // thumbnails
+    headerBottomY += searchThumbsGap;
 
     // --- Step 2: calculate tip area at the bottom (before thumbnails) ---
     int tipHeight = 0;
@@ -2924,6 +2981,46 @@ TempStr HomeSyncBtnWnd::GetTooltipTemp(Point) {
     return str::DupTemp(_TRA("Sync profile"));
 }
 
+void HomeSearchClearWnd::Paint(VirtWndPaintCtx& ctx) {
+    Rect b = ctx.bounds;
+    int pad = DpiScale(win->hwndCanvas, 7);
+    Rect r{b.x + pad, b.y + pad, b.dx - 2 * pad, b.dy - 2 * pad};
+    if (r.dx < 2 || r.dy < 2) {
+        return;
+    }
+    COLORREF col = HasFlag(vwfHovered) ? ThemeWindowTextColor() : ThemeWindowDarkerTextColor();
+    Gdiplus::Graphics g(GfxHdc(ctx.gfx));
+    g.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
+    Gdiplus::Pen pen(GpCol(col), 1.6f);
+    g.DrawLine(&pen, (float)r.x, (float)r.y, (float)(r.x + r.dx), (float)(r.y + r.dy));
+    g.DrawLine(&pen, (float)(r.x + r.dx), (float)r.y, (float)r.x, (float)(r.y + r.dy));
+}
+
+bool HomeSearchClearWnd::OnMouseDown(VirtWndMouseEvent&) {
+    return true; // consume: the click stays on the button
+}
+
+bool HomeSearchClearWnd::OnMouseUp(VirtWndMouseEvent&) {
+    if (!win || !win->hwndHomeSearch) {
+        return true;
+    }
+    // clearing the text fires EN_CHANGE, which resets the scroll, reselects the
+    // first entry and repaints the list
+    SetWindowTextW(win->hwndHomeSearch, L"");
+    HwndSetFocus(win->hwndHomeSearch);
+    HwndInvalidate(win->hwndCanvas);
+    return true;
+}
+
+bool HomeSearchClearWnd::OnSetCursor(Point) {
+    SetCursorCached(IDC_HAND);
+    return true;
+}
+
+TempStr HomeSearchClearWnd::GetTooltipTemp(Point) {
+    return str::DupTemp(_TRA("Clear search"));
+}
+
 //--- tip links
 
 HomeTipWnd::~HomeTipWnd() {
@@ -3216,6 +3313,10 @@ static HomeChromeWnd* EnsureHomeChrome(MainWindow* win) {
     chrome->syncBtn->win = win;
     chrome->AddChild(chrome->syncBtn);
 
+    chrome->searchClear = new HomeSearchClearWnd();
+    chrome->searchClear->win = win;
+    chrome->AddChild(chrome->searchClear);
+
     win->homeRoot->SetChild(chrome);
     return chrome;
 }
@@ -3223,6 +3324,34 @@ static HomeChromeWnd* EnsureHomeChrome(MainWindow* win) {
 void HomePageDestroyChrome(MainWindow* win) {
     delete win->homeRoot;
     win->homeRoot = nullptr;
+}
+
+// Turns the home overlay off and undoes everything turning it on changed: the
+// toolbar collapses to the Home button alone while the overlay is up, so the
+// other buttons, the page-number controls, the timer trio, the contrast veil
+// and the secondary toolbars (fc/arch/edit) all have to be restored here.
+// Shared by the ESC handler on the home page and a tab click while it is up;
+// the CmdOpenHome toggle does the same sequence inline (SumatraPDF.cpp).
+// Returns true when the overlay was on (i.e. work was done).
+bool HomePageHideOverlay(MainWindow* win) {
+    if (!win || !win->showHomeOverlay) {
+        return false;
+    }
+    win->showHomeOverlay = false;
+    logf("[home] overlay %s\n", StrL("OFF"));
+    InvalidateRect(win->hwndCanvas, nullptr, TRUE);
+    SetFocus(win->hwndCanvas);
+    SetToolbarButtonCheckedState(win, CmdOpenHome, false);
+    ToolbarUpdateStateForWindow(win, true);
+    // re-anchor the page-number controls: they are hidden while home is on and
+    // would otherwise float at the top-left once their anchor button hides
+    UpdateToolbarPageText(win, win->ctrl ? win->ctrl->PageCount() : -1);
+    LayoutToolbarChildWindows(win);
+    EnsureContrastOverlayState(win);
+    // secondary toolbars come back here; the layout snapshot's homeOverlay
+    // field makes the relayout always run
+    RelayoutFrame(win, true, -1);
+    return true;
 }
 
 // gives the home page's virtual controls first shot at the canvas messages.
@@ -3266,7 +3395,15 @@ bool HomePageOnCanvasMessage(MainWindow* win, UINT msg, WPARAM wp, LPARAM lp, LR
     TempStr tip = w->GetTooltipTemp(ptLocal);
     if (tip && *tip.s) {
         Rect r = w->BoundsInWindow();
-        win->ShowToolTip(tip, r);
+        // Track tips are placed at cursor + offset and comctl keeps them inside
+        // the work area only vertically, so a tip near the right screen edge was
+        // cut off. Pin it here and clamp the bubble's right edge instead.
+        Point screenPt = HwndClientToScreen(win->hwndCanvas, pt);
+        Rect work = GetWorkAreaRect(r, win->hwndFrame);
+        int offX = DpiScale(win->hwndFrame, 12);
+        int offY = DpiScale(win->hwndFrame, 18);
+        int maxRight = work.x + work.dx - DpiScale(win->hwndFrame, 8);
+        win->ShowToolTipAt(tip, r, Point(screenPt.x + offX, screenPt.y + offY), false, maxRight);
     }
     res = TRUE;
     return true;
@@ -3354,6 +3491,13 @@ static void HomePageSyncChrome(HomePageLayout& l) {
         Rect btn{l.rc.dx - margin - diam, bottom - margin - diam, diam, diam};
         chrome->helpBtn->SetBounds(btn);
     }
+
+    // "✕" inside the search box: only offered when there is a query to clear
+    TempStr searchQuery = HomeSearchQueryTemp(win);
+    bool hasSearchQuery = searchQuery && searchQuery.s && searchQuery.s[0];
+    chrome->searchClear->visibility =
+        (hasSearchQuery && !l.rcSearchClear.IsEmpty()) ? Visibility::Visible : Visibility::Collapse;
+    chrome->searchClear->SetBounds(l.rcSearchClear);
 }
 
 static void DrawHomePageLayout(HomePageLayout& l) {

@@ -864,7 +864,7 @@ const trim: Field[] = [
 ];
 
 const flashcard: Field[] = [
-  field("RandomOrder", Bool, false, "if true, flashcard study presents cards in random order instead of document order"),
+  field("RandomOrder", Bool, true, "if true, flashcard study presents cards in random order instead of document order; on by default"),
   field(
     "NewCardsPosition",
     Int,
@@ -882,13 +882,19 @@ const globalPrefs: Field[] = [
     "FlashcardStudyDir",
     Str,
     "",
-    "directory where flashcard study history JSONs are stored (per-book files, MD5-named). Empty = default app-data dir (FlashcardStudy). Point it at a cloud-synced folder (e.g. Google Drive) to keep the histories backed up",
+    "LEGACY override: directory where flashcard study history JSONs are stored (per-book files, MD5-named). Empty (recommended) = <ProfileDataDir>\\study. Set only to keep per-book files in a separate (e.g. cloud-synced) folder; the profile store already syncs the same states. Changing it migrates the files",
+  ),
+  field(
+    "FlashcardPreloadSessionBooks",
+    Bool,
+    false,
+    "if true, flashcard sessions may preload books of this window's study session that are not loaded yet (lazy tabs) in the background; off by default - lazy books load on first visit as usual",
   ),
   field(
     "ProfileDataDir",
     Str,
     "",
-    "directory for the single-file Profile Memory store (tumatraPDF-data_1.json). Empty = default app-data dir. Point it at a cloud-synced folder (e.g. Google Drive) so the study histories, reading stats and per-doc info sync between machines in ONE file",
+    "data ROOT for ALL user study data (s64-R9o): single-file Profile Memory store (tumatraPDF-data_1.json), the stats\\ sidecars (reading/flashcard stats) and, when FlashcardStudyDir is empty, the per-book study JSONs under study\\. Empty = default app-data dir. Point it at a cloud-synced folder (e.g. Google Drive) to sync everything between machines in ONE place",
   ),
 
   field(

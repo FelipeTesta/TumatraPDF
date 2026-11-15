@@ -247,6 +247,12 @@ static LRESULT CALLBACK FlashcardReBarSubclassProc(HWND hWnd, UINT uMsg, WPARAM 
                                                              : ThemeWindowTextColor());
                     }
                     WCHAR* txt = txtBuf;
+                    // labels carry leading spaces that reserve width (pad for
+                    // the normal buttons, the timer trio for Study) — draw only
+                    // the real label
+                    while (*txt == L' ') {
+                        txt++;
+                    }
                     if (bi2.idCommand == CmdFlashcardStudy) {
                         // the trio sits on the button's left: keep the label
                         // inside the remaining right part so it can't slide
@@ -254,12 +260,6 @@ static LRESULT CALLBACK FlashcardReBarSubclassProc(HWND hWnd, UINT uMsg, WPARAM 
                         MainWindow* win2 = FindMainWindowByHwnd(hWnd);
                         if (win2) {
                             rcBtn.left += FlashcardMeasureTimerTrioDx(win2, hwndToolbar);
-                        }
-                        // the width was reserved by prefixing the label with
-                        // spaces (see FlashcardToolbarCreate) — draw only the
-                        // real label
-                        while (*txt == L' ') {
-                            txt++;
                         }
                     }
                     // checked buttons draw their label BOLD (the classic
@@ -333,7 +333,7 @@ static LRESULT CALLBACK FlashcardToolbarSubclassProc(HWND hwnd, UINT msg, WPARAM
                 TBBUTTONINFOW bi{};
                 bi.cbSize = sizeof(bi);
                 bi.dwMask = TBIF_BYINDEX | TBIF_STATE;
-                if (SendMessageW(hwnd, TB_GETBUTTONINFO, i, (LPARAM)&bi)) {
+                if (TbGetButtonInfo(hwnd, i, &bi) >= 0) {
                     if (bi.fsState & TBSTATE_CHECKED) {
                         RECT rc{};
                         if (SendMessageW(hwnd, TB_GETITEMRECT, i, (LPARAM)&rc)) {
@@ -550,6 +550,12 @@ void FlashcardToolbarCreate(MainWindow* win) {
     iconSize = RoundUp(iconSize, 4);
     TbSetBitmapSize(hwndToolbar, Size(iconSize, iconSize));
     TbSetButtonSize(hwndToolbar, Size(iconSize, iconSize));
+
+    // comctl derives BTNS_SHOWTEXT widths from the label, and the derivation
+    // clips longer labels once the font/DPI differ from the insert-time
+    // measurement ("Settings" -> "Sett..."). Pin the measured width (label +
+    // pad) like the main/Arch/Edit toolbars do.
+    PostAddTextButtonSizing(win, hwndToolbar);
 
     Rect rc = TbGetItemRect(hwndToolbar, 0);
 

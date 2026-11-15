@@ -32,15 +32,22 @@ Below is an explanation of what the different settings mean and what their defau
 If you add or remove lines with square brackets, **make sure to always add/remove square brackets in pairs**! Else you risk losing all the data following them.
 
 ```
-; directory where flashcard study history JSONs are stored (per-book files,
-; MD5-named). Empty = default app-data dir (FlashcardStudy). Point it at a
-; cloud-synced folder (e.g. Google Drive) to keep the histories backed up
+; LEGACY override: directory where flashcard study history JSONs are stored
+; (per-book files, MD5-named). Empty (recommended) = <ProfileDataDir>\study. Set
+; only to keep per-book files in a separate (e.g. cloud-synced) folder; the
+; profile store already syncs the same states. Changing it migrates the files
 FlashcardStudyDir = 
 
-; directory for the single-file Profile Memory store (tumatraPDF-data_1.json).
-; Empty = default app-data dir. Point it at a cloud-synced folder (e.g. Google
-; Drive) so the study histories, reading stats and per-doc info sync between
-; machines in ONE file
+; if true, flashcard sessions may preload books of this window's study session
+; that are not loaded yet (lazy tabs) in the background; off by default - lazy
+; books load on first visit as usual
+FlashcardPreloadSessionBooks = false
+
+; data ROOT for ALL user study data (s64-R9o): single-file Profile Memory store
+; (tumatraPDF-data_1.json), the stats\ sidecars (reading/flashcard stats) and,
+; when FlashcardStudyDir is empty, the per-book study JSONs under study\. Empty
+; = default app-data dir. Point it at a cloud-synced folder (e.g. Google Drive)
+; to sync everything between machines in ONE place
 ProfileDataDir = 
 
 ; default layout of pages. valid values: automatic, single page, facing, book
@@ -362,7 +369,7 @@ ViewportCrop = 0 0 0 0 0 false false false
 Trim = 0 0 false
 
 ; flashcard study settings (introduced in version 3.7)
-FlashcardSettings = false 2 10
+FlashcardSettings = true 2 10
 
 ; customization options for PDF, XPS, DjVu and PostScript UI
 FixedPageUI [

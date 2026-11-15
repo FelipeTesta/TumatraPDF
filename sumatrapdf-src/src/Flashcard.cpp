@@ -449,18 +449,33 @@ int FlashcardImportDiffCount(Vec<Flashcard>& existing, const char* srcPath, int*
     return diff;
 }
 
-// Directory where the study-history JSONs are stored: the user-configured
-// flashcardSettings.studyDir when set (e.g. a Google Drive folder so the
-// histories are backed up / synced between machines), else the per-exe
-// portable app-data "FlashcardStudy" dir. Changing the setting MIGRATES the
-// existing files to the new dir (see FlashcardStudyMigrateFiles; files
-// already in the target are kept).
+// Directory where the study-history JSONs are stored (s64-R9o unified
+// storage): the user-configured flashcardStudyDir advanced setting acts as a
+// LEGACY OVERRIDE only — when set it wins (per-book files keep resolving
+// there, e.g. a cloud-synced folder; changing it migrates files), otherwise
+// per-book JSONs live under the data root: <ProfileDataGetDataRootTemp()>\study.
+// Changing the override via the Config window MIGRATES the existing files to
+// the new dir (see FlashcardStudyMigrateFiles; files already in the target are
+// kept). Legacy per-book files in the app-data "FlashcardStudy" dir are still
+// READ as a fallback by FlashcardStudyLoad when the override is unset (no
+// mass migration).
 TempStr FlashcardStudyDir() {
     Str custom = gGlobalPrefs->flashcardStudyDir;
     if (custom && len(custom) > 0) {
         return (TempStr)custom.s;
     }
-    return GetPathInAppDataDirTemp(StrL("FlashcardStudy"));
+    TempStr root = ProfileDataGetDataRootTemp();
+    return path::JoinTemp(root, StrL("study"));
+}
+
+// <dir>\<md5-of-path>.json — file name part only, so both the resolved study
+// dir and the legacy app-data FlashcardStudy dir can be probed with it
+static TempStr FlashcardStudyFileNameTemp(const char* filePath) {
+    Str pathStr(filePath);
+    u8 digest[16];
+    CalcMD5Digest(pathStr, digest);
+    TempStr md5Hex = str::MemToHexTemp(Str((const char*)digest, dimofi(digest)));
+    return fmt("%s.json", md5Hex);
 }
 
 // Compute MD5 hash of filePath and return <study dir>\<md5>.json
@@ -469,14 +484,8 @@ TempStr FlashcardStudyPath(const char* filePath) {
     if (!filePath) {
         return {};
     }
-
-    Str pathStr(filePath);
-    u8 digest[16];
-    CalcMD5Digest(pathStr, digest);
-    TempStr md5Hex = str::MemToHexTemp(Str((const char*)digest, dimofi(digest)));
-
     TempStr dir = FlashcardStudyDir();
-    return path::JoinTemp(dir, fmt("%s.json", md5Hex));
+    return path::JoinTemp(dir, FlashcardStudyFileNameTemp(filePath));
 }
 
 void FlashcardStudyWriteJsonValue(FILE* f, const FlashcardStudyState& state) {
@@ -1125,6 +1134,20 @@ FlashcardStudyDoc FlashcardStudyLoad(const char* filePath) {
     }
 
     Str json = file::ReadFile(Str(studyPath));
+    if (!json) {
+        // s64-R9o: when the legacy override is unset, per-book files moved to
+        // <root>\study — probe the OLD default location read-only as a
+        // fallback before the by-name adopt (NO mass migration of files)
+        Str custom = gGlobalPrefs->flashcardStudyDir;
+        if (!(custom && len(custom) > 0)) {
+            TempStr legacyDir = GetPathInAppDataDirTemp(StrL("FlashcardStudy"));
+            TempStr legacyPath = path::JoinTemp(legacyDir, FlashcardStudyFileNameTemp(filePath));
+            json = file::ReadFile(Str(legacyPath));
+            if (json) {
+                logf("[fc] FlashcardStudyLoad - read fallback from legacy '%s'\n", Str(legacyPath));
+            }
+        }
+    }
     if (!json) {
         // no history under this md5: the book may have been MOVED on disk
         // (path changed, base name kept). Try to ADOPT a study JSON saved

@@ -4,8 +4,9 @@
 // Flashcard study-time statistics: seconds spent studying flashcards with
 // study mode active, per document (FileState.flashcardStudyTimeSec, persisted with
 // the normal file-history settings) and per calendar day (sidecar file
-// "flashcard-stats.txt" next to the settings file, one "YYYYMMDD <sec> <cards>"
-// line per day — deliberately plain text, no JSON dependency). Cards rated are
+// "flashcard-stats.txt" under the data root's stats\ subdir — s64-R9o unified
+// storage; one "YYYYMMDD <sec> <cards>" line per day, deliberately plain text,
+// no JSON dependency). Cards rated are
 // counted alongside the seconds (FileState.flashcardCardsDone per document,
 // third sidecar column per day; 2-column lines from before the count existed
 // parse with cards=0).
@@ -47,10 +48,45 @@ static int DateKeyToday() {
     return (int)st.wYear * 10000 + (int)st.wMonth * 100 + (int)st.wDay;
 }
 
+// canonical sidecar location: <data-root>\stats\flashcard-stats.txt (s64-R9o)
 static TempStr FlashcardStatsPathTemp() {
+    TempStr root = ProfileDataGetDataRootTemp();
+    TempStr statsDir = path::JoinTemp(root, StrL("stats"));
+    return path::JoinTemp(statsDir, StrL("flashcard-stats.txt"));
+}
+
+// legacy sidecar lived next to the settings file — kept readable as fallback
+// and as the copy source for the one-time migration; never deleted
+static TempStr FlashcardStatsLegacyPathTemp() {
     TempStr settingsPath = GetSettingsPathTemp();
-    TempStr dir = path::GetDirTemp(settingsPath);
+    TempStr dir = path::GetDirTemp(Str(settingsPath));
     return path::JoinTemp(dir, StrL("flashcard-stats.txt"));
+}
+
+// copy-only migration (s64-R9o): on load, if the new sidecar is missing but
+// the legacy one exists, COPY it under <data-root>\stats. Never moves/deletes
+// the legacy file. Best-effort: a failed copy logs and the legacy file is
+// still read via the fallback path.
+static void FlashcardStatsMigrateIfNeeded() {
+    TempStr p = FlashcardStatsPathTemp();
+    if (file::Exists(p)) {
+        return;
+    }
+    TempStr legacy = FlashcardStatsLegacyPathTemp();
+    if (!file::Exists(legacy)) {
+        return;
+    }
+    TempStr root = ProfileDataGetDataRootTemp();
+    TempStr statsDir = path::JoinTemp(root, StrL("stats"));
+    if (!dir::CreateAll(Str(statsDir))) {
+        logf("[stats] could not create '%s', keeping legacy sidecar\n", Str(statsDir));
+        return;
+    }
+    if (file::Copy(Str(p), Str(legacy), true)) {
+        logf("[stats] sidecar migrated to data-root: '%s' -> '%s'\n", Str(legacy), Str(p));
+    } else {
+        logf("[stats] sidecar migration FAILED (legacy kept): '%s'\n", Str(legacy));
+    }
 }
 
 static void FlashcardStatsLoadIfNeeded() {
@@ -58,9 +94,15 @@ static void FlashcardStatsLoadIfNeeded() {
         return;
     }
     gFlashcardStats.loaded = true;
+    FlashcardStatsMigrateIfNeeded();
     TempStr p = FlashcardStatsPathTemp();
     if (!file::Exists(p)) {
-        return;
+        // fallback read: legacy sidecar next to the settings file
+        p = FlashcardStatsLegacyPathTemp();
+        if (!file::Exists(p)) {
+            return;
+        }
+        logf("[stats] reading legacy sidecar (new absent): '%s'\n", Str(p));
     }
     Str d = file::ReadFile(p);
     StrVec lines;
@@ -117,13 +159,12 @@ static void FlashcardStatsAddDaily(float sec) {
     gFlashcardStats.daily.Append(e);
 }
 
-// count one rated (studied) card: +1 to the current document's
-// FileState.flashcardCardsDone and to today's sidecar bucket
-void FlashcardStatsAddCard(MainWindow* win) {
-    if (!win) {
-        return;
-    }
-    WindowTab* tab = win->CurrentTab();
+// count one rated (studied) card: +1 to the rating card's owning document's
+// FileState.flashcardCardsDone and to today's sidecar bucket.
+// Accumulator spaces: `tab` = per-document (FileState/profile perDoc);
+// gFlashcardStats.daily / dirtyCards = window/machine-level sidecar (not
+// per-doc). The daily bucket is credited even when tab is null.
+void FlashcardStatsAddCard(WindowTab* tab) {
     if (tab && tab->filePath) {
         FileState* fs = gFileHistory.FindByPath(tab->filePath);
         if (fs) {
@@ -156,12 +197,16 @@ void FlashcardStatsAddCard(MainWindow* win) {
     }
 }
 
-void FlashcardStatsAddSeconds(MainWindow* win, float sec) {
-    if (!win || sec <= 0.0f) {
+void FlashcardStatsAddSeconds(WindowTab* tab, float sec) {
+    if (sec <= 0.0f) {
         return;
     }
-    // ticks arrive at ~64Hz with ~0.01s each — accumulate the fractional part
-    // and only credit whole seconds (the stores hold Int seconds)
+    // Accumulator spaces: gFlashcardStats.accumSec is a window/machine-level
+    // sub-second carry (shared across docs; whole seconds may straddle a tab
+    // switch, <1s drift). Whole seconds are credited per-document via the
+    // OWNING tab passed by the caller (studyOrder[curIdx].tab), never via
+    // win->CurrentTab() — see FlashcardStats.h. The daily bucket + dirtySec
+    // stay window/machine-level.
     gFlashcardStats.accumSec += sec;
     int whole = (int)gFlashcardStats.accumSec;
     if (whole <= 0) {
@@ -170,7 +215,6 @@ void FlashcardStatsAddSeconds(MainWindow* win, float sec) {
     gFlashcardStats.accumSec -= (float)whole;
 
     // per-document time (FileState is the same store the open-count uses)
-    WindowTab* tab = win->CurrentTab();
     if (tab && tab->filePath) {
         FileState* fs = gFileHistory.FindByPath(tab->filePath);
         if (fs) {
@@ -197,6 +241,9 @@ void FlashcardStatsFlush(bool force) {
     }
     Str data = sb.TakeStr();
     if (kProfDualWriteSidecars) {
+        TempStr root = ProfileDataGetDataRootTemp();
+        TempStr statsDir = path::JoinTemp(root, StrL("stats"));
+        dir::CreateAll(Str(statsDir));
         file::WriteFile(FlashcardStatsPathTemp(), data);
     }
     str::Free(data);

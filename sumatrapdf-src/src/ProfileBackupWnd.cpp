@@ -94,10 +94,13 @@ static void BackupPaint(ProfileBackupDialog* d) {
         bool isHolding = d->holdingSlot == i;
         RECT rcBtnInner = rcBtn;
         InflateRect(&rcBtnInner, -2, -2);
-        HBRUSH brBtn = CreateSolidBrush(isHolding ? RGB(255, 200, 200) : ThemeWindowControlBackgroundColor());
+        // TUMATRA-FORK(s64-R9l): hold-Restore = danger tint from theme (was hardcoded RGB(255,200,200))
+        HBRUSH brBtn = CreateSolidBrush(isHolding ? ThemeErrorBackgroundColor() : ThemeWindowControlBackgroundColor());
         FillRect(hdc, &rcBtn, brBtn);
         DeleteObject(brBtn);
-        FrameRect(hdc, &rcBtn, (HBRUSH)GetStockObject(BLACK_BRUSH));
+        HBRUSH frameBr = CreateSolidBrush(ThemeEdgeColor()); // TUMATRA-FORK(s64-R9l): was BLACK_BRUSH
+        FrameRect(hdc, &rcBtn, frameBr);
+        DeleteObject(frameBr);
         wchar_t btnText[64];
         if (isHolding) {
             swprintf(btnText, 64, L"Restore (%ds)", (int)((1.0 - d->progress) * 5.0 + 0.5));
@@ -111,12 +114,36 @@ static void BackupPaint(ProfileBackupDialog* d) {
     EndPaint(d->hwnd, &ps);
 }
 
+// TUMATRA-FORK(s64-R9l): cached theme-bg brush for WM_CTLCOLOR* (never fresh per message, never stale)
+static HBRUSH ThemeBgBrush() {
+    static HBRUSH sBrush = nullptr;
+    static COLORREF sColor = 0;
+    COLORREF col = ThemeWindowBackgroundColor();
+    if (!sBrush || sColor != col) {
+        if (sBrush) {
+            DeleteObject(sBrush);
+        }
+        sBrush = CreateSolidBrush(col);
+        sColor = col;
+    }
+    return sBrush;
+}
+
 static LRESULT CALLBACK BackupWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     ProfileBackupDialog* d = gBackupDialog;
     if (!d || d->hwnd != hwnd) {
         return DefWindowProcW(hwnd, msg, wp, lp);
     }
     switch (msg) {
+        case WM_ERASEBKGND: { // TUMATRA-FORK(s64-R9l): theme bg; class hbrBackground is nullptr
+            HDC hdc = (HDC)wp;
+            RECT rc;
+            GetClientRect(hwnd, &rc);
+            HBRUSH br = CreateSolidBrush(ThemeWindowBackgroundColor());
+            FillRect(hdc, &rc, br);
+            DeleteObject(br);
+            return TRUE;
+        }
         case WM_SIZE:
             BackupLayout(d);
             InvalidateRect(hwnd, nullptr, TRUE);
@@ -199,8 +226,7 @@ void ShowProfileBackupsDialog(MainWindow* win) {
     wc.hInstance = GetModuleHandle(nullptr);
     wc.lpszClassName = className;
     wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
-    static HBRUSH sBackupBg = CreateSolidBrush(ThemeWindowControlBackgroundColor());
-    wc.hbrBackground = sBackupBg;
+    wc.hbrBackground = nullptr; // TUMATRA-FORK(s64-R9l): WM_ERASEBKGND paints the theme surface
     RegisterClassW(&wc);
 
     int w = DpiScale(win->hwndFrame, 420);
@@ -281,7 +307,7 @@ static LRESULT CALLBACK CloudRevertWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARA
             HDC hdc = (HDC)wp;
             SetTextColor(hdc, ThemeWindowTextColor());
             SetBkMode(hdc, TRANSPARENT);
-            return (LRESULT)CreateSolidBrush(ThemeWindowBackgroundColor());
+            return (LRESULT)ThemeBgBrush();
         }
         case WM_PAINT: {
             PAINTSTRUCT ps;
@@ -350,8 +376,7 @@ void ProfileDataPromptCloudRevert(MainWindow* win, HWND hwndParent) {
     wc.hInstance = GetModuleHandle(nullptr);
     wc.lpszClassName = className;
     wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
-    static HBRUSH sCloudRevertBg = CreateSolidBrush(ThemeWindowControlBackgroundColor());
-    wc.hbrBackground = sCloudRevertBg;
+    wc.hbrBackground = nullptr; // TUMATRA-FORK(s64-R9l): WM_ERASEBKGND paints the theme surface
     RegisterClassW(&wc);
 
     int w = DpiScale(hwndParent, 380);

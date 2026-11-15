@@ -1,4 +1,111 @@
-﻿## 2026-11-13 (s64-R9) — Page Crop rotated (nomacs parity)
+﻿## 2026-11-15 (s64-R9v) - malformed-PDF "items left on stack" incident + R9u paint guard (fix)
+
+### Incident
+- App "closed itself" on flashcard toggle of book `Filosofia medica RESUMEN PARCIAL.pdf`. Not a hang: -for-testing DEBUG build's `ReportDebugIf(true)` in `getZoomSafe` (DisplayModel.cpp:1821, upstream TODO #2014 "sometimes zoom on a page is 0") killed the process (exit 105). Path: CmdFlashcardToggle -> HandleCommandFlashcard -> MainWindowRerender -> OnPaintDocument -> DrawDocument -> PaintFlashcardMasks -> paintPage -> CvtToScreen -> getZoomSafe(pageInfo->zoomReal == 0).
+- Log concurrently showed `argument error: items left on stack in draw device: 1` (MuPDF fz_throw FZ_ERROR_ARGUMENT in fz_draw_close_device draw-device.c:3145 — unmatched `q`/`Q` content stream; engine catches+logs+continues; NOT our code; prewarmer/study never engaged this run — zero `[fc][perf]` lines).
+- Release builds tolerate the zoom transient (fall back to zoomVirtual=1.05); the -for-testing dbg build terminates. This is upstream TODO #2014, not a fork bug.
+
+### Fixed (R9u)
+- Canvas.cpp paintPage: skip page when GetPageInfo(vPage)->zoomReal <= 0 (per-page guard after ValidPageNo; ~6 lines; DisplayModel.cpp untouched). LOG/CARDS alpha unchanged.
+
+### Verdict (R9v) + PDF repair
+- Root cause of the `items left on stack` warning = the PDF itself (content stream with unmatched q/Q, 20/20 first pages; MuPDF tolerates). NOT caused by this session's flashcard changes (prewarmer never engaged; verified in log). NOT caused by bookmark/outline edits made same day (outline edits do not touch content streams).
+- Repaired copy (PyMuPDF `doc.save(clean=True, garbage=4, deflate=True)`): 49 pages, 23 TOC identical, 0 annots, A4 mediabox unchanged; render OK; 15/20 pages balanced, 5 tolerated by MuPDF. ORIGINAL preserved as backup `Filosofia medica RESUMEN PARCIAL BK.pdf` in G:\Meu Drive\... (user deletes after satisfaction); fixed file placed under original name; user already validated flashcard on another doc OK.
+
+### Lesson
+- MUPDF close-device FZ_ERROR_ARGUMENT is logged, caught, tolerated; the DEBUG build's getZoomSafe ReportDebugIf is the only FATAL point — guard paint paths on per-page zoom validity; repair malformed PDFs with fitz `clean=True` (content sanitize) never outline edits.
+
+## 2026-11-14 (s64-R9u) - flashcard mask paint zoom guard
+
+### Fixed
+- PaintFlashcardMasks in Canvas.cpp: guard skip when page `zoomReal <= 0` (transient upstream #2014); `getZoomSafe` ReportDebugIf(FATAL in dbg builds) prevented mask painting on zero-zoom pages during relayout; add per-page `GetPageInfo(vPage)->zoomReal` check after `ValidPageNo` to `continue` skip painting this rect this frame, resumes on next repaint after relayout. Short comment noting the zero-zoom transient (upstream #2014) so it is not "fixed" again.
+
+### Verified
+- Build 0/0; `issue-2799` passed; `ad-hoc-s64-crop` passed; `ad-hoc-s64-apply-gating` passed; `ad-hoc-s64-tick-attr` passed; `ad-hoc-s64-prewarm` passed (n=1 epoch=2, worker clean). MD5 out/dbg64 == Compiled.
+
+## 2026-11-14 (s64-R9s) - toolbar labels still ellipsized (round 2)
+
+### Fixed
+- Round 1 (R9q RelayoutFrame re-enforce + Flashcard pass) was not enough: same window width, labels still flipped between full and ellipsized ("Flashcard" -> "Flash...", Edit "+Text" -> "+Te..."). Round 2 root cause, two bugs:
+  - `TB_GETBUTTONINFOW` / `TB_GETBUTTONINFO` return the button INDEX on success (0 is falsy), negative on failure — every `if (!TbGetButtonInfo(...)) continue;` / truthy test silently skipped button index 0 (the first text button of each toolbar, e.g. Edit "+Text", Flashcard "Reveal", Arch "Scale"). Raw `TB_GETBUTTONINFO` (ANSI) with a wide struct also silently failed (in `ToolbarPaintSubclassProc` the whole wipe+redraw never ran — comctl's ellipsized label stood). All call sites now use `TbGetButtonInfo` with `< 0` / `>= 0` checks.
+  - Explicit `cx` does NOT survive comctl: BTNS_SHOWTEXT widths are re-derived from the STRING on every layout pass, so any width pin is re-shrunk and comctl under-measures vs our DC font. Fix = bake the 12px pad as leading SPACES into the label string itself (Autoscroll/Study precedent) in `EnforceToolbarTextButtonWidths`; all draw paths (ReBarWndProc, ToolbarArchEditRebarSubclassProc, ToolbarPaintSubclassProc, FlashcardReBarSubclassProc) trim leading spaces before painting. cx pin now only applies when the label wasn't padded. Autoscroll excluded (its spaces own the timer-trio reservation). Dump `text=` field now reports the trimmed label (tests key on it).
+  - Follow-up hardening: the pad rewrite is now idempotent — `TBIF_TEXT` is re-sent only when the leading-space count differs from the padded size. The enforce pass runs inside `RelayoutFrame` (every relayout, incl. the Flashcard toggle path); re-writing every text button's string per relayout made comctl re-lay out the toolbars dozens of times per toggle.
+
+### Verified
+- Build 0/0; `issue-5869` passed (dump parser used `text=`); dark-mode screenshot: main/Edit/Arch/Flashcard labels all render full at 1280px, Edit strip shows "+Text" fully.
+
+## 2026-11-14 (s64-R9r) - flashcard toolbar AppHangB1
+
+### Fixed
+- FlashcardPrewarmInvalidate() drain-wait spun 400x Sleep(1) on UI thread; Sleep(1) inherits ~15.6ms timer granularity (process never raises it) => up to ~6.2s frozen UI per call => Windows AppHangB1 ("TumatraPDF não está respondendo"). Fired on every StopSession / RemoveTab / OnTabChanged / StudyTick timer-expiry that had an in-flight worker job (toggle OFF = flashcard button). Fix (Commands_Flashcard.cpp): drain loop now bounded by a real 50ms deadline via GetTickCount; worker shutdown join 2000->500ms. Any UI-thread drain/join must be wall-clock-bounded, never iteration-count-bounded.
+
+### Notes
+- WER AppHangB1 x7 (ReportArchive, Report.wer only, NO minidumps): 11-12 (exe built Nov 4) + 11-13 23:31 (exe built Nov 13 22:37) = pre-prewarmer builds - possible long-standing latent freeze on flashcard-button path (SidebarPopulate ExtractPageText per cloze is the heavy path); NOT reproducible here (Gallo 259p/40clozes, 5-card fixtures, slider-toggles all responsive). 5 on 11-14 (22:34 x3, 22:53, 22:55) - all on R9p builds within minutes of each deploy (TargetAppVer timestamps decode UTC\code builds match deploy order). History-load hypothesis DEBUNKED: user profile 1KB (books:{}), reading-stats/flashcard-stats 0 bytes, FlashcardStudy/ 0 files, toggle-ON path does no history I/O at all (tiny profile merge only). Probes responsive: fresh scratch appdata AND copy of user's real appdata AND book opened direct from G:\Meu Drive (Google Drive). Lock audit CLEAN: pagesLock->renderLock->docLock consistent everywhere incl. worker (only locked GetFzPageInfo entry allowed); no ABBA vs UI paint. Regressions 5/5 on fix build (issue-2799, s64-crop, s64-apply-gating, s64-tick-attr, ad-hoc-s64-prewarm - n=1 epoch=2, worker clean). Build 0/0; out/dbg64 == Compiled (MD5 C7A983152866BE52B3BA68E015CF3B37).
+
+## 2026-11-14 (s64-R9q) - random study order default + reinsert epoch bump
+
+### Changed
+- Flashcard RandomOrder advanced setting default false->true (gen-settings.ts; name kept). Random = BuildFilteredStudyOrder Shuffles new/due groups ONCE at study-session build (draw sequential). Default applies to FRESH appdata / settings files lacking the key only — bools serialize unconditionally, existing settings files carry explicit `RandomOrder = false`.
+- rating==1 (Again) reinsert: `FlashcardPrewarmInvalidate()` right after studyOrder.Append (Commands_Flashcard.cpp) - epoch bump drops stale-window warm jobs; re-Enqueue rebuilds window over mutated list. No other invalidate added in rate path.
+
+### Notes
+- gen-code.ts blocked at genVirtKeys (`cl` not in PATH, known); flags/commands regen idempotent (no diff); Settings.h + Advanced-options-settings.md regenerated via `bun cmd/gen-settings.ts` standalone. Build 0 err/2 pre-existing warn; MD5 out/dbg64 == Compiled (B106384DB75BAACB068E0E487CB534F4); regressions issue-2799 / ad-hoc-s64-crop / ad-hoc-s64-apply-gating / ad-hoc-s64-tick-attr PASS; fresh-appdata probe (prewarm5, fresh -appdata): log `order=random`, 0 crashes.
+
+## 2026-11-14 (s64-R9p) - flashcard adaptive prewarmer P1+P2
+
+### Added
+- Flashcard adaptive prewarmer, phases 1+2 (`Commands_Flashcard.cpp`; spec `tests/tmp/s64/fc-preload-analysis.md`, branch fix/profile-sync-cascade). P1: EWMA of per-advance card-switch wall ms (`win->flashcard.cardSwitchMsEwma`, 0.7/0.3, cap 2000ms, updated in `FlashcardNavigateToEntry` wrapper) drives sync-prefetch budget N = clamp(round(150/ewma), 0, tierCap); tierCap 0/1/2 from cores+GlobalMemoryStatusEx static-cached; silent N=0 when ewma>400 / memLoad>=85 / availPhys<512MB / tier0. P2: one BELOW_NORMAL worker (create at study start/CmdFlashcardStudy ON+ensure, join at FlashcardStopSession/study-OFF/timer-expiry teardown, 2s wait); mutex FIFO <=4 in-flight jobs, <=2 tile reqs, <=2 warm docs per batch; d1 = same-dm fz page-info warm (GetFzPageInfo loadQuick ONLY) + virtual-page `gRenderCache->RequestRendering` iff `PageVisibleNearby` + !pauseRendering; d2 = other-tab fz-only; epoch `volatile LONG gFcWarmEpoch` bumped Interlocked on invalidate (ApplyStudyOrder / OnTabChanged / StopSession / timer-expiry / CmdFlashcardAdd / study ON|OFF) + drain-wait <=400ms; `RemoveTab` (Tabs.cpp) bumps epoch BEFORE tab/engine teardown (bump-before-free kills UAF); idle one-shot pump in FlashcardStudyTick (`prewarmFilledForIdx`). extraPages warmed. Cross-doc tile warm deliberately skipped (PageVisibleNearby aborts offscreen tiles). P3 = setting-only `FlashcardPreloadSessionBooks` (bool, default false) — lazy-tab background load NOT implemented (UI-thread-only path; SumatraPDF.cpp read-only).
+
+### Notes
+- Probe `tests/tmp/s64/ad-hoc-s64-prewarm.ts` + 5-cloze fixture `tests/tmp/s64/fc-prewarm-5.pdf` (PyMuPDF clone of fc-paint-book.pdf, 4 extra TumatraPDF-Flashcard-author Highlight annots): worker start/stop clean, crash-ish lines 0, navigate `cached=` lines present, EWMA 150→81→57→45. Warm jobs NOT exercised: dev box silently degraded (availPhys ~830MB, memLoad>=85) → N=0 by design; mechanism disambiguated by budget==0 logf line added for exactly this. User: verify warm-job path (`prefetch idx=` / `prewarm epoch=… n>=1` lines) on a lighter machine; live validation pending. gen-code.ts blocked at genVirtKeys (`cl` not in PATH) — Settings.h regenerated via `bun cmd/gen-settings.ts` standalone (FlashcardPreloadSessionBooks added); Settings.h regen churn included. Build 0/0; out/dbg64 == Compiled (MD5 DA5C1E1F65E659A2CB977A312EF698E3); regressions issue-2799 / ad-hoc-s64-crop / ad-hoc-s64-apply-gating / ad-hoc-s64-tick-attr PASS.
+
+## 2026-11-14 (s64-R9q) - toolbar labels ellipsized
+
+### Fixed
+- Secondary toolbar labels rendered truncated/ellipsized ("+Text" -> "+Te...", "Settings" -> "Sett..."). comctl derives `BTNS_SHOWTEXT` button widths from the label on EVERY layout pass, and `RelayoutFrame` resizes the Arch/Flashcard/Edit rebars right after the toolbars are shown, so the width `PostAddTextButtonSizing` pinned at create time was re-derived (narrower) and the label got clipped.
+  - `Toolbar.cpp` `EnforceToolbarTextButtonWidths`: skip `CmdFlashcardStudy` — its width is reserved by leading spaces in the label (timer trio), pinning `cx` + dropping `BTNS_AUTOSIZE` would collapse that room.
+  - `FlashcardToolbar.cpp`: toolbars had NO width pass at all (Reveal/Next/Filter/Session/Settings relied purely on comctl); now runs `PostAddTextButtonSizing` after `TbSetButtonSize`.
+  - `SumatraPDF.cpp` `RelayoutFrame`: after the rebar resizes, re-pin measured widths for main + Arch + Flashcard + Edit toolbars (gated by `updateToolbars`). Pass only widens and is deterministic → no-op when comctl's derivation already fits.
+
+### Verified
+- Build 0 erros/0 avisos; `TumatraPDF.exe` copied to `Compiled/`. First attempt failed with `LNK1104 libsumatrapdf.dll` because a running instance held the DLL — build after closing it passed.
+
+## 2026-11-14 (s64-R9p) - Save button stayed hidden
+
+### Fixed
+- Save toolbar button (`CmdSaveAnnotations`) missing after some state changes. Root cause: per-button visibility (`TBSTATE_HIDDEN`) is only recomputed by `ToolbarUpdateStateForWindow(win, true)`, and two paths changed the inputs to `ctx.supportsAnnots` (`EngineSupportsAnnotations(engine) && !win->isFullScreen`, CommandAvailability.cpp:473) without re-running it:
+  - `ExitFullScreen` (SumatraPDF.cpp): buttons kept state computed while `isFullScreen` was true — Save stayed gone after Esc until a resize/doc load/tab switch.
+  - `LoadModelIntoTab` (SumatraPDF.cpp:4184): `UpdateUiForCurrentTab` refreshes while `showHomeOverlay` is still on (hides all but Home), then overlay cleared with no second refresh — opening a book from the home page left the toolbar without Save.
+- Both holes now call `ToolbarUpdateStateForWindow(win, true)` after the flag flip. Build 0/0; exe copied to `Compiled/`.
+
+### Notes
+- `C:\...\out\dbg64\InstallerData.dat` was missing (RC2135 from `SumatraPDF.rc`); regenerated with `bin\MakeLZSA.exe` per the vcxproj prebuild command before the build.
+
+## 2026-11-14 (s64-R9o) - storage unification
+
+### Added
+- ProfileSyncWnd "Set Folder" button (id=7, row 0, FOS_PICKFOLDERS IFileDialog): ProfileDataSaveNow -> ReplaceWithCopy(&gGlobalPrefs->profileDataDir, picked) -> SaveSettings -> log; migrates on next launch via existing ProfEnsureProfileDirAndMigrate (copy-only). Live root-switch out of scope.
+- ProfileDataGetDataRootTemp() (ProfileData.cpp/.h): the ONE data-root resolver; profileDataDir setting wins, else per-exe app-data dir. Spaces in code comments.
+
+### Changed
+- Sidecars moved `<root>\stats\reading-stats.txt` + `<root>\stats\flashcard-stats.txt` (were: next to settings file). Copy-only migration on first load (`[stats] sidecar migrated to data-root` log); legacy files never deleted; legacy fallback read when new absent. ProfReconcileSidecars/ProfImportLegacy prefer `<root>\stats\`.
+- flashcardStudyDir -> legacy override shim: unset => per-book JSONs under `<root>\study\`; set => unchanged resolution; FlashcardStudyLoad read-fallback to legacy app-data `FlashcardStudy\<md5>.json` when override unset. NO mass migration (split documented).
+- gen-settings.ts doc strings (ProfileDataDir = data root for ALL user study data; FlashcardStudyDir = legacy override, leave empty); Settings.h regenerated via gen-settings.ts (full gen-code.ts blocked: `cl` not in PATH for virt-keys step - settings output identical).
+
+### Fixed
+- Probe ad-hoc-s64-unify.ts PASS: legacy sidecar copy-migrated to `<root>\stats\` (rows 20261110/20261113 kept + today's row appended), legacy kept, profile json under root, [stats] log line present. reading-stats.txt migrates on first autoscroll tick (not exercised). Sync-dialog PNG: 2 click attempts missed Home "Sync" - dialog visuals = user live check. Build 0/0; out/dbg64 == Compiled (MD5 4B05EB4DAB37E4D71973F618F2A9587D); regressions issue-2799 / ad-hoc-s64-crop / ad-hoc-s64-apply-gating / ad-hoc-s64-tick-attr PASS (tick-attr asserts no sidecar path - no expectation change). NOTE: Settings.h diff = 2 regenerated doc strings only.
+
+## 2026-11-14 (s64-R9n) - flashcard study-tick tab attribution
+
+### Fixed
+- s64-R9n: FlashcardStatsAddSeconds/AddCard credited win->CurrentTab() — cross-doc session + manual Ctrl+Tab mid-study put per-doc FileState.flashcardStudyTimeSec/flashcardCardsDone + profile perDoc rows on the WRONG book. Both now take the card's OWNING WindowTab (studyOrder[curIdx].tab, e.tab) resolved at the call-site (tick + HandleFlashcardRate); null/closed tab skips the per-doc credit (window-level daily bucket still counted). Accumulator spaces documented in code comments: gFlashcardStats.accumSec = window/machine-level sub-second carry; win->flashcard.studyTimeSec = window-level per-card 60s cap (not per-doc); daily bucket + dirtySec window-level; FileState/profile perDoc = per-doc via passed tab. SumatraPDF.cpp untouched. Build 0/0; out/dbg64 == Compiled (MD5 54A7625E039CE9845FB02C61DE05C1A5); regressions issue-2799 / ad-hoc-s64-crop / ad-hoc-s64-apply-gating PASS. Probe tests/tmp/s64/ad-hoc-s64-tick-attr.ts: 2 tabs 1 flashcard each, study tick-b, CmdNextTab→focus tick-a → perDoc tick-b.pdf fcStudySec=3, tick-a.pdf fcStudySec=0 (correct); fcStats day bucket machine-level=3. NOTE: tumatraPDF-data_1.json is intentionally parsed by custom tokenizer, NOT JSON.parse (contains "checksum":""<hex>"" layout; raw JSON.parse fails) — do not validate it with stock JSON tooling.
+
+## 2026-11-14 (s64-R9m) - P1-migration verify closeout
+
+### Fixed
+- s64-R9m: P1-migration (FileState names-blob off-by-one, s36-az debt) confirmed already-fixed by s36-br (6df3dc3 2026-11-02); TODO entry stale → marked done with note. Migration test gen1/gen2/gen3 PASS (--no-build); build 0/0; out/dbg64 == Compiled (MD5 295786948CF6DF0FCA8F69D7A3857E8F); regressions issue-2799 / ad-hoc-s64-crop / ad-hoc-s64-apply-gating PASS. Historical perDoc profile corruption NOT auto-repairable — bleeding stopped by 6df3dc3.
+
+## 2026-11-13 (s64-R9) — Page Crop rotated (nomacs parity)
 
 ### Fixed
 - s64-R9h: Crop Align horizontal-axis residual sign fix (tilt doubled instead of zeroed: -44 -> -88, +40 -> +80, -5 -> -10); horizontal branch needed phi=+angleToHorizontal (screen-CW theta=-phi) — Canvas.cpp residual now `axis == 0 ? -angleToVertical : +angleToHorizontal`; vertical branch was exact.
@@ -23,7 +130,8 @@
 - tests/tmp/s64/ad-hoc-s64-rotated-crop.ts headless structural test (rotated [0 0 412 592] fm=1; angle=0 R8 preserved [100 100 512 692]).
 - tests/tmp/s64/sign_probe2.py PyMuPDF + named-pipe sign probe.
 - s64-R9g: Edit ON temporarily disables trim (dm->marginTrimEnabled) + two-columns (dm->viewportCropV2Enabled), restored on Edit OFF — suspend/restore via the same WM_COMMAND toggle paths (relayout/cache/toolbar consistent). Restore only-if-still-off (clobber guard) + same-doc filePath binding; user re-enable mid-edit survives Edit OFF; restore skipped+logged when active doc changed. Probe ad-hoc-s64-r9g.ts PASS (log markers, dm-level). Note: toolbar button visual state re-syncs via toggle handlers; not asserted separately (TB_GETSTATE constant corruption fixed in tests/winapi.ts — 0x040b).
-- s64-R9j: toolbar save icon replaced with nomacs-style floppy (fill->currentColor); resized to tabler-style stroke weight per user feedback (first filled 160px glyph rendered oversized/heavy vs neighbors; final: 24x24 viewBox, stroke-width 1, fill=none, ~2px padding — shell w/ top-right fold + shutter + notch + label; SvgIcons.cpp gIconSave).
+- s64-R9j: toolbar save icon replaced with nomacs-style floppy (fill->currentColor); resized to tabler-style stroke weight per user feedback (first filled 160px glyph rendered oversized/heavy vs neighbors; final: 24x24 viewBox, stroke-width 1, fill=none, ~2px padding - shell w/ top-right fold + shutter + notch + label; SvgIcons.cpp gIconSave).
+- s64-R9k: flashcard highlights marker alpha x2 (0.2) while flashcard toolbar ON && study OFF; back to normal on toolbar OFF / study ON. Paint-gate in Canvas.cpp PaintFlashcardMasks (FlashcardHighlightBoost: IsWindowVisible(rebar) && !studyMode; markerBrush 20->40 alpha; saved-annot CA not gateable - marker is the per-state lever). Repaint via existing MainWindowRerender toggles.
 
 ### Verified
 - Build 0/0 (0 warn, 0 err); MD5 AB51CE566C4DE88F24F0AA62A7165597 (out/dbg64 == Compiled; MD5 changes per incremental build).

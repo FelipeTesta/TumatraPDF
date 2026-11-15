@@ -75,7 +75,7 @@ Debug:              windbgx -Q -o -g out/dbg64/TumatraPDF.exe
 VS command-line tools (`cl.exe`, `msbuild.exe`) must be in PATH. Fallback: `MSBuild.exe sumatrapdf-src\vs2022\TumatraPDF.sln /t:TumatraPDF /p:Configuration=Debug /p:Platform=x64 /m`.
 
 ## Debug Methods
-Tools: `Tree-sitter`, `Lemma`, `Serena`, .dot files;
+Tools: `Tree-sitter`, `Lemma`, `Serena`, ...\FLOW\'.dot' files;
 For complex debuggin wich cant be solved in two temptatives, do:
   0. Read: `Lemma session start`, `lemma memories`, '.md' and '.dot' files;
   1. create a \FLOW\DEBUG\`tool_debug`.dot;
@@ -287,6 +287,7 @@ _Living document — append patterns/gotchas discovered during development._
 - **2026-10-18 (flashcard multi-page grouping)**: a PDF annotation cannot live on two pages, so ANY "one logical thing spanning pages" must be stored as N annotations + an in-file grouping key. Convention used for cross-page clozes: a shared token in the annotation AUTHOR (`TumatraPDF-Flashcard#%08X`, via `pdf_set_annot_author` = MuPDF `/T`, which survives save; other keys are not guaranteed to be written back). Do NOT put such a token in the annotation CONTENT: `RebuildCommentsFromAnnotationsInner` (EngineMupdf.cpp) turns any annot with non-empty contents into a page tooltip/comment. **TRAP**: identity checks on our annotations must use `str::StartsWith(Author(a), StrL("TumatraPDF-Flashcard"))`, never `str::Eq` — exact equality silently drops tagged annots (hit Canvas.cpp ctrl+click→List panel and the EditAnnotations filter that hides flashcard annots). Grouped cards: `Flashcard::extraPages` (secondary pages); primary page fields (`pageNo/bounds/rects`) stay the lowest page so nav/key/sort keep working.
 
 - **2026-11-04**: `MenuItemFromPoint` returns the item POSITION (0-based), never a command id — convert with `GetMenuItemID`. Burned 4 right-click rounds (s36-cg..s36-cl); pattern in Design_Guidelines §6 menus.
+- **2026-11-14 (s64-R9s)**: `TB_GETBUTTONINFOW`/`TB_GETBUTTONINFO` return the button INDEX on success and -1 on failure — a truthy test silently skips button index 0 (the first text button of a toolbar: Edit "+Text" stayed truncated). Use `TbGetButtonInfo(...) >= 0` / `< 0`; never `TB_GETBUTTONINFO` raw (ANSI message with a wide struct fails silently). Same class: explicit `cx` on BTNS_SHOWTEXT never survives comctl (re-derived from the STRING every layout pass) — bake the pad as leading SPACES in the label (Autoscroll/Study precedent), draw paths trim them, and keep the rewrite idempotent (no TBIF_TEXT re-send when already padded).
 - **2026-11-04**: scratch GUI probes (`tests/snap-*.ts`, `tests/diag-*.ts`, `err.txt`) must live under `tests/tmp/` (gitignored) — never commit or leave untracked in `tests/`; clean at round end.
 
 # 13. Informativos: English + Caveman (MANDATORY)

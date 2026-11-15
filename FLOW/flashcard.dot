@@ -1,6 +1,7 @@
 digraph Flashcard {
     rankdir=TB;
     node [shape=box, style=rounded];
+    compound=true;
 
     create [label="Create card (CmdFlashcardAdd)\nselection -> MuPDF Highlight (author=TumatraPDF-Flashcard)\ncontent EMPTY (positional mask, no text duplication)\nkey = hash(pageNo, bounds) - stable across saves\nMULTI-SELECT: Alt+drag sums disjoint selections\n(SelectionState.altAccum; Alt+click abort = restore)\n-> ONE annot with N quads = ONE card, N mask rects\n(cross-page: one card per page, annots are page-bound)", fillcolor="#c8e6c9", style=filled];
     load [label="CmdFlashcardToggle ON\nFlashcardLoadFromDocument (by author, not 'Q:' prefix)\n+ FlashcardStudyLoad (studyDoc persistence)", fillcolor="#bbdefb", style=filled];
@@ -23,6 +24,76 @@ digraph Flashcard {
     persist -> clean [style=dashed, label="reset"];
     lista [label="LISTA PANEL (Lista btn -> CmdFlashcardLista, s23)\ndocked RIGHT panel (AI-chat pattern; own width + splitter;\ncanvas shrinks via RelayoutFrame; toggle/label-close hides)\nowner-drawn listbox 4 cols: Flashcard (masked text via\nExtractPageText at populate - NOTHING stored in the PDF) |\nPag | Due (countdown AT DRAW TIME: 0min/Nmin/Nh/Nd/'—') |\nStatus colored: new=blue due=orange learn=purple ok=green\n(rows: FcListRow{cardIdx,pageNo,rating,interval,nextReviewAt})\nclick row -> FlashcardNavigateToCardInCurrentTab\nrefresh after rate + clean-current (FlashcardSidebarPopulate)", fillcolor="#e1bee7", style=filled];
     pertab -> lista [style=dotted, label="current tab's cards"];
+    stats [label="STUDY-TIME STATS (FlashcardStats.cpp; commits 80de1ac 2026-10-25 + 62b11fc 2026-10-26)
+flashcard-stats.txt next to SETTINGS file, 'YYYYMMDD <sec> <cards>'
+  (2-col legacy lines parse cards=0); plain text, no JSON
+FileState.flashcardStudyTimeSec / flashcardCardsDone per doc
+YYYYMMDD bucket = GetLocalTime (FlashcardStats.cpp:44) - DST-sensitive
+flush: dirtySec>=60s / dirtyCards>=20 / session end / toggle-off
+empty sidecar -> first card of day creates DailyEntry{0,card} (s36-az fix)
+lenient parse (strtol, n>=2), keep-sorted insertion", fillcolor="#c8e6c9", style=filled];
+    ticks [label="TIMER TICK (Commands_Flashcard.cpp:852 FlashcardStudyTick)
+kFlashcardStudyTimerID=16 (Canvas.h:45) dispatch Canvas.cpp:6672
+SetTimer(hwndCanvas, ID, USER_TIMER_MINIMUM) -> ~1ms wall ticks
+STATS: +0.01f/tick while studyMode && !revealMode,
+  per-card cap 60s (maxPerCardSec, MainWindow.h:529), tick count NOT
+  wall-clock (stalls/sleep skew) - CREDITS CURRENT TAB,
+  NOT studyOrder[curIdx].tab (misattribution bug, md §a)
+SESSION TIMER: wall-clock GetTickCount64 vs studyTimerStartTick
+  (autoscroll pattern); expiry -> studyMode off + beep + done overlay", fillcolor="#e1bee7", style=filled];
+    sesstrix [label="SESSION TIMER TRIO (in fc secondary toolbar)
+MainWindow.h FlashcardState: studyTimerCheck (hwndStudyTimerCheck)
++ label + edit (CmdFlashcardStudyTimerEdit=528, :389-412)
+studyTimerMinutesSetting (default 30) -> studyTimerMinutes>0 = armed
+progress line overlay (FlashcardTimerUIOverlayProc,
+  Commands_Flashcard.cpp:915-971; silver RGB(192,192,192) line - theme bug md §B)
+'Timer done' ∴ overlay (kFlashcardTimerDoneOverlay, 3s, theme-ok)
+shown only while study session runs; fullscreen bottom (windowed = above taskbar)", fillcolor="#e1bee7", style=filled];
+    cardsrated [label="CARDS RATED (62b11fc)
+HandleFlashcardRate -> FlashcardStatsAddCard (Commands_Flashcard.cpp:479)
+per-doc FileState.flashcardCardsDone += 1 + today's sidecar bucket
+ALL-TIME totals = FlashcardStatsGetTotalSec/Cards (sum of daily buckets,
+independent of doc path - survives rename/delete)
+sidecar col 3; FileState field appended at END (s36-az)", fillcolor="#c8e6c9", style=filled];
+    dualwrite [label="DUAL-WRITE GATE (s36-bs/bt, F8 partial)
+static bool kProfDualWriteSidecars = true (ReadingStats/FlashcardStats/
+Flashcard.cpp) - per-book *.json + sidecars STILL written;
+profile upserts (ProfileDataAddFlashcardSec/AddFlashcardCard)
+UNCONDITIONAL; FlashcardStudySave -> ProfileDataUpdateStudyDoc;
+FlashcardStudyLoad -> ProfileDataMergeStudyDoc (newest-wins lastReviewedAt)
+profile-only books merged into Config list (deduped docPath)", fillcolor="#ffcdd2", style=filled];
+    homesurf [label="HOME SURFACE (HomePage.cpp)
+'Read: Today %s | Total: %s   Flashcards: Today %d cards / %s | Total: %d cards / %s'
+(:1506-1515, merged profile+live getters)
+calendar day cells: readSec+fcSec heat (:1642, :1712-1742)
+peru/orange graph line = study-time (:1741-1755)
+calendar hover tooltip: 'Read: %s | Flashcards: %s' (:1941-1945)
+Home on => fc/arch secondary toolbars HIDDEN, restored on home-off (s36-ax)", fillcolor="#bbdefb", style=filled];
+    perftweak [label="PERF + LATE-FIXES (ar..az, post-62b11fc)
+s36-ar (877213c): mask paint viewport culling + GDI+ hoist
+s36-aq: page filter follows USER-VISIBLE page numbers
+s36-am: loader restored only first card -> fixed (FlashcardStudyPruneStates
+  at Commands_Flashcard.cpp:470 prunes orphan states)
+s36-al: active card rect in peru/orange (Peru/orange fill)
+s36-az (dab2dfe): study-scroll strip gate removed (masks doc-anchored)
+c4c70ea: save-reload preserves fork state (invert/contrast/trim/crop/timer)
+aecd3b4: highlight opacity 0.4 -> 0.1
+dab2dfe/aa09dcf/0b2b0c0: profile F3s3/F4/F5 + F6 sync window + F7 + F8 s1/s2", shape=note, fillcolor="#fff9c4", style=filled];
+    rate -> cardsrated [style=dotted];
+    ticks -> stats [style=dotted];
+    ticks -> sesstrix [style=dotted];
+    cardsrated -> dualwrite [style=dotted];
+    stats -> dualwrite [style=dotted];
+    stats -> homesurf [style=dotted];
+    ui -> homesurf [style=dotted];
+    ticks -> perftweak [style=dotted];
+    subgraph cluster_preload {
+        label="Preload / cache (study=on)";
+        pa3 [label="PA3 PREFETCH (existing)\nFlashcardPrefetchUpcoming Commands_Flashcard.cpp:303\n(GetFzPageInfo loadQuick=true, next 4-5 + extraPages)\nFlashcardPrefetchRenderUpcoming :260 (next 2, gRenderCache)\n[fc][perf] logs: navigate cached=%d (:392) / prefetch idx %dms (:329)\nsync UI-thread; NOT adaptive", fillcolor="#fff9c4", style=filled];
+        prewarm [label="ADAPTIVE PREWARMER (PLANNED - not implemented, s64)\newma(cardSwitchMs) at [fc][perf] navigate; N=clamp(150/ewma, 0, tierCap 0|1|2)\nN=0 when ewma>400ms / gConserveMemory / memFree<15%\ncaps: <=2 warm docs, <=4 fz jobs, BELOW_NORMAL thread, droppable\nworker: locked GetFzPageInfo(loadQuick) only, never raw fz\nepoch counter bumped on LoadDocumentFinish/crop/trim/viewportCropV2/tab-close/filter/annot\ntiles same-dm near-target only (cross-doc tiles dropped RenderCache.cpp:626 PageVisibleNearby)\nphases: P1 instrument+N in {0,1} | P2 cross-tab tiles | P3 lazy-tab warm (opt-in, default OFF)", fillcolor="#ffcdd2", style=filled];
+        pa3 -> prewarm [style=dashed, label="evolves"];
+    }
+    perftweak -> pa3 [style=dotted];
     pending [label="REMAINING: bookmark-mirror live check on user's real books;\nimage-occlusion IO-1..IO-4\n(decisions IO-D1/D2/D3 pending);\nuser live tests: filter/global-session/Lista visual", shape=note, fillcolor="#ffcdd2", style=filled];
     clean -> pending [style=dotted];
 
@@ -38,4 +109,12 @@ digraph Flashcard {
 
     pertab [label="PER-TAB STATE (s22 foundation): WindowTab::flashcard\n= FlashcardTabState{cards, studyDoc, filterExpr,\nfilterEnabled, cardsLoaded(lazy)}\nFlashcardOnTabChanged hook in LoadModelIntoTab\n(ensures new tab's cards; fixes cross-tab mask bleed)", fillcolor="#c8e6c9", style=filled];
     load -> pertab [style=dotted];
+
+    verifynote [label="(verify) unverified-this-session claims:
+CmdFlashcardImport=512 / CmdFlashcardSession=513 (confirmed in Commands.h)
+filterdlg 'Filtro de Estudo' details (560x500), bookmark-mirror DFS range
+Lista column set; import dry-run diff semantics; session window search scope
+none of these were re-read in code - trust prior sessions", shape=note, fillcolor="#ffe0b2", style=filled];
+    filterdlg -> verifynote [style=dotted];
+    lista -> verifynote [style=dotted];
 }

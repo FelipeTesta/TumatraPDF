@@ -523,6 +523,9 @@ struct MainWindow {
         bool revealMode = false; // true when answer is revealed (Space/Enter)
         int currentCardIdx = -1; // index in studyOrder
         // Per-card stats accumulator (seconds, float because ticks are 10ms).
+        // WINDOW-level per-card accumulator (reset on advance/rate) — it is a
+        // cap, not a per-doc ledger; per-doc attribution happens inside
+        // FlashcardStatsAddSeconds via the card's owning tab.
         // Capped at maxPerCardSec: each card contributes at most 60s to the
         // flashcard study-time stats (prevents one hard card inflating stats).
         float studyTimeSec = 0.0f;
@@ -542,6 +545,11 @@ struct MainWindow {
         // of THIS window (the "global session" mode — tabs of other windows
         // never count)
         bool crossDocSession = false;
+        // s64-R9p adaptive prewarmer (see Commands_Flashcard.cpp): EWMA of
+        // per-advance card-switch cost (ms), updated at the [fc][perf]
+        // navigate point; drives the prefetch budget N.
+        double cardSwitchMsEwma = 150.0;
+        int prewarmFilledForIdx = -1; // idle-pump guard for FlashcardStudyTick
         // Secondary toolbar
         HWND hwndReBarFlashcard = nullptr;
         HWND hwndToolbarFlashcard = nullptr;
