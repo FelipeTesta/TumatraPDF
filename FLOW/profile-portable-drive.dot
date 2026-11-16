@@ -1,0 +1,193 @@
+digraph ProfilePortableDrive {
+    rankdir=TB;
+    node [shape=box, style=rounded, fontname="Consolas", fontsize=9];
+    edge [fontname="Consolas", fontsize=8];
+    compound=true;
+
+    // ===================== TWO APPS, TWO ROOTS (user's real layout) =====================
+    subgraph cluster_portable {
+        label="PORTABLE app (user's daily driver) — repo Compiled build";
+        color="#4caf50";
+        style=filled;
+        fillcolor="#e8f5e9";
+
+        p_exe [label="Compiled\\TumatraPDF.exe
+Desktop shortcut 'TumatraPDF - Atalho.lnk'
+runs with exe dir as app-data dir", fillcolor="#c8e6c9", style=filled];
+        p_settings [label="<exeDir>\\TumatraPDF-settings.txt
+343,034 B | 13,531 lines (rich)
+Holds (NOT synced by profile):
+  FileStates[~13k lines] trim/contrast/zoom/\nreadingTimeSec per book
+  TabGroups[~200 lines] named sessions
+  SessionData (last window restore)
+  ActiveTabGroup", fillcolor="#c8e6c9", style=filled];
+        p_profile [label="<exeDir>\\tumatraPDF-data_1.json
+100,247 B (rich history: books,
+reading/study day rows, perDoc)\nbackup\\00..08 (9 slots x 8h)\nstats\\ reading-stats.txt / flashcard-stats.txt\n(R9o sidecar root)", fillcolor="#c8e6c9", style=filled];
+        p_study [label="Per-book study JSONs LIVE ON DRIVE,
+NOT in exe dir:\nFlashcardStudyDir = G:\\Meu Drive\\3 Arquivos\n(5 md5.json files, mixed with user docs!)\nexeDir\\FlashcardStudy\\ holds only backup\\\n(1d/3d/7d, 26/10)", fillcolor="#fff9c4", style=filled];
+        p_legacy [label="<exeDir>\\data\\ (31/10, legacy era):
+3 md5.json (same names as Drive ones)
+<exeDir>\\reading-stats.txt 205B | flashcard-stats.txt 82B (pre-R9o sidecars)\nNO auto-adoption of these by F5", fillcolor="#fff9c4", style=filled];
+    }
+
+    subgraph cluster_installed {
+        label="INSTALLED app — v1.0.17 (15/11 00:48), fresh start";
+        color="#2196f3";
+        style=filled;
+        fillcolor="#e3f2fd";
+
+        i_exe [label="C:\\Program Files\\TumatraPDF\\TumatraPDF.exe
+app-data = %LOCALAPPDATA%\\TumatraPDF\\", fillcolor="#90caf9", style=filled];
+        i_settings [label="%LOCALAPPDATA%\\TumatraPDF\\TumatraPDF-settings.txt
+11,453 B | 515 lines (FRESH)
+TabGroups ~10 lines | FileStates ~253 lines\nSessionData ~60 lines
+NO profileDataDir | NO flashcardStudyDir", fillcolor="#90caf9", style=filled];
+        i_profile [label="%LOCALAPPDATA%\\TumatraPDF\\tumatraPDF-data_1.json
+1,219 B (EMPTY husk, books:{})
+NO perDoc/day rows — nothing was adopted\nstats\\: reading 15B | flashcard 0B", fillcolor="#90caf9", style=filled];
+        i_study [label="%LOCALAPPDATA%\\TumatraPDF\\FlashcardStudy\\ — EMPTY\n(installed has zero study books)", fillcolor="#90caf9", style=filled];
+    }
+
+    p_exe -> p_settings;
+    p_exe -> p_profile;
+    p_exe -> p_study;
+    i_exe -> i_settings;
+    i_exe -> i_profile;
+    i_exe -> i_study;
+
+    // ===================== WHY THE PORTABLE->INSTALL IMPORT DOES NOTHING =====================
+    subgraph cluster_f5 {
+        label="Root cause — ProfImportPortableInstall (ProfileData.cpp:536, F5, s36-br F4-lineage)";
+        color="#f44336";
+        style=filled;
+        fillcolor="#ffebee";
+
+        f5_guard [label="Guard rails, first match returns VOID:
+(1) gForTesting -> skip
+(2) IsRunningInPortableMode() -> return (we ARE installed)
+(3) profileDataDir advanced-set -> RETURN early (user custom root)", fillcolor="#ffcdd2", style=filled];
+        f5_probe [label="Probe paths — ADJACENT TO THE INSTALLED EXE ONLY:
+  <installExeDir>\\tumatraPDF-data_1.json
+  <installExeDir>\\FlashcardStudy\\*.json
+  <installExeDir>\\reading-stats.txt / flashcard-stats.txt
+NEVER probes a portable build living ELSEWHERE (repo Compiled\\, Desktop, other drives)", fillcolor="#ffcdd2", style=filled];
+        f5_study [label="Even IF probed, portable's real study books are NOT at
+<exeDir>\\FlashcardStudy\\ either (user moved them to Drive via
+flashcardStudyDir) -> hasPortableBooks == false", fillcolor="#ffcdd2", style=filled];
+        f5_result [label="Result on user's machine:
+portable-adjacent source EMPTY -> nothing adopts,
+no log, no dialog, NO feedback", fillcolor="#ffcdd2", style=filled];
+        f5_scope [label="Even if it fired, F5 adopts ONLY:
+primary json (books/stats/day rows/perDoc) + sidecars +
+study books.\nNEVER touches settings file:
+Sessions (TabGroups/SessionData/ActiveTabGroup) and
+FileStates (trim/zoom/readingTimeSec) stay unmirrored", fillcolor="#fff9c4", style=filled];
+
+        f5_guard -> f5_probe -> f5_study -> f5_result -> f5_scope;
+    }
+
+    // ===================== WHAT CAN/CANNOT TRAVEL =====================
+    subgraph cluster_travel {
+        label="Syncable vs NOT-syncable (verified in code)";
+        color="#607d8b";
+        style=filled;
+        fillcolor="#eceff1";
+
+        syncs [label="SYNCS via shared <root> = profileDataDir:
+  tumatraPDF-data_1.json   (books, perDoc,
+     reading/study day rows per machine)
+  backup\\NN slots         (9 x 8h rolling,
+     copied by ProfEnsureProfileDirAndMigrate)
+  stats\\ sidecars         (R9o: reading-stats.txt /
+     flashcard-stats.txt; copy-migrated on load)
+  study\\<md5>.json        (when FlashcardStudyDir EMPTY:
+     default root study\\ — covers BOTH apps)
+  Drive conflicted copies  (ProfMergeConflictedCopies adopts
+     tumatraPDF-data_*.json newest-wins/absent)", fillcolor="#c8e6c9", style=filled];
+        nosync [label="DOES NOT SYNC — lives ONLY in each app's
+TumatraPDF-settings.txt:
+  Sessions / TabGroups / ActiveTabGroup / RestoreSession
+  FileStates (trim/contrast/invert/zoom/pageNo per book,
+     readingTimeSec / flashcardStudyTimeSec snapshot)
+  Window state, sidebar width, theme, all UI prefs
+  -> separate files per app; NEVER merged by profile path;
+     portable->installed requires manual settings copy", fillcolor="#ffcdd2", style=filled];
+        importbtn [label="Import button (Profile Sync wnd, id=6):
+Prompt Replace (primary -> .pre-import + copy) or
+Merge (newest-wins per (book, key) / day row)
+FILE PICKER ONLY -> user must pick portable's json manually;
+no auto-discovery; same no-sessions limitation", fillcolor="#fff9c4", style=filled];
+        setfolder [label="Set Folder button (Profile Sync wnd, id=7, s64-R9o):
+FOS_PICKFOLDERS -> profileDataDir -> SaveSettings\nrestart -> F4 ProfEnsureProfileDirAndMigrate
+(copy-only primary+backup migration; existing Drive
+primary is NOT clobbered if already present)", fillcolor="#bbdefb", style=filled];
+
+        syncs -> setfolder [style=dotted];
+    }
+
+    // ===================== UNIFIED GOOGLE DRIVE ROOT — PLAN =====================
+    subgraph cluster_plan {
+        label="Unification plan — single Drive root for BOTH apps (target: G:\\Meu Drive\\DriveSyncFiles\\TumatraPDF)";
+        color="#9c27b0";
+        style=filled;
+        fillcolor="#f3e5f5";
+
+        step1 [label="1. Close BOTH apps", fillcolor="#e1bee7", style=filled];
+        step2 [label="2. Seed shared root <R> = G:\\Meu Drive\\DriveSyncFiles\\TumatraPDF:
+   copy portable tumatraPDF-data_1.json -> <R>\\
+   copy portable backup\\ -> <R>\\backup\\
+   copy portable stats\\reading-stats.txt (205B) + flashcard-stats.txt (96B)
+      -> <R>\\stats\\  (keep richer copies; installed 0B versions discarded)
+   copy 5 portable md5.json from G:\\Meu Drive\\3 Arquivos -> <R>\\study\\
+   (md5 = hash of full PDF path — files stay valid for both apps)", fillcolor="#e1bee7", style=filled];
+        step3 [label="3. Portable settings (<exeDir>\\TumatraPDF-settings.txt):
+   SET profileDataDir = <R>
+   CLEAR FlashcardStudyDir (leave empty)
+   -> per-book study files resolve <R>\\study\\<md5>.json from now on", fillcolor="#e1bee7", style=filled];
+        step4 [label="4. Installed settings (%LOCALAPPDATA%\\TumatraPDF\\TumatraPDF-settings.txt):
+   SET profileDataDir = <R>   (same folder, same value)
+   leave everything else untouched (keep ITS session state)", fillcolor="#e1bee7", style=filled];
+        step5 [label="5. Launch BOTH once:
+   each app logs '[profile] data root ...'; backup\\ + stats\\ coexist;
+   F4 migrate skipped (Drive primary already present);
+   portable legacy <exeDir> sidecar leftovers = dead files (kept, never deleted)", fillcolor="#e1bee7", style=filled];
+        step6 [label="6. SESSIONS (if wanted): copy portable settings -> installed settings
+   (same machine/user, same PDF paths — paths stay valid)
+   installs ALL sessions + FileStates from portable
+   ONLY DESTRUCTIVE STEP — overwrites installed's 515-line settings
+   product options: A) fresh sessions kept apart, B) full portable adopt", fillcolor="#fff9c4", style=filled];
+        step7 [label="7. Steady state:
+   both apps share ONE Drive root — stats/books sync automatically
+   sessions stay per-app (documented limitation —
+   settings file is local and never merged)
+   AVOID running both apps against Drive simultaneously
+   (last-writer-wins on whole-file save; Drive conflicted-copy
+   adoption rescues rows on next load)", fillcolor="#fff9c4", style=filled];
+
+        step1 -> step2 -> step3 -> step4 -> step5 -> step6 -> step7;
+    }
+
+    // ===================== OLD DOTS =====================
+    stale [label="FLOW/profile-system.dot is STALE:
+shows 'UNIFICATION PLANNED' + 6-button Sync dialog;
+Set Folder (id=7) + <root>\\stats + <root>\\study shipped s64-R9o (v1.0.17);
+this file supersedes that cluster for the portable/installed split", shape=note, fillcolor="#ffcdd2", style=filled];
+
+    // ===================== EDGES =====================
+    f5_result -> p_profile [style=dashed, label="still only looks here (never finds)"];
+    p_settings -> nosync [style=dashed];
+    i_settings -> nosync [style=dashed];
+    step2 -> syncs [style=dotted];
+
+    // ===================== LEGEND =====================
+    subgraph cluster_legend {
+        label="Legend";
+        color="#ccc";
+        green [label="Portable (daily driver)", fillcolor="#c8e6c9", style=filled];
+        blue [label="Installed v1.0.17", fillcolor="#90caf9", style=filled];
+        pink [label="Load/merge pipeline", fillcolor="#e1bee7", style=filled];
+        warn [label="Root cause / gap", fillcolor="#ffcdd2", style=filled];
+        plan [label="Plan / caution", fillcolor="#fff9c4", style=filled];
+    }
+}

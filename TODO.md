@@ -167,6 +167,7 @@ Feature shipped: single profile file `tumatraPDF-data_1.json` (exportable/syncab
 - [ ] **BUG-4** Contrast × Trim Config ONE-SHOT vanish (first trim-config open after launch). Fix v2 (`EnsureContrastOverlayState` invariant + self-healing) deployed 2026-09-22 — awaiting user confirmation of the exact flow; `[contrast]` breadcrumbs in debug build. NOTE (s36-az): 2026-10-25 "contrast stopped working" = save-reload state wipe (FIXED — ReloadDocument preserves extras; LOG s36-az); if it still reproduces, it is a separate flow.
 - [ ] **Ctrl+click flashcard highlight opens List** — implemented s34-b (Canvas ctrl+click detects `TumatraPDF-Flashcard` author → FlashcardSidebarShow; turns flashcard mode on if off). USER live-test pending — see queue.
 - [ ] **s34-g user validation pending**: Arch Measure Radius + Ref Line UX, resize-enlarge on a real book, flicker-free drag confirm (shipped + E2E 2026-10-11) — see queue.
+- [ ] Revisar e comparar funcionalidades PDF/.md, existem elementos diferentes que deveriam se comportar iguais, padrão de referencia:PDF. Exemplos: botão 'home' não sobrepõe; comandos de teclado não funcinam corretamente (F:fullscreen), click e arrastar não arrasta o texto, etc, revisar outros elementos que podem não estar corretos;
 
 ## Tab system
 

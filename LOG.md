@@ -1,4 +1,44 @@
-﻿## 2026-11-15 (s64-R9v) - malformed-PDF "items left on stack" incident + R9u paint guard (fix)
+## 2026-11-16 (s64-R9z) - .md preview handler
+
+### Added
+- Windows Explorer preview for Markdown files (.md / .markdown): new kMarkdownPreviewClsid ({A3F2E1D4-C5B6-4A7B-8C9D-0E1F2A3B4C5D}, RegistryPreview.h), gPreviewers entry, PreviewType::Markdown, CLSID-to-type mapping in PdfPreviewDll.cpp, LoadEngine case via CreateEngineMupdfFromData(data, "document.md"). NeedsGdiPlus excludes Markdown (pure MuPDF DIB draw path). Installer/uninstaller need no changes - they iterate gPreviewers. Registration happens at install-time; taking effect on this machine requires reinstalling the new build. Preview renders via MuPDF's HTML path (md.c + publisher CSS), NOT the in-app WebView2 renderer - output is visually similar but NOT identical; Mermaid/JS does not run in preview. Relative images do not resolve (data-only load). .md associations already in gSupportedExts.
+
+## 2026-11-16 — Portable↔Installed settings merge + Drive shared data-root (analysis + seeds)
+
+### Changed
+- Portable→installed history merge: `tests/tmp/s64/TumatraPDF-settings-merged.txt` = portable settings base (316 FileStates, 10 TabGroups, portable SessionData) + 3 installed-unique FileStates appended (Argente Semiologia 2ed.pdf, Cronograma de cursada.pdf, Patologia Resumen 3er Trimestre - Deepseek.md); duplicate-path winner = richer (time sum, then OpenCount, tie → portable); FlashcardStudyDir cleared; ProfileDataDir = G:\Meu Drive\DriveSyncFiles\TumatraPDF inserted; dead `Checksum` line dropped; Latin1 (byte-lossless) round-trip.
+- Verify load-restore via -for-testing scratch launch: tabs restore (nTabs: 3), page restore (page 304 Suarez Richards) — merged settings parses & loads cleanly.
+- Drive shared root Seeded `G:\Meu Drive\DriveSyncFiles\TumatraPDF`: tumatraPDF-data_1.json 100247B (portable), backup\00..08 (9/9 ok, portable wins; installed husks 00/02/05 NOT copied — kept in install app-data untouched), stats\reading-stats.txt 205B + flashcard-stats.txt 96B, study\ = 5 md5.json from G:\Meu Drive\3 Arquivos.
+- Portable settings: FlashcardStudyDir → empty (byte-level surgery, .bak = TumatraPDF-settings.txt.pre-s64-merge-20261116.bak).
+
+### Notes
+- Deploy to install app `C:\Program Files\TumatraPDF` — access DENIED to agents (no write ACL); merged file delivered as `C:\Users\Testa\Desktop\TumatraPDF-settings-merged-TUMATRA-2026-11-16.txt`; user must copy it in manually (admin) then click Profile Sync → Set Folder → pick the shared Drive root (silent F4 skip when target primary exists — it does; no dialog fires).
+- Dark-theme verification (PNGs tests/tmp/s64/shot-{import,cloudrevert,backups}-dark.png): dialog bodies = theme dark, white text readable (s40-v pattern). Captions render white on Win10 19045 (consistent across the three dialogs — system-defined, not a theme-API bug).
+- FLOW/profile-portable-drive.dot documents the portable/installed split + unification plan (new dot, supersedes stale UNIFICATION-PLANNED cluster in profile-system.dot).
+- BUG (open): ProfImportPortableInstall (ProfileData.cpp:536) probes ONLY installed-exe-adjacent paths — dead for Compiled-based portable layout; user must use Set Folder manually (or Import button). The expected "already exists" 3-way dialog (replace/replace/MERGE) at Set Folder DOES NOT EXIST — Set Folder is silent; no replace/merge choice UI exists; candidate feature if user wants it.
+- TODO idea (not added): 3-way merge chooser for shared Drive root.
+
+### Correction (deploy)
+- Target corrected: installed settings does NOT live in Program Files (ACL denied, earlier note superseded). GetSettingsPathTemp (AppSettings.cpp:302) resolves to per-app USER dir = %LOCALAPPDATA%\TumaruPDF\TumaruPDF-settings.txt. Merged file was deployed there 2026-11-15 (hash matches portable Desktop copy); original backed up to %LOCALAPPDATA%\TumaruPDF\TumaruPDF-settings.txt.pre-merge-20261116.bak (11,449 B, untouched).
+- Stats caveat: merge carries FileStates/TabGroups/SessionData only; installed profile json remains a 1,219 B husk. User must open INSTALLED app -> Profile Sync -> Set Folder -> pick G:\Meu Drive\DriveSyncFiles\TumaruPDF (seeded with the 100,247 B portable profile) to inherit reading/flashcard stats. Portable app: same click if user wants shared sync.
+- Deployed installed settings file md5 520D2968B170A40D5CA01AA513F65A7A8FAB78BE2127A72C877C68835367BED5, FilePath count 319 — byte-identical to tests/tmp/s64/TumaruPDF-settings-merged.txt.
+- UAC detour note: the previous note claiming the merge was "delivered as desktop file, Program Files denied, user must admin-copy" is SUPERCEDED — no admin rights were needed; Desktop merge file remains as a redundant backup, user may delete it.
+
+## 2026-11-15 (s64-R9w) - installer redesign + report preview fix
+
+### Changed
+- Installer rebranded end to end. Texts "SumatraPDF" -> "TumatraPDF" (Installer.cpp / Uninstaller.cpp; user-visible strings + logs; legacy uninstall file list "SumatraPDF.exe" / "SumatraPDF-settings.txt" kept on purpose). Temp uninstaller copy `TumatraPDF-Uninstaller.exe` (Uninstaller.cpp 3 sites). In-install docs URL already github.com/FelipeTesta/TumatraPDF#readme.
+- Installer wordmark: old per-letter animated "SUMATRAPDF" (Impact 40pt, kCol1..5, LetterInfo anim machinery) replaced by PLAIN static "TumatraPDF" Impact 40pt, off-white (#F5F5F0) on brand tile - zero animation (user decision). Frame background yellow bug (kInstallerWinBgColor) -> brand tile #202634. Version badge (rotated 45deg) kept, off-white.
+- New brand icon wired everywhere: gfx/svg/tumatrapdf.svg + gfx/tumatrapdf.ico (256/64/48/32/16; geometric dark tile + T + 5 brand-col dots; rasterized by cmd/svg-to-ico.ts + locally installed bin/resvg.exe). SumatraPDF.rc ids 1 & 2 ICO -> tumatrapdf.ico; resource.h IDI_SUMATRAPDF -> IDI_TUMATRAPDF (SumatraConfig.cpp GetAppIconID); PdfFilter.rc / PdfPreview.rc ProductName + FileDescription -> TumatraPDF; version stamps via kAppName/kPublisherStr.
+- Publisher string everywhere: "Krzysztof Kowalczyk, modificado por FTesta" (Version.h kPublisherStr; RegistryInstaller RegisterForOpenWith ApplicationCompany).
+- Machine-side preview fix (this PC, HKLM): .pdf\shellex\{8895b1c6...}|{e357fccd...} = {3D3B1846-...} (confirmed present), PreviewHandlers/HKCU label "TumatraPDF Preview (*.pdf)", NEW: SOFTWARE\TumatraPDF\Capabilities (ApplicationDescription/Name/Icon) + RegisteredApplications\TumatraPDF + SOFTWARE\Classes\TumatraPDF.pdf Application/ApplicationCompany filled -> Default Apps lists TumatraPDF Reader; Explorer restarted. CLSID\{3D3B...} DisplayName renamed. NOTE: the fork deliberately does NOT force .pdf default ProgID (Win10 UserChoice protected) - user sets default in Settings. Installer preview opt-in checkbox existed but never worked on this machine because the file-association/Capabilities half of the registration never landed.
+- Release assets regenerated: Compiled/TumatraPDF.exe, -portable-win64.exe, -install-win64.exe (build-installer.ts, 213.8s, 0/0). App icon visible after install/shortcut re-creation.
+
+### Notes
+- Legal attribution unchanged (LICENSE / headers: "SumatraPDF project authors"; About kept "based on SumatraPDF").
+- Preview now should work once the app is set as default PDF handler in Settings > Default Apps; if it still fails, check HKCR\.pdf (empty by design) - the log reproducer is src/cmd/show-preview-reg.ts.
+
+## 2026-11-15 (s64-R9v) - malformed-PDF "items left on stack" incident + R9u paint guard (fix)
 
 ### Incident
 - App "closed itself" on flashcard toggle of book `Filosofia medica RESUMEN PARCIAL.pdf`. Not a hang: -for-testing DEBUG build's `ReportDebugIf(true)` in `getZoomSafe` (DisplayModel.cpp:1821, upstream TODO #2014 "sometimes zoom on a page is 0") killed the process (exit 105). Path: CmdFlashcardToggle -> HandleCommandFlashcard -> MainWindowRerender -> OnPaintDocument -> DrawDocument -> PaintFlashcardMasks -> paintPage -> CvtToScreen -> getZoomSafe(pageInfo->zoomReal == 0).
