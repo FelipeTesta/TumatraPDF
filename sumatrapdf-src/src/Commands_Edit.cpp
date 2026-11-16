@@ -637,12 +637,13 @@ void EditToolsPaintImageOverlays(MainWindow* win, DisplayModel* dm, HDC hdc) {
     if (!dm || st.imageEdits.len == 0) {
         return;
     }
+    DsAccents ac = DsAccentsGet();
     Gdiplus::Graphics gs(hdc);
-    static Gdiplus::Pen selPen(Gdiplus::Color(255, 0, 120, 255), 1.6f);
-    static Gdiplus::Pen pendPen(Gdiplus::Color(255, 0, 120, 255), 1.0f);
-    static Gdiplus::SolidBrush handleBrush(Gdiplus::Color(255, 255, 255, 255));
-    static Gdiplus::Pen handlePen(Gdiplus::Color(255, 0, 0, 0), 1.0f);
-    static Gdiplus::SolidBrush dimBrush(Gdiplus::Color(110, 0, 0, 0));
+    Gdiplus::Pen selPen(Gdiplus::Color(255, GetRValue(ac.accentBlue), GetGValue(ac.accentBlue), GetBValue(ac.accentBlue)), 1.6f);
+    Gdiplus::Pen pendPen(Gdiplus::Color(255, GetRValue(ac.accentBlue), GetGValue(ac.accentBlue), GetBValue(ac.accentBlue)), 1.0f);
+    Gdiplus::SolidBrush handleBrush(Gdiplus::Color(255, GetRValue(ac.textOnAccent), GetGValue(ac.textOnAccent), GetBValue(ac.textOnAccent)));
+    Gdiplus::Pen handlePen(Gdiplus::Color(255, 0, 0, 0), 1.0f); // literal black: handle outline
+    Gdiplus::SolidBrush dimBrush(Gdiplus::Color(110, 0, 0, 0));  // translucent scrim, not a palette color
     for (int i = 0; i < st.imageEdits.len; i++) {
         auto& ed = st.imageEdits[i];
         bool isSel = (i == st.selEditIdx);

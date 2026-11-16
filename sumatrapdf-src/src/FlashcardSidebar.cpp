@@ -25,17 +25,12 @@
 #include "WindowTab.h"
 #include "SumatraPDF.h"
 #include "Theme.h"
+#include "ToolbarLayout.h"
 #include "Translations.h"
 #include "resource.h"
 #include "Darkmodelib.h"
 #include "Flashcard.h"
 #include "FlashcardSidebar.h"
-
-// status colors (readable on light and dark backgrounds)
-static COLORREF kFcStatusNew = RGB(33, 150, 243);   // blue
-static COLORREF kFcStatusDue = RGB(239, 108, 0);    // orange
-static COLORREF kFcStatusLearn = RGB(156, 39, 176); // purple
-static COLORREF kFcStatusOk = RGB(67, 160, 71);     // green
 
 constexpr int kFcListMinDx = 260;
 
@@ -78,18 +73,20 @@ static FcListCols FcListColumnAnchors(HWND hwnd, int w) {
 
 // status word + color from the card's study state (computed at draw time so
 // the Due countdown stays fresh without repopulating)
+// Uses DsAccentsGet() at paint time for theme-aware colors (never baked).
 static COLORREF FcListStatusColor(const FcListRow& row, i64 now) {
+    DsAccents ac = DsAccentsGet();
     bool isNew = row.rating == 0;
     if (isNew) {
-        return kFcStatusNew;
+        return ac.accentBlue;
     }
     if (row.nextReviewAt <= now) {
-        return kFcStatusDue;
+        return ac.accentOrange;
     }
     if (row.interval <= 1) {
-        return kFcStatusLearn;
+        return ac.accentPurple;
     }
-    return kFcStatusOk;
+    return ac.accentGreen;
 }
 
 static TempStr FcListStatusTextTemp(const FcListRow& row, i64 now) {

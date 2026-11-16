@@ -209,6 +209,12 @@ sidebar, AI-chat panel, home-page additions). Upstream look stays upstream.
   (`-Client WxH` to pin a size, `-List` to find a popup/overlay by class).
   No screenshot = not done; name the PNG in the LOG.md entry.
 
+### 6.2 Color tokens (added 2026-11-15, s64 color-token migration)
+- COLOR RULE: new UI color = DsAccents token (dark/light pair OR mid-luminance = same value in both DsAccentsGet branches). No raw RGB literals in fork UI paint code.
+- Exceptions: chroma-key (magenta), translucent scrims, F7 brand palette kBrandPalette, pure black/white overlay pairs.
+- Static-baked GDI+ pens/brushes FORBIDDEN for palette colors (theme-switch hazard — Commands_Edit fixed 2026-11-16).
+- Agent scratch: tests/tmp/ only (gitignored), clean at round end (TumatraPDF residue incident 2026-11-15).
+
 ## 7. Dual namespaces — HARD rules (project bug history)
 
 - **virtual pageNo vs physical pageNo** (TC2 crop): features MUST route through

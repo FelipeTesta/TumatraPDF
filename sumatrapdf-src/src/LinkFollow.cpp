@@ -16,6 +16,7 @@
 #include "base/GuessFileType.h"
 #include "EngineAll.h"
 #include "DisplayModel.h"
+#include "ToolbarLayout.h"
 #include "SumatraPDF.h"
 #include "MainWindow.h"
 #include "WindowTab.h"
@@ -252,11 +253,8 @@ TempStr KeyboardLinkFollowResultTemp(int* exitCodeOut) {
     return ToStrTemp(out);
 }
 
-constexpr COLORREF kLinkFollowHighlightCol = RGB(0xff, 0xf1, 0x00);
-constexpr COLORREF kLinkFollowBadgeBgCol = RGB(0xd3, 0x2f, 0x2f);
-constexpr COLORREF kLinkFollowBadgeTextCol = RGB(0xff, 0xff, 0xff);
-
-static void PaintLinkBadge(Gdiplus::Graphics& gs, Gdiplus::Font& font, const Rect& linkRect, int number) {
+// Resolved at paint time via DsAccentsGet() — not constexpr (theme-aware)
+static void PaintLinkBadge(Gdiplus::Graphics& gs, Gdiplus::Font& font, const Rect& linkRect, int number, COLORREF badgeBg, COLORREF badgeText) {
     WCHAR label[2] = {(WCHAR)(L'0' + number), 0};
 
     Gdiplus::RectF layout(0, 0, 1000, 1000);
@@ -278,11 +276,11 @@ static void PaintLinkBadge(Gdiplus::Graphics& gs, Gdiplus::Font& font, const Rec
     }
 
     u8 r, g, b;
-    UnpackColor(kLinkFollowBadgeBgCol, r, g, b);
+    UnpackColor(badgeBg, r, g, b);
     Gdiplus::SolidBrush bgBrush(Gdiplus::Color(235, r, g, b));
     gs.FillRectangle(&bgBrush, x, y, dx, dy);
 
-    UnpackColor(kLinkFollowBadgeTextCol, r, g, b);
+    UnpackColor(badgeText, r, g, b);
     Gdiplus::SolidBrush textBrush(Gdiplus::Color(255, r, g, b));
     Gdiplus::PointF at((float)(x + padX), (float)y);
     gs.DrawString(label, 1, &font, at, &textBrush);
@@ -301,17 +299,19 @@ void PaintKeyboardLinkTargets(MainWindow* win, HDC hdc) {
         return;
     }
 
+    DsAccents ac = DsAccentsGet();
+
     Vec<Rect> screenRects;
     for (int i = 0; i < n; i++) {
         const KeyboardLinkTarget& t = win->linkFollowTargets[i];
         screenRects.Append(dm->CvtToScreen(t.pageNo, t.rect));
     }
-    PaintTransparentRectangles(hdc, win->canvasRc, screenRects, kLinkFollowHighlightCol, 90, 2, false);
+    PaintTransparentRectangles(hdc, win->canvasRc, screenRects, ac.highlightYellow, 90, 2, false);
 
     Gdiplus::Graphics gs(hdc);
     gs.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
     Gdiplus::Font font(L"Segoe UI", (float)DpiScale(win->hwndCanvas, 11), Gdiplus::FontStyleBold, Gdiplus::UnitPixel);
     for (int i = 0; i < n; i++) {
-        PaintLinkBadge(gs, font, screenRects[i], i + 1);
+        PaintLinkBadge(gs, font, screenRects[i], i + 1, ac.accentRed, ac.textOnAccent);
     }
 }

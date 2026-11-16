@@ -2268,6 +2268,7 @@ static LRESULT CALLBACK WndProcEtaOverlay(HWND hwnd, UINT msg, WPARAM wp, LPARAM
             DeleteObject(hBrush);
             // Draw the text on a black rounded background so it's readable over
             // any page content.
+            // ETA overlay: black bg + white text (colorkey = magenta literal below — do NOT tokenize)
             InflateRect(&rc, -4, -2);
             HBRUSH bg = CreateSolidBrush(RGB(0, 0, 0));
             FillRect(hdc, &rc, bg);

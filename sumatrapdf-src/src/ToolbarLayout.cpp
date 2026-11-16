@@ -38,7 +38,7 @@ DsAccents DsAccentsGet() {
         a.textHot = RGB(120, 130, 140);
         a.silver = RGB(120, 130, 140);
         a.silverHi = RGB(198, 209, 215);
-        a.today = RGB(255, 140, 0);
+        a.today = RGB(255, 152, 0); // harmonized with accentOrange (mid-luminance)
         a.flashcardActive = RGB(205, 133, 63); // Peru: warm, readable on dark pages
         a.cellEmpty = RGB(20, 20, 20);
         a.cellOutline = RGB(90, 90, 90);
@@ -48,13 +48,17 @@ DsAccents DsAccentsGet() {
         a.cellGrade[1] = RGB(150, 150, 150);
         a.cellGrade[2] = RGB(190, 190, 190);
         a.cellGrade[3] = RGB(225, 225, 225);
+
+        // Theme-paired tokens (dark branch)
+        a.bgSelToolbar = RGB(27, 29, 33);
+        a.accentErrorSoft = RGB(239, 154, 154); // soft red for dark (paired with accentRed)
     } else {
         a.text = RGB(90, 90, 90);
         a.textStrong = RGB(30, 30, 30);
         a.textHot = RGB(90, 100, 120);
         a.silver = RGB(140, 150, 165);
         a.silverHi = RGB(90, 110, 140);
-        a.today = RGB(215, 110, 0);
+        a.today = RGB(255, 152, 0); // harmonized with accentOrange (mid-luminance)
         a.flashcardActive = RGB(184, 115, 51); // Peru, deepened for white pages
         a.cellEmpty = RGB(235, 235, 235);
         a.cellOutline = RGB(205, 205, 205);
@@ -64,7 +68,22 @@ DsAccents DsAccentsGet() {
         a.cellGrade[1] = RGB(175, 175, 175);
         a.cellGrade[2] = RGB(150, 150, 150);
         a.cellGrade[3] = RGB(120, 120, 120);
+
+        // Theme-paired tokens (light branch)
+        a.bgSelToolbar = RGB(92, 96, 104);
+        a.accentErrorSoft = RGB(239, 154, 154); // soft red for light (paired with accentRed)
     }
+
+    // Mid-luminance THEME-AGNOSTIC tokens (same in both branches)
+    a.accentBlue = RGB(33, 150, 243);
+    a.accentGreen = RGB(67, 160, 71);
+    a.accentOrange = RGB(255, 152, 0);
+    a.accentRed = RGB(229, 57, 53);
+    a.accentPurple = RGB(156, 39, 176);
+    a.textMuted = RGB(158, 158, 158);
+    a.highlightYellow = RGB(255, 241, 0);
+    a.textOnAccent = RGB(255, 255, 255);
+
     return a;
 }
 

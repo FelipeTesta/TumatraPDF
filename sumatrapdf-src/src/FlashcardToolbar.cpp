@@ -42,16 +42,6 @@ void ToolbarRewrapAfterSizing(MainWindow* win, HWND hwndToolbar, bool force);
 // Created when flashcard mode is toggled on.
 // Pattern follows Arch Tools secondary toolbar (Toolbar2).
 
-// Semantic state colors (Design_Guidelines §6.1: state markers keep raw
-// values — mid-luminance, readable on both theme backgrounds; centralized
-// here so the pairs stay consistent across every draw site)
-static COLORREF kFcSyncLegacy = RGB(158, 158, 158);   // grey: legacy file, no saved path
-static COLORREF kFcSyncOk = RGB(67, 160, 71);         // green: PDF found at the saved path
-static COLORREF kFcSyncMissing = RGB(229, 57, 53);    // red: PDF missing (resync needed)
-static COLORREF kFcHoldMinor = RGB(255, 152, 0);      // hold-to-confirm minor (2s, orange)
-static COLORREF kFcHoldMajor = RGB(229, 57, 53);      // hold-to-confirm major (5s, red)
-static COLORREF kFcCheckedAccent = RGB(66, 133, 244); // selected/checked accent (blue)
-
 // ---- study timer trio (checkbox + "Timer:" + minutes edit) ----------------
 // The trio lives INSIDE the Study button's rect, copying the autoscroll
 // format (CreateTimerControls / PositionToolbarChildWindows, Toolbar.cpp):
@@ -1204,6 +1194,7 @@ static void ConfigLayout(ConfigDialog* d) {
 // owner-drawn one history row: |PDF |cartões|due|última revisão| — name
 // flexible on the left, numbers/date right-aligned on the right
 static void ConfigDrawListItem(ConfigDialog* d, const DRAWITEMSTRUCT* dis) {
+    DsAccents ac = DsAccentsGet();
     int idx = (int)dis->itemID;
     if (idx < 0 || idx >= len(d->docs)) {
         return;
@@ -1227,11 +1218,11 @@ static void ConfigDrawListItem(ConfigDialog* d, const DRAWITEMSTRUCT* dis) {
     {
         int dotX = rc.left + pad;
         int dotY = (rc.top + rc.bottom - dotD) / 2;
-        COLORREF col = kFcSyncLegacy;
+        COLORREF col = ac.textMuted;
         if (info.syncStatus == 1) {
-            col = kFcSyncOk;
+            col = ac.accentGreen;
         } else if (info.syncStatus == 2) {
-            col = kFcSyncMissing;
+            col = ac.accentRed;
         }
         HBRUSH br = CreateSolidBrush(col);
         HGDIOBJ oldBr = SelectObject(hdc, br);
@@ -1261,6 +1252,7 @@ static void ConfigDrawListItem(ConfigDialog* d, const DRAWITEMSTRUCT* dis) {
 }
 
 static void ConfigPaint(ConfigDialog* d) {
+    DsAccents ac = DsAccentsGet();
     PAINTSTRUCT ps;
     HDC hdc = BeginPaint(d->hwnd, &ps);
     RECT rc;
@@ -1311,15 +1303,15 @@ static void ConfigPaint(ConfigDialog* d) {
 
     // "Clear Selected": orange drain, 2s hold
     FlashcardDrawHoldButton(d->hwnd, hdc, d->rcClearSel, L"Clear Selected", d->holding == kFcConfigHoldSelected,
-                            d->holding == kFcConfigHoldSelected ? d->progress : 1.0, kFcHoldMinor);
+                            d->holding == kFcConfigHoldSelected ? d->progress : 1.0, ac.accentOrange);
     // "Clear All": red drain, 5s hold
     FlashcardDrawHoldButton(d->hwnd, hdc, d->rcClearAll, L"Clear All", d->holding == kFcConfigHoldAll,
-                            d->holding == kFcConfigHoldAll ? d->progress : 1.0, kFcHoldMajor);
+                            d->holding == kFcConfigHoldAll ? d->progress : 1.0, ac.accentRed);
     // "Link to PDF...": instant (the file picker is the confirmation)
     FlashcardDrawButton(hdc, d->rcLink, L"Link to PDF...", false);
     // "Restore Backup": red drain, 5s hold (overwrites current history)
     FlashcardDrawHoldButton(d->hwnd, hdc, d->rcRecover, L"Restore Backup", d->holding == kFcConfigHoldRecover,
-                            d->holding == kFcConfigHoldRecover ? d->progress : 1.0, kFcHoldMajor);
+                            d->holding == kFcConfigHoldRecover ? d->progress : 1.0, ac.accentRed);
     // "Re-check": instant — re-validate every sync marker (e.g. a Drive
     // folder that came back online)
     FlashcardDrawButton(hdc, d->rcRecheck, L"Re-check", false);
@@ -1857,6 +1849,7 @@ static void SessionLayout(SessionDialog* d) {
 
 // one row: [checkbox] (dot) name | cards | due | last reviewed | tags
 static void SessionDrawListItem(SessionDialog* d, const DRAWITEMSTRUCT* dis) {
+    DsAccents ac = DsAccentsGet();
     int idx = (int)dis->itemData;
     if (idx < 0 || idx >= len(d->docs)) {
         return;
@@ -1875,17 +1868,17 @@ static void SessionDrawListItem(SessionDialog* d, const DRAWITEMSTRUCT* dis) {
     int boxD = DpiScale(d->hwnd, 13);
     RECT rcBox = {rc.left + pad, (rc.top + rc.bottom - boxD) / 2, rc.left + pad + boxD,
                   (rc.top + rc.bottom - boxD) / 2 + boxD};
-    FlashcardFillBg(hdc, rcBox, d->checked[idx] ? kFcCheckedAccent : ThemeWindowControlBackgroundColor());
+    FlashcardFillBg(hdc, rcBox, d->checked[idx] ? ac.accentBlue : ThemeWindowControlBackgroundColor());
     // sync dot (green/red/grey, same as the Settings window)
     int dotD = DpiScale(d->hwnd, 8);
     int dotX = rcBox.right + pad;
     {
         int dotY = (rc.top + rc.bottom - dotD) / 2;
-        COLORREF col = kFcSyncLegacy;
+        COLORREF col = ac.textMuted;
         if (info.syncStatus == 1) {
-            col = kFcSyncOk;
+            col = ac.accentGreen;
         } else if (info.syncStatus == 2) {
-            col = kFcSyncMissing;
+            col = ac.accentRed;
         }
         HBRUSH br = CreateSolidBrush(col);
         HGDIOBJ oldBr = SelectObject(hdc, br);
@@ -2187,10 +2180,11 @@ static void OrderOptionsLayout(OrderOptionsDialog* d) {
 }
 
 static void OrderOptionsDrawOption(HWND hwnd, HDC hdc, const RECT& rc, const WCHAR* label, bool checked) {
+    DsAccents ac = DsAccentsGet();
     // flat button: border + radio dot + label; the checked one gets the
     // accent border and a filled dot. Theme colors so it works in dark mode.
     FlashcardFillBg(hdc, rc, checked ? ThemeHotBackgroundColor() : ThemeWindowControlBackgroundColor());
-    HPEN pen = CreatePen(PS_SOLID, checked ? 2 : 1, checked ? kFcCheckedAccent : ThemeEdgeColor());
+    HPEN pen = CreatePen(PS_SOLID, checked ? 2 : 1, checked ? ac.accentBlue : ThemeEdgeColor());
     HPEN oldPen = (HPEN)SelectObject(hdc, pen);
     HBRUSH oldBrush = (HBRUSH)SelectObject(hdc, GetStockObject(NULL_BRUSH));
     Rectangle(hdc, rc.left, rc.top, rc.right, rc.bottom);
@@ -2201,7 +2195,7 @@ static void OrderOptionsDrawOption(HWND hwnd, HDC hdc, const RECT& rc, const WCH
     int cy = (rc.top + rc.bottom) / 2;
     int dotR = DpiScale(hwnd, 4); // dot radius, dpi-scaled
     RECT dot = {rc.left + dotR * 2, cy - dotR, rc.left + dotR * 2 + 2 * dotR, cy + dotR};
-    HBRUSH dotBg = CreateSolidBrush(checked ? kFcCheckedAccent : ThemeWindowBackgroundColor());
+    HBRUSH dotBg = CreateSolidBrush(checked ? ac.accentBlue : ThemeWindowBackgroundColor());
     HBRUSH oldDotBg = (HBRUSH)SelectObject(hdc, dotBg);
     Ellipse(hdc, dot.left, dot.top, dot.right, dot.bottom);
     SelectObject(hdc, oldDotBg);
@@ -2558,11 +2552,12 @@ static void FilterOptionsLayout(FilterOptionsDialog* d) {
 }
 
 static void FilterDrawCheckbox(HWND hwnd, HDC hdc, int x, int y, bool checked) {
+    DsAccents ac = DsAccentsGet();
     int side = DpiScale(hwnd, 14);
     RECT box = {x, y, x + side, y + side};
     // theme-aware: unchecked box in window bg, checked in the blue accent
-    FlashcardFillBg(hdc, box, checked ? kFcCheckedAccent : ThemeWindowBackgroundColor());
-    HPEN pen = CreatePen(PS_SOLID, checked ? 2 : 1, checked ? kFcCheckedAccent : ThemeEdgeColor());
+    FlashcardFillBg(hdc, box, checked ? ac.accentBlue : ThemeWindowBackgroundColor());
+    HPEN pen = CreatePen(PS_SOLID, checked ? 2 : 1, checked ? ac.accentBlue : ThemeEdgeColor());
     HPEN oldPen = (HPEN)SelectObject(hdc, pen);
     HBRUSH oldBrush = (HBRUSH)SelectObject(hdc, GetStockObject(NULL_BRUSH));
     Rectangle(hdc, box.left, box.top, box.right, box.bottom);
@@ -2580,6 +2575,7 @@ static void FilterDrawCheckbox(HWND hwnd, HDC hdc, int x, int y, bool checked) {
 }
 
 static void FilterOptionsPaint(FilterOptionsDialog* d) {
+    DsAccents ac = DsAccentsGet();
     PAINTSTRUCT ps;
     HDC hdc = BeginPaint(d->hwnd, &ps);
     RECT rc;
@@ -2609,7 +2605,7 @@ static void FilterOptionsPaint(FilterOptionsDialog* d) {
     TempStr toggleLabel = filterOn ? StrL("Filters: ON") : StrL("Filters: OFF");
     FlashcardDrawButton(hdc, d->rcToggle, (WCHAR*)CWStrTemp(ToWStrTemp(Str(toggleLabel))), false);
     FlashcardDrawHoldButton(d->hwnd, hdc, d->rcClear, L"Clear Filters", d->holdingClear == 1,
-                            d->holdingClear == 1 ? d->progress : 1.0, kFcHoldMajor);
+                            d->holdingClear == 1 ? d->progress : 1.0, ac.accentRed);
 
     SelectObject(hdc, oldFont);
     EndPaint(d->hwnd, &ps);

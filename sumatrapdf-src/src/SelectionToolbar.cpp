@@ -25,6 +25,7 @@
 #include "AppSettings.h"
 #include "Translations.h"
 #include "Theme.h"
+#include "ToolbarLayout.h"
 #include "SelectionToolbar.h"
 
 // A small floating toolbar shown under/over a finished text selection with
@@ -136,17 +137,19 @@ static COLORREF SelBarBorderColor() {
 }
 
 static COLORREF SelBarTextColor() {
+    DsAccents ac = DsAccentsGet();
     if (SelBarIsDark()) {
         return ThemeWindowTextColor();
     }
-    return RGB(27, 29, 33);
+    return ac.bgSelToolbar;
 }
 
 static COLORREF SelBarMutedTextColor() {
+    DsAccents ac = DsAccentsGet();
     if (SelBarIsDark()) {
         return ThemeWindowTextDisabledColor();
     }
-    return RGB(92, 96, 104);
+    return ac.bgSelToolbar;
 }
 
 static COLORREF SelBarHoverBg(COLORREF bg) {

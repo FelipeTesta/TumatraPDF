@@ -3967,7 +3967,8 @@ static void DebugOutlinePageElements(DisplayModel* dm, HDC hdc, bool images) {
     Rect viewPortRect(Point(), dm->GetViewPort().Size());
 
     // blue for links, green for images, so both can be on at once
-    COLORREF col = images ? RGB(0x00, 0xa0, 0x00) : RGB(0x00, 0x00, 0xff);
+    DsAccents ac = DsAccentsGet();
+    COLORREF col = images ? ac.accentGreen : ac.accentBlue;
     ScopedSelectObject autoPen(hdc, CreatePen(PS_SOLID, 1, col), true);
 
     for (int pageNo = dm->PageCount(); pageNo >= 1; --pageNo) {
@@ -4025,7 +4026,8 @@ static void DebugShowFitContentArea(DisplayModel* dm, HDC hdc) {
         return;
     }
     Rect viewPortRect(Point(), dm->GetViewPort().Size());
-    ScopedSelectObject autoPen(hdc, CreatePen(PS_SOLID, 2, RGB(0xff, 0x00, 0x00)), true);
+    DsAccents ac = DsAccentsGet();
+    ScopedSelectObject autoPen(hdc, CreatePen(PS_SOLID, 2, ac.accentRed), true);
 
     for (int pageNo = dm->PageCount(); pageNo >= 1; --pageNo) {
         PageInfo* pi = dm->GetPageInfo(pageNo);
@@ -4568,7 +4570,8 @@ static bool DrawDocument(MainWindow* win, HDC hdc, Rect rcArea) {
         // Draw subtle trim separator line between pages
         if (dm->marginTrimEnabled) {
             int sepY = pi->pageOnScreen.y + pi->pageOnScreen.dy;
-            HPEN hPen = CreatePen(PS_SOLID, 1, RGB(200, 200, 200));
+            DsAccents ac = DsAccentsGet();
+            HPEN hPen = CreatePen(PS_SOLID, 1, ac.separator);
             HPEN hOld = (HPEN)SelectObject(hdc, hPen);
             MoveToEx(hdc, pi->pageOnScreen.x, sepY, nullptr);
             LineTo(hdc, pi->pageOnScreen.x + pi->pageOnScreen.dx, sepY);
@@ -6504,10 +6507,11 @@ static void DrawLoadErrorLine(HDC hdc, Rect r, Str name, HFONT font) {
 
 // a red that stays readable on both a light and a dark canvas background
 static COLORREF LoadErrorTextColor() {
+    DsAccents ac = DsAccentsGet();
     if (IsLightColor(ThemeMainWindowBackgroundColor())) {
-        return RGB(0xc6, 0x28, 0x28);
+        return ac.accentRed;
     }
-    return RGB(0xef, 0x9a, 0x9a);
+    return ac.accentErrorSoft;
 }
 
 static void OnPaintDocumentStatus(MainWindow* win) {

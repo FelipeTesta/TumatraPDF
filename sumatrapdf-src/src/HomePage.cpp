@@ -207,7 +207,8 @@ static void PickAnotherRandomTip() {
     }
 }
 
-constexpr COLORREF kAboutBorderCol = RGB(0, 0, 0);
+constexpr COLORREF kAboutBorderCol =
+    RGB(0, 0, 0); // intentional: defined but unused (was About border, now drawn via ThemeEdgeColor)
 
 constexpr int kAboutLeftRightSpaceDx = 8;
 constexpr int kAboutMarginDx = 10;
@@ -311,11 +312,14 @@ static TempStr GetAppVersionTemp() {
     return s;
 }
 
-constexpr COLORREF kCol1 = RGB(196, 64, 50);
-constexpr COLORREF kCol2 = RGB(227, 107, 35);
-constexpr COLORREF kCol3 = RGB(93, 160, 40);
-constexpr COLORREF kCol4 = RGB(69, 132, 190);
-constexpr COLORREF kCol5 = RGB(112, 115, 207);
+// F7 brand palette — intentional, not theme-driven; do NOT tokenize
+static const COLORREF kBrandPalette[] = {
+    RGB(196, 64, 50),  // kCol1
+    RGB(227, 107, 35), // kCol2
+    RGB(93, 160, 40),  // kCol3
+    RGB(69, 132, 190), // kCol4
+    RGB(112, 115, 207) // kCol5
+};
 
 static Kind kindSumatraLogo = "sumatraLogo";
 
@@ -344,7 +348,9 @@ Size SumatraLogo::GetIdealSize() {
 }
 
 void SumatraLogo::Paint(VirtWndPaintCtx& ctx) {
-    static COLORREF cols[] = {kCol1, kCol2, kCol3, kCol4, kCol5, kCol5, kCol4, kCol3, kCol2, kCol1};
+    // palette expansion: kBrandPalette[i<5?i:9-i] equivalent (symmetric 10 colors)
+    static COLORREF cols[] = {kBrandPalette[0], kBrandPalette[1], kBrandPalette[2], kBrandPalette[3], kBrandPalette[4],
+                              kBrandPalette[4], kBrandPalette[3], kBrandPalette[2], kBrandPalette[1], kBrandPalette[0]};
     Size txtSize = PlatformFontMeasureText(font, kAppName);
     Rect r = ctx.bounds;
     Point pt{r.x + ((r.dx - txtSize.dx) / 2), r.y + ((r.dy - txtSize.dy) / 2)};
@@ -2552,11 +2558,10 @@ static TempStr FileSizeForHomeListTemp(i64 size) {
 // light blue outline marking the keyboard-selected entry (issue #1136).
 // A fixed color: it has to read as "selected" against both the light and the
 // dark page background
-constexpr COLORREF kHomeSelectionColor = RGB(0x4c, 0xa6, 0xff);
-
 static void DrawHomeSelectionOutline(HDC hdc, const Rect& r, int radius) {
     int penDx = DpiScale(hdc, 2);
-    ScopedSelectObject pen(hdc, CreatePen(PS_SOLID, penDx, kHomeSelectionColor), true);
+    DsAccents ac = DsAccentsGet();
+    ScopedSelectObject pen(hdc, CreatePen(PS_SOLID, penDx, ac.accentBlue), true);
     ScopedSelectObject brush(hdc, GetStockBrush(NULL_BRUSH));
     RoundRect(hdc, r.x, r.y, r.x + r.dx, r.y + r.dy, radius, radius);
 }
@@ -2673,6 +2678,7 @@ static void DrawHomeHelpButton(HDC hdc, Rect r) {
 
     HFONT font = HdcCreateSimpleFont(hdc, "MS Shell Dlg", 14);
     int oldBk = SetBkMode(hdc, TRANSPARENT);
+    // white GDI+ circle + black text = intentional high-contrast pair (not theme-driven)
     SetTextColor(hdc, RGB(0, 0, 0));
     HdcDrawText(hdc, "?", r, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX, font);
     SetBkMode(hdc, oldBk);
