@@ -9,6 +9,7 @@
 #define kMobiPreviewClsid "{42CA907E-BDF5-4A75-994A-E1AEC8A10954}"
 #define kCbxPreviewClsid "{C29D3E2B-8FF6-4033-A4E8-54221D859D74}"
 #define kTgaPreviewClsid "{CB1D63A6-FE5E-4DED-BEA5-3F6AF1A70D08}"
+#define kMarkdownPreviewClsid "{A3F2E1D4-C5B6-4A7B-8C9D-0E1F2A3B4C5D}"
 
 bool InstallPreviewDll(Str dllPath, bool allUsers);
 bool UninstallPreviewDll();

@@ -506,6 +506,8 @@ EngineBase* PdfPreview::LoadEngine(const Str& data) {
             return CreateEngineCbxFromData(data);
         case PreviewType::Tga:
             return CreateEngineImageFromData(data);
+        case PreviewType::Markdown:
+            return CreateEngineMupdfFromData(data, "document.md", nullptr);
     }
     return nullptr;
 }

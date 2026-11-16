@@ -69,6 +69,8 @@ class PreviewClassFactory : public IClassFactory {
             type = PreviewType::Mobi;
         } else if (IsClsid(kCbxPreviewClsid)) {
             type = PreviewType::Cbx;
+        } else if (IsClsid(kMarkdownPreviewClsid)) {
+            type = PreviewType::Markdown;
         } else if (IsClsid(kTgaPreviewClsid)) {
             type = PreviewType::Tga;
         } else {

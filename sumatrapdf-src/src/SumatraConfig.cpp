@@ -58,5 +58,5 @@ bool gIsStoreBuild = false;
 bool gForTesting = false;
 
 int GetAppIconID() {
-    return IDI_SUMATRAPDF;
+    return IDI_TUMATRAPDF;
 }

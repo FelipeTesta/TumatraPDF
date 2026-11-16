@@ -2,7 +2,7 @@
 // Microsoft Visual C++ generated include file.
 // Used by SumatraPDF.rc
 //
-#define IDI_SUMATRAPDF 1
+#define IDI_TUMATRAPDF 1
 
 #define IDD_DIALOG_GOTO_PAGE 129
 #define IDD_DIALOG_GET_PASSWORD 130
