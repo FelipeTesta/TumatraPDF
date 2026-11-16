@@ -1,3 +1,14 @@
+## 2026-11-16 (s64) — fix: installer owner-draw buttons engage via SWP_FRAMECHANGED
+
+### Fixed
+- Installer/uninstaller stock push buttons (Install, Browse ..., Start, Close, Uninstall) rendered WHITE face + near-white letter on the real screen. Root cause: `MakeButtonOwnerDrawn` (InstallerCommon.cpp) flipped GWL_STYLE to add BS_OWNERDRAW AFTER create but never notified the control, so the class kept painting the stock themed push button (white face on this machine) while the frame returned kInstallerSurfaceText for WM_CTLCOLORBTN -> near-white letter on white.
+- Fix: after SetWindowLongPtrW(GWL_STYLE, +BS_OWNERDRAW), call `SetWindowPos(btn->hwnd, nullptr, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED)` -> WM_STYLECHANGED -> button class re-reads style, PaintOwnerDrawn engages.
+
+### Verified
+- Rebuilt dbg64; renamed copy `TumatraPDF-install-win64.exe` launched (no Install click), BitBlt screen capture (setProcessDpiAware process, GetDC(0) path) shows: dark caption, white wordmark, dark path edit, 3 checkboxes off-white labels, Install button dark face + white text. User visually confirmed on real screen. Captures in tests/tmp/s64/installer-fix3-screen.png.
+- Note: PrintWindow misses this (classic path artifact) — verify theme bug via screen DC captures. Win-installer tests must call setProcessDpiAware() first or rects come out virtualized.
+- Not fixed here (pre-existing, separate decision): installer title shows "TumatraPDF 1.0.16 Installer" (CURR_VERSION_STRA not bumped with fork releases); uninstaller covered by same fix path.
+
 ## 2026-11-16 (s64) — UX map (FLOW/UX.dot) + OpenPencil baseline + dot-vs-op findings
 
 ### Added

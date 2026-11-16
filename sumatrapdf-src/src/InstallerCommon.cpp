@@ -861,6 +861,9 @@ void MakeButtonOwnerDrawn(Button* btn) {
     btn->ownerDrawn = true;
     LONG_PTR style = GetWindowLongPtrW(btn->hwnd, GWL_STYLE);
     SetWindowLongPtrW(btn->hwnd, GWL_STYLE, style | BS_OWNERDRAW);
+    // force the control to re-read its style so BS_OWNERDRAW engages on the real screen
+    SetWindowPos(btn->hwnd, nullptr, 0, 0, 0, 0,
+                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
 }
 
 // The installer/uninstaller process never runs the app startup that inits
