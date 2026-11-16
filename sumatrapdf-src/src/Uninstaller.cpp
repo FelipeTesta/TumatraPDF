@@ -6,7 +6,6 @@
 
 #include "base/Win.h"
 #include "base/Dpi.h"
-#include "base/FrameTimeoutCalculator.h"
 
 #include "wingui/UIModels.h"
 #include "wingui/Layout.h"
@@ -231,7 +230,7 @@ static void CreateUninstallerWindow() {
     HwndResizeClientSize(gHwndFrame, dx, dy);
 
     auto isRtl = IsUIRtl();
-    gButtonUninstaller = CreateDefaultButton(gHwndFrame, _TRA("Uninstall SumatraPDF"), isRtl);
+    gButtonUninstaller = CreateDefaultButton(gHwndFrame, _TRA("Uninstall TumatraPDF"), isRtl);
     gButtonUninstaller->onClick = MkFunc0Void(OnButtonUninstall);
 }
 
@@ -328,21 +327,13 @@ static bool InstanceInit() {
     return TRUE;
 }
 
-// inspired by http://engineering.imvu.com/2010/11/24/how-to-write-an-interactive-60-hz-desktop-application/
+// event-driven loop; wakes once a second just to re-check whether the user
+// needs to close apps before uninstallation can start
 static int RunApp() {
     MSG msg;
-    FrameTimeoutCalculator ftc(60);
     auto t = TimeGet();
     for (;;) {
-        const DWORD timeout = ftc.GetTimeoutInMilliseconds();
-        DWORD res = WAIT_TIMEOUT;
-        if (timeout > 0) {
-            res = MsgWaitForMultipleObjects(0, nullptr, TRUE, timeout, QS_ALLINPUT);
-        }
-        if (res == WAIT_TIMEOUT) {
-            AnimStep();
-            ftc.Step();
-        }
+        MsgWaitForMultipleObjects(0, nullptr, TRUE, 1000, QS_ALLINPUT);
 
         while (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE)) {
             if (msg.message == WM_QUIT) {
@@ -369,7 +360,7 @@ static TempStr GetUninstallerPathInTemp() {
     DWORD res = ::GetTempPathW(dimof(tempDir), tempDir);
     ReportIf(res == 0 || res >= dimof(tempDir));
     TempStr dirA = ToUtf8Temp(tempDir);
-    return path::JoinTemp(dirA, StrL("Sumatra-Uninstaller.exe"));
+    return path::JoinTemp(dirA, StrL("TumatraPDF-Uninstaller.exe"));
 }
 
 // %SystemRoot%\Temp, used instead of the per-user temp directory for the
@@ -383,7 +374,7 @@ static TempStr GetUninstallerPathInSystemTemp() {
         return {};
     }
     TempStr dir = path::JoinTemp(ToUtf8Temp(winDir), StrL("Temp"));
-    return path::JoinTemp(dir, StrL("Sumatra-Uninstaller.exe"));
+    return path::JoinTemp(dir, StrL("TumatraPDF-Uninstaller.exe"));
 }
 
 // to be able to delete installation directory we must copy
@@ -557,7 +548,7 @@ int RunUninstaller() {
         if (uninstallerLogPath) {
             StartLogToFile(uninstallerLogPath, false);
         }
-        logf("------------- Starting SumatraPDF uninstallation\n");
+        logf("------------- Starting TumatraPDF uninstallation\n");
     }
 
     // TODO: remove dependency on this in the uninstaller
@@ -569,7 +560,7 @@ int RunUninstaller() {
     logf("Running uninstaller '%s' with args '%s' for '%s'\n", exePath, cmdLine, instDir);
 
     if (false) {
-        Str path = R"(C:\Users\kjk\AppData\Local\Temp\Sumatra-Uninstaller.exe)";
+        Str path = R"(C:\Users\kjk\AppData\Local\Temp\TumatraPDF-Uninstaller.exe)";
         Str cl = "-uninstall";
         logf("LaunchProcessWithCmdLine('%s' '%s')\n", path, cl);
         HANDLE h = LaunchProcessWithCmdLine(path, cl);
@@ -608,7 +599,7 @@ int RunUninstaller() {
         log("Previewer is installed\n");
     }
 
-    gDefaultMsg = _TRA("Are you sure you want to uninstall SumatraPDF?");
+    gDefaultMsg = _TRA("Are you sure you want to uninstall TumatraPDF?");
 
     // unregister search filter and previewer to reduce
     // possibility of blocking

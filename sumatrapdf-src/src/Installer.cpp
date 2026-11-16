@@ -595,7 +595,7 @@ static TempStr FormatMoveAsideDialogContentTemp(Str fileName, Str path) {
                             "that only a reboot clears.\n\n"
                             "What to try:\n"
                             "• Temporarily exclude the install folder from antivirus / Controlled Folder Access\n"
-                            "• Reboot, then run the installer again before opening SumatraPDF\n"
+                            "• Reboot, then run the installer again before opening TumatraPDF\n"
                             "• Or install to a folder your account can write to (Options)\n\n"
                             "The installer keeps retrying every few seconds. Click Abort to cancel.\n\n"
                             "More help: <a href=\"%s\">Installation documentation</a>")
@@ -608,7 +608,7 @@ static TempStr FormatMoveAsideDialogContentTemp(Str fileName, Str path) {
                         "• Run the installer again and accept the administrator (UAC) prompt\n"
                         "• Temporarily exclude the install folder from antivirus / Controlled Folder Access\n"
                         "• Or install to a folder your account can write to (Options)\n"
-                        "• If it still fails when elevated: reboot, then install before opening SumatraPDF\n\n"
+                        "• If it still fails when elevated: reboot, then install before opening TumatraPDF\n\n"
                         "The installer keeps retrying every few seconds. Click Abort to cancel.\n\n"
                         "More help: <a href=\"%s\">Installation documentation</a>")
                        .s,
@@ -618,11 +618,11 @@ static TempStr FormatMoveAsideDialogContentTemp(Str fileName, Str path) {
                     "Common causes:\n"
                     "• Windows Search Indexer (loads PdfFilter.dll for PDF search)\n"
                     "• File Explorer PDF preview (loads PdfPreview.dll / libsumatrapdf.dll)\n"
-                    "• Another SumatraPDF window or PDF application\n\n"
+                    "• Another TumatraPDF window or PDF application\n\n"
                     "What to try:\n"
                     "• Close Explorer windows that show a PDF preview pane\n"
                     "• Stop the \"Windows Search\" service temporarily (services.msc)\n"
-                    "• Close all SumatraPDF and other PDF apps\n\n"
+                    "• Close all TumatraPDF and other PDF apps\n\n"
                     "The installer keeps retrying every few seconds. Click Abort to cancel.\n\n"
                     "More help: <a href=\"%s\">Installation documentation</a>")
                    .s,
@@ -1527,10 +1527,10 @@ static void OnInstallationFinished(Flags* cli) {
     DeleteWnd(&gWnd->progressBar);
     auto isRtl = IsUIRtl();
     if (!cli->fastInstall) {
-        gWnd->btnRunSumatra = CreateDefaultButton(gWnd->hwnd, _TRA("Start SumatraPDF"), isRtl);
+        gWnd->btnRunSumatra = CreateDefaultButton(gWnd->hwnd, _TRA("Start TumatraPDF"), isRtl);
         gWnd->btnRunSumatra->onClick = MkFunc0Void(OnButtonStartSumatra);
     }
-    SetMsg(_TRA("Thank you! SumatraPDF has been installed."), COLOR_MSG_OK);
+    SetMsg(_TRA("Thank you! TumatraPDF has been installed."), COLOR_MSG_OK);
     gMsgError = gFirstError;
     HwndRepaintNow(gWnd->hwnd);
 
@@ -1703,7 +1703,7 @@ static void OnButtonBrowse(InstallerWnd* wnd) {
         installDir = path::GetDirTemp(installDir);
     }
 
-    auto caption = _TRA("Select the folder where SumatraPDF should be installed:");
+    auto caption = _TRA("Select the folder where TumatraPDF should be installed:");
     TempStr installPath = BrowseForFolderTemp(wnd->hwnd, installDir, caption);
     if (!installPath) {
         HwndSetFocus(wnd->btnBrowseDir->hwnd);
@@ -1756,7 +1756,7 @@ static void CreateInstallerWindowControls(InstallerWnd* wnd, Flags* cli) {
     bool isRtl = IsUIRtl();
     bool showInstallButton = !cli->fastInstall;
 
-    wnd->btnInstall = CreateDefaultButton(hwnd, _TRA("Install SumatraPDF"), isRtl);
+    wnd->btnInstall = CreateDefaultButton(hwnd, _TRA("Install TumatraPDF"), isRtl);
     auto* b = wnd->btnInstall;
     b->onClick = MkFunc0(OnButtonInstall, wnd);
     {
@@ -1875,7 +1875,7 @@ static void CreateInstallerWindowControls(InstallerWnd* wnd, Flags* cli) {
 
     y -= editDy;
 
-    Str s2 = _TRA("Install SumatraPDF in &folder:");
+    Str s2 = _TRA("Install TumatraPDF in &folder:");
     rc = {x, y, r.dx - 2 * margin, staticDy};
 
     Static::CreateArgs args;
@@ -2010,7 +2010,7 @@ static bool CreateInstallerWnd(Flags* cli) {
 }
 
 static bool CreateInstallerWindow(Flags* cli) {
-    gDefaultMsg = _TRA("Thank you for choosing SumatraPDF!");
+    gDefaultMsg = _TRA("Thank you for choosing TumatraPDF!");
     if (!CreateInstallerWnd(cli)) {
         return false;
     }
@@ -2029,21 +2029,13 @@ static bool CreateInstallerWindow(Flags* cli) {
     return true;
 }
 
-// inspired by http://engineering.imvu.com/2010/11/24/how-to-write-an-interactive-60-hz-desktop-application/
+// event-driven loop; wakes once a second just to re-check whether the user
+// needs to close apps before installation can start
 static int RunApp() {
     MSG msg;
-    FrameTimeoutCalculator ftc(60);
     auto t = TimeGet();
     for (;;) {
-        const DWORD timeout = ftc.GetTimeoutInMilliseconds();
-        DWORD res = WAIT_TIMEOUT;
-        if (timeout > 0) {
-            res = MsgWaitForMultipleObjects(0, nullptr, TRUE, timeout, QS_ALLINPUT);
-        }
-        if (res == WAIT_TIMEOUT) {
-            AnimStep();
-            ftc.Step();
-        }
+        MsgWaitForMultipleObjects(0, nullptr, TRUE, 1000, QS_ALLINPUT);
 
         while (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE)) {
             if (msg.message == WM_QUIT) {
@@ -2200,7 +2192,7 @@ static bool EnsureEnoughDiskSpaceForInstall(Str installDir, const lzma::SimpleAr
     }
     int freeMb = (int)(freeBytes / (1024ull * 1024ull));
     int needMb = (int)((need + (i64)1024 * 1024 - 1) / ((i64)1024 * 1024));
-    NotifyFailed(fmt(_TRA("Not enough free disk space to install SumatraPDF.\n\n"
+    NotifyFailed(fmt(_TRA("Not enough free disk space to install TumatraPDF.\n\n"
                           "Required: about %d MB free\nAvailable: %d MB\n\n"
                           "Free up space on this drive and try again.")
                          .s,
@@ -2275,10 +2267,10 @@ static bool ShouldInstallMismatchedArch(HWND hwndParent) {
         flags |= TDF_RTL_LAYOUT;
     }
     dialogConfig.cbSize = sizeof(TASKDIALOGCONFIG);
-    s = _TRA("Installing 32-bit SumatraPDF on 64-bit OS");
+    s = _TRA("Installing 32-bit TumatraPDF on 64-bit OS");
     dialogConfig.pszWindowTitle = CWStrTemp(s);
     // dialogConfig.pszMainInstruction = mainInstr;
-    s = _TRA("You're installing 32-bit SumatraPDF on 64-bit OS.\nWould you like to download\n64-bit version?");
+    s = _TRA("You're installing 32-bit TumatraPDF on 64-bit OS.\nWould you like to download\n64-bit version?");
     dialogConfig.pszContent = CWStrTemp(s);
     dialogConfig.nDefaultButton = kBtnIdContinue;
     dialogConfig.dwFlags = (TASKDIALOG_FLAGS)flags;
@@ -2319,7 +2311,7 @@ int RunInstaller() {
         bool removeLog = !gCli->runInstallNow;
         StartLogToFile(installerLogPath, removeLog);
     }
-    logf("------------- Starting SumatraPDF installation\n");
+    logf("------------- Starting TumatraPDF installation\n");
     LogParentProcessChain();
     if (!gCli->silent && !IsProcessAndOsArchSame()) {
         logfa("quitting because !IsProcessAndOsArchSame()\n");

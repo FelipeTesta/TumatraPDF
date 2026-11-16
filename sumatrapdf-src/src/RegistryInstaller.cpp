@@ -187,7 +187,7 @@ ShCtx is either HKCU or HKLM
 For each extension, create a progid:
 ShCtx\Software\Classes\SumatraPDF.${ext}
   Application
-    ApplicationCompany = Krzysztof Kowalczyk
+    ApplicationCompany = Krzysztof Kowalczyk, modificado por FTesta
     ApplicationName = SumatraPDF
   DefaultIcon
     (Default) = ${SumatraExePath},${OptIconIndex}
@@ -249,7 +249,7 @@ static bool RegisterForOpenWith(HKEY hkey, Str installedExePath) {
         }
 
         key = str::JoinTemp(progIDKey, StrL("\\Application"));
-        ok &= LoggedWriteRegStr(hkey, key, "ApplicationCompany", "Krzysztof Kowalczyk");
+        ok &= LoggedWriteRegStr(hkey, key, "ApplicationCompany", "Krzysztof Kowalczyk, modificado por FTesta");
         ok &= LoggedWriteRegStr(hkey, key, "ApplicationName", kAppName);
 
         key = str::JoinTemp(progIDKey, StrL("\\DefaultIcon"));

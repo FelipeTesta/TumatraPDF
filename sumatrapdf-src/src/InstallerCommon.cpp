@@ -7,7 +7,6 @@
 #include "base/ScopedWin.h"
 #include "base/File.h"
 #include "base/Win.h"
-#include "base/FrameTimeoutCalculator.h"
 
 #include "Translations.h"
 
@@ -24,7 +23,7 @@
 constexpr bool kDrawTextShadow = true;
 constexpr bool kDrawMsgTextShadow = false;
 
-constexpr COLORREF kInstallerWinBgColor = RGB(0xff, 0xf2, 0); // yellow
+constexpr COLORREF kInstallerWinBgColor = RGB(0x20, 0x26, 0x34); // brand tile dark
 
 constexpr DWORD kTenSecondsInMs = 10 * 1000;
 
@@ -720,8 +719,36 @@ void SetDefaultMsg() {
     SetMsg(gDefaultMsg, COLOR_MSG_WELCOME);
 }
 
-static void InvalidateFrame() {
-    HwndRepaintNow(gHwndFrame);
+// Static wordmark shown on the frame header. Replaces the old per-letter
+// animated "SUMATRAPDF": plain "TumatraPDF" in the header font, off-white
+// ink on the brand tile. No animation, no timer.
+Color kWordmarkCol(0xF5, 0xF5, 0xF0);
+
+static void DrawTumatraWordmark(Graphics& g, int dx, float y) {
+    Font f(L"Impact", 40, FontStyleRegular);
+    Font fVer(L"Impact", 16, FontStyleRegular);
+    StringFormat sfmt;
+    sfmt.SetAlignment(StringAlignmentCenter);
+    Gdiplus::RectF layout(0.f, y, (float)dx, 200.f);
+    SolidBrush b(kWordmarkCol);
+    g.DrawString(L"TumatraPDF", -1, &f, layout, &sfmt, &b);
+
+    // version number, rotated 45deg at the end of the wordmark
+    Gdiplus::RectF textBox;
+    g.MeasureString(L"TumatraPDF", -1, &f, Gdiplus::PointF(0.f, 0.f), &textBox);
+    float endX = ((float)dx + textBox.Width) / 2.f;
+    g.TranslateTransform(endX, y);
+    g.RotateTransform(45.f);
+    float x2 = 15.f;
+    float y2 = -34.f;
+
+    const WCHAR* ver_s = L"v" CURR_VERSION_STR;
+    if (kDrawTextShadow) {
+        SolidBrush b1(Color(0, 0, 0));
+        g.DrawString(ver_s, -1, &fVer, Gdiplus::PointF(x2 - 2, y2 - 1), &b1);
+    }
+    g.DrawString(ver_s, -1, &fVer, Gdiplus::PointF(x2, y2), &b);
+    g.ResetTransform();
 }
 
 bool CheckInstallUninstallPossible(HWND hwnd, bool silent) {
@@ -747,144 +774,6 @@ bool CheckInstallUninstallPossible(HWND hwnd, bool silent) {
     }
     HwndRepaintNow(hwnd);
     return possible;
-}
-
-// This display is inspired by http://letteringjs.com/
-typedef struct {
-    // part that doesn't change
-    char c;
-    Color col, colShadow;
-    float rotation;
-    float dyOff; // displacement
-
-    // part calculated during layout
-    float dx, dy;
-    float x;
-} LetterInfo;
-
-// clang-format off
-static LetterInfo gLetters[] = {
-    {'S', gCol1, gCol1Shadow, -3.f, 0, 0, 0},
-    {'U', gCol2, gCol2Shadow, 0.f, 0, 0, 0},
-    {'M', gCol3, gCol3Shadow, 2.f, -2.f, 0, 0},
-    {'A', gCol4, gCol4Shadow, 0.f, -2.4f, 0, 0},
-    {'T', gCol5, gCol5Shadow, 0.f, 0, 0, 0},
-    {'R', gCol5, gCol5Shadow, 2.3f, -1.4f, 0, 0},
-    {'A', gCol4, gCol4Shadow, 0.f, 0, 0, 0},
-    {'P', gCol3, gCol3Shadow, 0.f, -2.3f, 0, 0},
-    {'D', gCol2, gCol2Shadow, 0.f, 3.f, 0, 0},
-    {'F', gCol1, gCol1Shadow, 0.f, 0, 0, 0}
-};
-// clang-format on
-
-#if 0
-static char RandUppercaseLetter()
-{
-    // note: clearly, not random but seems to work ok anyway
-    static char l = 'A' - 1;
-    l++;
-    if (l > 'Z')
-        l = 'A';
-    return l;
-}
-
-static void RandomizeLetters()
-{
-    for (int i = 0; i < dimof(gLetters); i++) {
-        gLetters[i].c = RandUppercaseLetter();
-    }
-}
-#endif
-
-#define kSumatraLettersCount (dimof(gLetters))
-
-static void SetLettersSumatraUpTo(size_t n) {
-    Str s = "SUMATRAPDF";
-    for (size_t i = 0; i < kSumatraLettersCount; i++) {
-        char c = ' ';
-        if (i < n) {
-            c = s.s[i];
-        }
-        gLetters[i].c = c;
-    }
-}
-
-static void SetLettersSumatra() {
-    SetLettersSumatraUpTo(kSumatraLettersCount);
-}
-
-// an animation that reveals letters one by one
-
-// how long the animation lasts, in seconds
-#define REVEALING_ANIM_DUR double(2)
-
-static FrameTimeoutCalculator* gRevealingLettersAnim = nullptr;
-
-static int gRevealingLettersAnimLettersToShow;
-
-static void RevealingLettersAnimStart() {
-    int framesPerSec = (int)(double(kSumatraLettersCount) / REVEALING_ANIM_DUR);
-    gRevealingLettersAnim = new FrameTimeoutCalculator(framesPerSec);
-    gRevealingLettersAnimLettersToShow = 0;
-    SetLettersSumatraUpTo(0);
-}
-
-static void RevealingLettersAnimStop() {
-    delete gRevealingLettersAnim;
-    gRevealingLettersAnim = nullptr;
-    SetLettersSumatra();
-    InvalidateFrame();
-}
-
-static void RevealingLettersAnim() {
-    if (gRevealingLettersAnim->ElapsedTotal() > REVEALING_ANIM_DUR) {
-        RevealingLettersAnimStop();
-        return;
-    }
-    DWORD timeOut = gRevealingLettersAnim->GetTimeoutInMilliseconds();
-    if (timeOut != 0) {
-        return;
-    }
-    SetLettersSumatraUpTo(++gRevealingLettersAnimLettersToShow);
-    gRevealingLettersAnim->Step();
-    InvalidateFrame();
-}
-
-void AnimStep() {
-    if (gRevealingLettersAnim) {
-        RevealingLettersAnim();
-    }
-}
-
-static void CalcLettersLayout(Graphics& g, Font* f, int dx) {
-    static BOOL didLayout = FALSE;
-    if (didLayout) {
-        return;
-    }
-
-    StringFormat sfmt;
-    const float letterSpacing = -12.f;
-    float totalDx = -letterSpacing; // counter last iteration of the loop
-    WCHAR s[2]{};
-    Gdiplus::PointF origin(0.f, 0.f);
-    Gdiplus::RectF bbox;
-    for (LetterInfo& li : gLetters) {
-        s[0] = li.c;
-        g.MeasureString(s, 1, f, origin, &sfmt, &bbox);
-        li.dx = bbox.Width;
-        li.dy = bbox.Height;
-        totalDx += li.dx;
-        totalDx += letterSpacing;
-    }
-
-    float x = ((float)dx - totalDx) / 2.f;
-    for (LetterInfo& li : gLetters) {
-        li.x = x;
-        x += li.dx;
-        x += letterSpacing;
-    }
-    RevealingLettersAnimStart();
-    didLayout = TRUE;
 }
 
 static float DrawMessage(Graphics& g, Str msg, float y, float dx, Color color) {
@@ -917,53 +806,10 @@ static float DrawMessage(Graphics& g, Str msg, float y, float dx, Color color) {
     return bbox.Height;
 }
 
-static void DrawSumatraLetters(Graphics& g, Font* f, Font* fVer, float y) {
-    WCHAR s[2]{};
-    for (const LetterInfo& li : gLetters) {
-        s[0] = li.c;
-        if (s[0] == ' ') {
-            return;
-        }
-
-        g.RotateTransform(li.rotation, MatrixOrderAppend);
-        if (kDrawTextShadow) {
-            // draw shadow first
-            SolidBrush b2(li.colShadow);
-            Gdiplus::PointF o2(li.x - 3.f, y + 4.f + li.dyOff);
-            g.DrawString(s, 1, f, o2, &b2);
-        }
-
-        SolidBrush b1(li.col);
-        Gdiplus::PointF o1(li.x, y + li.dyOff);
-        g.DrawString(s, 1, f, o1, &b1);
-        g.RotateTransform(li.rotation, MatrixOrderAppend);
-        g.ResetTransform();
-    }
-
-    // draw version number
-    float x = gLetters[dimof(gLetters) - 1].x;
-    g.TranslateTransform(x, y);
-    g.RotateTransform(45.f);
-    float x2 = 15;
-    float y2 = -34;
-
-    const WCHAR* ver_s = L"v" CURR_VERSION_STR;
-    if (kDrawTextShadow) {
-        SolidBrush b1(Color(0, 0, 0));
-        g.DrawString(ver_s, -1, fVer, Gdiplus::PointF(x2 - 2, y2 - 1), &b1);
-    }
-    SolidBrush b2(Color(0xff, 0xff, 0xff));
-    g.DrawString(ver_s, -1, fVer, Gdiplus::PointF(x2, y2), &b2);
-    g.ResetTransform();
-}
-
 static void DrawFrame2(Graphics& g, Rect r, bool skipMessage) {
     g.SetCompositingQuality(CompositingQualityHighQuality);
     g.SetSmoothingMode(SmoothingModeAntiAlias);
     g.SetPageUnit(Gdiplus::UnitPixel);
-
-    Font f(L"Impact", 40, FontStyleRegular);
-    CalcLettersLayout(g, &f, r.dx);
 
     Gdiplus::Color bgCol;
     bgCol.SetFromCOLORREF(kInstallerWinBgColor);
@@ -972,8 +818,7 @@ static void DrawFrame2(Graphics& g, Rect r, bool skipMessage) {
     r2.Inflate(1, 1);
     g.FillRectangle(&bgBrush, r2);
 
-    Font f2(L"Impact", 16, FontStyleRegular);
-    DrawSumatraLetters(g, &f, &f2, 18.f);
+    DrawTumatraWordmark(g, r.dx, 18.f);
 
     if (skipMessage) {
         return;
