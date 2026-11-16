@@ -42,6 +42,8 @@ Items ONLY the user can verify live (real book / real build). Flat list; details
 - [ ] Design rules partial: TBSTYLE_EX_MIXEDBUTTONS (`Toolbar.cpp:2931/:3072`, `FlashcardToolbar.cpp:482`) + custom-draw POSTPAINT centering shipped — visual verify pending.
 - [ ] Crop Align s64-R8 + s64-R9: Page Crop box cut == drawn region + nomacs overlay visual; GUI rotate-drag draws diagonal box + rotated handles (vision check).
 
+- [ ] Loading fix (s64): on real launch confirm instant window with heavy books + logo-dots pulsing + white progress bar; evidence tests/tmp/s64/loading-heavy-*.png (dbg64; users get it via v1.0.19).
+
 ## Tomorrow plan — 2026-11-16
 
 1. Confirm release workflow run 43673119222 finished OK on GitHub Actions (release.yml; assets + auto update.txt bump commit may appear on main — pull it if so).

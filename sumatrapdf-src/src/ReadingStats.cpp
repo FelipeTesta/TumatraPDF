@@ -13,6 +13,7 @@
 
 #include "Settings.h" // FileState (FileHistory.h relies on it being declared)
 #include "AppSettings.h"
+#include "GlobalPrefs.h"
 #include "DocController.h" // MarkdownModel fwd (WindowTab.h relies on it)
 #include "FileHistory.h"
 #include "WindowTab.h"
@@ -162,6 +163,13 @@ void ReadingStatsAddSeconds(MainWindow* win, float sec) {
     }
     gReadingStats.accumSec -= (float)whole;
 
+    {
+        Str group = gGlobalPrefs->activeTabGroup;
+        if (group.s && *group.s) {
+            ProfileDataAddSessionReadingSec(group, whole);
+        }
+    }
+
     // per-document time (FileState is the same store the open-count uses)
     WindowTab* tab = win->CurrentTab();
     if (tab && tab->filePath) {
@@ -198,6 +206,7 @@ void ReadingStatsResetTick() {
 }
 
 void ReadingStatsFlush(bool force) {
+    ProfileDataFlushSessionsIfNeeded();
     if (!force && gReadingStats.dirtySec == 0) {
         return;
     }

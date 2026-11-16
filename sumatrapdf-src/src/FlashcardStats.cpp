@@ -16,6 +16,7 @@
 
 #include "Settings.h" // FileState (FileHistory.h relies on it being declared)
 #include "AppSettings.h"
+#include "GlobalPrefs.h"
 #include "DocController.h" // MarkdownModel fwd (WindowTab.h relies on it)
 #include "FileHistory.h"
 #include "WindowTab.h"
@@ -195,6 +196,13 @@ void FlashcardStatsAddCard(WindowTab* tab) {
     if (gFlashcardStats.dirtyCards >= 20) {
         FlashcardStatsFlush(true);
     }
+
+    {
+        Str group = gGlobalPrefs->activeTabGroup;
+        if (group.s && *group.s) {
+            ProfileDataAddSessionCard(group);
+        }
+    }
 }
 
 void FlashcardStatsAddSeconds(WindowTab* tab, float sec) {
@@ -214,6 +222,13 @@ void FlashcardStatsAddSeconds(WindowTab* tab, float sec) {
     }
     gFlashcardStats.accumSec -= (float)whole;
 
+    {
+        Str group = gGlobalPrefs->activeTabGroup;
+        if (group.s && *group.s) {
+            ProfileDataAddSessionStudySec(group, whole);
+        }
+    }
+
     // per-document time (FileState is the same store the open-count uses)
     if (tab && tab->filePath) {
         FileState* fs = gFileHistory.FindByPath(tab->filePath);
@@ -230,6 +245,7 @@ void FlashcardStatsAddSeconds(WindowTab* tab, float sec) {
 }
 
 void FlashcardStatsFlush(bool force) {
+    ProfileDataFlushSessionsIfNeeded();
     if (!force && gFlashcardStats.dirtySec == 0 && gFlashcardStats.dirtyCards == 0) {
         return;
     }

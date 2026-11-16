@@ -327,7 +327,7 @@ static bool isSafeAccel(const ACCEL& a) {
 // process while a custom control (edit / tree / WebView2-hosted CHM) has focus.
 // Returns the command id, or 0 if none. Used to forward app shortcuts that a
 // focused control would otherwise swallow.
-int SafeAcceleratorCmd(u16 vk, bool ctrl, bool shift, bool alt) {
+int SafeAcceleratorCmd(u16 vk, bool ctrl, bool shift, bool alt, bool allowPlainLetters) {
     BYTE fVirt = FVIRTKEY;
     if (ctrl) {
         fVirt |= FCONTROL;
@@ -340,8 +340,19 @@ int SafeAcceleratorCmd(u16 vk, bool ctrl, bool shift, bool alt) {
     }
     for (int i = 0; i < gAccelsCount; i++) {
         const ACCEL& a = gAccels[i];
-        if (a.key == vk && a.fVirt == fVirt && isSafeAccel(a)) {
-            return a.cmd;
+        if (a.key == vk && a.fVirt == fVirt) {
+            if (allowPlainLetters) {
+                // when allowPlainLetters is true, allow plain letters A-Z through
+                // regardless of isSafeAccel; other keys use the normal check
+                WORD k = a.key;
+                if (k >= 'A' && k <= 'Z') {
+                    // plain letter A-Z — allow it
+                    return a.cmd;
+                }
+            }
+            if (isSafeAccel(a)) {
+                return a.cmd;
+            }
         }
     }
     return 0;

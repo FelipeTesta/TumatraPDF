@@ -430,7 +430,7 @@ static int ChmResolveAccelCmd(void* /*user*/, u16 vk, bool ctrl, bool shift, boo
     if (vk == VK_ESCAPE) {
         return kWebViewForwardKey;
     }
-    return SafeAcceleratorCmd(vk, ctrl, shift, alt);
+    return SafeAcceleratorCmd(vk, ctrl, shift, alt, true);
 }
 
 void BrowserDocView::UnsubclassParent() {
