@@ -4,6 +4,14 @@ Per-version changelog for TumatraPDF — new functions + bug fixes, newest first
 Feature details live in [README.md](README.md); full per-session development
 history in [LOG.md](LOG.md).
 
+## v1.0.18 (2026-11-16)
+- **Markdown preview in Explorer Preview Pane:** `.md` files render in the Windows Preview Pane through TumatraPDF's preview handler (WebView2), with mermaid/markdown support — previously only PDFs/XPS/images were previewable.
+- **Dark Installer & Uninstaller:** both windows render in dark theme (brand tile, monochrome logo, off-white text); checkbox labels are readable (off-white on dark); the "hide options" path is removed. Installer identity updated (FTesta wordmark splash, TumatraPDF icon, publisher attribution).
+- **Color tokens harmonized (DsAccents):** dark theme paints through shared design tokens — selection toolbar, link badges, toolbar/sidebar chrome, flashcard sidebar and Home page use consistent accent colors and hover/pressed states.
+- **Portable ↔ installed profile merge documented:** audit of settings/data-root differences between portable and installed builds (see FLOW/profile-portable-drive.dot).
+- **Yellow caption bar removed:** stray `MainWindowBackground = #80fff200` (inherited from the portable settings) no longer tints the window caption; dark captions render black.
+- **UX/UI map:** complete user-reachable action map added to the repo (`FLOW/UX.dot`, 416 nodes / 34 clusters) to power the hidden/dysfunctional-control audit.
+
 ## v1.0.13 (2026-10-21)
 
 - Trim and Two Columns are per book again; new books start with both OFF.

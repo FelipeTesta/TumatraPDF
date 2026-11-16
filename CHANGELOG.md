@@ -6,6 +6,14 @@ history in [LOG.md](LOG.md).
 
 ## Unreleased
 
+## v1.0.18 (2026-11-16)
+- **Markdown preview in Explorer Preview Pane:** `.md` files render in the Windows Preview Pane through TumatraPDF's preview handler (WebView2), with mermaid/markdown support — previously only PDFs/XPS/images were previewable.
+- **Dark Installer & Uninstaller:** both windows render in dark theme (brand tile, monochrome logo, off-white text); checkbox labels are readable (off-white on dark); the "hide options" path is removed. Installer identity updated (FTesta wordmark splash, TumatraPDF icon, publisher attribution).
+- **Color tokens harmonized (DsAccents):** dark theme paints through shared design tokens — selection toolbar, link badges, toolbar/sidebar chrome, flashcard sidebar and Home page use consistent accent colors and hover/pressed states.
+- **Portable ↔ installed profile merge documented:** audit of settings/data-root differences between portable and installed builds (see FLOW/profile-portable-drive.dot).
+- **Yellow caption bar removed:** stray `MainWindowBackground = #80fff200` (inherited from the portable settings) no longer tints the window caption; dark captions render black.
+- **UX/UI map:** complete user-reachable action map added to the repo (`FLOW/UX.dot`, 416 nodes / 34 clusters) to power the hidden/dysfunctional-control audit.
+
 ## v1.0.17 (2026-11-15)
 
 - **Repair Document File:** Right-click a damaged PDF and choose **Repair Document File** (next to **Show Errors**). TumatraPDF re-saves the document in place with a full, clean rewrite, verifies the error count does not increase, and atomically swaps the corrected file over the original. If anything fails, the original file is left untouched; on success the same page and scroll position are restored.
