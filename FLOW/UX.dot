@@ -1,0 +1,1224 @@
+digraph TumatraPDF_UX {
+  // TumatraPDF UX Map — complete user-experience flow from first-run to every reachable action
+  // Date: 2026-11-16
+  // Sources: tests/tmp/s64/ux-commands.md (537 Cmd* ids, MENU MAP 11 top menus, TOOLBAR MAP 35+ toggles+secondary, CONTEXT MENUS, SUSPECT/DEAD)
+  //          tests/tmp/s64/ux-menumap-raw.md (raw menu paths with Cmd ids)
+  //          tests/tmp/s64/ui-inventory.md (installer+uninstaller: windows, controls, buttons, flows, registry, flags)
+  //          tests/tmp/s64/dialog-inventory.md (25+ dialogs/secondary windows, controls, invocation)
+  //          tests/tmp/s64/home_side_inventory.md (Home page 18 elements; side panels 53 elements; CONDITIONAL 7)
+  // Legend: solid edges = hierarchy/parent-child; dashed blue edges = cross-links (menu→dialog, toolbar→panel, shortcut→cmd)
+  //         red cluster = SUSPECT orphan commands; note nodes = registry/flags; dashed nodes = conditional/dev-only
+  // Cluster node counts: install=42, main=18, menus=11 clusters/148 items, toolbars_extra=3 clusters/45 btns, dialogs=27, home=18, panels=53, suspect=80, shortcuts=15
+
+  rankdir=TB; compound=true; newrank=true; splines=ortho;
+  node [shape=box style="filled,rounded" fontname="Helvetica" fontsize=11 margin="0.18,0.08"];
+  edge [fontname="Helvetica" fontsize=9 color="#6B7280"];
+
+  // ============================================================
+  // CLUSTER: INSTALLER / UNINSTALLER FLOW
+  // ============================================================
+  subgraph cluster_install {
+    label="Installer / Uninstaller Flow"; style="filled,rounded"; fillcolor="#1E293B"; fontcolor="#E2E8F0"; color="#334155";
+    node [fillcolor="#334155" fontcolor="#E2E8F0" color="#475569"];
+
+    // Entry points
+    n_download [label="Download Installer\n(.exe from GitHub)", tooltip="source:ui-inventory.md:entry points RunInstaller()"];
+    n_run_installer [label="RunInstaller()\nlaunches GUI installer", tooltip="source:ui-inventory.md:54"];
+    n_silent_flag [label="/S silent flag\ninstall without UI", tooltip="source:ui-inventory.md:55", shape=note, fillcolor="#0F172A", fontcolor="#94A3B8"];
+    n_d_path [label="/d <path>\nchange uninstall dir", tooltip="source:ui-inventory.md:56", shape=note, fillcolor="#0F172A", fontcolor="#94A3B8"];
+    n_run_install_now [label="-run-install-now\nauto-elevated install", tooltip="source:ui-inventory.md:57", shape=note, fillcolor="#0F172A", fontcolor="#94A3B8"];
+    n_fast_install [label="-fast-install\nskip UI direct install", tooltip="source:ui-inventory.md:58", shape=note, fillcolor="#0F172A", fontcolor="#94A3B8"];
+    n_all_users_flag [label="-all-users\nforce all-users install", tooltip="source:ui-inventory.md:59", shape=note, fillcolor="#0F172A", fontcolor="#94A3B8"];
+    n_with_filter [label="-with-filter / -with-preview\nopt-in checkboxes", tooltip="source:ui-inventory.md:60", shape=note, fillcolor="#0F172A", fontcolor="#94A3B8"];
+    n_install_dir_flag [label="-install-dir <dir>\nset install directory", tooltip="source:ui-inventory.md:61", shape=note, fillcolor="#0F172A", fontcolor="#94A3B8"];
+
+    // Installer window
+    n_installer_win [label="Installer Window\n420x340 (492x340 pre-release)\nclass SUMATRA_PDF_INSTALLER_FRAME", tooltip="source:ui-inventory.md:2-5"];
+    n_installer_paint [label="GDI+ Custom Paint\nWM_PAINT handler", tooltip="source:ui-inventory.md:6"];
+    n_wordmark [label="Wordmark \"TumatraPDF\"\nImpact 40pt #F5F5F0 on #202634", tooltip="source:ui-inventory.md:9"];
+    n_version_badge [label="Version Badge\nrotated 45deg off-white", tooltip="source:ui-inventory.md:10"];
+
+    // Pre-install controls
+    n_edit_dir [label="Installation Dir Edit\n\"Install TumatraPDF in &folder:\"\neditable, pre-filled", tooltip="source:ui-inventory.md:7"];
+    n_btn_browse [label="Browse \"...\" Button\nbtnBrowseDir → folder browser", tooltip="source:ui-inventory.md:8,15"];
+    n_chk_preview [label="Checkbox: Let Windows show\n&previews of PDF documents\ncheckboxRegisterPreview", tooltip="source:ui-inventory.md:11,31"];
+    n_chk_search [label="Checkbox: Let Windows Desktop Search\n&search PDF documents\ncheckboxRegisterSearchFilter", tooltip="source:ui-inventory.md:12,32"];
+    n_chk_allusers [label="Checkbox: Install for all users\ncheckboxForAllUsers", tooltip="source:ui-inventory.md:13,33"];
+    n_btn_install [label="Install TumatraPDF\nbtnInstall (disabled during install)", tooltip="source:ui-inventory.md:14,35"];
+
+    // Installing phase
+    n_progress_install [label="Installing Progress Bar\nfile extraction + registry writes", tooltip="source:ui-inventory.md:28"];
+    n_progress_uninstall [label="Uninstall Progress Bar\nremoved in StartInstallation", tooltip="source:ui-inventory.md:29"];
+
+    // Done / Failed
+    n_done_start [label="Done: Start TumatraPDF\nbtnRunSumatra shown", tooltip="source:ui-inventory.md:16"];
+    n_failed_dialog [label="Failed: TaskDialog\nShow log / Close buttons", tooltip="source:ui-inventory.md:17,27", shape=box, style="filled,rounded,dashed", fillcolor="#7F1D1D", fontcolor="#FECACA"];
+    n_no_repair [label="NOTE: No repair mode UI\nwould require custom cmd-line", tooltip="source:ui-inventory.md:64", shape=note, fillcolor="#7F1D1D", fontcolor="#FECACA"];
+
+    // Uninstaller branch
+    n_uninstaller_win [label="Uninstaller Window\n420x340 class SUMATRA_PDF_INSTALLER_FRAME", tooltip="source:ui-inventory.md:18-21"];
+    n_uninstaller_welcome [label="Welcome Message\n\"Thank you for choosing TumatraPDF!\"", tooltip="source:ui-inventory.md:24"];
+    n_uninstaller_progress [label="Uninstallation in Progress...", tooltip="source:ui-inventory.md:25"];
+    n_uninstaller_done [label="Uninstall Complete\n\"Thank you! %s has been uninstalled.\"", tooltip="source:ui-inventory.md:26"];
+    n_uninstaller_failed [label="Uninstall Failed\nTaskDialog: Show log / Close", tooltip="source:ui-inventory.md:27"];
+    n_btn_uninstall [label="Uninstall TumatraPDF\ngButtonUninstaller (disabled during)", tooltip="source:ui-inventory.md:22,37"];
+    n_btn_close_post [label="Close (post-uninstall)\ngButtonExit", tooltip="source:ui-inventory.md:23,38"];
+
+    // Registry keys
+    n_reg_hklm [label="HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\SumatraPDF", tooltip="source:ui-inventory.md:40-52", shape=note, fillcolor="#0F172A", fontcolor="#94A3B8"];
+    n_reg_keys [label="DisplayIcon, DisplayName, DisplayVersion,\nEstimatedSize, InstallDate, InstallLocation,\nNoModify=1, NoRepair=1, Publisher,\nUninstallString, QuietUninstallString,\nURLInfoAbout, URLUpdateInfo", tooltip="source:ui-inventory.md:40-52", shape=note, fillcolor="#0F172A", fontcolor="#94A3B8"];
+
+    // Edges installer flow
+    n_download -> n_run_installer;
+    n_run_installer -> n_silent_flag [style=dashed, color="#3B82F6", xlabel="if /S"];
+    n_run_installer -> n_d_path [style=dashed, color="#3B82F6", xlabel="if /d"];
+    n_run_installer -> n_run_install_now [style=dashed, color="#3B82F6", xlabel="if flag"];
+    n_run_installer -> n_fast_install [style=dashed, color="#3B82F6", xlabel="if flag"];
+    n_run_installer -> n_all_users_flag [style=dashed, color="#3B82F6", xlabel="if flag"];
+    n_run_installer -> n_with_filter [style=dashed, color="#3B82F6", xlabel="if flag"];
+    n_run_installer -> n_install_dir_flag [style=dashed, color="#3B82F6", xlabel="if flag"];
+    n_run_installer -> n_installer_win;
+    n_installer_win -> n_installer_paint;
+    n_installer_win -> n_wordmark;
+    n_installer_win -> n_version_badge;
+    n_installer_win -> n_edit_dir;
+    n_installer_win -> n_btn_browse;
+    n_installer_win -> n_chk_preview;
+    n_installer_win -> n_chk_search;
+    n_installer_win -> n_chk_allusers;
+    n_installer_win -> n_btn_install;
+    n_btn_install -> n_progress_install;
+    n_progress_install -> n_done_start;
+    n_progress_install -> n_failed_dialog;
+    n_failed_dialog -> n_no_repair [style=dashed, color="#EF4444"];
+
+    // Uninstaller flow
+    n_run_installer -> n_uninstaller_win [style=dashed, color="#3B82F6", xlabel="uninstall path"];
+    n_uninstaller_win -> n_uninstaller_welcome;
+    n_uninstaller_win -> n_btn_uninstall;
+    n_uninstaller_win -> n_btn_browse;
+    n_btn_uninstall -> n_uninstaller_progress;
+    n_uninstaller_progress -> n_uninstaller_done;
+    n_uninstaller_progress -> n_uninstaller_failed;
+    n_uninstaller_done -> n_btn_close_post;
+    n_uninstaller_failed -> n_no_repair [style=dashed, color="#EF4444"];
+
+    // Registry
+    n_installer_win -> n_reg_hklm [style=dashed, color="#3B82F6", xlabel="WriteUninstallerRegistryInfo"];
+    n_reg_hklm -> n_reg_keys;
+  }
+
+  // ============================================================
+  // CLUSTER: MAIN WINDOW
+  // ============================================================
+  subgraph cluster_main {
+    label="Main Window"; style="filled,rounded"; fillcolor="#1E3A5F"; fontcolor="#E2E8F0"; color="#3B82F6";
+    node [fillcolor="#1E40AF" fontcolor="#E2E8F0" color="#3B82F6"];
+
+    n_main_win [label="Main Window\nTab Bar + Hamburger + Green Dot\nCaption Controls (min/max/close)", tooltip="source:home_side_inventory.md:main window elements"];
+    n_tab_bar [label="Tab Bar\nTabs + Hamburger Menu + Green Status Dot", tooltip="source:home_side_inventory.md:main window"];
+    n_hamburger [label="Hamburger Menu\nopens Command Palette / menus", tooltip="source:home_side_inventory.md:main window"];
+    n_green_dot [label="Green Dot\nstatus indicator", tooltip="source:home_side_inventory.md:main window"];
+    n_caption [label="Caption Controls\nMinimize / Maximize / Close", tooltip="source:home_side_inventory.md:main window"];
+
+    // Primary toolbar row
+    n_toolbar_main [label="Primary Toolbar Row (35 built-in + separators)", tooltip="source:ux-commands.md:160-196"];
+    n_tb_home [label="Home\nCmdOpenHome", tooltip="source:ux-commands.md:161"];
+    n_tb_open [label="Open\nCmdOpenFile", tooltip="source:ux-commands.md:162"];
+    n_tb_bookmarks [label="Bookmarks (toggle)\nCmdToggleBookmarks\nchecked=sidebar visible", tooltip="source:ux-commands.md:163"];
+    n_tb_print [label="Print\nCmdPrint", tooltip="source:ux-commands.md:164"];
+    n_tb_save [label="Save (toggle)\nCmdSaveAnnotations\nchecked=unsaved annotations", tooltip="source:ux-commands.md:165"];
+    n_tb_pagenum [label="Page Number Edit Box\n(special, not a command)", tooltip="source:ux-commands.md:166", shape=note, fillcolor="#0F172A", fontcolor="#94A3B8"];
+    n_tb_prev [label="Previous Page\nCmdGoToPrevPage", tooltip="source:ux-commands.md:167"];
+    n_tb_next [label="Next Page\nCmdGoToNextPage", tooltip="source:ux-commands.md:168"];
+    n_tb_readaloud [label="Read Aloud (dropdown)\nCmdReadAloud", tooltip="source:ux-commands.md:170"];
+    n_tb_fitwidth [label="Fit Width + Continuous\nCmdZoomFitWidthAndContinuous", tooltip="source:ux-commands.md:172"];
+    n_tb_fitsingle [label="Fit Single Page\nCmdZoomFitPageAndSinglePage", tooltip="source:ux-commands.md:173"];
+    n_tb_rotleft [label="Rotate Left\nCmdRotateLeft", tooltip="source:ux-commands.md:174"];
+    n_tb_rotright [label="Rotate Right\nCmdRotateRight", tooltip="source:ux-commands.md:175"];
+    n_tb_zoomout [label="Zoom Out\nCmdZoomOut", tooltip="source:ux-commands.md:176"];
+    n_tb_zoomin [label="Zoom In\nCmdZoomIn", tooltip="source:ux-commands.md:177"];
+    n_tb_find [label="Find\nCmdFindFirst", tooltip="source:ux-commands.md:179"];
+    n_tb_autoscroll [label="Autoscroll\nCmdAutoScrollToggle", tooltip="source:ux-commands.md:181"];
+    n_tb_as_down [label="Autoscroll Speed Down\nCmdAutoScrollSpeedDown", tooltip="source:ux-commands.md:182"];
+    n_tb_as_up [label="Autoscroll Speed Up\nCmdAutoScrollSpeedUp", tooltip="source:ux-commands.md:183"];
+    n_tb_contrast [label="Contrast (toggle)\nCmdContrastToggle\nchecked=contrast on/off", tooltip="source:ux-commands.md:185,212"];
+    n_tb_invert [label="Invert (toggle)\nCmdInvertColors\nchecked=invert on/off", tooltip="source:ux-commands.md:186,213"];
+    n_tb_scan [label="Scan Mode (toggle)\nCmdViewportCropToggle\nchecked=scan mode on/off", tooltip="source:ux-commands.md:187,214"];
+    n_tb_twocol [label="Two Columns (toggle)\nCmdViewportCropV2Toggle\nchecked=two columns on/off", tooltip="source:ux-commands.md:188,215"];
+    n_tb_trim [label="Trim (toggle)\nCmdMarginTrimToggle\nchecked=margin trim on/off", tooltip="source:ux-commands.md:189,216"];
+    n_tb_trimcfg [label="Trim Config\nCmdTrimConfig", tooltip="source:ux-commands.md:190"];
+    n_tb_flashcard [label="Flashcard (toggle)\nCmdFlashcardToggle\nchecked=flashcard mode on/off", tooltip="source:ux-commands.md:192,219", style="filled,rounded", fillcolor="#7C2D12", fontcolor="#FED7AA"];
+    n_tb_archtools [label="Arch Tools (toggle)\nCmdArchToolsToggle\nchecked=arch tools on/off", tooltip="source:ux-commands.md:194,217"];
+    n_tb_edit [label="Edit (toggle)\nCmdEditToolsToggle\nchecked=edit mode on/off", tooltip="source:ux-commands.md:195,218"];
+
+    n_canvas [label="Canvas\nPDF rendering area", tooltip="source:home_side_inventory.md:canvas"];
+
+    // Hierarchy edges
+    n_main_win -> n_tab_bar;
+    n_main_win -> n_toolbar_main;
+    n_main_win -> n_canvas;
+    n_tab_bar -> n_hamburger;
+    n_tab_bar -> n_green_dot;
+    n_main_win -> n_caption;
+
+    n_toolbar_main -> n_tb_home;
+    n_toolbar_main -> n_tb_open;
+    n_toolbar_main -> n_tb_bookmarks;
+    n_toolbar_main -> n_tb_print;
+    n_toolbar_main -> n_tb_save;
+    n_toolbar_main -> n_tb_pagenum;
+    n_toolbar_main -> n_tb_prev;
+    n_toolbar_main -> n_tb_next;
+    n_toolbar_main -> n_tb_readaloud;
+    n_toolbar_main -> n_tb_fitwidth;
+    n_toolbar_main -> n_tb_fitsingle;
+    n_toolbar_main -> n_tb_rotleft;
+    n_toolbar_main -> n_tb_rotright;
+    n_toolbar_main -> n_tb_zoomout;
+    n_toolbar_main -> n_tb_zoomin;
+    n_toolbar_main -> n_tb_find;
+    n_toolbar_main -> n_tb_autoscroll;
+    n_toolbar_main -> n_tb_as_down;
+    n_toolbar_main -> n_tb_as_up;
+    n_toolbar_main -> n_tb_contrast;
+    n_toolbar_main -> n_tb_invert;
+    n_toolbar_main -> n_tb_scan;
+    n_toolbar_main -> n_tb_twocol;
+    n_toolbar_main -> n_tb_trim;
+    n_toolbar_main -> n_tb_trimcfg;
+    n_toolbar_main -> n_tb_flashcard;
+    n_toolbar_main -> n_tb_archtools;
+    n_toolbar_main -> n_tb_edit;
+
+    // Cross-links: toolbar buttons -> commands (dashed blue, using xlabel for ortho)
+    n_tb_home -> n_mnu_file_newwin [style=dashed, color="#3B82F6", xlabel="CmdOpenHome"];
+    n_tb_open -> n_mnu_file_open [style=dashed, color="#3B82F6", xlabel="CmdOpenFile"];
+    n_tb_bookmarks -> n_mnu_view_bookmarks [style=dashed, color="#3B82F6", xlabel="CmdToggleBookmarks"];
+    n_tb_print -> n_mnu_file_print [style=dashed, color="#3B82F6", xlabel="CmdPrint"];
+    n_tb_save -> n_mnu_file_saveann [style=dashed, color="#3B82F6", xlabel="CmdSaveAnnotations"];
+    n_tb_prev -> n_mnu_goto_prev [style=dashed, color="#3B82F6", xlabel="CmdGoToPrevPage"];
+    n_tb_next -> n_mnu_goto_next [style=dashed, color="#3B82F6", xlabel="CmdGoToNextPage"];
+    n_tb_readaloud -> n_mnu_context_readaloud [style=dashed, color="#3B82F6", xlabel="CmdReadAloud"];
+    n_tb_fitwidth -> n_mnu_zoom_fitwidth [style=dashed, color="#3B82F6", xlabel="CmdZoomFitWidthAndContinuous"];
+    n_tb_fitsingle -> n_mnu_view_single [style=dashed, color="#3B82F6", xlabel="CmdZoomFitPageAndSinglePage"];
+    n_tb_rotleft -> n_mnu_view_rotleft [style=dashed, color="#3B82F6", xlabel="CmdRotateLeft"];
+    n_tb_rotright -> n_mnu_view_rotright [style=dashed, color="#3B82F6", xlabel="CmdRotateRight"];
+    n_tb_zoomout -> n_mnu_zoom_out [style=dashed, color="#3B82F6", xlabel="CmdZoomOut"];
+    n_tb_zoomin -> n_mnu_zoom_in [style=dashed, color="#3B82F6", xlabel="CmdZoomIn"];
+    n_tb_find -> n_mnu_goto_find [style=dashed, color="#3B82F6", xlabel="CmdFindFirst"];
+    n_tb_autoscroll -> n_mnu_newtools_autoscroll [style=dashed, color="#3B82F6", xlabel="CmdAutoScrollToggle"];
+    n_tb_as_down -> n_mnu_newtools_asdown [style=dashed, color="#3B82F6", xlabel="CmdAutoScrollSpeedDown"];
+    n_tb_as_up -> n_mnu_newtools_asup [style=dashed, color="#3B82F6", xlabel="CmdAutoScrollSpeedUp"];
+    n_tb_contrast -> n_mnu_newtools_contrast [style=dashed, color="#3B82F6", xlabel="CmdContrastToggle"];
+    n_tb_invert -> n_mnu_newtools_invert [style=dashed, color="#3B82F6", xlabel="CmdInvertColors"];
+    n_tb_scan -> n_mnu_newtools_scan [style=dashed, color="#3B82F6", xlabel="CmdViewportCropToggle"];
+    n_tb_twocol -> n_mnu_newtools_twocol [style=dashed, color="#3B82F6", xlabel="CmdViewportCropV2Toggle"];
+    n_tb_trim -> n_mnu_newtools_trim [style=dashed, color="#3B82F6", xlabel="CmdMarginTrimToggle"];
+    n_tb_trimcfg -> n_mnu_newtools_trimcfg [style=dashed, color="#3B82F6", xlabel="CmdTrimConfig"];
+    n_tb_flashcard -> n_mnu_newtools_flashcard [style=dashed, color="#3B82F6", xlabel="CmdFlashcardToggle"];
+    n_tb_archtools -> n_mnu_newtools_archscale [style=dashed, color="#3B82F6", xlabel="CmdArchToolsToggle"];
+    n_tb_edit -> n_mnu_newtools_edit [style=dashed, color="#3B82F6", xlabel="CmdEditToolsToggle"];
+
+    // Toggle state nodes
+    n_toggle_bookmarks [label="Bookmarks Toggle State\nchecked=tocVisible", tooltip="source:ux-commands.md:209,221", shape=note, fillcolor="#0F172A", fontcolor="#94A3B8"];
+    n_toggle_save [label="Save Toggle State\nchecked=unsaved annotations", tooltip="source:ux-commands.md:210", shape=note, fillcolor="#0F172A", fontcolor="#94A3B8"];
+    n_toggle_readaloud [label="Read Aloud Toggle State\nchecked=speaking/paused", tooltip="source:ux-commands.md:211", shape=note, fillcolor="#0F172A", fontcolor="#94A3B8"];
+    n_toggle_contrast [label="Contrast Toggle State\nchecked=overlay on/off", tooltip="source:ux-commands.md:212", shape=note, fillcolor="#0F172A", fontcolor="#94A3B8"];
+    n_toggle_invert [label="Invert Toggle State\nchecked=invert on/off", tooltip="source:ux-commands.md:213", shape=note, fillcolor="#0F172A", fontcolor="#94A3B8"];
+    n_toggle_scan [label="Scan Mode Toggle State\nchecked=on/off", tooltip="source:ux-commands.md:214", shape=note, fillcolor="#0F172A", fontcolor="#94A3B8"];
+    n_toggle_twocol [label="Two Columns Toggle State\nchecked=on/off", tooltip="source:ux-commands.md:215", shape=note, fillcolor="#0F172A", fontcolor="#94A3B8"];
+    n_toggle_trim [label="Trim Toggle State\nchecked=on/off", tooltip="source:ux-commands.md:216", shape=note, fillcolor="#0F172A", fontcolor="#94A3B8"];
+    n_toggle_arch [label="Arch Tools Toggle State\nchecked=on/off", tooltip="source:ux-commands.md:217", shape=note, fillcolor="#0F172A", fontcolor="#94A3B8"];
+    n_toggle_edit [label="Edit Tools Toggle State\nchecked=on/off", tooltip="source:ux-commands.md:218", shape=note, fillcolor="#0F172A", fontcolor="#94A3B8"];
+    n_toggle_flashcard [label="Flashcard Toggle State\nchecked=on/off", tooltip="source:ux-commands.md:219", shape=note, fillcolor="#0F172A", fontcolor="#94A3B8"];
+    n_toggle_autoscroll [label="Autoscroll Toggle State\nchecked=on/off", tooltip="source:ux-commands.md:220", shape=note, fillcolor="#0F172A", fontcolor="#94A3B8"];
+  }
+
+  // ============================================================
+  // CLUSTER: TOP-LEVEL MENUS (11 menus)
+  // ============================================================
+  subgraph cluster_menus {
+    label="Top-Level Menus (11)"; style="filled,rounded"; fillcolor="#1E4D2B"; fontcolor="#E2E8F0"; color="#22C55E";
+    node [fillcolor="#166534" fontcolor="#E2E8F0" color="#22C55E"];
+
+    // FILE MENU
+    subgraph cluster_mnu_file {
+      label="File Menu"; style="filled,rounded"; fillcolor="#14532D"; color="#4ADE80";
+      node [fillcolor="#15803D" fontcolor="#E2E8F0" color="#4ADE80"];
+
+      n_mnu_file [label="File Menu", shape=folder];
+      n_mnu_file_newwin [label="New Window\nCmdNewWindow", tooltip="source:ux-menumap-raw.md:6"];
+      n_mnu_file_open [label="Open...\nCmdOpenFile", tooltip="source:ux-menumap-raw.md:7"];
+      n_mnu_file_togglepicker [label="Use TumatraPDF File Picker\nCmdToggleFilePicker", tooltip="source:ux-menumap-raw.md:8"];
+      n_mnu_file_close [label="Close\nCmdClose", tooltip="source:ux-menumap-raw.md:9"];
+      n_mnu_file_showfolder [label="Show in Folder\nCmdShowInFolder", tooltip="source:ux-menumap-raw.md:10"];
+      n_mnu_file_next [label="Open Next File In Folder\nCmdOpenNextFileInFolder", tooltip="source:ux-menumap-raw.md:11"];
+      n_mnu_file_prev [label="Open Previous File In Folder\nCmdOpenPrevFileInFolder", tooltip="source:ux-menumap-raw.md:12"];
+      n_mnu_file_saveas [label="Save As...\nCmdSaveAs", tooltip="source:ux-menumap-raw.md:13"];
+      n_mnu_file_convert [label="Convert to PDF...\nCmdConvertToPDF", tooltip="source:ux-menumap-raw.md:14"];
+      n_mnu_file_saveann [label="Save Annotations to existing PDF\nCmdSaveAnnotations", tooltip="source:ux-menumap-raw.md:15"];
+      n_mnu_file_rename [label="Rename...\nCmdRenameFile\n(ENABLE_SAVE_SHORTCUT cond.)", tooltip="source:ux-menumap-raw.md:17", style="dashed"];
+      n_mnu_file_delete [label="Delete\nCmdDeleteFile", tooltip="source:ux-menumap-raw.md:18"];
+      n_mnu_file_delnext [label="Delete and Open Next File\nCmdDeleteFileAndOpenNext", tooltip="source:ux-menumap-raw.md:19"];
+      n_mnu_file_print [label="Print...\nCmdPrint", tooltip="source:ux-menumap-raw.md:20"];
+      n_mnu_file_opendir_explorer [label="Open Directory in Explorer\nCmdOpenWithExplorer\n(PDF/XPS/CHM cond.)", tooltip="source:ux-menumap-raw.md:22", style="dashed"];
+      n_mnu_file_opendir_opus [label="Open Directory in Directory Opus\nCmdOpenWithDirectoryOpus\n(PDF/XPS/CHM cond.)", tooltip="source:ux-menumap-raw.md:23", style="dashed"];
+      n_mnu_file_opendir_tc [label="Open Directory in Total Commander\nCmdOpenWithTotalCommander\n(PDF/XPS/CHM cond.)", tooltip="source:ux-menumap-raw.md:24", style="dashed"];
+      n_mnu_file_opendir_dc [label="Open Directory in Double Commander\nCmdOpenWithDoubleCommander\n(PDF/XPS/CHM cond.)", tooltip="source:ux-menumap-raw.md:25", style="dashed"];
+      n_mnu_file_openacrobat [label="Open in Adobe Reader\nCmdOpenWithAcrobat\n(PDF cond.)", tooltip="source:ux-menumap-raw.md:26", style="dashed"];
+      n_mnu_file_openfoxit [label="Open in Foxit Reader\nCmdOpenWithFoxIt\n(PDF cond.)", tooltip="source:ux-menumap-raw.md:27", style="dashed"];
+      n_mnu_file_openpdfx [label="Open in PDF-XChange\nCmdOpenWithPdfXchange\n(PDF cond.)", tooltip="source:ux-menumap-raw.md:28", style="dashed"];
+      n_mnu_file_openxps [label="Open in Microsoft XPS-Viewer\nCmdOpenWithXpsViewer\n(CHM cond.)", tooltip="source:ux-menumap-raw.md:30", style="dashed"];
+      n_mnu_file_openhtmlhelp [label="Open in Microsoft HTML Help\nCmdOpenWithHtmlHelp\n(CHM cond.)", tooltip="source:ux-menumap-raw.md:31", style="dashed"];
+      n_mnu_file_email [label="Send by E-mail...\nCmdSendByEmail\n(email client cond.)", tooltip="source:ux-menumap-raw.md:33", style="dashed"];
+      n_mnu_file_props [label="Properties\nCmdProperties", tooltip="source:ux-menumap-raw.md:35"];
+      n_mnu_file_exit [label="Exit\nCmdExit", tooltip="source:ux-menumap-raw.md:37"];
+
+      n_mnu_file -> n_mnu_file_newwin;
+      n_mnu_file -> n_mnu_file_open;
+      n_mnu_file -> n_mnu_file_togglepicker;
+      n_mnu_file -> n_mnu_file_close;
+      n_mnu_file -> n_mnu_file_showfolder;
+      n_mnu_file -> n_mnu_file_next;
+      n_mnu_file -> n_mnu_file_prev;
+      n_mnu_file -> n_mnu_file_saveas;
+      n_mnu_file -> n_mnu_file_convert;
+      n_mnu_file -> n_mnu_file_saveann;
+      n_mnu_file -> n_mnu_file_rename;
+      n_mnu_file -> n_mnu_file_delete;
+      n_mnu_file -> n_mnu_file_delnext;
+      n_mnu_file -> n_mnu_file_print;
+      n_mnu_file -> n_mnu_file_opendir_explorer;
+      n_mnu_file -> n_mnu_file_opendir_opus;
+      n_mnu_file -> n_mnu_file_opendir_tc;
+      n_mnu_file -> n_mnu_file_opendir_dc;
+      n_mnu_file -> n_mnu_file_openacrobat;
+      n_mnu_file -> n_mnu_file_openfoxit;
+      n_mnu_file -> n_mnu_file_openpdfx;
+      n_mnu_file -> n_mnu_file_openxps;
+      n_mnu_file -> n_mnu_file_openhtmlhelp;
+      n_mnu_file -> n_mnu_file_email;
+      n_mnu_file -> n_mnu_file_props;
+      n_mnu_file -> n_mnu_file_exit;
+    }
+
+    // VIEW MENU
+    subgraph cluster_mnu_view {
+      label="View Menu"; style="filled,rounded"; fillcolor="#14532D"; color="#4ADE80";
+      node [fillcolor="#15803D" fontcolor="#E2E8F0" color="#4ADE80"];
+
+      n_mnu_view [label="View Menu", shape=folder];
+      n_mnu_view_palette [label="Command Palette\nCmdCommandPalette", tooltip="source:ux-menumap-raw.md:40"];
+      n_mnu_view_single [label="Single Page\nCmdSinglePageView", tooltip="source:ux-menumap-raw.md:41"];
+      n_mnu_view_facing [label="Facing\nCmdFacingView", tooltip="source:ux-menumap-raw.md:42"];
+      n_mnu_view_book [label="Book View\nCmdBookView", tooltip="source:ux-menumap-raw.md:43"];
+      n_mnu_view_continuous [label="Show Pages Continuously\nCmdToggleContinuousView", tooltip="source:ux-menumap-raw.md:44"];
+      n_mnu_view_manga [label="Manga Mode\nCmdToggleMangaMode", tooltip="source:ux-menumap-raw.md:45"];
+      n_mnu_view_rotleft [label="Rotate Left\nCmdRotateLeft", tooltip="source:ux-menumap-raw.md:47"];
+      n_mnu_view_rotright [label="Rotate Right\nCmdRotateRight", tooltip="source:ux-menumap-raw.md:48"];
+      n_mnu_view_presentation [label="Presentation\nCmdTogglePresentationMode", tooltip="source:ux-menumap-raw.md:50"];
+      n_mnu_view_fullscreen [label="Fullscreen\nCmdToggleFullscreen", tooltip="source:ux-menumap-raw.md:51"];
+      n_mnu_view_bookmarks [label="Show Bookmarks\nCmdToggleBookmarks", tooltip="source:ux-menumap-raw.md:53"];
+      n_mnu_view_menubar [label="Show Menu\nCmdToggleMenuBar", tooltip="source:ux-menumap-raw.md:54"];
+      n_mnu_view_toolbar [label="Show Toolbar\nCmdToggleToolbar", tooltip="source:ux-menumap-raw.md:55"];
+      n_mnu_view_claude [label="Claude chat\nCmdAIChatWithClaudeCode", tooltip="source:ux-menumap-raw.md:57"];
+      n_mnu_view_grok [label="Grok chat\nCmdAIChatWithGrokBuild", tooltip="source:ux-menumap-raw.md:58"];
+      n_mnu_view_codex [label="Codex chat\nCmdAIChatWithOpenAICodex", tooltip="source:ux-menumap-raw.md:59"];
+      n_mnu_view_antigrav [label="Antigravity chat\nCmdAIChatWithAntiGravity", tooltip="source:ux-menumap-raw.md:60"];
+
+      n_mnu_view -> n_mnu_view_palette;
+      n_mnu_view -> n_mnu_view_single;
+      n_mnu_view -> n_mnu_view_facing;
+      n_mnu_view -> n_mnu_view_book;
+      n_mnu_view -> n_mnu_view_continuous;
+      n_mnu_view -> n_mnu_view_manga;
+      n_mnu_view -> n_mnu_view_rotleft;
+      n_mnu_view -> n_mnu_view_rotright;
+      n_mnu_view -> n_mnu_view_presentation;
+      n_mnu_view -> n_mnu_view_fullscreen;
+      n_mnu_view -> n_mnu_view_bookmarks;
+      n_mnu_view -> n_mnu_view_menubar;
+      n_mnu_view -> n_mnu_view_toolbar;
+      n_mnu_view -> n_mnu_view_claude;
+      n_mnu_view -> n_mnu_view_grok;
+      n_mnu_view -> n_mnu_view_codex;
+      n_mnu_view -> n_mnu_view_antigrav;
+    }
+
+    // GO TO MENU
+    subgraph cluster_mnu_goto {
+      label="Go To Menu"; style="filled,rounded"; fillcolor="#14532D"; color="#4ADE80";
+      node [fillcolor="#15803D" fontcolor="#E2E8F0" color="#4ADE80"];
+
+      n_mnu_goto [label="Go To Menu", shape=folder];
+      n_mnu_goto_next [label="Next Page\nCmdGoToNextPage", tooltip="source:ux-menumap-raw.md:64"];
+      n_mnu_goto_prev [label="Previous Page\nCmdGoToPrevPage", tooltip="source:ux-menumap-raw.md:65"];
+      n_mnu_goto_first [label="First Page\nCmdGoToFirstPage", tooltip="source:ux-menumap-raw.md:66"];
+      n_mnu_goto_last [label="Last Page\nCmdGoToLastPage", tooltip="source:ux-menumap-raw.md:67"];
+      n_mnu_goto_page [label="Page...\nCmdGoToPage", tooltip="source:ux-menumap-raw.md:68"];
+      n_mnu_goto_back [label="Back\nCmdNavigateBack", tooltip="source:ux-menumap-raw.md:70"];
+      n_mnu_goto_forward [label="Forward\nCmdNavigateForward", tooltip="source:ux-menumap-raw.md:71"];
+      n_mnu_goto_find [label="Find...\nCmdFindFirst", tooltip="source:ux-menumap-raw.md:73"];
+
+      n_mnu_goto -> n_mnu_goto_next;
+      n_mnu_goto -> n_mnu_goto_prev;
+      n_mnu_goto -> n_mnu_goto_first;
+      n_mnu_goto -> n_mnu_goto_last;
+      n_mnu_goto -> n_mnu_goto_page;
+      n_mnu_goto -> n_mnu_goto_back;
+      n_mnu_goto -> n_mnu_goto_forward;
+      n_mnu_goto -> n_mnu_goto_find;
+    }
+
+    // ZOOM MENU
+    subgraph cluster_mnu_zoom {
+      label="Zoom Menu"; style="filled,rounded"; fillcolor="#14532D"; color="#4ADE80";
+      node [fillcolor="#15803D" fontcolor="#E2E8F0" color="#4ADE80"];
+
+      n_mnu_zoom [label="Zoom Menu", shape=folder];
+      n_mnu_zoom_fitpage [label="Fit Page\nCmdZoomFitPage", tooltip="source:ux-menumap-raw.md:76"];
+      n_mnu_zoom_actual [label="Actual Size\nCmdZoomActualSize", tooltip="source:ux-menumap-raw.md:77"];
+      n_mnu_zoom_fitwidth [label="Fit Width\nCmdZoomFitWidth", tooltip="source:ux-menumap-raw.md:78"];
+      n_mnu_zoom_fitheight [label="Fit Height\nCmdZoomFitHeight", tooltip="source:ux-menumap-raw.md:79"];
+      n_mnu_zoom_fitorient [label="Fit by Orientation\nCmdZoomFitByOrientation", tooltip="source:ux-menumap-raw.md:80"];
+      n_mnu_zoom_fitcontent [label="Fit Content\nCmdZoomFitContent", tooltip="source:ux-menumap-raw.md:81"];
+      n_mnu_zoom_shrink [label="Shrink To Fit\nCmdZoomShrinkToFit", tooltip="source:ux-menumap-raw.md:82"];
+      n_mnu_zoom_custom [label="Custom Zoom...\nCmdZoomCustom", tooltip="source:ux-menumap-raw.md:83"];
+      n_mnu_zoom_sel [label="To Selection\nCmdZoomToSelection", tooltip="source:ux-menumap-raw.md:84"];
+      n_mnu_zoom_6400 [label="6400%\nCmdZoom6400", tooltip="source:ux-menumap-raw.md:86"];
+      n_mnu_zoom_3200 [label="3200%\nCmdZoom3200", tooltip="source:ux-menumap-raw.md:87"];
+      n_mnu_zoom_1600 [label="1600%\nCmdZoom1600", tooltip="source:ux-menumap-raw.md:88"];
+      n_mnu_zoom_800 [label="800%\nCmdZoom800", tooltip="source:ux-menumap-raw.md:89"];
+      n_mnu_zoom_400 [label="400%\nCmdZoom400", tooltip="source:ux-menumap-raw.md:90"];
+      n_mnu_zoom_200 [label="200%\nCmdZoom200", tooltip="source:ux-menumap-raw.md:91"];
+      n_mnu_zoom_150 [label="150%\nCmdZoom150", tooltip="source:ux-menumap-raw.md:92"];
+      n_mnu_zoom_125 [label="125%\nCmdZoom125", tooltip="source:ux-menumap-raw.md:93"];
+      n_mnu_zoom_100 [label="100%\nCmdZoom100", tooltip="source:ux-menumap-raw.md:94"];
+      n_mnu_zoom_50 [label="50%\nCmdZoom50", tooltip="source:ux-menumap-raw.md:95"];
+      n_mnu_zoom_25 [label="25%\nCmdZoom25", tooltip="source:ux-menumap-raw.md:96"];
+      n_mnu_zoom_12_5 [label="12.5%\nCmdZoom12_5", tooltip="source:ux-menumap-raw.md:97"];
+      n_mnu_zoom_8_33 [label="8.33%\nCmdZoom8_33", tooltip="source:ux-menumap-raw.md:98"];
+
+      n_mnu_zoom -> n_mnu_zoom_fitpage;
+      n_mnu_zoom -> n_mnu_zoom_actual;
+      n_mnu_zoom -> n_mnu_zoom_fitwidth;
+      n_mnu_zoom -> n_mnu_zoom_fitheight;
+      n_mnu_zoom -> n_mnu_zoom_fitorient;
+      n_mnu_zoom -> n_mnu_zoom_fitcontent;
+      n_mnu_zoom -> n_mnu_zoom_shrink;
+      n_mnu_zoom -> n_mnu_zoom_custom;
+      n_mnu_zoom -> n_mnu_zoom_sel;
+      n_mnu_zoom -> n_mnu_zoom_6400;
+      n_mnu_zoom -> n_mnu_zoom_3200;
+      n_mnu_zoom -> n_mnu_zoom_1600;
+      n_mnu_zoom -> n_mnu_zoom_800;
+      n_mnu_zoom -> n_mnu_zoom_400;
+      n_mnu_zoom -> n_mnu_zoom_200;
+      n_mnu_zoom -> n_mnu_zoom_150;
+      n_mnu_zoom -> n_mnu_zoom_125;
+      n_mnu_zoom -> n_mnu_zoom_100;
+      n_mnu_zoom -> n_mnu_zoom_50;
+      n_mnu_zoom -> n_mnu_zoom_25;
+      n_mnu_zoom -> n_mnu_zoom_12_5;
+      n_mnu_zoom -> n_mnu_zoom_8_33;
+    }
+
+    // SETTINGS MENU
+    subgraph cluster_mnu_settings {
+      label="Settings Menu"; style="filled,rounded"; fillcolor="#14532D"; color="#4ADE80";
+      node [fillcolor="#15803D" fontcolor="#E2E8F0" color="#4ADE80"];
+
+      n_mnu_settings [label="Settings Menu", shape=folder];
+      n_mnu_settings_lang [label="Change Language\nCmdChangeLanguage\n(disabled when 0)", tooltip="source:ux-menumap-raw.md:102", style="dashed"];
+      n_mnu_settings_picker [label="Use TumatraPDF File Picker\nCmdToggleFilePicker", tooltip="source:ux-menumap-raw.md:104"];
+      n_mnu_settings_options [label="Options...\nCmdOptions", tooltip="source:ux-menumap-raw.md:105"];
+      n_mnu_settings_adv [label="Advanced Options...\nCmdAdvancedOptions", tooltip="source:ux-menumap-raw.md:106"];
+      n_mnu_settings_theme [label="Theme (submenu)\nmenuDefThemes placeholder", tooltip="source:ux-menumap-raw.md:107", style="dashed"];
+
+      n_mnu_settings -> n_mnu_settings_lang;
+      n_mnu_settings -> n_mnu_settings_picker;
+      n_mnu_settings -> n_mnu_settings_options;
+      n_mnu_settings -> n_mnu_settings_adv;
+      n_mnu_settings -> n_mnu_settings_theme;
+    }
+
+    // FAVORITES MENU
+    subgraph cluster_mnu_fav {
+      label="Favorites Menu"; style="filled,rounded"; fillcolor="#14532D"; color="#4ADE80";
+      node [fillcolor="#15803D" fontcolor="#E2E8F0" color="#4ADE80"];
+
+      n_mnu_fav [label="Favorites Menu", shape=folder];
+      n_mnu_fav_add [label="Add to favorites\nCmdFavoriteAdd", tooltip="source:ux-menumap-raw.md:110"];
+      n_mnu_fav_del [label="Remove from favorites\nCmdFavoriteDel", tooltip="source:ux-menumap-raw.md:111"];
+      n_mnu_fav_toggle [label="Show Favorites\nCmdFavoriteToggle", tooltip="source:ux-menumap-raw.md:112"];
+      n_mnu_fav_showintab [label="Show Favorites in Tab\nCmdFavoriteShowInTab", tooltip="source:ux-menumap-raw.md:113"];
+      n_mnu_fav_tabgroups [label="Tab Groups (submenu)\nmenuDefTabGroups", tooltip="source:ux-menumap-raw.md:115", style="dashed"];
+      n_mnu_fav_tabgroups_save [label="Save Tab Group\nCmdTabGroupSave", tooltip="source:ux-menumap-raw.md:116"];
+      n_mnu_fav_tabgroups_restore [label="Restore Tab Group\nCmdTabGroupRestore", tooltip="source:ux-menumap-raw.md:117"];
+
+      n_mnu_fav -> n_mnu_fav_add;
+      n_mnu_fav -> n_mnu_fav_del;
+      n_mnu_fav -> n_mnu_fav_toggle;
+      n_mnu_fav -> n_mnu_fav_showintab;
+      n_mnu_fav -> n_mnu_fav_tabgroups;
+      n_mnu_fav_tabgroups -> n_mnu_fav_tabgroups_save;
+      n_mnu_fav_tabgroups -> n_mnu_fav_tabgroups_restore;
+    }
+
+    // NEW TOOLS MENU
+    subgraph cluster_mnu_newtools {
+      label="New Tools Menu"; style="filled,rounded"; fillcolor="#14532D"; color="#4ADE80";
+      node [fillcolor="#15803D" fontcolor="#E2E8F0" color="#4ADE80"];
+
+      n_mnu_newtools [label="New Tools Menu", shape=folder];
+      n_mnu_newtools_autoscroll [label="Auto-Scroll Toggle\nCmdAutoScrollToggle", tooltip="source:ux-menumap-raw.md:120"];
+      n_mnu_newtools_asup [label="Auto-Scroll Speed Up\nCmdAutoScrollSpeedUp", tooltip="source:ux-menumap-raw.md:121"];
+      n_mnu_newtools_asdown [label="Auto-Scroll Speed Down\nCmdAutoScrollSpeedDown", tooltip="source:ux-menumap-raw.md:122"];
+      n_mnu_newtools_contrast [label="Contrast Toggle\nCmdContrastToggle", tooltip="source:ux-menumap-raw.md:124"];
+      n_mnu_newtools_contrastup [label="Contrast Up (+10%)\nCmdContrastIncrease", tooltip="source:ux-menumap-raw.md:125"];
+      n_mnu_newtools_contrastdown [label="Contrast Down (-10%)\nCmdContrastDecrease", tooltip="source:ux-menumap-raw.md:126"];
+      n_mnu_newtools_scan [label="Scan Mode\nCmdViewportCropToggle", tooltip="source:ux-menumap-raw.md:128"];
+      n_mnu_newtools_twocol [label="Two Columns\nCmdViewportCropV2Toggle", tooltip="source:ux-menumap-raw.md:129"];
+      n_mnu_newtools_trim [label="Margin Trim\nCmdMarginTrimToggle", tooltip="source:ux-menumap-raw.md:130"];
+      n_mnu_newtools_trimcfg [label="Trim Config\nCmdTrimConfig", tooltip="source:ux-menumap-raw.md:131"];
+      n_mnu_newtools_archscale [label="Arch Scale\nCmdArchScale", tooltip="source:ux-menumap-raw.md:133"];
+      n_mnu_newtools_archmeasure [label="Arch Measure\nCmdArchMeasure", tooltip="source:ux-menumap-raw.md:134"];
+      n_mnu_newtools_flashcard [label="Flashcard Toggle\nCmdFlashcardToggle", tooltip="source:ux-commands.md:118"];
+
+      n_mnu_newtools -> n_mnu_newtools_autoscroll;
+      n_mnu_newtools -> n_mnu_newtools_asup;
+      n_mnu_newtools -> n_mnu_newtools_asdown;
+      n_mnu_newtools -> n_mnu_newtools_contrast;
+      n_mnu_newtools -> n_mnu_newtools_contrastup;
+      n_mnu_newtools -> n_mnu_newtools_contrastdown;
+      n_mnu_newtools -> n_mnu_newtools_scan;
+      n_mnu_newtools -> n_mnu_newtools_twocol;
+      n_mnu_newtools -> n_mnu_newtools_trim;
+      n_mnu_newtools -> n_mnu_newtools_trimcfg;
+      n_mnu_newtools -> n_mnu_newtools_archscale;
+      n_mnu_newtools -> n_mnu_newtools_archmeasure;
+      n_mnu_newtools -> n_mnu_newtools_flashcard;
+    }
+
+    // HELP MENU
+    subgraph cluster_mnu_help {
+      label="Help Menu"; style="filled,rounded"; fillcolor="#14532D"; color="#4ADE80";
+      node [fillcolor="#15803D" fontcolor="#E2E8F0" color="#4ADE80"];
+
+      n_mnu_help [label="Help Menu", shape=folder];
+      n_mnu_help_manual [label="Manual\nCmdHelpOpenManual", tooltip="source:ux-menumap-raw.md:138"];
+      n_mnu_help_shortcuts [label="Keyboard Shortcuts\nCmdHelpOpenKeyboardShortcuts", tooltip="source:ux-menumap-raw.md:139"];
+      n_mnu_help_manualweb [label="Manual On Website\nCmdHelpOpenManualOnWebsite", tooltip="source:ux-menumap-raw.md:140"];
+      n_mnu_help_website [label="Visit Website\nCmdHelpVisitWebsite", tooltip="source:ux-menumap-raw.md:141"];
+      n_mnu_help_update [label="Check for Updates\nCmdCheckUpdate", tooltip="source:ux-menumap-raw.md:142"];
+      n_mnu_help_rendinfo [label="Toggle Render Queue Info\nCmdDebugToggleRenderInfo\n(debug/pre-release only)", tooltip="source:ux-menumap-raw.md:143", style="dashed"];
+      n_mnu_help_cacheinfo [label="Toggle Cache Info\nCmdDebugToggleCacheInfo\n(debug/pre-release only)", tooltip="source:ux-menumap-raw.md:144", style="dashed"];
+      n_mnu_help_about [label="About\nCmdHelpAbout", tooltip="source:ux-menumap-raw.md:146"];
+
+      n_mnu_help -> n_mnu_help_manual;
+      n_mnu_help -> n_mnu_help_shortcuts;
+      n_mnu_help -> n_mnu_help_manualweb;
+      n_mnu_help -> n_mnu_help_website;
+      n_mnu_help -> n_mnu_help_update;
+      n_mnu_help -> n_mnu_help_rendinfo;
+      n_mnu_help -> n_mnu_help_cacheinfo;
+      n_mnu_help -> n_mnu_help_about;
+    }
+
+    // DEBUG MENU (dev-only)
+    subgraph cluster_mnu_debug {
+      label="Debug Menu (dev/pre-release only)"; style="filled,rounded,dashed"; fillcolor="#7F1D1D"; color="#EF4444";
+      node [fillcolor="#991B1B" fontcolor="#FECACA" color="#EF4444"];
+
+      n_mnu_debug [label="Debug Menu", shape=folder, style=dashed];
+      n_mnu_debug_links [label="Show links\nCmdToggleLinks", tooltip="source:ux-menumap-raw.md:149", style="dashed"];
+      n_mnu_debug_images [label="Show images\nCmdToggleImages", tooltip="source:ux-menumap-raw.md:150", style="dashed"];
+      n_mnu_debug_fitcontent [label="Show fit content area\nCmdDebugShowFitContentArea", tooltip="source:ux-menumap-raw.md:151", style="dashed"];
+      n_mnu_debug_dlsym [label="Download symbols\nCmdDebugDownloadSymbols", tooltip="source:ux-menumap-raw.md:152", style="dashed"];
+      n_mnu_debug_testapp [label="Test app\nCmdDebugTestApp", tooltip="source:ux-menumap-raw.md:153", style="dashed"];
+      n_mnu_debug_notif [label="Show notification\nCmdDebugShowNotif", tooltip="source:ux-menumap-raw.md:154", style="dashed"];
+      n_mnu_debug_about [label="About\nCmdHelpAbout (same as Help)", tooltip="source:ux-menumap-raw.md:156", style="dashed"];
+
+      n_mnu_debug -> n_mnu_debug_links;
+      n_mnu_debug -> n_mnu_debug_images;
+      n_mnu_debug -> n_mnu_debug_fitcontent;
+      n_mnu_debug -> n_mnu_debug_dlsym;
+      n_mnu_debug -> n_mnu_debug_testapp;
+      n_mnu_debug -> n_mnu_debug_notif;
+      n_mnu_debug -> n_mnu_debug_about;
+    }
+  }
+
+  // ============================================================
+  // CLUSTER: CONTEXT MENUS (6 context menus)
+  // ============================================================
+  subgraph cluster_contextmenus {
+    label="Context Menus (6)"; style="filled,rounded"; fillcolor="#4C1D95"; fontcolor="#E2E8F0"; color="#A855F7";
+    node [fillcolor="#6B21A8" fontcolor="#E2E8F0" color="#A855F7"];
+
+    // Selection context menu
+    subgraph cluster_ctx_sel {
+      label="Selection Context Menu (right-click selected text)"; style="filled,rounded"; fillcolor="#581C87"; color="#D8B4FE";
+      node [fillcolor="#7C3AED" fontcolor="#E2E8F0" color="#D8B4FE"];
+
+      n_ctx_sel [label="Selection Context Menu", shape=folder];
+      n_ctx_sel_google [label="Translate With Google\nCmdTranslateSelectionWithGoogle", tooltip="source:ux-menumap-raw.md:161"];
+      n_ctx_sel_deepl [label="Translate with DeepL\nCmdTranslateSelectionWithDeepL", tooltip="source:ux-menumap-raw.md:162"];
+      n_ctx_sel_grok [label="Translate with Grok Build\nCmdTranslateSelectionWithGrokBuild", tooltip="source:ux-menumap-raw.md:163"];
+      n_ctx_sel_claude [label="Translate with Claude Code\nCmdTranslateSelectionWithClaudeCode", tooltip="source:ux-menumap-raw.md:164"];
+      n_ctx_sel_codex [label="Translate with OpenAI Codex\nCmdTranslateSelectionWithOpenAICodex", tooltip="source:ux-menumap-raw.md:165"];
+      n_ctx_sel_antigrav [label="Translate with Antigravity\nCmdTranslateSelectionWithAntiGravity", tooltip="source:ux-menumap-raw.md:166"];
+      n_ctx_sel_search_google [label="Search With Google\nCmdSearchSelectionWithGoogle", tooltip="source:ux-menumap-raw.md:167"];
+      n_ctx_sel_search_bing [label="Search With Bing\nCmdSearchSelectionWithBing", tooltip="source:ux-menumap-raw.md:168"];
+      n_ctx_sel_search_wiki [label="Search with Wikipedia\nCmdSearchSelectionWithWikipedia", tooltip="source:ux-menumap-raw.md:169"];
+      n_ctx_sel_search_scholar [label="Search with Google Scholar\nCmdSearchSelectionWithGoogleScholar", tooltip="source:ux-menumap-raw.md:170"];
+      n_ctx_sel_selall [label="Select All\nCmdSelectAll", tooltip="source:ux-menumap-raw.md:171"];
+
+      n_ctx_sel -> n_ctx_sel_google;
+      n_ctx_sel -> n_ctx_sel_deepl;
+      n_ctx_sel -> n_ctx_sel_grok;
+      n_ctx_sel -> n_ctx_sel_claude;
+      n_ctx_sel -> n_ctx_sel_codex;
+      n_ctx_sel -> n_ctx_sel_antigrav;
+      n_ctx_sel -> n_ctx_sel_search_google;
+      n_ctx_sel -> n_ctx_sel_search_bing;
+      n_ctx_sel -> n_ctx_sel_search_wiki;
+      n_ctx_sel -> n_ctx_sel_search_scholar;
+      n_ctx_sel -> n_ctx_sel_selall;
+    }
+
+    // Main document context menu
+    subgraph cluster_ctx_main {
+      label="Main Context Menu (right-click document area)"; style="filled,rounded"; fillcolor="#581C87"; color="#D8B4FE";
+      node [fillcolor="#7C3AED" fontcolor="#E2E8F0" color="#D8B4FE"];
+
+      n_ctx_main [label="Main Context Menu", shape=folder];
+      n_ctx_main_copy [label="Copy To Clipboard\nCmdCopySelection", tooltip="source:ux-menumap-raw.md:175"];
+      n_ctx_main_sel_sub [label="Selection (submenu)\n→ translate/search items", tooltip="source:ux-menumap-raw.md:176", style="dashed"];
+      n_ctx_main_copylink [label="Copy Link Address\nCmdCopyLinkTarget", tooltip="source:ux-menumap-raw.md:177"];
+      n_ctx_main_copycomment [label="Copy Comment\nCmdCopyComment", tooltip="source:ux-menumap-raw.md:178"];
+      n_ctx_main_copyimg [label="Copy Image To Clipboard\nCmdCopyImage", tooltip="source:ux-menumap-raw.md:179"];
+      n_ctx_main_saveatt [label="Save Attachment\nCmdSaveAttachment", tooltip="source:ux-menumap-raw.md:180"];
+      n_ctx_main_img_sub [label="Image (submenu)\nreplace/edit/crop/resize/convert", tooltip="source:ux-menumap-raw.md:181", style="dashed"];
+      n_ctx_main_favadd [label="Add to favorites\nCmdFavoriteAdd", tooltip="source:ux-menumap-raw.md:182"];
+      n_ctx_main_favdel [label="Remove from favorites\nCmdFavoriteDel", tooltip="source:ux-menumap-raw.md:183"];
+      n_ctx_main_favtoggle [label="Show Favorites\nCmdFavoriteToggle", tooltip="source:ux-menumap-raw.md:184"];
+      n_ctx_main_bookmarks [label="Show Bookmarks\nCmdToggleBookmarks", tooltip="source:ux-menumap-raw.md:185"];
+      n_ctx_main_toolbar [label="Show Toolbar\nCmdToggleToolbar", tooltip="source:ux-menumap-raw.md:186"];
+      n_ctx_main_aichat [label="AI chat with document\n(submenu: Grok/Codex/Claude/Antigrav)", tooltip="source:ux-menumap-raw.md:188", style="dashed"];
+      n_ctx_main_doc_sub [label="Document (submenu)\nProperties/Show PDF Info/TOC/Extract Pages/Delete Pages/Extract Text/Compress/Decompress/Encrypt/Decrypt/Bake/Convert/Show in folder", tooltip="source:ux-menumap-raw.md:189", style="dashed"];
+      n_ctx_main_readaloud [label="Read Aloud\nCmdReadAloud (via submenu)", tooltip="source:ux-menumap-raw.md:190"];
+      n_ctx_main_editann [label="Edit Annotations\nCmdEditAnnotations", tooltip="source:ux-menumap-raw.md:191"];
+      n_ctx_main_createann_sel [label="Create Annotation From Selection\n(commented out)", tooltip="source:ux-menumap-raw.md:192", style="dashed"];
+      n_ctx_main_createann_cursor [label="Create Annotation Under Cursor\n(submenu: Text/FreeText/Stamp/Image/Caret/Line/Square/Circle)", tooltip="source:ux-menumap-raw.md:193", style="dashed"];
+      n_ctx_main_delann [label="Delete Annotation\nCmdDeleteAnnotation", tooltip="source:ux-menumap-raw.md:194"];
+      n_ctx_main_saveann [label="Save Annotations to existing PDF\nCmdSaveAnnotations", tooltip="source:ux-menumap-raw.md:195"];
+      n_ctx_main_showerr [label="Show Errors\nCmdShowErrors", tooltip="source:ux-menumap-raw.md:196"];
+      n_ctx_main_repair [label="Repair Document File\nCmdRepairDocumentFile", tooltip="source:ux-menumap-raw.md:197"];
+      n_ctx_main_exitfs [label="Exit Fullscreen\nCmdToggleFullscreen\n(only in full-screen)", tooltip="source:ux-menumap-raw.md:198", style="dashed"];
+
+      n_ctx_main -> n_ctx_main_copy;
+      n_ctx_main -> n_ctx_main_sel_sub;
+      n_ctx_main -> n_ctx_main_copylink;
+      n_ctx_main -> n_ctx_main_copycomment;
+      n_ctx_main -> n_ctx_main_copyimg;
+      n_ctx_main -> n_ctx_main_saveatt;
+      n_ctx_main -> n_ctx_main_img_sub;
+      n_ctx_main -> n_ctx_main_favadd;
+      n_ctx_main -> n_ctx_main_favdel;
+      n_ctx_main -> n_ctx_main_favtoggle;
+      n_ctx_main -> n_ctx_main_bookmarks;
+      n_ctx_main -> n_ctx_main_toolbar;
+      n_ctx_main -> n_ctx_main_aichat;
+      n_ctx_main -> n_ctx_main_doc_sub;
+      n_ctx_main -> n_ctx_main_readaloud;
+      n_ctx_main -> n_ctx_main_editann;
+      n_ctx_main -> n_ctx_main_createann_sel;
+      n_ctx_main -> n_ctx_main_createann_cursor;
+      n_ctx_main -> n_ctx_main_delann;
+      n_ctx_main -> n_ctx_main_saveann;
+      n_ctx_main -> n_ctx_main_showerr;
+      n_ctx_main -> n_ctx_main_repair;
+      n_ctx_main -> n_ctx_main_exitfs;
+    }
+
+    // Start page context menu
+    subgraph cluster_ctx_start {
+      label="Start Page Context Menu (recently opened list)"; style="filled,rounded"; fillcolor="#581C87"; color="#D8B4FE";
+      node [fillcolor="#7C3AED" fontcolor="#E2E8F0" color="#D8B4FE"];
+
+      n_ctx_start [label="Start Page Context Menu", shape=folder];
+      n_ctx_start_open [label="Open Document\nCmdOpenSelectedDocument", tooltip="source:ux-menumap-raw.md:201"];
+      n_ctx_start_showfolder [label="Show in folder\nCmdNavigateFilesInFolder", tooltip="source:ux-menumap-raw.md:202"];
+      n_ctx_start_pin [label="Pin Document\nCmdPinSelectedDocument", tooltip="source:ux-menumap-raw.md:203"];
+      n_ctx_start_removehist [label="Remove From History\nCmdForgetSelectedDocument", tooltip="source:ux-menumap-raw.md:205"];
+      n_ctx_start_delete [label="Delete File\nCmdDeleteFile", tooltip="source:ux-menumap-raw.md:206"];
+
+      n_ctx_start -> n_ctx_start_open;
+      n_ctx_start -> n_ctx_start_showfolder;
+      n_ctx_start -> n_ctx_start_pin;
+      n_ctx_start -> n_ctx_start_removehist;
+      n_ctx_start -> n_ctx_start_delete;
+    }
+
+    // Create annot from selection (commented out)
+    subgraph cluster_ctx_annotsel {
+      label="Create Annot From Selection (commented out)"; style="filled,rounded,dashed"; fillcolor="#7F1D1D"; color="#EF4444";
+      node [fillcolor="#991B1B" fontcolor="#FECACA" color="#EF4444"];
+
+      n_ctx_annotsel [label="Create Annot From Selection", shape=folder, style=dashed];
+      n_ctx_annotsel_highlight [label="Highlight\nCmdCreateAnnotHighlight", tooltip="source:ux-menumap-raw.md:209", style="dashed"];
+      n_ctx_annotsel_underline [label="Underline\nCmdCreateAnnotUnderline", tooltip="source:ux-menumap-raw.md:210", style="dashed"];
+      n_ctx_annotsel_strike [label="Strike Out\nCmdCreateAnnotStrikeOut", tooltip="source:ux-menumap-raw.md:211", style="dashed"];
+      n_ctx_annotsel_redact [label="Redact\n(commented out)", tooltip="source:ux-menumap-raw.md:212", style="dashed"];
+      n_ctx_annotsel_poly [label="Polygon/Polyline/File Attachment\n(commented out)", tooltip="source:ux-menumap-raw.md:213", style="dashed"];
+
+      n_ctx_annotsel -> n_ctx_annotsel_highlight;
+      n_ctx_annotsel -> n_ctx_annotsel_underline;
+      n_ctx_annotsel -> n_ctx_annotsel_strike;
+      n_ctx_annotsel -> n_ctx_annotsel_redact;
+      n_ctx_annotsel -> n_ctx_annotsel_poly;
+    }
+
+    // Create annot under cursor
+    subgraph cluster_ctx_annotcursor {
+      label="Create Annotation Under Cursor"; style="filled,rounded"; fillcolor="#581C87"; color="#D8B4FE";
+      node [fillcolor="#7C3AED" fontcolor="#E2E8F0" color="#D8B4FE"];
+
+      n_ctx_annotcursor [label="Create Annotation Under Cursor", shape=folder];
+      n_ctx_annotcursor_text [label="Text\nCmdCreateAnnotText", tooltip="source:ux-menumap-raw.md:216"];
+      n_ctx_annotcursor_freetext [label="Free Text\nCmdCreateAnnotFreeText", tooltip="source:ux-menumap-raw.md:217"];
+      n_ctx_annotcursor_stamp [label="Stamp\nCmdCreateAnnotStamp", tooltip="source:ux-menumap-raw.md:218"];
+      n_ctx_annotcursor_imgclip [label="Image From Clipboard\nCmdCreateAnnotImageFromClipboard", tooltip="source:ux-menumap-raw.md:219"];
+      n_ctx_annotcursor_caret [label="Caret\nCmdCreateAnnotCaret", tooltip="source:ux-menumap-raw.md:220"];
+      n_ctx_annotcursor_line [label="Line\nCmdCreateAnnotLine", tooltip="source:ux-menumap-raw.md:221"];
+      n_ctx_annotcursor_square [label="Square\nCmdCreateAnnotSquare", tooltip="source:ux-menumap-raw.md:222"];
+      n_ctx_annotcursor_circle [label="Circle\nCmdCreateAnnotCircle", tooltip="source:ux-menumap-raw.md:223"];
+      n_ctx_annotcursor_poly [label="Polygon/Polyline\n(commented out)", tooltip="source:ux-menumap-raw.md:224", style="dashed"];
+
+      n_ctx_annotcursor -> n_ctx_annotcursor_text;
+      n_ctx_annotcursor -> n_ctx_annotcursor_freetext;
+      n_ctx_annotcursor -> n_ctx_annotcursor_stamp;
+      n_ctx_annotcursor -> n_ctx_annotcursor_imgclip;
+      n_ctx_annotcursor -> n_ctx_annotcursor_caret;
+      n_ctx_annotcursor -> n_ctx_annotcursor_line;
+      n_ctx_annotcursor -> n_ctx_annotcursor_square;
+      n_ctx_annotcursor -> n_ctx_annotcursor_circle;
+      n_ctx_annotcursor -> n_ctx_annotcursor_poly;
+    }
+
+    // Read Aloud context menu
+    subgraph cluster_ctx_readaloud {
+      label="Read Aloud Context Menu"; style="filled,rounded"; fillcolor="#581C87"; color="#D8B4FE";
+      node [fillcolor="#7C3AED" fontcolor="#E2E8F0" color="#D8B4FE"];
+
+      n_ctx_readaloud [label="Read Aloud Context Menu", shape=folder];
+      n_ctx_readaloud_start [label="Start Reading From Top\nCmdReadAloud", tooltip="source:ux-menumap-raw.md:227"];
+
+      n_ctx_readaloud -> n_ctx_readaloud_start;
+    }
+  }
+
+  // ============================================================
+  // CLUSTER: SECONDARY / EXTRA TOOLBARS
+  // ============================================================
+  subgraph cluster_toolbars_extra {
+    label="Secondary / Conditional Toolbars"; style="filled,rounded"; fillcolor="#7C2D12"; fontcolor="#FED7AA"; color="#FB923C";
+    node [fillcolor="#9A3412" fontcolor="#FED7AA" color="#FB923C"];
+
+    // Arch Tools toolbar
+    subgraph cluster_tb_arch {
+      label="Arch Tools Toolbar\n(shows when gGlobalPrefs->archToolsEnabled=true)"; style="filled,rounded"; fillcolor="#7C2D12"; color="#FB923C";
+      node [fillcolor="#9A3412" fontcolor="#FED7AA" color="#FB923C"];
+
+      n_tb_arch [label="Arch Tools Toolbar", shape=folder];
+      n_tb_arch_scale [label="Arch Scale (toggle)\nCmdArchScale", tooltip="source:ux-commands.md:200"];
+      n_tb_arch_measure [label="Arch Measure (toggle)\nCmdArchMeasure", tooltip="source:ux-commands.md:200"];
+      n_tb_arch_align [label="Arch Align\nCmdArchAlign", tooltip="source:ux-commands.md:200"];
+      n_tb_arch_apply [label="Arch Apply\nCmdArchApply", tooltip="source:ux-commands.md:200"];
+      n_tb_arch_pagecrop [label="Arch Page Crop\nCmdArchPageCrop", tooltip="source:ux-commands.md:200"];
+      n_tb_arch_radius [label="Arch Measure Radius\nCmdArchMeasureRadius", tooltip="source:ux-commands.md:200"];
+      n_tb_arch_clear [label="Arch Clear\nCmdArchClear", tooltip="source:ux-commands.md:200"];
+      n_tb_arch_resetscale [label="Arch Reset Scale\nCmdArchResetScale", tooltip="source:ux-commands.md:200"];
+      n_tb_arch_cleanall [label="Arch Clean All\nCmdArchCleanAll", tooltip="source:ux-commands.md:200"];
+      n_tb_arch_toggle [label="Arch Tools Toggle (checked)\nCmdArchToolsToggle", tooltip="source:ux-commands.md:200"];
+
+      n_tb_arch -> n_tb_arch_scale;
+      n_tb_arch -> n_tb_arch_measure;
+      n_tb_arch -> n_tb_arch_align;
+      n_tb_arch -> n_tb_arch_apply;
+      n_tb_arch -> n_tb_arch_pagecrop;
+      n_tb_arch -> n_tb_arch_radius;
+      n_tb_arch -> n_tb_arch_clear;
+      n_tb_arch -> n_tb_arch_resetscale;
+      n_tb_arch -> n_tb_arch_cleanall;
+      n_tb_arch -> n_tb_arch_toggle;
+    }
+
+    // Edit toolbar
+    subgraph cluster_tb_edit {
+      label="Edit Toolbar\n(shows when win->editTools.on=true)"; style="filled,rounded"; fillcolor="#7C2D12"; color="#FB923C";
+      node [fillcolor="#9A3412" fontcolor="#FED7AA" color="#FB923C"];
+
+      n_tb_edit_tb [label="Edit Toolbar", shape=folder];
+      n_tb_edit_addtext [label="Add Text\nCmdEditAddText", tooltip="source:ux-commands.md:203"];
+      n_tb_edit_addimg [label="Add Image\nCmdEditAddImage", tooltip="source:ux-commands.md:203"];
+      n_tb_edit_imgcrop [label="Image Crop\nCmdEditImageCrop", tooltip="source:ux-commands.md:203"];
+      n_tb_edit_imgapply [label="Image Apply\nCmdEditImageApply", tooltip="source:ux-commands.md:203"];
+      n_tb_edit_toggle [label="Edit Tools Toggle (checked)\nCmdEditToolsToggle", tooltip="source:ux-commands.md:203"];
+
+      n_tb_edit_tb -> n_tb_edit_addtext;
+      n_tb_edit_tb -> n_tb_edit_addimg;
+      n_tb_edit_tb -> n_tb_edit_imgcrop;
+      n_tb_edit_tb -> n_tb_edit_imgapply;
+      n_tb_edit_tb -> n_tb_edit_toggle;
+    }
+
+    // Flashcard toolbar
+    subgraph cluster_tb_flashcard {
+      label="Flashcard Toolbar\n(shows when win->flashcard.on=true) — STATEFUL"; style="filled,rounded"; fillcolor="#7C2D12"; color="#FB923C";
+      node [fillcolor="#9A3412" fontcolor="#FED7AA" color="#FB923C"];
+
+      n_tb_flashcard_tb [label="Flashcard Toolbar", shape=folder];
+      n_tb_fc_toggle [label="Flashcard Toggle (checked)\nCmdFlashcardToggle", tooltip="source:ux-commands.md:206"];
+      n_tb_fc_back [label="Back\nCmdFlashcardBack", tooltip="source:ux-commands.md:206"];
+      n_tb_fc_next [label="Next\nCmdFlashcardNext", tooltip="source:ux-commands.md:206"];
+      n_tb_fc_rate1 [label="Rate 1\nCmdFlashcardRate1", tooltip="source:ux-commands.md:206"];
+      n_tb_fc_rate2 [label="Rate 2\nCmdFlashcardRate2", tooltip="source:ux-commands.md:206"];
+      n_tb_fc_rate3 [label="Rate 3\nCmdFlashcardRate3", tooltip="source:ux-commands.md:206"];
+      n_tb_fc_rate4 [label="Rate 4\nCmdFlashcardRate4", tooltip="source:ux-commands.md:206"];
+      n_tb_fc_filter [label="Filter\nCmdFlashcardFilter", tooltip="source:ux-commands.md:206"];
+      n_tb_fc_reveal [label="Reveal\nCmdFlashcardReveal", tooltip="source:ux-commands.md:206"];
+      n_tb_fc_order [label="Order Options\nCmdFlashcardOrderOptions", tooltip="source:ux-commands.md:206"];
+      n_tb_fc_config [label="Config\nCmdFlashcardConfig", tooltip="source:ux-commands.md:206"];
+      n_tb_fc_import [label="Import\nCmdFlashcardImport", tooltip="source:ux-commands.md:206"];
+      n_tb_fc_session [label="Session\nCmdFlashcardSession", tooltip="source:ux-commands.md:206"];
+      n_tb_fc_timer_toggle [label="Study Timer Toggle\nCmdFlashcardStudyTimerToggle\n(when in study mode)", tooltip="source:ux-commands.md:206", style="dashed"];
+      n_tb_fc_timer_edit [label="Study Timer Edit\nCmdFlashcardStudyTimerEdit\n(when in study mode)", tooltip="source:ux-commands.md:206", style="dashed"];
+
+      n_tb_flashcard_tb -> n_tb_fc_toggle;
+      n_tb_flashcard_tb -> n_tb_fc_back;
+      n_tb_flashcard_tb -> n_tb_fc_next;
+      n_tb_flashcard_tb -> n_tb_fc_rate1;
+      n_tb_flashcard_tb -> n_tb_fc_rate2;
+      n_tb_flashcard_tb -> n_tb_fc_rate3;
+      n_tb_flashcard_tb -> n_tb_fc_rate4;
+      n_tb_flashcard_tb -> n_tb_fc_filter;
+      n_tb_flashcard_tb -> n_tb_fc_reveal;
+      n_tb_flashcard_tb -> n_tb_fc_order;
+      n_tb_flashcard_tb -> n_tb_fc_config;
+      n_tb_flashcard_tb -> n_tb_fc_import;
+      n_tb_flashcard_tb -> n_tb_fc_session;
+      n_tb_flashcard_tb -> n_tb_fc_timer_toggle;
+      n_tb_flashcard_tb -> n_tb_fc_timer_edit;
+    }
+  }
+
+  // ============================================================
+  // CLUSTER: DIALOGS / SECONDARY WINDOWS (25+)
+  // ============================================================
+  subgraph cluster_dialogs {
+    label="Dialogs / Secondary Windows (25+)"; style="filled,rounded"; fillcolor="#1E1B4B"; fontcolor="#E2E8F0"; color="#6366F1";
+    node [fillcolor="#312E81" fontcolor="#E2E8F0" color="#6366F1"];
+
+    n_dlg_about [label="About Dialog\ninvoked by: CmdHelpAbout (Help→About, CmdPalette)", tooltip="source:dialog-inventory.md:9-35"];
+    n_dlg_options [label="Options / Settings Dialog (Ctrl+K)\ninvoked by: CmdOptions (Tools→Options, CmdPalette)", tooltip="source:dialog-inventory.md:41-79"];
+    n_dlg_docprops [label="Document Properties\ninvoked by: CmdProperties (File→Document Properties, Ctrl+D)", tooltip="source:dialog-inventory.md:81-102"];
+    n_dlg_customzoom [label="Custom Zoom Dialog\ninvoked by: Zoom control UI", tooltip="source:dialog-inventory.md:104-123"];
+    n_dlg_password [label="Enter Password Dialog\ninvoked by: Dialog_GetPassword() for encrypted files", tooltip="source:dialog-inventory.md:126-147"];
+    n_dlg_gotopage [label="Go To Page Dialog\ninvoked by: Dialog_GoToPage()", tooltip="source:dialog-inventory.md:149-166"];
+    n_dlg_findbar [label="Find Bar (compact overlay + floating)\ninvoked by: Ctrl+F or toolbar magnifying glass", tooltip="source:dialog-inventory.md:168-200"];
+    n_dlg_cmdpalette [label="Command Palette (Ctrl+Shift+P)\ninvoked by: CmdCommandPalette", tooltip="source:dialog-inventory.md:202-222"];
+    n_dlg_shortcuts [label="Keyboard Shortcuts Display\ninvoked by: CmdHelpOpenKeyboardShortcuts (inline in menus/CmdPalette)", tooltip="source:dialog-inventory.md:224-236", style="dashed"];
+    n_dlg_changetheme [label="Change Theme Dialog\ninvoked by: CmdChangeTheme", tooltip="source:dialog-inventory.md:238-247"];
+    n_dlg_aichat [label="AI Chat Sidebar (WebView2 panel)\ninvoked by: AI chat functionality", tooltip="source:dialog-inventory.md:249-270"];
+    n_dlg_readaloudbar [label="Read Aloud Playback Bar\ninvoked by: CmdReadAloud, CmdPause/Continue/Stop/FromTop/Selection", tooltip="source:dialog-inventory.md:272-294"];
+    n_dlg_profilesync [label="Profile Sync Dialog\ninvoked by: ShowProfileSyncDialog() from HomePage", tooltip="source:dialog-inventory.md:296-313"];
+    n_dlg_profilebackup [label="Profile Backup/Restore Dialog\ninvoked by: ProfileSyncWnd references", tooltip="source:dialog-inventory.md:315-328"];
+    n_dlg_changescrollbar [label="Change Scrollbar Dialog\ninvoked by: CmdChangeScrollbar", tooltip="source:dialog-inventory.md:329-348"];
+    n_dlg_changebgcolor [label="Change Background Color Dialog\ninvoked by: Dialog_ChangeBackgroundColor", tooltip="source:dialog-inventory.md:350-371"];
+    n_dlg_changelang [label="Change Language Dialog\ninvoked by: Dialog_ChangeLanguage", tooltip="source:dialog-inventory.md:373-388"];
+    n_dlg_inversesearch [label="Inverse Search Dialog\ninvoked by: Dialog_SetInverseSearch", tooltip="source:dialog-inventory.md:389-403"];
+    n_dlg_addfav [label="Add Favorite Dialog\ninvoked by: Dialog_AddFavorite (Favorites.cpp)", tooltip="source:dialog-inventory.md:405-418"];
+    n_dlg_unsupported [label="Unsupported Format Message\n\"The file format is not supported or the file is damaged\"", tooltip="source:dialog-inventory.md:420-428", style="dashed"];
+    n_dlg_fileerrors [label="File Error Messages (MessageBoxW)\nFile not exist / Access denied / In use / other system errors", tooltip="source:dialog-inventory.md:430-441", style="dashed"];
+    n_dlg_toasts [label="Toast Notifications / Progress Indicators\ninvoked by: ShowNotification(), ShowWarningNotification()", tooltip="source:dialog-inventory.md:443-466"];
+    n_dlg_printadv [label="Print Dialog (Advanced Property Sheet)\ninvoked by: Print menu/Command", tooltip="source:dialog-inventory.md:468-488"];
+    n_dlg_msgboxes [label="Error Message Boxes (MessageBoxW)\nNumerous locations: edit, image, print, profile, PDF tools, crash, installer, uninstaller", tooltip="source:dialog-inventory.md:490-516", style="dashed"];
+  }
+
+  // ============================================================
+  // CLUSTER: HOME PAGE (18 elements)
+  // ============================================================
+  subgraph cluster_home {
+    label="Home Page (18 elements)"; style="filled,rounded"; fillcolor="#0C4A6E"; fontcolor="#E2E8F0"; color="#06B6D4";
+    node [fillcolor="#0E7490" fontcolor="#E2E8F0" color="#06B6D4"];
+
+    n_home [label="Home Page", shape=folder];
+    n_home_stats [label="Stats Section\nRead/Flashcards tabs + heatmap calendar + year nav + Graph toggle + Most read list + totals line + 14 books scroll", tooltip="source:home_side_inventory.md:5-8,18"];
+    n_home_heatmap [label="Heatmap Calendar Day Cells\nHover tooltip shows read time", tooltip="source:home_side_inventory.md:6-7"];
+    n_home_yearnav [label="Year Navigation Arrows\nPrev/Next year buttons", tooltip="source:home_side_inventory.md:7-8,18"];
+    n_home_tabs [label="Read / Flashcards Tabs\nToggle flashcardMode", tooltip="source:home_side_inventory.md:8"];
+    n_home_recents_header [label="Recently Opened / Frequently Read Header\nReflects gGlobalPrefs->homePageSortByFrequentlyRead", tooltip="source:home_side_inventory.md:9"];
+    n_home_thumbs [label="Thumbnail Cards (Grid View)\nPDF thumb + name + size + close(✕) + pin buttons", tooltip="source:home_side_inventory.md:10"];
+    n_home_list [label="List View Entries\nFile name + path + size + close(✕) + pin + keyboard nav", tooltip="source:home_side_inventory.md:11"];
+    n_home_search [label="Search Box (Ctrl+F)\nFilters by base name + clear(✕) + cue banner", tooltip="source:home_side_inventory.md:12"];
+    n_home_viewtoggle [label="View Mode Toggle (Grid/List icons)\nToggles HomePageIsListView", tooltip="source:home_side_inventory.md:13"];
+    n_home_opendoc [label="\"Open a document...\" Link\nOpens file history picker", tooltip="source:home_side_inventory.md:14"];
+    n_home_syncbtn [label="Profile/Sync \"⟳ Sync\" Button\nOpens Profile Sync modal dialog", tooltip="source:home_side_inventory.md:15"];
+    n_home_tipband [label="Tip Band at Bottom\nRandom tips/promos + clickable links", tooltip="source:home_side_inventory.md:16"];
+    n_home_totals [label="Most Read Totals Line\nRead: Today Xm | Total Xm | Flashcards: Today N cards / Xm | Total N cards / Xm", tooltip="source:home_side_inventory.md:17"];
+
+    n_home -> n_home_stats;
+    n_home -> n_home_heatmap;
+    n_home -> n_home_yearnav;
+    n_home -> n_home_tabs;
+    n_home -> n_home_recents_header;
+    n_home -> n_home_thumbs;
+    n_home -> n_home_list;
+    n_home -> n_home_search;
+    n_home -> n_home_viewtoggle;
+    n_home -> n_home_opendoc;
+    n_home -> n_home_syncbtn;
+    n_home -> n_home_tipband;
+    n_home -> n_home_totals;
+
+    // Cross-links
+    n_home_syncbtn -> n_dlg_profilesync [style=dashed, color="#3B82F6", xlabel="opens"];
+    n_home_thumbs -> n_main_win [style=dashed, color="#3B82F6", xlabel="click opens PDF"];
+    n_home_list -> n_main_win [style=dashed, color="#3B82F6", xlabel="click opens PDF"];
+    n_home_search -> n_dlg_findbar [style=dashed, color="#3B82F6", xlabel="Ctrl+F focuses"];
+  }
+
+  // ============================================================
+  // CLUSTER: SIDE / FEATURE PANELS (53 elements)
+  // ============================================================
+  subgraph cluster_panels {
+    label="Side / Feature Panels (53 elements)"; style="filled,rounded"; fillcolor="#3F1B4B"; fontcolor="#E2E8F0"; color="#EC4899";
+    node [fillcolor="#86198F" fontcolor="#E2E8F0" color="#EC4899"];
+
+    // Flashcard Sidebar
+    subgraph cluster_pnl_fc {
+      label="Flashcard Sidebar (right)"; style="filled,rounded"; fillcolor="#3F1B4B"; color="#EC4899";
+      node [fillcolor="#86198F" fontcolor="#E2E8F0" color="#EC4899"];
+
+      n_pnl_fc [label="Flashcard Sidebar", shape=folder];
+      n_pnl_fc_title [label="Title Strip \"Flashcards\" + Close(✕)\nIDC_FLASHCARD_LABEL_WITH_CLOSE", tooltip="source:home_side_inventory.md:24"];
+      n_pnl_fc_headers [label="Column Headers: Flashcard | Page | Due | Status\nDouble-click row navigates", tooltip="source:home_side_inventory.md:25"];
+      n_pnl_fc_rows [label="List Rows (4 cols): label | Pág | Due | Status\nHover highlight + click navigates\nStatus colors: new=blue, due=orange, learn=purple, ok=green", tooltip="source:home_side_inventory.md:26"];
+      n_pnl_fc_splitter [label="Vertical Splitter\nDrag resize panel ↔ canvas\nAdjusts when AI chat also open", tooltip="source:home_side_inventory.md:27"];
+      n_pnl_fc_timer [label="Study Timer Trio (inside Study button)\nCheckbox + \"Timer:\" label + minutes edit field", tooltip="source:home_side_inventory.md:28"];
+      n_pnl_fc_toolbar [label="Flashcard Toolbar (11 buttons)", tooltip="source:home_side_inventory.md:29-38"];
+
+      n_pnl_fc -> n_pnl_fc_title;
+      n_pnl_fc -> n_pnl_fc_headers;
+      n_pnl_fc -> n_pnl_fc_rows;
+      n_pnl_fc -> n_pnl_fc_splitter;
+      n_pnl_fc -> n_pnl_fc_timer;
+      n_pnl_fc -> n_pnl_fc_toolbar;
+    }
+
+    // Flashcard Toolbar buttons (detail)
+    subgraph cluster_pnl_fc_tb {
+      label="Flashcard Toolbar Buttons"; style="filled,rounded"; fillcolor="#3F1B4B"; color="#EC4899";
+      node [fillcolor="#86198F" fontcolor="#E2E8F0" color="#EC4899"];
+
+      n_pnl_fc_tb_study [label="Study Button (with leading spaces for timer trio)\nToggles study mode + enables timer controls", tooltip="source:home_side_inventory.md:29-30"];
+      n_pnl_fc_tb_reveal [label="Reveal Button\nToggles reveal mode (shows answer)", tooltip="source:home_side_inventory.md:30-31"];
+      n_pnl_fc_tb_back [label="Back Button\nNavigates to previous card", tooltip="source:home_side_inventory.md:31-32"];
+      n_pnl_fc_tb_next [label="Next Button\nNavigates to next card", tooltip="source:home_side_inventory.md:32-33"];
+      n_pnl_fc_tb_order [label="Order Button\nToggles card order (forward/backward/mixed)", tooltip="source:home_side_inventory.md:33-34"];
+      n_pnl_fc_tb_lista [label="List Button\nToggles Lista sidebar open/close", tooltip="source:home_side_inventory.md:34-35"];
+      n_pnl_fc_tb_filter [label="Filter Button\nToggles page/chapter filter", tooltip="source:home_side_inventory.md:35-36"];
+      n_pnl_fc_tb_import [label="Import Button\nOpens study config dialog", tooltip="source:home_side_inventory.md:36-37"];
+      n_pnl_fc_tb_session [label="Session Button\nToggles session mode", tooltip="source:home_side_inventory.md:37-38"];
+      n_pnl_fc_tb_settings [label="Settings Button\nOpens study config (dir/clear/resync)", tooltip="source:home_side_inventory.md:38-39"];
+
+      n_pnl_fc_toolbar -> n_pnl_fc_tb_study;
+      n_pnl_fc_toolbar -> n_pnl_fc_tb_reveal;
+      n_pnl_fc_toolbar -> n_pnl_fc_tb_back;
+      n_pnl_fc_toolbar -> n_pnl_fc_tb_next;
+      n_pnl_fc_toolbar -> n_pnl_fc_tb_order;
+      n_pnl_fc_toolbar -> n_pnl_fc_tb_lista;
+      n_pnl_fc_toolbar -> n_pnl_fc_tb_filter;
+      n_pnl_fc_toolbar -> n_pnl_fc_tb_import;
+      n_pnl_fc_toolbar -> n_pnl_fc_tb_session;
+      n_pnl_fc_toolbar -> n_pnl_fc_tb_settings;
+    }
+
+    // Selection Toolbar
+    subgraph cluster_pnl_sel {
+      label="Selection Toolbar (floating under text selection)"; style="filled,rounded"; fillcolor="#3F1B4B"; color="#EC4899";
+      node [fillcolor="#86198F" fontcolor="#E2E8F0" color="#EC4899"];
+
+      n_pnl_sel [label="Selection Toolbar", shape=folder];
+      n_pnl_sel_copy [label="Copy\nCmdCopySelection", tooltip="source:home_side_inventory.md:39"];
+      n_pnl_sel_translate [label="Translate\nCmdTranslateSelection", tooltip="source:home_side_inventory.md:40"];
+      n_pnl_sel_readaloud [label="Read Aloud\nCmdReadAloudSelection", tooltip="source:home_side_inventory.md:41"];
+      n_pnl_sel_highlight [label="Highlight\nCmdCreateAnnotHighlight", tooltip="source:home_side_inventory.md:42"];
+      n_pnl_sel_underline [label="Underline\nCmdCreateAnnotUnderline", tooltip="source:home_side_inventory.md:43"];
+      n_pnl_sel_squiggly [label="Squiggly\nCmdCreateAnnotSquiggly", tooltip="source:home_side_inventory.md:44"];
+      n_pnl_sel_strike [label="Strike Out\nCmdCreateAnnotStrikeOut", tooltip="source:home_side_inventory.md:45"];
+      n_pnl_sel_textann [label="Text Annotation\nCmdCreateAnnotText", tooltip="source:home_side_inventory.md:46"];
+      n_pnl_sel_flashcard [label="Flashcard\nCmdFlashcardAdd", tooltip="source:home_side_inventory.md:47"];
+
+      n_pnl_sel -> n_pnl_sel_copy;
+      n_pnl_sel -> n_pnl_sel_translate;
+      n_pnl_sel -> n_pnl_sel_readaloud;
+      n_pnl_sel -> n_pnl_sel_highlight;
+      n_pnl_sel -> n_pnl_sel_underline;
+      n_pnl_sel -> n_pnl_sel_squiggly;
+      n_pnl_sel -> n_pnl_sel_strike;
+      n_pnl_sel -> n_pnl_sel_textann;
+      n_pnl_sel -> n_pnl_sel_flashcard;
+    }
+
+    // AI Chat Sidebar
+    subgraph cluster_pnl_aichat {
+      label="AI Chat Sidebar (WebView2-hosted)"; style="filled,rounded"; fillcolor="#3F1B4B"; color="#EC4899";
+      node [fillcolor="#86198F" fontcolor="#E2E8F0" color="#EC4899"];
+
+      n_pnl_aichat [label="AI Chat Panel", shape=folder];
+      n_pnl_aichat_provider [label="Provider Name + Session Combo + Model Combo + Option Combo + Checkbox", tooltip="source:home_side_inventory.md:48"];
+      n_pnl_aichat_session [label="Session Combo: \"+ New Session\" + saved sessions\nsel=0 clears, sel>0 loads history", tooltip="source:home_side_inventory.md:49"];
+      n_pnl_aichat_model [label="Model Combo: available AI models\nChanges provider", tooltip="source:home_side_inventory.md:50"];
+      n_pnl_aichat_option [label="Option Combo: provider-specific options", tooltip="source:home_side_inventory.md:51"];
+      n_pnl_aichat_checkbox [label="Checkbox: toggles feature flag", tooltip="source:home_side_inventory.md:52"];
+      n_pnl_aichat_input [label="Input Field: \"Ask about this document...\" / \"Agent is working...\" / \"Not available\"", tooltip="source:home_side_inventory.md:53"];
+      n_pnl_aichat_stop [label="Stop Button: stops AI generation\nVisible when working", tooltip="source:home_side_inventory.md:54"];
+      n_pnl_aichat_webview [label="WebView Area: renders AI responses\nEmbedded WebView2", tooltip="source:home_side_inventory.md:55"];
+
+      n_pnl_aichat -> n_pnl_aichat_provider;
+      n_pnl_aichat -> n_pnl_aichat_session;
+      n_pnl_aichat -> n_pnl_aichat_model;
+      n_pnl_aichat -> n_pnl_aichat_option;
+      n_pnl_aichat -> n_pnl_aichat_checkbox;
+      n_pnl_aichat -> n_pnl_aichat_input;
+      n_pnl_aichat -> n_pnl_aichat_stop;
+      n_pnl_aichat -> n_pnl_aichat_webview;
+    }
+
+    // TOC/Bookmarks/Attachments
+    subgraph cluster_pnl_toc {
+      label="TOC / Bookmarks / Attachments"; style="filled,rounded"; fillcolor="#3F1B4B"; color="#EC4899";
+      node [fillcolor="#86198F" fontcolor="#E2E8F0" color="#EC4899"];
+
+      n_pnl_toc [label="TOC / Outline Sidebar\nHierarchical document outline\nToggle F12 (CmdToggleBookmarks) / Shift+F12 (CmdCommandPaletteTOC)", tooltip="source:home_side_inventory.md:56"];
+      n_pnl_bookmarks [label="Bookmarks Panel\nList of document bookmarks\nToggle F12; Add/Delete/Rename", tooltip="source:home_side_inventory.md:57"];
+      n_pnl_attach [label="Attachments Sidebar\nPDF file attachments with save/embed", tooltip="source:home_side_inventory.md:58"];
+
+      n_pnl -> n_pnl_toc;
+      n_pnl -> n_pnl_bookmarks;
+      n_pnl -> n_pnl_attach;
+    }
+
+    // Link badges
+    subgraph cluster_pnl_links {
+      label="Link Following Badges (1-9)"; style="filled,rounded"; fillcolor="#3F1B4B"; color="#EC4899";
+      node [fillcolor="#86198F" fontcolor="#E2E8F0" color="#EC4899"];
+
+      n_pnl_linkbadges [label="Link Badges (numbered 1-9)\nShift+F activates keyboard link following\nNumber selects link; badges disappear after follow", tooltip="source:home_side_inventory.md:62"];
+    }
+
+    // Notifications/Toasts
+    subgraph cluster_pnl_notif {
+      label="Notifications / Toasts"; style="filled,rounded"; fillcolor="#3F1B4B"; color="#EC4899";
+      node [fillcolor="#86198F" fontcolor="#E2E8F0" color="#EC4899"];
+
+      n_pnl_annot_notif [label="Annotation Notifications\nTooltip on hover/context; suppressed by others", tooltip="source:home_side_inventory.md:63"];
+      n_pnl_pageinfo_notif [label="Page Info Notifications\nShows view mode (single/facing/book)", tooltip="source:home_side_inventory.md:64"];
+      n_pnl_error_toast [label="Error/Toast Notifications\nAnnotation errors, import/export errors, etc.", tooltip="source:home_side_inventory.md:65"];
+      n_pnl_cursor_notif [label="Cursor Position Notification\nTooltip shows cursor position on canvas", tooltip="source:home_side_inventory.md:66"];
+    }
+
+    // Read Aloud Playback Bar
+    subgraph cluster_pnl_readaloud {
+      label="Read Aloud Playback Bar (bottom canvas)"; style="filled,rounded"; fillcolor="#3F1B4B"; color="#EC4899";
+      node [fillcolor="#86198F" fontcolor="#E2E8F0" color="#EC4899"];
+
+      n_pnl_ra_bar [label="Read Aloud Playback Bar", shape=folder];
+      n_pnl_ra_pause [label="Pause/Resume Button\nToggles pause/resume state", tooltip="source:home_side_inventory.md:67-68"];
+      n_pnl_ra_stop [label="Stop Button\nStops TTS and hides bar", tooltip="source:home_side_inventory.md:67,69"];
+      n_pnl_ra_speed [label="Speed Toggle\nLeft-click: cycle forward; Right-click: cycle backward", tooltip="source:home_side_inventory.md:67,70"];
+
+      n_pnl_ra_bar -> n_pnl_ra_pause;
+      n_pnl_ra_bar -> n_pnl_ra_stop;
+      n_pnl_ra_bar -> n_pnl_ra_speed;
+    }
+
+    // Conditional panels note
+    n_pnl_conditional [label="CONDITIONAL PANELS (appear only in specific states):\n- Flashcard sidebar: only when flashcard mode on\n- AI Chat panel: only when AI chat enabled + file supported\n- Read Aloud bar: only when read-aloud active\n- TOC/Bookmarks: only when document has structure\n- Profile Sync: only when profile data file exists\n- Selection toolbar: only when text selected + setting enabled\n- Link badges: only when Shift+F pressed + links exist\n- Flashcard toolbar: only when flashcard mode toggled on\n- View mode notifications: only when view mode changes", tooltip="source:home_side_inventory.md:75-83", shape=note, fillcolor="#7F1D1D", fontcolor="#FECACA", color="#EF4444"];
+  }
+
+  // ============================================================
+  // CLUSTER: SUSPECT ORPHAN COMMANDS (~80)
+  // ============================================================
+  subgraph cluster_suspect {
+    label="SUSPECT Orphan Commands (~80) — no handler, no menu, no toolbar, no shortcut"; style="filled,rounded"; fillcolor="#7F1D1D"; fontcolor="#F5F5F0"; color="#EF4444";
+    node [fillcolor="#991B1B" fontcolor="#F5F5F0" color="#EF4444" shape=box style="filled,rounded"];
+
+    n_suspect [label="SUSPECT Commands", shape=folder];
+
+    // Grouped by category from ux-commands.md
+    n_suspect_ui [label="UI Toggles (no handler found):\nCmdChangeScrollbar, CmdToggleMenuBar, CmdToggleToolbar,\nCmdToggleFullscreen, CmdTogglePresentationMode,\nCmdToggleImages, CmdToggleLinks", tooltip="source:ux-commands.md:492-507,556-557"];
+    n_suspect_ext [label="External Viewers (may lack handlers):\nCmdOpenWithDirectoryOpus, CmdOpenWithTotalCommander,\nCmdOpenWithDoubleCommander, CmdSendByEmail,\nCmdOpenWithAcrobat, CmdOpenWithFoxIt, CmdOpenWithPdfXchange", tooltip="source:ux-commands.md:496-499,522"];
+    n_suspect_debug [label="Debug Commands (debug-only, no formal handler):\nCmdDebugCrashMe, CmdDebugDownloadSymbols, CmdDebugTestApp,\nCmdDebugShowNotif, CmdDebugTogglePredictiveRender,\nCmdDebugToggleRtl, CmdDebugToggleCacheInfo,\nCmdDebugToggleDpiOverride, CmdDebugShowFitContentArea,\nCmdDebugToggleRenderInfo", tooltip="source:ux-commands.md:502-508,540-542,565,529"];
+    n_suspect_ai [label="AI Chat / Translation (backends may be stubs):\nCmdAIChatWithClaudeCode, CmdAIChatWithGrokBuild,\nCmdAIChatWithOpenAICodex, CmdAIChatWithAntiGravity,\nCmdTranslateSelectionWithGoogle, CmdTranslateSelectionWithDeepL,\nCmdTranslateSelectionWithGrokBuild, CmdTranslateSelectionWithClaudeCode,\nCmdTranslateSelectionWithOpenAICodex, CmdTranslateSelectionWithAntiGravity", tooltip="source:ux-commands.md:533-534,547,563"];
+    n_suspect_flashcard [label="Flashcard Commands (all 20+):\nCmdFlashcardToggle, CmdFlashcardStudy, CmdFlashcardAdd,\nCmdFlashcardBack, CmdFlashcardFilter, CmdFlashcardReveal,\nCmdFlashcardRate1-4, CmdFlashcardLista, CmdFlashcardNext,\nCmdFlashcardOrderOptions, CmdFlashcardConfig, CmdFlashcardImport,\nCmdFlashcardSession, CmdFlashcardStudyTimerToggle/Edit", tooltip="source:ux-commands.md:396,484,575"];
+    n_suspect_arch [label="Arch Tools Commands (all):\nCmdArchScale, CmdArchMeasure, CmdArchScaleApply, CmdArchClear,\nCmdArchResetScale, CmdArchCleanAll, CmdArchRefLine,\nCmdArchAlign, CmdArchAlignApply, CmdArchPageCrop,\nCmdArchMeasureRadius, CmdArchToolsToggle, CmdEditToolsToggle", tooltip="source:ux-commands.md:480-482,572-573,579"];
+    n_suspect_autoscroll [label="Auto-Scroll Commands:\nCmdAutoScrollToggle, CmdAutoScrollSpeedUp, CmdAutoScrollSpeedDown,\nCmdAutoScrollTimerToggle, CmdAutoScrollTimerEdit,\nCmdStartAutoScroll", tooltip="source:ux-commands.md:389,532,574"];
+    n_suspect_contrast [label="Contrast/Invert Commands:\nCmdContrastToggle, CmdContrastIncrease, CmdContrastDecrease,\nCmdInvertColors", tooltip="source:ux-commands.md:390,570"];
+    n_suspect_viewport [label="Viewport/Trim Commands:\nCmdViewportCropToggle, CmdMarginTrimToggle, CmdTrimConfig,\nCmdViewportCropV2Toggle", tooltip="source:ux-commands.md:391,571"];
+    n_suspect_pdftools [label="PDF Tools (may lack handlers):\nCmdPdfBake, CmdPdfCompress, CmdPdfDecompress,\nCmdPdfDeletePages, CmdPdfExtractPages, CmdPdfEncrypt,\nCmdPdfDecrypt, CmdConvertImageToPdf, CmdConvertToPDF,\nCmdDocumentExtractText, CmdDocumentShowOutline,\nCmdPdShowInfo", tooltip="source:ux-commands.md:430,439,473,520-522,530"];
+    n_suspect_annot [label="Annotation Commands (some commented out):\nCmdCreateAnnotHighlight, CmdCreateAnnotUnderline,\nCmdCreateAnnotStrikeOut, CmdCreateAnnotSquiggly,\nCmdCreateAnnotText, CmdCreateAnnotFreeText,\nCmdCreateAnnotStamp, CmdCreateAnnotImageFromClipboard,\nCmdCreateAnnotCaret, CmdCreateAnnotLine,\nCmdCreateAnnotSquare, CmdCreateAnnotCircle,\nCmdDeleteAnnotation, CmdEditAnnotations,\nCmdBookmarkAdd/Delete/Update/Rename", tooltip="source:ux-commands.md:321,537,546,578"];
+    n_suspect_misc [label="Miscellaneous Orphans:\nCmdChangeBackgroundColor, CmdSetTabColor, CmdListPrinters,\nCmdToggleWindowsPreviewer, CmdToggleWindowsSearchFilter,\nCmdScreenshot, CmdCropImage, CmdResizeImage, CmdSaveImage,\nCmdPasteClipboardImage, CmdTabGroupSave, CmdTabGroupRestore,\nCmdSetScreenshotHotkey, CmdRemoveDeletedFilesFromHistory,\nCmdCommandPaletteTOC, CmdCommandPaletteFavorites,\nCmdNavigateFilesInFolder, CmdToggleEngineeringDrawingEnhance,\nCmdSetDocumentColorsFollowTheme, CmdTogglePreservePdfImages,\nCmdToggleLightDarkTheme, CmdChangeTheme, CmdTranslateSelection,\nCmdFavoriteShowInTab, CmdTocExpandToLevel1/2/3,\nCmdTocCollapseSameLevel, CmdToggleFavoritesSort,\nCmdZoomFitHeight, CmdZoomToSelection, CmdDeleteFileAndOpenNext,\nCmdShowGeneratedHTML, CmdDeleteCachedFiles,\nCmdToggleKeyboardLinkFollowing, CmdOpenFileWithOSFilePicker,\nCmdToggleFilePicker, CmdToggleBoolSetting, CmdFixDefaultApp,\nCmdProfileBackups, CmdCaptureTool, CmdRepairDocumentFile,\nCmdExtendSelectionCharLeft/Right/WordLeft/WordRight,\nCmdToggleLaserPointer, CmdSetInverseSearch,\nCmdGoToNextPrevFavorite, CmdFindToggleMatchWholeWord,\nCmdReadAloud/Pause/Continue/Stop,\nCmdToggleToolbarShowReadAloud", tooltip="source:ux-commands.md:518-590"];
+
+    n_suspect -> n_suspect_ui;
+    n_suspect -> n_suspect_ext;
+    n_suspect -> n_suspect_debug;
+    n_suspect -> n_suspect_ai;
+    n_suspect -> n_suspect_flashcard;
+    n_suspect -> n_suspect_arch;
+    n_suspect -> n_suspect_autoscroll;
+    n_suspect -> n_suspect_contrast;
+    n_suspect -> n_suspect_viewport;
+    n_suspect -> n_suspect_pdftools;
+    n_suspect -> n_suspect_annot;
+    n_suspect -> n_suspect_misc;
+  }
+
+  // ============================================================
+  // CLUSTER: KEYBOARD SHORTCUTS MAP
+  // ============================================================
+  subgraph cluster_shortcuts {
+    label="Keyboard Shortcuts Map"; style="filled,rounded"; fillcolor="#1F2937"; fontcolor="#E2E8F0"; color="#9CA3AF";
+    node [fillcolor="#374151" fontcolor="#E2E8F0" color="#9CA3AF"];
+
+    n_shortcuts [label="Keyboard Shortcuts", shape=folder];
+
+    n_sc_f12 [label="F12\nCmdToggleBookmarks\n(toggle TOC/Bookmarks sidebar)", tooltip="source:home_side_inventory.md:56-57"];
+    n_sc_shift_f12 [label="Shift+F12\nCmdCommandPaletteTOC\n(Command Palette: TOC)", tooltip="source:home_side_inventory.md:57"];
+    n_sc_ctrl_k [label="Ctrl+K\nCmdOptions\n(Options/Settings dialog)", tooltip="source:dialog-inventory.md:43"];
+    n_sc_ctrl_f [label="Ctrl+F\nCmdFindFirst\n(Find bar / search)", tooltip="source:ux-menumap-raw.md:73,174"];
+    n_sc_ctrl_l [label="Ctrl+L\nCmdToggleLightDarkTheme\n(toggle light/dark theme)", tooltip="source:ux-commands.md:365"];
+    n_sc_ctrl_shift_p [label="Ctrl+Shift+P\nCmdCommandPalette\n(Command Palette)", tooltip="source:dialog-inventory.md:204"];
+    n_sc_ctrl_shift_y [label="Ctrl+Shift+Y\nCmdReadAloud\n(Read Aloud)", tooltip="source:ux-commands.md:325"];
+    n_sc_ctrl_i [label="Ctrl+I\nCmdInvertColors\n(Invert colors)", tooltip="source:ux-commands.md:323"];
+    n_sc_ctrl_c [label="Ctrl+C\nCmdCopySelection\n(Copy selection)", tooltip="source:ux-commands.md:327"];
+    n_sc_ctrl_shift_i [label="Ctrl+Shift+I\nCmdInvokeInverseSearch\n(Inverse search)", tooltip="source:ux-commands.md:333"];
+    n_sc_ctrl_shift_eq [label="Ctrl+Shift+=\nCmdContrastIncrease\n(Contrast up)", tooltip="source:ux-commands.md:323"];
+    n_sc_ctrl_minus [label="Ctrl+-\nCmdContrastDecrease\n(Contrast down)", tooltip="source:ux-commands.md:323"];
+    n_sc_pgup [label="PgUp / Ctrl+PgUp\nCmdGoToPrevPage\n(Previous page)", tooltip="source:ux-commands.md:341"];
+    n_sc_pgdn [label="PgDn / Ctrl+PgDn\nCmdGoToNextPage\n(Next page)", tooltip="source:ux-commands.md:341"];
+    n_sc_home_end [label="Home / End\nCmdGoToFirstPage / CmdGoToLastPage\n(First/Last page)", tooltip="source:ux-commands.md:341"];
+    n_sc_ctrl_0 [label="Ctrl+0\nCmdZoomFitPage\n(Fit page)", tooltip="source:ux-commands.md:343"];
+    n_sc_ctrl_1 [label="Ctrl+1\nCmdZoomActualSize\n(Actual size)", tooltip="source:ux-commands.md:343"];
+    n_sc_ctrl_tab [label="Ctrl+Tab / Ctrl+Shift+Tab\nCmdNextTab / CmdPrevTab\n(Next/Prev tab)", tooltip="source:ux-commands.md:319"];
+    n_sc_shift_f [label="Shift+F\nKeyboard Link Following\n(activates link badges 1-9)", tooltip="source:home_side_inventory.md:62"];
+
+    n_shortcuts -> n_sc_f12;
+    n_shortcuts -> n_sc_shift_f12;
+    n_shortcuts -> n_sc_ctrl_k;
+    n_shortcuts -> n_sc_ctrl_f;
+    n_shortcuts -> n_sc_ctrl_l;
+    n_shortcuts -> n_sc_ctrl_shift_p;
+    n_shortcuts -> n_sc_ctrl_shift_y;
+    n_shortcuts -> n_sc_ctrl_i;
+    n_shortcuts -> n_sc_ctrl_c;
+    n_shortcuts -> n_sc_ctrl_shift_i;
+    n_shortcuts -> n_sc_ctrl_shift_eq;
+    n_shortcuts -> n_sc_ctrl_minus;
+    n_shortcuts -> n_sc_pgup;
+    n_shortcuts -> n_sc_pgdn;
+    n_shortcuts -> n_sc_home_end;
+    n_shortcuts -> n_sc_ctrl_0;
+    n_shortcuts -> n_sc_ctrl_1;
+    n_shortcuts -> n_sc_ctrl_tab;
+    n_shortcuts -> n_sc_shift_f;
+
+    // Cross-links from shortcuts to commands/menus
+    n_sc_f12 -> n_mnu_view_bookmarks [style=dashed, color="#3B82F6", xlabel="CmdToggleBookmarks"];
+    n_sc_shift_f12 -> n_dlg_cmdpalette [style=dashed, color="#3B82F6", xlabel="CmdCommandPaletteTOC"];
+    n_sc_ctrl_k -> n_dlg_options [style=dashed, color="#3B82F6", xlabel="CmdOptions"];
+    n_sc_ctrl_f -> n_dlg_findbar [style=dashed, color="#3B82F6", xlabel="CmdFindFirst"];
+    n_sc_ctrl_l -> n_mnu_settings_theme [style=dashed, color="#3B82F6", xlabel="CmdToggleLightDarkTheme"];
+    n_sc_ctrl_shift_p -> n_dlg_cmdpalette [style=dashed, color="#3B82F6", xlabel="CmdCommandPalette"];
+    n_sc_ctrl_shift_y -> n_dlg_readaloudbar [style=dashed, color="#3B82F6", xlabel="CmdReadAloud"];
+    n_sc_ctrl_i -> n_tb_invert [style=dashed, color="#3B82F6", xlabel="CmdInvertColors"];
+    n_sc_ctrl_c -> n_pnl_sel_copy [style=dashed, color="#3B82F6", xlabel="CmdCopySelection"];
+    n_sc_ctrl_shift_i -> n_dlg_inversesearch [style=dashed, color="#3B82F6", xlabel="CmdInvokeInverseSearch"];
+    n_sc_ctrl_shift_eq -> n_tb_contrast [style=dashed, color="#3B82F6", xlabel="CmdContrastIncrease"];
+    n_sc_ctrl_minus -> n_tb_contrast [style=dashed, color="#3B82F6", xlabel="CmdContrastDecrease"];
+    n_sc_pgup -> n_mnu_goto_prev [style=dashed, color="#3B82F6", xlabel="CmdGoToPrevPage"];
+    n_sc_pgdn -> n_mnu_goto_next [style=dashed, color="#3B82F6", xlabel="CmdGoToNextPage"];
+    n_sc_home_end -> n_mnu_goto_first [style=dashed, color="#3B82F6", xlabel="CmdGoToFirstPage"];
+    n_sc_home_end -> n_mnu_goto_last [style=dashed, color="#3B82F6", xlabel="CmdGoToLastPage"];
+    n_sc_ctrl_0 -> n_mnu_zoom_fitpage [style=dashed, color="#3B82F6", xlabel="CmdZoomFitPage"];
+    n_sc_ctrl_1 -> n_mnu_zoom_actual [style=dashed, color="#3B82F6", xlabel="CmdZoomActualSize"];
+    n_sc_ctrl_tab -> n_main_win [style=dashed, color="#3B82F6", xlabel="tab navigation"];
+    n_sc_shift_f -> n_pnl_linkbadges [style=dashed, color="#3B82F6", xlabel="activates link badges"];
+  }
+
+  // ============================================================
+  // CROSS-CLUSTER LINKS (key entry points)
+  // ============================================================
+  // Installer -> Main window
+  n_done_start -> n_main_win [style=dashed, color="#22C55E", xlabel="launches", penwidth=2.0];
+
+  // Main window -> Home page (initial state)
+  n_main_win -> n_home [style=dashed, color="#06B6D4", xlabel="shows when no doc", penwidth=2.0];
+
+  // Menus -> Dialogs
+  n_mnu_help_about -> n_dlg_about [style=dashed, color="#3B82F6", xlabel="opens"];
+  n_mnu_settings_options -> n_dlg_options [style=dashed, color="#3B82F6", xlabel="opens"];
+  n_mnu_file_props -> n_dlg_docprops [style=dashed, color="#3B82F6", xlabel="opens"];
+  n_mnu_zoom_custom -> n_dlg_customzoom [style=dashed, color="#3B82F6", xlabel="opens"];
+  n_mnu_goto_page -> n_dlg_gotopage [style=dashed, color="#3B82F6", xlabel="opens"];
+  n_mnu_goto_find -> n_dlg_findbar [style=dashed, color="#3B82F6", xlabel="opens"];
+  n_mnu_view_palette -> n_dlg_cmdpalette [style=dashed, color="#3B82F6", xlabel="opens"];
+  n_mnu_help_shortcuts -> n_dlg_shortcuts [style=dashed, color="#3B82F6", xlabel="shows inline"];
+  n_mnu_settings_theme -> n_dlg_changetheme [style=dashed, color="#3B82F6", xlabel="opens"];
+  n_mnu_settings_lang -> n_dlg_changelang [style=dashed, color="#3B82F6", xlabel="opens"];
+  n_mnu_file_print -> n_dlg_printadv [style=dashed, color="#3B82F6", xlabel="opens"];
+  n_mnu_fav_add -> n_dlg_addfav [style=dashed, color="#3B82F6", xlabel="opens"];
+
+  // Toolbar toggles -> Secondary toolbars
+  n_tb_archtools -> n_tb_arch [style=dashed, color="#FB923C", xlabel="shows Arch Tools toolbar", penwidth=2.0];
+  n_tb_edit -> n_tb_edit_tb [style=dashed, color="#FB923C", xlabel="shows Edit toolbar", penwidth=2.0];
+  n_tb_flashcard -> n_tb_flashcard_tb [style=dashed, color="#FB923C", xlabel="shows Flashcard toolbar", penwidth=2.0];
+
+  // Toolbar -> Panels
+  n_tb_bookmarks -> n_pnl_toc [style=dashed, color="#EC4899", xlabel="toggles TOC sidebar"];
+  n_tb_flashcard -> n_pnl_fc [style=dashed, color="#EC4899", xlabel="toggles Flashcard sidebar"];
+  n_tb_readaloud -> n_pnl_ra_bar [style=dashed, color="#EC4899", xlabel="shows Read Aloud bar"];
+
+  // Context menus -> Dialogs/Commands
+  n_ctx_main_doc_sub -> n_dlg_docprops [style=dashed, color="#3B82F6", xlabel="Properties"];
+  n_ctx_main_doc_sub -> n_dlg_customzoom [style=dashed, color="#3B82F6", xlabel="Show PDF Info"];
+  n_ctx_main_doc_sub -> n_pnl_toc [style=dashed, color="#3B82F6", xlabel="Show TOC"];
+  n_ctx_main_doc_sub -> n_dlg_gotopage [style=dashed, color="#3B82F6", xlabel="Extract/Delete Pages"];
+  n_ctx_main_doc_sub -> n_dlg_printadv [style=dashed, color="#3B82F6", xlabel="Print"];
+  n_ctx_main_editann -> n_dlg_docprops [style=dashed, color="#3B82F6", xlabel="opens Edit Annotations"];
+  n_ctx_main_repair -> n_dlg_unsupported [style=dashed, color="#EF4444", xlabel="Repair Document"];
+  n_ctx_start_open -> n_main_win [style=dashed, color="#22C55E", xlabel="opens PDF in main window"];
+  n_ctx_start_showfolder -> n_mnu_file_showfolder [style=dashed, color="#3B82F6", xlabel="Show in folder"];
+  n_ctx_start_delete -> n_mnu_file_delete [style=dashed, color="#3B82F6", xlabel="Delete File"];
+
+  // Home page -> Main window / Dialogs
+  n_home_opendoc -> n_dlg_findbar [style=dashed, color="#3B82F6", xlabel="opens file picker"];
+  n_home_syncbtn -> n_dlg_profilesync [style=dashed, color="#3B82F6", xlabel="opens Profile Sync"];
+  n_home_thumbs -> n_main_win [style=dashed, color="#22C55E", xlabel="opens PDF"];
+  n_home_list -> n_main_win [style=dashed, color="#22C55E", xlabel="opens PDF"];
+
+  // Panels -> Dialogs
+  n_pnl_fc_tb_settings -> n_dlg_options [style=dashed, color="#3B82F6", xlabel="opens study config"];
+  n_pnl_fc_tb_import -> n_dlg_options [style=dashed, color="#3B82F6", xlabel="opens study config"];
+  n_pnl_aichat -> n_dlg_aichat [style=dashed, color="#3B82F6", xlabel="is AI Chat panel"];
+  n_pnl_ra_bar -> n_dlg_readaloudbar [style=dashed, color="#3B82F6", xlabel="is Read Aloud bar"];
+
+  // Shortcuts already linked above
+
+  // Legend node (invisible, for documentation)
+  n_legend [label="Legend:\n● Solid edges = hierarchy (parent→child)\n● Dashed blue = cross-links (menu→dialog, toolbar→panel, shortcut→cmd)\n● Dashed orange = toolbar toggle → secondary toolbar\n● Dashed pink = toolbar/menu → side panel\n● Dashed green = installer → main window / home → main window\n● Red cluster = SUSPECT orphan commands (no handler/menu/toolbar/shortcut)\n● Dashed nodes = conditional / dev-only / commented out\n● Note nodes (folded corner) = registry keys, cmd-line flags, toggle states, special items\n● Fill colors: install=slate, main=blue, menus=green, toolbars=orange, dialogs=indigo, home=cyan, panels=pink, suspect=red, shortcuts=gray", shape=note, fillcolor="#0F172A", fontcolor="#64748B", fontsize=9, style="filled,rounded"];
+}

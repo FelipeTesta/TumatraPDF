@@ -1,3 +1,20 @@
+## 2026-11-16 (s64) — UX map (FLOW/UX.dot) + OpenPencil baseline + dot-vs-op findings
+
+### Added
+- `FLOW/UX.dot` — full user-reachable action map: 416 nodes, 34 clusters (installer, main window, 11 top menus + 6 context menus, extra toolbars (Arch/Edit/Flashcard), 24 dialogs, Home, side panels, ~80 SUSPECT orphan commands, 21 shortcut groups). Validated with graphviz (`dot -Tcanon`). Tooltips carry `source:file:line` per node. Synthesis: inventories in `tests/tmp/s64/` (ux-commands.md 537 Cmd* ids, ux-menumap-raw.md, ui-inventory.md, dialog-inventory.md, home_side_inventory.md).
+- `TEMP/tumatrapdf_UI.op` (NOT committed, user ref-only) — OpenPencil visual baseline, 4 dark screens: Installer (2 states), Main Window, Home, Diálogos (Options/About/Zoom/Palette). Drawn by NVIDIA VL agents from architect-authored JSX; every PNG re-verified by architect (agents fabricate).
+
+### Findings (dot vs op compare)
+- Main Window mock shows ~15 of 35 real toolbar buttons (+15 toggles) — op screens are representational, not audits.
+- Home mock OMITS the 365-day heatmap + Read/Flashcards tab totals (dot cluster_home has 14 nodes).
+- Diálogos mock = 4 of 24 dialogs in dot cluster_dialogs.
+- ~80 SUSPECT orphans (CmdDebug*, CmdScreenshot, CmdPdfBake, CmdCropImage, CmdSaveImage, CmdListPrinters, CmdSendByEmail, CmdToggleWindowsPreviewer/-SearchFilter ...) — no handler/menu/toolbar/shortcut found.
+- ~50 DEAD? commands (no HandleCmd* located) folded into SUSPECT groups.
+- registry correction: inventory REPORT SUSPECTED uninstall DisplayName="SumatraPDF"; VERIFIED false by reading source — both branches use kAppName ("TumatraPDF") (RegistryInstaller.cpp:117, :123-124). Uninstall KEY path remains `...\\Uninstall\\SumatraPDF` (upstream key name kept intentionally; renaming = separate decision, not done).
+- RISK note: `Compiled/TumatraPDF.exe` missing since 16/11 release packaging (install/portable-win64.exe produced instead); captures use `sumatrapdf-src/out/dbg64/TumatraPDF.exe`.
+
+### Notes
+- Verification discipline: NVIDIA VL Write agents claim success while delivering broken output (tofu glyphs, stale PNGs, phantom node moves). Architect must re-read every exported PNG + inspect MCP nodes before accepting.
 ## 2026-11-16 (s64-R9x) - checkbox labels off-white on real screen
 
 ### Fixed
