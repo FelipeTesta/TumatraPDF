@@ -44,16 +44,6 @@ Items ONLY the user can verify live (real book / real build). Flat list; details
 
 - [ ] Loading fix (s64): on real launch confirm instant window with heavy books + logo-dots pulsing + white progress bar; evidence tests/tmp/s64/loading-heavy-*.png (dbg64; users get it via v1.0.19).
 
-## Tomorrow plan — 2026-11-16
-
-1. Confirm release workflow run 43673119222 finished OK on GitHub Actions (release.yml; assets + auto update.txt bump commit may appear on main — pull it if so).
-2. USER validation sweep from the queue above (priority: R9o Set Folder, R9n Ctrl+Tab, R9k boost, R9l dialogs).
-3. Next feature: Page Counting Format (spec below in file) — wireframe then implement.
-4. R2 latent rotated-90 bug triage (see LOG s64-R2 — Edit/ notes archived 2026-11-15).
-5. Decision needed: branch protection "main must not contain merge commits" was BYPASSED on v1.0.17 push (b0fda73) — repo admin: relax rule or change release flow.
-6. Bookmark visuals: confirm status with user before doing anything.
-7. Backlog unchanged (see sections below).
-
 ## Vertical tab list
 
 Next to the minimize button, add a `🧾` button: show the list of open tabs as a vertical list, e.g.:
@@ -69,6 +59,8 @@ Goal: make reading long file names easier. Clicking a tab in the list focuses th
 ## OTHER FEATURES
 
 - [ ] Add a settings option to disable the toolbar `scan mode` button; other buttons must adapt to the freed space.
+- [ ] R2 latent rotated-90 bug triage (LOG s64-R2 — Edit/ notes archived 2026-11-15).
+- [ ] Decision needed: branch protection "main must not contain merge commits" was BYPASSED on v1.0.17 push (b0fda73) — repo admin decision pending.
 
 ## Performance optimizations (verified 2026-11-04, evidence LOG s38)
 
@@ -169,7 +161,7 @@ Feature shipped: single profile file `tumatraPDF-data_1.json` (exportable/syncab
 - [ ] **BUG-4** Contrast × Trim Config ONE-SHOT vanish (first trim-config open after launch). Fix v2 (`EnsureContrastOverlayState` invariant + self-healing) deployed 2026-09-22 — awaiting user confirmation of the exact flow; `[contrast]` breadcrumbs in debug build. NOTE (s36-az): 2026-10-25 "contrast stopped working" = save-reload state wipe (FIXED — ReloadDocument preserves extras; LOG s36-az); if it still reproduces, it is a separate flow.
 - [ ] **Ctrl+click flashcard highlight opens List** — implemented s34-b (Canvas ctrl+click detects `TumatraPDF-Flashcard` author → FlashcardSidebarShow; turns flashcard mode on if off). USER live-test pending — see queue.
 - [ ] **s34-g user validation pending**: Arch Measure Radius + Ref Line UX, resize-enlarge on a real book, flicker-free drag confirm (shipped + E2E 2026-10-11) — see queue.
-- [ ] Revisar e comparar funcionalidades PDF/.md, existem elementos diferentes que deveriam se comportar iguais, padrão de referencia:PDF. Exemplos: botão 'home' não sobrepõe; comandos de teclado não funcinam corretamente (F:fullscreen), click e arrastar não arrasta o texto, etc, revisar outros elementos que podem não estar corretos;
+- [ ] Revisar outros elementos com divergência .md vs PDF (padrão: PDF) — auditoria ampla ainda não feita; fixes pontuais desta sessão: home overlay + F (fullscreen).
 
 ## Tab system
 
@@ -181,7 +173,7 @@ The app always restores the last tab group used by the user; if none exists, ope
 
 - [ ] Open (user action): TAB SYSTEM — all dev done s36-bu→s36-co (LOG), awaiting user revalidation on real book. Build 0/0; ad-hoc-tab-session.ts + ad-hoc-tab-session-e2e.ts + ad-hoc-tab-menu.ts PASS.
 
-- [ ] FUTURE (user spec 2026-11-01): per-session reading/flashcard totals on Home tab — sum sessions' aggregated reading/flashcard time per group, independent of books; BIG feature, plan separately.
+
 
 ## Vertical_Toolbar (PARKED — DO NOT DO)
 

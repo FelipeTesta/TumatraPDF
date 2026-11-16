@@ -32,6 +32,7 @@
 ### Notes
 - Left column (chips + ranking) hides below ~520 DIP (existing breakpoint).
 - Retroaggregation is one-time; ongoing sums only inside the active session.
+- TODO triage: migrated the .md-divergence spec bullet + FUTURE per-session totals bullet to this entry (both done this session); removed Tomorrow plan 2026-11-16 (stale).
 ## 2026-11-16 (s64) — fix: installer owner-draw buttons engage via SWP_FRAMECHANGED
 
 ### Fixed
