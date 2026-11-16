@@ -38,6 +38,8 @@
 #include "Installer.h"
 #include "SumatraConfig.h"
 #include "Translations.h"
+#include "Theme.h"
+#include "Darkmodelib.h"
 #include "SumatraLog.h"
 
 constexpr int kInstallerWinMargin = 8;
@@ -56,7 +58,6 @@ struct InstallerWnd {
     HWND hwnd = nullptr;
 
     HBRUSH hbrBackground = nullptr;
-    Button* btnOptions = nullptr;
     Button* btnRunSumatra = nullptr;
     Static* staticInstDir = nullptr;
     Edit* editInstallationDir = nullptr;
@@ -1318,9 +1319,11 @@ static void StartInstallation(InstallerWnd* wnd) {
     gInstallStarted = true;
 
     // create a progress bar in place of the Options button
+    // anchor to the install button (Options button removed; progress bar at left margin)
     int dx = DpiScale(wnd->hwnd, GetInstallerWinDx() / 2);
     Rect rc(0, 0, dx, gButtonDy);
-    rc = HwndMapRectToWindow(rc, wnd->btnOptions->hwnd, wnd->hwnd);
+    rc = HwndMapRectToWindow(rc, wnd->btnInstall->hwnd, wnd->hwnd);
+    rc.x = DpiScale(wnd->hwnd, kInstallerWinMargin); // left-aligned with margin
 
     int nInstallationSteps = gArchive.filesCount;
     nInstallationSteps++; // for copying files to installation dir
@@ -1346,7 +1349,9 @@ static void StartInstallation(InstallerWnd* wnd) {
     DeleteWnd(&wnd->checkboxForAllUsers);
     DeleteWnd(&wnd->checkboxRegisterSearchFilter);
     DeleteWnd(&wnd->checkboxRegisterPreview);
-    DeleteWnd(&wnd->btnOptions);
+
+    // options always visible; mark area as occupied so "Installation in progress..." message paints
+    gWnd->showOptions = false;
 
     SetMsg(_TRA("Installation in progress..."), COLOR_MSG_INSTALLATION);
     HwndRepaintNow(wnd->hwnd);
@@ -1354,8 +1359,6 @@ static void StartInstallation(InstallerWnd* wnd) {
     auto fn = MkFunc0(InstallerThread, &gCliNew);
     wnd->hThread = StartThread(fn, "InstallerThread");
 }
-
-static void OnButtonOptions(InstallerWnd* wnd);
 
 static TempStr GetInstalledExePathTemp(Flags* cli) {
     TempStr dir = cli->installDir;
@@ -1372,10 +1375,6 @@ static void OnButtonInstall(InstallerWnd* wnd) {
     }
 
     Flags* cli = &gCliNew;
-    if (wnd->showOptions) {
-        // hide and disable "Options" button during installation
-        OnButtonOptions(wnd);
-    }
     wnd->btnInstall->SetIsEnabled(false);
 
     // TODO: if needs elevation, this might not have enough prermissions
@@ -1528,6 +1527,7 @@ static void OnInstallationFinished(Flags* cli) {
     auto isRtl = IsUIRtl();
     if (!cli->fastInstall) {
         gWnd->btnRunSumatra = CreateDefaultButton(gWnd->hwnd, _TRA("Start TumatraPDF"), isRtl);
+        MakeButtonOwnerDrawn(gWnd->btnRunSumatra);
         gWnd->btnRunSumatra->onClick = MkFunc0Void(OnButtonStartSumatra);
     }
     SetMsg(_TRA("Thank you! TumatraPDF has been installed."), COLOR_MSG_OK);
@@ -1545,14 +1545,6 @@ static void ShowAndEnable(Wnd* w, bool enable) {
         ShowWindow(w->hwnd, enable ? SW_SHOW : SW_HIDE);
         w->SetIsEnabled(enable);
     }
-}
-
-static Size SetButtonTextAndResize(Button* b, Str s) {
-    b->SetText(s);
-    Size size = b->GetIdealSize();
-    uint flags = SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED;
-    SetWindowPos(b->hwnd, nullptr, 0, 0, size.dx, size.dy, flags);
-    return size;
 }
 
 static TempStr GetDefaultInstallationDirTemp(bool forAllUsers, bool ignorePrev) {
@@ -1603,39 +1595,6 @@ static void ForAllUsersStateChanged() {
     gWnd->editInstallationDir->SetText(cli->installDir);
     logf("ForAllUsersStateChanged: cli->allUsers: %d, cli->installDir: '%s', forAllUsers: %d\n", (int)cli->allUsers,
          cli->installDir, (int)forAllUsers);
-}
-
-static void UpdateUIForOptionsState(InstallerWnd* wnd) {
-    bool showOpts = wnd->showOptions;
-
-    ShowAndEnable(wnd->staticInstDir, showOpts);
-    ShowAndEnable(wnd->editInstallationDir, showOpts);
-    ShowAndEnable(wnd->btnBrowseDir, showOpts);
-
-    ShowAndEnable(wnd->checkboxForAllUsers, showOpts);
-    ShowAndEnable(wnd->checkboxRegisterSearchFilter, showOpts);
-    ShowAndEnable(wnd->checkboxRegisterPreview, showOpts);
-
-    auto* btnOptions = wnd->btnOptions;
-    //[ ACCESSKEY_GROUP Installer
-    //[ ACCESSKEY_ALTERNATIVE // ideally, the same access key is used for both
-    auto s = _TRA("&Options");
-    if (showOpts) {
-        //| ACCESSKEY_ALTERNATIVE
-        s = _TRA("Hide &Options");
-    }
-    SetButtonTextAndResize(btnOptions, s);
-    //] ACCESSKEY_ALTERNATIVE
-    //] ACCESSKEY_GROUP Installer
-
-    HwndRepaintNow(wnd->hwnd);
-    HwndSetFocus(btnOptions->hwnd);
-}
-
-static void OnButtonOptions(InstallerWnd* wnd) {
-    // toggle options ui
-    wnd->showOptions = !wnd->showOptions;
-    UpdateUIForOptionsState(wnd);
 }
 
 static int CALLBACK BrowseCallbackProc(HWND hwnd, UINT msg, LPARAM lp, LPARAM lpData) {
@@ -1741,7 +1700,6 @@ static void SetTabOrder(HWND* hwnds, int nHwnds) {
     }
 }
 
-//[ ACCESSKEY_GROUP Installer
 static void CreateInstallerWindowControls(InstallerWnd* wnd, Flags* cli) {
     logf(
         "CreateInstallerWindowControls: cli->allUsers: %d, cli->withPreview: %d, cli->withFilter: %d, install dir: "
@@ -1757,6 +1715,7 @@ static void CreateInstallerWindowControls(InstallerWnd* wnd, Flags* cli) {
     bool showInstallButton = !cli->fastInstall;
 
     wnd->btnInstall = CreateDefaultButton(hwnd, _TRA("Install TumatraPDF"), isRtl);
+    MakeButtonOwnerDrawn(wnd->btnInstall);
     auto* b = wnd->btnInstall;
     b->onClick = MkFunc0(OnButtonInstall, wnd);
     {
@@ -1771,23 +1730,14 @@ static void CreateInstallerWindowControls(InstallerWnd* wnd, Flags* cli) {
     ShowAndEnable(wnd->btnInstall, showInstallButton);
 
     Rect r = HwndClientRect(hwnd);
-    wnd->btnOptions = CreateDefaultButton(hwnd, _TRA("&Options"), isRtl);
-    b = wnd->btnOptions;
-    b->onClick = MkFunc0(OnButtonOptions, wnd);
-    int x = margin;
-    int y;
-    {
-        auto size = b->GetIdealSize();
-        y = r.dy - size.dy - margin;
-        b->SetBounds({x, y, size.dx, size.dy});
-        gButtonDy = size.dy;
-        gBottomPartDy = gButtonDy + (margin * 2);
-    }
-
     Size size = HwndMeasureText(hwnd, "Foo");
     int staticDy = size.dy + DpiScale(hwnd, 6);
 
-    y = r.dy - gBottomPartDy;
+    // Options button removed: anchor bottom row to the Install button height
+    gButtonDy = wnd->btnInstall->GetIdealSize().dy;
+    gBottomPartDy = gButtonDy + (margin * 2);
+    int x = margin;
+    int y = r.dy - gBottomPartDy;
     int dx = r.dx - (margin * 2) - DpiScale(hwnd, 2);
 
     x += DpiScale(hwnd, 2);
@@ -1844,21 +1794,29 @@ static void CreateInstallerWindowControls(InstallerWnd* wnd, Flags* cli) {
     }
 
     // a bit more space between text box and checkboxes
-    y -= (DpiScale(hwnd, 4) + margin);
+    // reduce the DPI-scaled gap to tighten the layout
+    y -= margin;
 
     wnd->btnBrowseDir = CreateDefaultButton(hwnd, "&...", isRtl);
+    MakeButtonOwnerDrawn(wnd->btnBrowseDir);
     wnd->btnBrowseDir->onClick = MkFunc0(OnButtonBrowse, wnd);
 
     Edit::CreateArgs eargs;
     eargs.parent = hwnd;
-    eargs.withBorder = true;
+    eargs.withBorder = false;
     eargs.isRtl = IsUIRtl();
 
     wnd->editInstallationDir = new Edit();
     wnd->editInstallationDir->Create(eargs);
+    wnd->editInstallationDir->bgColor = kInstallerCtrlBg;
+    wnd->editInstallationDir->textColor = kInstallerSurfaceText;
     wnd->editInstallationDir->SetText(cli->installDir);
 
     int editDy = wnd->editInstallationDir->GetIdealSize().dy;
+    // withBorder=false removed the WS_EX_CLIENTEDGE (white stock border) but
+    // Edit::GetIdealSize only adds vertical padding when HasBorder() - add the
+    // same padding here so the text is not vertically clipped
+    editDy += DpiScale(hwnd, 8);
 
     int btnDx = editDy; // btnDx == btnDy
     x = r.dx - margin - btnDx;
@@ -1887,8 +1845,14 @@ static void CreateInstallerWindowControls(InstallerWnd* wnd, Flags* cli) {
     wnd->staticInstDir->Create(args);
     wnd->staticInstDir->SetBounds(rc);
 
-    wnd->showOptions = showOptions;
-    UpdateUIForOptionsState(wnd);
+    wnd->showOptions = true; // options always visible
+
+    ShowAndEnable(wnd->staticInstDir, true);
+    ShowAndEnable(wnd->editInstallationDir, true);
+    ShowAndEnable(wnd->btnBrowseDir, true);
+    ShowAndEnable(wnd->checkboxForAllUsers, true);
+    ShowAndEnable(wnd->checkboxRegisterSearchFilter, true);
+    ShowAndEnable(wnd->checkboxRegisterPreview, true);
 
     HWND hwnds[8] = {};
     int nHwnds = 0;
@@ -1904,13 +1868,11 @@ static void CreateInstallerWindowControls(InstallerWnd* wnd, Flags* cli) {
     if (wnd->checkboxRegisterPreview) {
         hwnds[nHwnds++] = wnd->checkboxRegisterPreview->hwnd;
     }
-    hwnds[nHwnds++] = wnd->btnOptions->hwnd;
     SetTabOrder(hwnds, nHwnds);
 
     SetInstallButtonElevationState();
-    HwndSetFocus(showInstallButton ? wnd->btnInstall->hwnd : wnd->btnOptions->hwnd);
+    HwndSetFocus(showInstallButton ? wnd->btnInstall->hwnd : wnd->hwnd);
 }
-//] ACCESSKEY_GROUP Installer
 
 static LRESULT CALLBACK WndProcInstallerFrame(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     bool handled;
@@ -1922,13 +1884,22 @@ static LRESULT CALLBACK WndProcInstallerFrame(HWND hwnd, UINT msg, WPARAM wp, LP
     }
 
     switch (msg) {
+        case WM_CTLCOLORBTN:
         case WM_CTLCOLORSTATIC: {
             if (gWnd->hbrBackground == nullptr) {
-                gWnd->hbrBackground = CreateSolidBrush(RGB(0xff, 0xf2, 0));
+                gWnd->hbrBackground = CreateSolidBrush(kInstallerWinBgColor);
             }
             HDC hdc = (HDC)wp;
-            SetTextColor(hdc, RGB(0, 0, 0));
+            // Always set text color to kInstallerSurfaceText for consistent rendering
+            // across all static controls, including potentially disabled checkbox labels
+            SetTextColor(hdc, kInstallerSurfaceText);
             SetBkMode(hdc, TRANSPARENT);
+            // Additionally, if the control is disabled, explicitly set the text
+            // color to avoid the default disabled gray (0x6B7280)
+            LONG_PTR style = GetWindowLongPtrW((HWND)wp, GWL_STYLE);
+            if (style & WS_DISABLED) {
+                SetTextColor(hdc, kInstallerSurfaceText);
+            }
             return (LRESULT)gWnd->hbrBackground;
         }
 
@@ -2001,6 +1972,9 @@ static bool CreateInstallerWnd(Flags* cli) {
     HWND hwnd = CreateWindowExW(exStyle, winCls.s, titleW, dwStyle, x, y, dx, dy, nullptr, nullptr, h, nullptr);
     if (!hwnd) {
         return false;
+    }
+    if (UseDarkModeLib()) {
+        dmlib::setDarkTitleBarEx(hwnd, true);
     }
     gWnd->hwnd = hwnd;
     DpiScale(hwnd, dx, dy);
@@ -2295,6 +2269,7 @@ static bool ShouldInstallMismatchedArch(HWND hwndParent) {
 }
 
 int RunInstaller() {
+    InitInstallerDarkMode();
     trans::SetCurrentLangByCode(trans::DetectUserLang());
 
     Str installerLogPath;

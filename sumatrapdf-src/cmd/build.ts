@@ -75,7 +75,7 @@ async function main() {
 
   // Copy freshly compiled exe to final folder
   const srcExe = join(outDir, "TumatraPDF.exe");
-  const dstExe = join(finalExeDir, "TumatraPDF.exe");
+  const dstExe = join(finalExeDir, "TumatraPDF-debug.exe");
   try {
     require("fs").copyFileSync(srcExe, dstExe);
     console.log(`Copied ${srcExe} to ${dstExe}`);

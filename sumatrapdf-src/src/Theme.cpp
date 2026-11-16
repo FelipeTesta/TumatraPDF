@@ -10,11 +10,13 @@ License: GPLv3 */
 #include "Settings.h"
 #include "AppSettings.h"
 #include "Commands.h"
-#include "Theme.h"
+#include "AppTools.h"
+#include "Installer.h"
 #include "GlobalPrefs.h"
 #include "Translations.h"
 #include "Darkmodelib.h"
 #include "PdfDarkMode.h"
+#include "Theme.h"
 
 // allow only x64 and arm64 for compatibility for older OS
 #if !defined(_DARKMODELIB_NOT_USED) && \
@@ -63,8 +65,20 @@ void ApplyDarkModeToPopupWindow(HWND hwnd) {
 // Windows, which is what an app that doesn't theme anything should do.
 bool ButtonGetColors(ButtonColors* out) {
     if (!HasCurrentTheme()) {
-        // installer / uninstaller: no palette, so wingui draws a stock button
-        return false;
+        if (!IsInstallerOrUninstallerExe()) {
+            // installer / uninstaller: no palette, so wingui draws a stock button
+            return false;
+        }
+        // installer / uninstaller: fixed dark palette matching the installer frame
+        out->bg = kInstallerCtrlBg;
+        out->bgHot = kInstallerCtrlBgHot;
+        out->bgPressed = kInstallerCtrlBgPressed;
+        out->text = kInstallerSurfaceText;
+        out->textDisabled = kInstallerCtrlTextDisabled;
+        out->edge = kInstallerCtrlEdge;
+        out->edgeHot = kInstallerCtrlEdgeHot;
+        out->edgeDisabled = kInstallerCtrlEdgeDisabled;
+        return true;
     }
     out->bg = ThemeWindowControlBackgroundColor();
     out->bgHot = ThemeHotBackgroundColor();

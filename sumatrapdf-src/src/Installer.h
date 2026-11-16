@@ -1,6 +1,22 @@
 /* Copyright 2022 the SumatraPDF project authors (see AUTHORS file).
    License: GPLv3 */
 
+#ifndef INSTALLER_H
+#define INSTALLER_H
+
+// Installer/uninstaller fixed dark surfaces (single-theme process; no theme
+// system here, so no DsAccents ” but no scattered RGB literals either, §6.2).
+constexpr COLORREF kInstallerWinBgColor = RGB(0x20, 0x26, 0x34);
+constexpr COLORREF kInstallerSurfaceText = RGB(0xF5, 0xF5, 0xF0);
+constexpr COLORREF kInstallerCtrlBg = RGB(0x2A, 0x31, 0x40);
+constexpr COLORREF kInstallerCtrlBgHot = RGB(0x34, 0x3C, 0x4E);
+constexpr COLORREF kInstallerCtrlBgPressed = RGB(0x23, 0x28, 0x38);
+constexpr COLORREF kInstallerCtrlEdge = RGB(0x3A, 0x42, 0x54);
+constexpr COLORREF kInstallerCtrlEdgeHot = RGB(0x4A, 0x54, 0x68);
+constexpr COLORREF kInstallerCtrlEdgeDisabled = RGB(0x2C, 0x33, 0x42);
+constexpr COLORREF kInstallerCtrlTextDisabled = RGB(0x6B, 0x72, 0x80);
+constexpr COLORREF kInstallerMsgShadow = RGB(0x10, 0x15, 0x20);
+
 constexpr int kInstallerWinDy = 340;
 
 enum class PreviousInstallationType {
@@ -23,6 +39,11 @@ struct PreviousInstallationInfo {
 
 // This is the height of the lower part
 extern int gBottomPartDy;
+
+struct Button;
+
+void InitInstallerDarkMode();
+void MakeButtonOwnerDrawn(Button* btn);
 
 extern int gButtonDy;
 
@@ -113,3 +134,5 @@ int GetInstallerWinDx();
 void ReRegisterFileAssociations();
 void CollectNonDefaultRegisteredExtensions(StrVec& out);
 void LaunchDefaultAppDialogForExtension(HWND hwnd, Str ext);
+
+#endif // INSTALLER_H

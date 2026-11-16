@@ -22,6 +22,8 @@
 
 #include "RegistryPreview.h"
 #include "RegistrySearchFilter.h"
+#include "Theme.h"
+#include "Darkmodelib.h"
 #include "SumatraLog.h"
 
 static HBRUSH ghbrBackground = nullptr;
@@ -193,6 +195,7 @@ static void OnUninstallationFinished() {
     delete gButtonUninstaller;
     gButtonUninstaller = nullptr;
     gButtonExit = CreateDefaultButton(gHwndFrame, _TRA("Close"), isRtl);
+    MakeButtonOwnerDrawn(gButtonExit);
     gButtonExit->onClick = MkFunc0Void(OnButtonExit);
     SetMsg(fmt(_TRA("%s has been uninstalled.").s, StrL(kAppName)), gMsgError ? COLOR_MSG_FAILED : COLOR_MSG_OK);
     gMsgError = gFirstError;
@@ -225,12 +228,16 @@ static void CreateUninstallerWindow() {
     DWORD dwStyle = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_CLIPCHILDREN;
     const auto* winCls = kInstallerWindowClassName;
     gHwndFrame = CreateWindowW(winCls, CWStrTemp(title), dwStyle, x, y, dx, dy, nullptr, nullptr, h, nullptr);
+    if (UseDarkModeLib()) {
+        dmlib::setDarkTitleBarEx(gHwndFrame, true);
+    }
 
     DpiScale(gHwndFrame, dx, dy);
     HwndResizeClientSize(gHwndFrame, dx, dy);
 
     auto isRtl = IsUIRtl();
     gButtonUninstaller = CreateDefaultButton(gHwndFrame, _TRA("Uninstall TumatraPDF"), isRtl);
+    MakeButtonOwnerDrawn(gButtonUninstaller);
     gButtonUninstaller->onClick = MkFunc0Void(OnButtonUninstall);
 }
 
@@ -255,12 +262,13 @@ static LRESULT CALLBACK WndProcUninstallerFrame(HWND hwnd, UINT msg, WPARAM wp, 
     }
 
     switch (msg) {
+        case WM_CTLCOLORBTN:
         case WM_CTLCOLORSTATIC: {
             if (ghbrBackground == nullptr) {
-                ghbrBackground = CreateSolidBrush(RGB(0xff, 0xf2, 0));
+                ghbrBackground = CreateSolidBrush(kInstallerWinBgColor);
             }
             HDC hdc = (HDC)wp;
-            SetTextColor(hdc, RGB(0, 0, 0));
+            SetTextColor(hdc, kInstallerSurfaceText);
             SetBkMode(hdc, TRANSPARENT);
             return (LRESULT)ghbrBackground;
         }
@@ -539,6 +547,7 @@ static void InitSelfDelete() {
 }
 
 int RunUninstaller() {
+    InitInstallerDarkMode();
     Str uninstallerLogPath;
     trans::SetCurrentLangByCode(trans::DetectUserLang());
 

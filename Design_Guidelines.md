@@ -260,8 +260,7 @@ duplicated here.
 - NEVER `2>nul` (NTFS undeletable file) — `2>/dev/null`. No `&&` (PS 5.1) — `;`.
 - premake5 regen strips fork vcxproj sources → LNK1120 later; stash-restore
   `vs2022/` after any premake run.
-- Build: MSBuild only via hard path; `cmd/build.ts` overwrites
-  `Compiled\TumatraPDF.exe` with DEBUG exe — re-copy `out\rel64` after final build.
+- Debug deploy = `Compiled\TumatraPDF-debug.exe`; release deploy = `TumatraPDF-portable-win64.exe` / `TumatraPDF-install-win64.exe` via `cmd/build-installer.ts`. There is no plain `Compiled\TumatraPDF.exe` anymore.
 - Tests: `cmdId("CmdName")` never hardcode ids (lint enforces); log-SLICE
   assertions (rotation-safe); GUI card-creation needs RETRY loop; tab navigation
   BY FRAME TITLE (About tab shifts indices); long repro fail → run minimal

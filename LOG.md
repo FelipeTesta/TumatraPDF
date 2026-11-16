@@ -1,3 +1,51 @@
+## 2026-11-16 (s64-R9y) - installer polish round, logo recolor, build artifact trim
+
+### Changed
+- Installer: "Hide Options" button removed (user: always show options). btnOptions member/creation/OnButtonOptions/UpdateUIForOptionsState deleted; all 6 option controls always ShowAndEnable(true); focus defaults to Install button; progress bar re-anchored to left margin (was mapped from btnOptions); gWnd->showOptions starts true and is set false in StartInstallation so the "Installation in progress..." message paints; dead SetButtonTextAndResize removed (C4505 -> /WX error).
+- Checkbox black-text scare resolved: print-window captures hid the real themed rendering; DPI-aware CopyFromScreen real-screen capture proved labels already off-white/readable on current build (user had seen stale installed build). Owner-draw checkbox implementation done then REVERTED: BS_OWNERDRAW (0x0B) shares the style nibble with BS_AUTOCHECKBOX (0x03) so auto-check broke (BM_GETCHECK/IsChecked/click toggling) and ODS_CHECKED is menu-only. Stock BS_AUTOCHECKBOX + WM_CTLCOLORSTATIC off-white text is the shipped state. Lesson: never owner-draw BS_AUTOCHECKBOX via style-OR; use SetWindowTheme(L"", L"") or classic CTLCOLOR paths instead. Real-screen capture != PrintWindow capture for themed controls - verify on screen before "fixing".
+- Logo: five colored palette dots replaced by monochromatic cool-gray scale; then inverted per user (dark left #4A4F5E -> off-white right #E8E9E6, mid #8F929C; kept T off-white + #202634 tile). gfx/svg/tumatrapdf.svg edited; gfx/tumatrapdf.ico regenerated via cmd/svg-to-ico.ts (8 icons re-encoded; 7 doc-type .ico diffs stashed as re-encode noise, only tumatrapdf.ico kept).
+- Build output trimmed: plain `Compiled\TumatraPDF.exe` removed - byte-identical to -portable-win64 (SHA256 verified). build-installer.ts now copies portable + installer only; cmd/build.ts (debug) now deploys to `Compiled\TumatraPDF-debug.exe`; stale `Compiled\TumatraPDF.exe` deleted; BUILD.md/Design_Guidelines.md references updated. LOG.md/CHANGELOG.md history untouched.
+
+### Verified
+- Installer window: all controls dark, options always visible, Hide Options gone, edit full height (Edit::GetIdealSize only pads with HasBorder - manual +DpiScale(8) kept), build-installer green, 3 -> 2 copies in Compiled. Real-screen capture: labels legible off-white. Vision critique (inkling) recidivist false-alarm on "dim gray labels" - refuted by direct crop (3rd time; inkling pixel-sampling untrusted on text contrast).
+- Icon preview rendered 256px: balanced, telescopes left-dark to right-light matching the T.
+
+### Notes
+- Not committed. Plain `Compiled\TumatraPDF.exe` gone; debug builds now land in `Compiled\TumatraPDF-debug.exe` (was overwriting the release artifact before).
+- Remaining accepted items: stock white checkbox boxes (design limit, no dmlib child-theming - conflicts with CTLCOLOR handlers), near-black title bar (no Darkmodelib setter).
+
+## 2026-11-16 (s64) — Color tokens: DsAccents harmonization (F6/F7)
+
+### Added
+- `DsAccents` design tokens in ToolbarLayout.{h,cpp}: 11 new fields (accentBlue/Green/Orange/Red/Purple, textMuted, highlightYellow, textOnAccent, bgSelToolbar, accentErrorSoft; `today` harmonized to accentOrange). Mid-luminance tokens theme-agnostic (same value dark+light); bgSelToolbar paired per theme (dark 27,29,33 / light 92,96,104).
+
+### Changed
+- Migrated hardcoded colors to tokens: Canvas.cpp (page borders/separators/debug), Commands_Edit.cpp (selection pens/brushes: static→per-paint, fixes theme-switch hazard), FlashcardSidebar.cpp + FlashcardToolbar.cpp (static color consts removed, paint-time DsAccentsGet), LinkFollow.cpp (badge colors as paint params), SelectionToolbar.cpp, HomePage.cpp (kCol1-5 → documented `kBrandPalette[5]`; dead const + high-contrast pair marked `// intentional`).
+- Design_Guidelines.md §6.2: new UI colors MUST use DsAccents tokens; exceptions = chroma-key magenta, kBrandPalette, overlay fixed pairs; static baked pens banned; scratch files only under tests/tmp.
+
+### Verified
+- Build 0 errors / 0 warnings (60.8s), exe in Compiled/.
+- Dark home screenshot (tests/tmp/s64/shot-home-dark.png): black bg, orange today cell, accentBlue selection, no light-theme inheritance. Light theme verification skipped per user (harness artifacts, not product bugs).
+
+### Notes
+- Capture-harness saga: agent-reported PNG "success" was fabricated (script had `TumaruPDF` exe/settings typos — could not even spawn exe). Lesson: personally re-run + hash-compare agent outputs before accepting.
+
+## 2026-11-16 (s64-R9t) - installer/uninstaller dark theme
+
+### Changed
+- Full dark theme for installer + uninstaller windows (user: yellow background was wrong). Centralized palette in new `src/Installer.h` (kInstallerWinBgColor #202634 brand tile, kInstallerSurfaceText #F5F5F0, ctrl bg #2A3140 / hot #343C4E / pressed #232838, edges #3A4254/#4A5468/#2C3342, textDisabled #6B7280, kInstallerMsgShadow #101520).
+- Root cause of yellow: WM_CTLCOLORSTATIC handlers in Installer.cpp/Uninstaller.cpp painted control bg RGB(0xff,0xf2,0) over the dark GDI+ frame; now use kInstallerWinBgColor + kInstallerSurfaceText (all statics, incl. disabled).
+- Buttons: new MakeButtonOwnerDrawn() (InstallerCommon.cpp) sets ownerDrawn + BS_OWNERDRAW via SetWindowLongPtrW AFTER CreateDefaultButton (which bakes ownerDrawn=false at create; post-create member-only assignment was a no-op). All 6 buttons owner-drawn dark via Theme.cpp ButtonGetColors installer branch (IsInstallerOrUninstallerExe()).
+- Messages: COLOR_MSG_WELCOME/OK/INSTALLATION -> off-white (was dark blue-purple gCol5, near-invisible on #202634); COLOR_MSG_FAILED -> soft red (224,108,90); DrawMessage shadow white -> dark #101520.
+- dmlib: InitInstallerDarkMode() (InstallerCommon.cpp) called at top of RunInstaller/RunUninstaller - installer process never ran SumatraStartup initDarkMode, so setDarkTitleBarEx no-op'd and title bar stayed white. Sets dark config + all dmlib color setters to installer palette.
+- Edit: withBorder=false (white WS_EX_CLIENTEDGE stock border gone), dark bgColor/textColor via Wnd members; manual editDy += DpiScale(8) because Edit::GetIdealSize only pads height when HasBorder().
+- Dead space above folder row trimmed (round 4); browse "..." button matches edit height.
+
+### Failed attempts (documented for next agents)
+- dmlib setChildCtrlsSubclassAndTheme + setWindowNotifyCustomDrawSubclass on the installer frame CONFLICT with our WM_CTLCOLORSTATIC/WM_CTLCOLORBTN handlers: garbled double-drawn labels, black checkbox boxes with white X, compressed layout. REVERTED - do not re-apply while custom CTLCOLOR handlers exist. Stock white checkbox boxes remain (acceptable; alternative = hand-drawn owner-draw checkbox glyph).
+- No title-bar background color setter exists in Darkmodelib.h; title bar stays near-black (visually acceptable vs #202634).
+- Vision critique lesson: openrouter-thinkingmachines-inkling pixel-sampling can FALSE-ALARM (reported black illegible checkbox labels; direct crop proved labels off-white and legible). Verify claims with own crop before acting.
+
 ## 2026-11-16 (s64-R9z) - .md preview handler
 
 ### Added

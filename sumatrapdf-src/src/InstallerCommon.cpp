@@ -8,6 +8,10 @@
 #include "base/File.h"
 #include "base/Win.h"
 
+#include "wingui/UIModels.h"
+#include "wingui/Layout.h"
+#include "wingui/WinGui.h"
+
 #include "Translations.h"
 
 #include "RegistryPreview.h"
@@ -18,12 +22,12 @@
 #include "Flags.h"
 #include "Version.h"
 #include "Installer.h"
+#include "Theme.h"
+#include "Darkmodelib.h"
 
 // set to true to enable shadow effect
 constexpr bool kDrawTextShadow = true;
 constexpr bool kDrawMsgTextShadow = false;
-
-constexpr COLORREF kInstallerWinBgColor = RGB(0x20, 0x26, 0x34); // brand tile dark
 
 constexpr DWORD kTenSecondsInMs = 10 * 1000;
 
@@ -52,10 +56,10 @@ Color gCol4Shadow(47, 89, 127);
 Color gCol5(112, 115, 207);
 Color gCol5Shadow(66, 71, 118);
 
-Color COLOR_MSG_WELCOME(gCol5);
-Color COLOR_MSG_OK(gCol5);
-Color COLOR_MSG_INSTALLATION(gCol5);
-Color COLOR_MSG_FAILED(gCol1);
+Color COLOR_MSG_WELCOME(0xF5, 0xF5, 0xF0);
+Color COLOR_MSG_OK(0xF5, 0xF5, 0xF0);
+Color COLOR_MSG_INSTALLATION(0xF5, 0xF5, 0xF0);
+Color COLOR_MSG_FAILED(224, 108, 90);
 
 HWND gHwndFrame = nullptr;
 Str gFirstError;
@@ -579,7 +583,7 @@ static bool KillProcessesUsingInstallation() {
 
 // Unregister PdfFilter/PdfPreview (so Windows Search / Explorer stop loading
 // them) and kill processes still holding install-dir files. Must run before
-// overwriting those DLLs — especially on elevated -run-install-now, which
+// overwriting those DLLs â€” especially on elevated -run-install-now, which
 // skips the GUI path's CheckInstallUninstallPossible().
 // removedOut (optional): state to pass to RestoreShellExtensions if install fails.
 void FreeInstallationFilesInUse(Str installDir, bool allUsers, ShellExtInstallState* removedOut) {
@@ -794,7 +798,7 @@ static float DrawMessage(Graphics& g, Str msg, float y, float dx, Color color) {
     if (kDrawMsgTextShadow) {
         bbox.X--;
         bbox.Y++;
-        SolidBrush b(Color(0xff, 0xff, 0xff));
+        SolidBrush b(Color(0x10, 0x15, 0x20));
         g.DrawString(s, -1, &f, bbox, &sft, &b);
         bbox.X++;
         bbox.Y--;
@@ -848,4 +852,32 @@ void OnPaintFrame(HWND hwnd, bool skipMessage) {
     HDC dc = BeginPaint(hwnd, &ps);
     DrawFrame(hwnd, dc, &ps, skipMessage);
     EndPaint(hwnd, &ps);
+}
+
+// CreateDefaultButton bakes ownerDrawn=false into the window style at
+// CreateWindow time; flip the style bit post-create so the dark palette
+// from Theme.cpp ButtonGetColors actually engages.
+void MakeButtonOwnerDrawn(Button* btn) {
+    btn->ownerDrawn = true;
+    LONG_PTR style = GetWindowLongPtrW(btn->hwnd, GWL_STYLE);
+    SetWindowLongPtrW(btn->hwnd, GWL_STYLE, style | BS_OWNERDRAW);
+}
+
+// The installer/uninstaller process never runs the app startup that inits
+// darkmodelib (SumatraStartup does initDarkMode), so without this the dark
+// title bar call no-ops and the frame stays white.
+void InitInstallerDarkMode() {
+    if (!UseDarkModeLib()) {
+        return;
+    }
+    dmlib::initDarkMode();
+    dmlib::setColorizeTitleBarConfig(true);
+    dmlib::setDarkModeConfigEx((UINT)dmlib::DarkModeType::dark);
+    dmlib::setDefaultColors(false);
+    dmlib::setBackgroundColor(kInstallerWinBgColor);
+    dmlib::setCtrlBackgroundColor(kInstallerCtrlBg);
+    dmlib::setHotBackgroundColor(kInstallerCtrlBgHot);
+    dmlib::setTextColor(kInstallerSurfaceText);
+    dmlib::setDisabledTextColor(kInstallerCtrlTextDisabled);
+    dmlib::setDlgBackgroundColor(kInstallerCtrlBg);
 }

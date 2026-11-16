@@ -24,7 +24,7 @@ of sumatrapdf-src = missing file → MSB1009). Reverted to `vs2022\TumatraPDF.sl
 Running `bun cmd/build.ts` from repo root (`TumatraPDF\`):
 `bun : error: Module not found "cmd/build.ts"` (script lives in `sumatrapdf-src\cmd\`, not `TumatraPDF\cmd\`).
 
-Build auto-copies exe to `..\Compiled\TumatraPDF.exe` (finalExeDir = join("..","Compiled")).
+Build auto-copies exe to `..\Compiled\TumatraPDF-debug.exe` (finalExeDir = join("..","Compiled")).
 Manual deploy step below redundant but safe.
 
 Subagents fail builds from root or by timeout. Architect (bash) always `cd sumatrapdf-src` first.
@@ -32,13 +32,13 @@ Subagents fail builds from root or by timeout. Architect (bash) always `cd sumat
 ## Deploy (copy to Compiled)
 
 ```powershell
-Copy-Item -Path sumatrapdf-src\out\dbg64\TumatraPDF.exe -Destination Compiled\TumatraPDF.exe -Force
+Copy-Item -Path sumatrapdf-src\out\dbg64\TumatraPDF.exe -Destination Compiled\TumatraPDF-debug.exe -Force
 ```
 
 ## Smoke test
 
 ```powershell
-Compiled\TumatraPDF.exe -for-testing -console
+Compiled\TumatraPDF-debug.exe -for-testing -console
 ```
 
 Close window → clean exit, no crash dump under `%LOCALAPPDATA%\SumatraPDF-data\<hash>\crashinfo`.
@@ -97,7 +97,7 @@ The two sizes are the SAME code — Debug vs Release configuration:
 - **Debug (22 MB)**: `/Od` (no optimization), full runtime checks (`/RTC1`), `_ITERATOR_DEBUG_LEVEL=2` (extra STL debug locking), PDB-path + `__FUNCTION__` strings embedded, all asserts + `ReportIf` + [fc]/[arch] log strings live, no dead-code elimination.
 - **Release (11.7 MB)**: `/O2`, checks compiled out, PLUS linker dead-code stripping (`/OPT:REF` — drops unreferenced functions/data) + identical-COMDAT folding (`/OPT:ICF` — merges identical code), and mupdf/SumatraPDF build most string tables + logging out.
 - Debug info itself (.pdb ~100+ MB) is NOT in the exe — the size gap is purely codegen + stripping.
-- Rule: `Compiled\TumatraPDF.exe` = Release build (`out\rel64`), `TumatraPDF-debug.exe` = Debug (`out\dbg64`). `cmd/build.ts` only builds Debug x64 (and overwrites `Compiled\TumatraPDF.exe` with it — re-copy `out\rel64\TumatraPDF.exe` after a debug build if both are deployed).
+- Rule: `Compiled\TumatraPDF-debug.exe` = Debug (`out\dbg64\`, from `cmd/build.ts`), `TumatraPDF-portable-win64.exe` = Release portable (`out\rel64`), `TumatraPDF-install-win64.exe` = Release installer (`out\rel64`). There is no longer a plain `Compiled\TumatraPDF.exe` in the build output (it was byte-identical to the portable asset).
 
 ## New files in src/
 

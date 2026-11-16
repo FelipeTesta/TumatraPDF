@@ -3,7 +3,7 @@ import { copyFileSync } from "node:fs";
 import { detectVisualStudio, runLogged } from "./util";
 
 // Builds Release x64 and produces BOTH flavors in ../Compiled:
-// - TumatraPDF.exe              (portable asset -> TumatraPDF-portable-win64.exe)
+// - TumatraPDF-portable-win64.exe (portable asset)
 // - TumatraPDF-install-win64.exe (installer asset: SAME exe; the "install" in the
 //   name flips it to installer mode via IsInstallerOrUninstallerExe()).
 // The payload (InstallerData.dat: libsumatrapdf.dll, PdfFilter.dll, PdfPreview.dll,
@@ -20,7 +20,7 @@ async function main() {
     await runLogged(msbuildPath, [sln, `/t:TumatraPDF`, `/p:Configuration=Release;Platform=x64`, `/m`]);
 
     const srcExe = join(outDir, "TumatraPDF.exe");
-    for (const name of ["TumatraPDF.exe", "TumatraPDF-portable-win64.exe", "TumatraPDF-install-win64.exe"]) {
+    for (const name of ["TumatraPDF-portable-win64.exe", "TumatraPDF-install-win64.exe"]) {
         const dst = join(finalExeDir, name);
         try {
             copyFileSync(srcExe, dst);
