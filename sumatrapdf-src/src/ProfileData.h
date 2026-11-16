@@ -48,6 +48,20 @@ void ProfileDataAddReadingSec(const char* pdfPath, int sec);
 void ProfileDataAddFlashcardSec(const char* pdfPath, int sec);
 void ProfileDataAddFlashcardCard(const char* pdfPath);
 
+// per-session (TabGroup) study stats; book-independent sidecar, seeded once via backfill
+void ProfileDataFlushSessionsIfNeeded(); // flush only if dirty > 0
+
+struct SessionStatEntry {
+    Str name;    // points into ProfileData's store, valid until the process flushes/loads
+    int readSec = 0;
+    int fcSec = 0;
+    int fcCards = 0;
+};
+void ProfileDataAddSessionReadingSec(Str group, int sec);
+void ProfileDataAddSessionStudySec(Str group, int sec);
+void ProfileDataAddSessionCard(Str group);
+void ProfileDataGetSessionStats(Vec<SessionStatEntry>& out); // appends one entry per recorded session
+void ProfileDataRenameSession(Str oldName, Str newName);     // rename the key; no-op if old absent/new empty/old==new
 // day getters merged across machines: this machine's live numbers come from
 // the owning stats module (ReadingStats* / FlashcardStats*), other machines'
 // numbers from the profile

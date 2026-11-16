@@ -6528,40 +6528,73 @@ static void OnPaintDocumentStatus(MainWindow* win) {
     if (filePath) {
         TempStr msg;
         if (tab->loadState == WindowTab::LoadState::Loading || tab->loadState == WindowTab::LoadState::LoadedPending) {
-            TempStr basename = path::GetBaseNameTemp(filePath);
-            // prefer network-drive copy progress when available (set by
-            // OnFileCopyProgress); the 1s loading timer only invalidates and
-            // re-reads these fields so it does not replace the copy message
-            if (tab->loadCopyBytesCopied >= 0) {
-                TempStr copied = str::FormatSizeShortTemp(tab->loadCopyBytesCopied, nullptr);
-                if (tab->loadCopyBytesTotal > 0) {
-                    TempStr total = str::FormatSizeShortTemp(tab->loadCopyBytesTotal, nullptr);
-                    msg = fmt(_TRA("Copying %s: %s / %s").s, basename, copied, total);
-                } else {
-                    msg = fmt(_TRA("Copying %s: %s").s, basename, copied);
-                }
+            Rect rc = HwndClientRect(win->hwndCanvas);
+            COLORREF bgCol2 = ThemeMainWindowBackgroundColor();
+            bool lightBg = IsLightColor(bgCol2);
+            u8 bgR = GetRValue(bgCol2), bgG = GetGValue(bgCol2), bgB = GetBValue(bgCol2);
+            auto blend = [bgR, bgG, bgB](u8 fr, u8 fg2, u8 fb, double inten) -> COLORREF {
+                u8 r = (u8)(bgR + (int)(((int)fr - (int)bgR) * inten));
+                u8 g = (u8)(bgG + (int)(((int)fg2 - (int)bgG) * inten));
+                u8 b = (u8)(bgB + (int)(((int)fb - (int)bgB) * inten));
+                return RGB(r, g, b);
+            };
+            u8 inkR = lightBg ? 0x1F : 0xF5, inkG = lightBg ? 0x29 : 0xF5, inkB = lightBg ? 0x37 : 0xF0;
+            double t = (double)(GetTickCount64() % 100000) / 1000.0;
+            int cx = rc.x + rc.dx / 2;
+            int cy = rc.y + rc.dy / 2;
+            // 5 dots in a row, white-intensity wave travelling left->right (logo row)
+            int dia = 16, gap = 14;
+            int rowW = 5 * dia + 4 * gap;
+            int x0 = cx - rowW / 2;
+            int dotsY = cy - 26;
+            HBRUSH oldBrush;
+            for (int i = 0; i < 5; i++) {
+                double phase = t * 2.6 - i * 0.9;
+                double s = (sin(phase) + 1.0) * 0.5;
+                double inten = 0.16 + 0.84 * s;
+                HBRUSH b = CreateSolidBrush(blend(inkR, inkG, inkB, inten));
+                oldBrush = (HBRUSH)SelectObject(hdc, b);
+                Ellipse(hdc, x0 + i * (dia + gap), dotsY, x0 + i * (dia + gap) + dia, dotsY + dia);
+                SelectObject(hdc, oldBrush);
+                DeleteObject(b);
+            }
+            // gray track bar (100%) overlaid by white bar growing with progress
+            int trackW = 240, barH = 6, barRadius = 3;
+            int bx = cx - trackW / 2, by = cy + 30;
+            u8 trackR = lightBg ? 0xD4 : 0x2A, trackG = lightBg ? 0xD4 : 0x2A, trackB = lightBg ? 0xD8 : 0x2E;
+            HBRUSH track = CreateSolidBrush(RGB(trackR, trackG, trackB));
+            oldBrush = (HBRUSH)SelectObject(hdc, track);
+            HPEN nullP = CreatePen(PS_NULL, 0, 0);
+            HGDIOBJ oldPen = SelectObject(hdc, nullP);
+            RoundRect(hdc, bx, by, bx + trackW, by + barH, barRadius, barRadius);
+            SelectObject(hdc, oldPen);
+            DeleteObject(nullP);
+            SelectObject(hdc, oldBrush);
+            DeleteObject(track);
+            float actual = tab->loadProgress;
+            float elapsed = tab->loadStartedAt != 0 ? (float)(GetTickCount64() - tab->loadStartedAt) / 1000.f : 0.f;
+            float creep = 0.06f + 0.74f * (1.f - expf(-elapsed / 1.8f));
+            float p;
+            if (tab->loadCopyBytesCopied >= 0 && tab->loadCopyBytesTotal > 0) {
+                p = (float)tab->loadCopyBytesCopied / (float)tab->loadCopyBytesTotal;
+            } else if (actual >= 0.85f) {
+                p = actual;
             } else {
-                msg = fmt(_TRA("Loading %s ...").s, basename);
+                p = std::min(std::max(actual, creep), 0.80f);
             }
-            if (tab->loadStartedAt != 0) {
-                u64 elapsedSecs = (GetTickCount64() - tab->loadStartedAt) / 1000;
-                if (elapsedSecs > 0) {
-                    TempStr elapsed;
-                    u64 hours = elapsedSecs / 3600;
-                    u64 minutes = (elapsedSecs % 3600) / 60;
-                    u64 seconds = elapsedSecs % 60;
-                    if (hours > 0) {
-                        elapsed = fmt("%dh %dm %ds", hours, minutes, seconds);
-                    } else if (minutes > 0) {
-                        elapsed = fmt("%dm %ds", minutes, seconds);
-                    } else {
-                        elapsed = fmt("%ds", seconds);
-                    }
-                    msg = fmt("%s %s", msg, elapsed);
-                }
+            p = std::max(0.f, std::min(p, 1.f));
+            int fillW = (int)(trackW * p);
+            if (fillW > 2) {
+                HBRUSH fill = CreateSolidBrush(RGB(inkR, inkG, inkB));
+                oldBrush = (HBRUSH)SelectObject(hdc, fill);
+                HPEN nullP2 = CreatePen(PS_NULL, 0, 0);
+                HGDIOBJ oldPen2 = SelectObject(hdc, nullP2);
+                RoundRect(hdc, bx, by, bx + fillW, by + barH, barRadius, barRadius);
+                SelectObject(hdc, oldPen2);
+                DeleteObject(nullP2);
+                SelectObject(hdc, oldBrush);
+                DeleteObject(fill);
             }
-            SetTextColor(hdc, ThemeWindowTextColor());
-            HdcDrawCenteredText(hdc, HwndClientRect(win->hwndCanvas), msg, IsUIRtl());
         } else {
             // red, with the file name in bold and the reason (file gone, no
             // permission, locked by another program) on a second line: a bare

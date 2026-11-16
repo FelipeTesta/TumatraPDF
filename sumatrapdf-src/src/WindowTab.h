@@ -46,6 +46,10 @@ struct WindowTab {
     // network-drive copy progress while loading (-1 = not in copy phase)
     i64 loadCopyBytesCopied = -1;
     i64 loadCopyBytesTotal = 0;
+    // 0..1 progress for the loading screen (engine-parse milestone; creep
+    // animation computed at paint time). UI-thread written; reset before
+    // each load starts.
+    float loadProgress = 0.f;
     // why the load failed, shown under the error message (owned; empty if we
     // couldn't tell). See FileLoadErrorReasonTemp()
     Str loadErrorReason;
@@ -70,7 +74,7 @@ struct WindowTab {
     float prevZoomVirtual{kInvalidZoom};
     DisplayMode prevDisplayMode{DisplayMode::Automatic};
     TocTree* currToc = nullptr; // not owned by us
-    int currTocIdCounter = 0; // for assigning unique IDs to new TOC items
+    int currTocIdCounter = 0;   // for assigning unique IDs to new TOC items
     EditAnnotationsWindow* editAnnotsWindow = nullptr;
     Rect lastEditAnnotsWindowPos;
 

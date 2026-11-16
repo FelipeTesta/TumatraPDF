@@ -1,3 +1,37 @@
+## 2026-11-16 (s64) — startup: async activeTabGroup restore + logo-dots loading overlay
+
+### Fixed
+- Window stayed HIDDEN for seconds when the restoring `ActiveTabGroup` contained heavy books: the group-restore branch ran sync `LoadDocument` (controller + DisplayModel on UI thread) for EVERY file before `ShowMainWindow`. Now uses `StartLoadDocument` (async, same as normal session restore) — window appears immediately; group streams in afterwards; visible tab prioritized.
+
+### Added
+- Loading screen redesigned (was: static "Loading …" 1s repaint): text removed; centered 5 pulsing dots (TumatraPDF logo row, white intensity wave) + full-width gray track bar overlaid by white bar growing with real progress. Milestones: 0.05 load started → 0.85 engine ready (posted from bg thread) → 0.92 controller created; network copies (bytes>0) override with the byte ratio; time-creep asymptote capped at 0.80 otherwise. Repaint 1000ms → 100ms.
+- `WindowTab.loadProgress` (0..1, UI-thread only). Also covers tab switch to a lazy tab via the existing invalidate path.
+
+### Verified
+- Build 0 errors/warnings. Isolated smoke: `-for-testing -appdata` scratch + heavy PDF (75MB Kiple) in `TabGroups` + `ActiveTabGroup` ⇒ frame found ~0.2-1.2s (dbg64; release faster); overlay screenshot shows dots wave + bar (tests/tmp/s64/loading-heavy-200ms.png), next frame shows the document rendered (page 1/1203). PID-scoped capture only — user's installed instance untouched.
+
+### Notes
+- Users get this via v1.0.19 (installed 1.0.18 has neither this nor `259cc56` installer fix).
+- Committed as the startup-fix commit, split from the Study History work; user will verify on real launch (see TODO).
+
+## 2026-11-16 (s64) — Study History (Sessions) + .md fixes (F, home overlay)
+
+### Added
+- Home "Study History": "Most read" renamed; third chip Sessions next to Read/Flashcards, on the title row (right-aligned in the ranking column, same line). Sessions list: saved TabGroups with `R <t> | Fc <n>/<t> | T <t>` (HomeStatsFormatMinTemp), name + proportional bar (sorted by total), rankW 42% in sessions mode only, dedicated empty state + "groups - scroll" hint. Book-INDEPENDENT: new sidecar `<data-root>\stats\study-sessions.txt` (`Name<TAB>ReadSec<TAB>FcSec<TAB>FcCards`), credits on autoscroll(read)/study(flashcards) attributed to `gGlobalPrefs->activeTabGroup`; a book in N groups counts in each; group rename migrates the stats key (merge if target exists).
+- One-time backfill seeds groups from FileState stats (marker `study-sessions.seeded`; log `[stats] sessions backfill: %d groups seeded`). Fires on first credited study second OR first Sessions-tab paint — click the Sessions chip once after update to get the retroactive totals.
+- Session credits live outside the per-doc `if (fs)` blocks; global totals line unchanged.
+
+### Fixed
+- `.md`: F (fullscreen) dead — the WebView2 JS bridge forwarded plain letters, but `SafeAcceleratorCmd` rejected A–Z FVIRTKEY/FSHIFT (isSafeAccel). Added `allowPlainLetters` (default false); `ChmResolveAccelCmd` passes true (JS already excludes editable targets). CHM path fixed identically.
+- Home overlay invisible on `.md` (native WebView2 HWND covered the canvas-painted overlay): hide/show BOTH AsMarkdown() and AsChm() controllers (`SetWebviewsHiddenForHomeOverlay`, called at every `showHomeOverlay` toggle; also hides the WebView2 host HWND — `SetControllerVisible(FALSE)` alone left a stale WHITE surface on this runtime; `ShowWindow(hwnd, SW_HIDE/SW_SHOW)` now paired).
+
+### Verified
+- Build 0 errors/0 warnings. Dark overlay on PDF (Stats/heatmap/recently-opened) and on .md (previously full white, now dark home, md restorable on toggle). Screenshots tests/tmp/s64/{md-open,md-overlay,md-after,home-pdf-overlay}.png. First-time stats land only after real study ticks or first Sessions paint.
+- `-for-testing` scratch only; user's installed instance and %LOCALAPPDATA%\TumatraPDF\stats untouched (reading-stats.txt mtime 2026-11-15).
+
+### Notes
+- Left column (chips + ranking) hides below ~520 DIP (existing breakpoint).
+- Retroaggregation is one-time; ongoing sums only inside the active session.
 ## 2026-11-16 (s64) — fix: installer owner-draw buttons engage via SWP_FRAMECHANGED
 
 ### Fixed

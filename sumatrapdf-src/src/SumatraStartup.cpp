@@ -2705,6 +2705,7 @@ ContinueOpenWindow:
                 // re-saved, leaving stale entries).
                 SaveSettings();
                 ShowMainWindow(win, WIN_STATE_NORMAL);
+                logf("[tabs] group restore: window shown, async loads running\n");
                 RefreshTabGroupButton(win);
             }
         }

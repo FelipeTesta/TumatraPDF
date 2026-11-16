@@ -26,6 +26,7 @@
 #include "wingui/Layout.h"
 #include "wingui/WinGui.h"
 #include "wingui/WebView.h"
+#include "wingui/BrowserDocView.h"
 
 #include "wingui/LabelWithCloseWnd.h"
 #include "wingui/FrameRateWnd.h"
@@ -47,6 +48,7 @@
 #include "FormFields.h"
 #include "PdfTools.h"
 #include "GlobalPrefs.h"
+#include "ProfileData.h"
 #include "ChmModel.h"
 #include "MarkdownModel.h"
 #include "MarkdownToc.h"
@@ -3527,7 +3529,7 @@ static void CALLBACK LoadingMessageTimerProc(HWND /*hwnd*/, UINT /*msg*/, UINT_P
                 continue;
             }
             hasLoadingTabs = true;
-            if (tab == win->CurrentTab() && tab->loadStartedAt != 0 && now - tab->loadStartedAt >= 1000) {
+            if (tab == win->CurrentTab() && tab->loadStartedAt != 0 && now - tab->loadStartedAt >= 100) {
                 HwndInvalidate(win->hwndCanvas);
             }
         }
@@ -3545,8 +3547,9 @@ static void StartLoadingMessageTimer(WindowTab* tab) {
     tab->loadStartedAt = GetTickCount64();
     tab->loadCopyBytesCopied = -1;
     tab->loadCopyBytesTotal = 0;
+    tab->loadProgress = 0.f;
     if (gLoadingMessageTimer == 0) {
-        gLoadingMessageTimer = SetTimer(nullptr, 0, 1000, LoadingMessageTimerProc);
+        gLoadingMessageTimer = SetTimer(nullptr, 0, 100, LoadingMessageTimerProc);
     }
 }
 
@@ -3569,6 +3572,9 @@ static void StartLoadDocumentThread(LoadDocumentAsyncData* data) {
         args->hwndPwdParent = args->win->hwndFrame;
     }
     StartLoadingMessageTimer(args->targetTab);
+    if (args->targetTab) {
+        args->targetTab->loadProgress = 0.05f;
+    }
     gLoadThreadsActive++;
     auto fn = MkFunc0<LoadDocumentAsyncData>(LoadDocumentAsync, data);
     RunAsync(fn, "LoadDocumentThread");
@@ -3681,8 +3687,15 @@ static void LoadDocumentAsyncFinish(LoadDocumentAsyncData* d) {
     }
 
     if (args->targetTab) {
+        args->targetTab->loadProgress = 0.92f;
+    } else if (win && win->CurrentTab()) {
+        win->CurrentTab()->loadProgress = 0.92f;
+    }
+
+    if (args->targetTab) {
         args->targetTab->loadStartedAt = 0;
         args->targetTab->loadCopyBytesCopied = -1;
+        args->targetTab->loadProgress = 0.f;
         args->targetTab->loadCopyBytesTotal = 0;
     }
     if (!args->ctrl) {
@@ -3732,6 +3745,25 @@ static void UpdateCopyProgressUI(CopyProgressUITask* task) {
     }
 }
 
+// Progress for the loading screen animation.
+struct LoadProgressUITask {
+    WindowTab* targetTab = nullptr;
+    float progress = 0.f;
+};
+
+static void UpdateLoadProgressUI(LoadProgressUITask* task) {
+    AutoDelete delTask(task);
+    WindowTab* tab = task->targetTab;
+    MainWindow* win = FindMainWindowByTab(tab);
+    if (!win) {
+        return;
+    }
+    tab->loadProgress = task->progress;
+    if (tab == win->CurrentTab()) {
+        HwndInvalidate(tab->win->hwndCanvas);
+    }
+}
+
 struct CopyProgressState {
     WindowTab* targetTab = nullptr;
 };
@@ -3776,6 +3808,13 @@ static void LoadDocumentAsync(LoadDocumentAsyncData* d) {
         SafeEngineRelease(&engine);
     }
     args->engine = engine;
+    if (args->targetTab) {
+        auto* p = new LoadProgressUITask;
+        p->targetTab = args->targetTab;
+        p->progress = 0.85f;
+        auto fn = MkFunc0<LoadProgressUITask>(UpdateLoadProgressUI, p);
+        uitask::Post(fn, "LoadProgressUI");
+    }
     // args->ctrl stays null until LoadDocumentAsyncFinish
 
     file::gFileCopyProgressCb = {};
@@ -4183,6 +4222,7 @@ void LoadModelIntoTab(WindowTab* tab) {
     FlashcardOnTabChanged(win);
     if (win->showHomeOverlay) {
         win->showHomeOverlay = false;
+        SetWebviewsHiddenForHomeOverlay(win);
         // UpdateUiForCurrentTab above refreshed the toolbar while the overlay
         // was still up, which hides every button except Home. Re-run now that
         // the overlay is gone, or the buttons (notably Save) stay hidden.
@@ -7737,6 +7777,42 @@ void ChangeZoomLevel(MainWindow* win, float newZoom, bool pagesContinuously) {
 }
 
 // --- Cross-TU helpers for Commands_View.cpp (avoids DisplayModel.h/WindowTab.h includes) ---
+
+// The WebView2-hosted viewers (markdown/HTML-inside-CHM) are native child
+// HWNDs of the canvas and would cover the home overlay (which is painted on
+// the canvas). Mirror the ContrastOverlay pattern: hide the controller while
+// the overlay is up, restore when it closes.
+void SetWebviewsHiddenForHomeOverlay(MainWindow* win) {
+    if (!win) {
+        return;
+    }
+    bool hidden = win->showHomeOverlay;
+    auto hideOne = [&](bool md) {
+        if (md) {
+            auto* m = win->AsMarkdown();
+            if (m) {
+                if (auto* wv = m->GetWebviewWnd()) {
+                    wv->SetControllerVisible(!hidden);
+                    if (wv->hwnd) {
+                        ShowWindow(wv->hwnd, hidden ? SW_HIDE : SW_SHOW);
+                    }
+                }
+            }
+        } else {
+            auto* m = win->AsChm();
+            if (m && m->docView) {
+                if (auto* wv = m->docView->GetWebviewWnd()) {
+                    wv->SetControllerVisible(!hidden);
+                    if (wv->hwnd) {
+                        ShowWindow(wv->hwnd, hidden ? SW_HIDE : SW_SHOW);
+                    }
+                }
+            }
+        }
+    };
+    hideOne(true);
+    hideOne(false);
+}
 
 bool IsCurrentDocMarkdown(MainWindow* win) {
     if (!win) return false;
@@ -11662,6 +11738,7 @@ static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, L
         case CmdOpenHome:
             // toggle the per-window home overlay (paints over the canvas, no tab)
             win->showHomeOverlay = !win->showHomeOverlay;
+            SetWebviewsHiddenForHomeOverlay(win);
             logf("[home] overlay %s\n", win->showHomeOverlay ? StrL("ON") : StrL("OFF"));
             InvalidateRect(win->hwndCanvas, nullptr, TRUE);
             SetFocus(win->hwndCanvas);
@@ -12631,6 +12708,8 @@ void HandleTabGroupMenuCmd(MainWindow* win, int cmdId) {
             // old-name equality, not post-rename g->name).
             bool wasActive = gGlobalPrefs->activeTabGroup.s && str::EqI(g->name, gGlobalPrefs->activeTabGroup);
             if (ShowTabGroupNameDialog(win, &newName, true)) {
+                // TUMATRA-FORK(s49): record old name before ReplaceWithCopy
+                Str oldName = str::Dup(g->name);
                 str::ReplaceWithCopy(&g->name, newName.s);
                 // TUMATRA-FORK(s49): keep activeTabGroup pointing at the renamed
                 // group so it stays valid (no ghost). Upstream re-apply note:
@@ -12638,6 +12717,7 @@ void HandleTabGroupMenuCmd(MainWindow* win, int cmdId) {
                 if (wasActive) {
                     str::ReplaceWithCopy(&gGlobalPrefs->activeTabGroup, newName.s);
                 }
+                ProfileDataRenameSession(Str(oldName.s), Str(newName.s));
                 SaveSettings();
                 RefreshTabGroupButton(win);
                 logf("[tabs] menu rename '%s' -> '%s'\n", Str(g->name), Str(newName));
@@ -14953,12 +15033,15 @@ LRESULT CALLBACK WndProcSumatraFrame(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) 
                     if (gTestDialogIsRename) {
                         TabGroup* g = FindTabGroup(gTestDialogName.s);
                         if (g) {
+                            // TUMATRA-FORK(s49): record old name before ReplaceWithCopy
+                            Str oldName = str::Dup(g->name);
                             str::ReplaceWithCopy(&g->name, tmp);
                             // TUMATRA-FORK(s49): keep activeTabGroup pointing at the
                             // renamed group so it stays valid (no ghost).
                             if (wasActive) {
                                 str::ReplaceWithCopy(&gGlobalPrefs->activeTabGroup, Str(tmp.s));
                             }
+                            ProfileDataRenameSession(Str(oldName.s), Str(tmp.s));
                             SaveSettings();
                             RefreshTabGroupButton(win);
                             logf("[tabs] dialog rename '%s' -> '%s'\n", Str(gTestDialogName), Str(g->name));

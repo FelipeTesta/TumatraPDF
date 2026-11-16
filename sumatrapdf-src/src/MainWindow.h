@@ -917,6 +917,8 @@ struct MainWindow {
     void ArchClearMeasurementsForPath(Str path);
 };
 
+void SetWebviewsHiddenForHomeOverlay(MainWindow* win);
+
 bool HasOpenedDocuments(MainWindow*);
 void UpdateControlsColors(MainWindow*);
 void ScheduleRepaint(MainWindow*, int delay);

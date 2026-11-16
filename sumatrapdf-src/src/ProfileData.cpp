@@ -84,6 +84,22 @@ static void ProfMaybeBackup();
 static void ProfPullHistory();
 static void ProfileDataEnsureLoaded();
 
+// per-session (TabGroup) study stats
+struct SessionStatRow {
+    Str name;
+    int readSec = 0;
+    int fcSec = 0;
+    int fcCards = 0;
+};
+
+static Vec<SessionStatRow> gSessionStats;
+static bool gSessionStatsLoaded = false;
+static int gSessionDirtySec = 0;
+static int gSessionDirtyCards = 0;
+
+static void ProfileDataLoadSessionStatsFromFile();
+static Str ProfileDataSessionCleanName(Str s);
+
 // forward: used by ProfMergeConflictedCopies before their definitions
 static ProfileBook* ProfFindBook(Str keyHex);
 static void ProfParseDaySection(Str json, const char* section, Vec<ProfDayMachine>& out);
@@ -495,6 +511,316 @@ static void ProfImportBooksFromDir(Vec<ProfileBook>& outBooks, TempStr dir) {
 // legacy one read-only when the new one does not exist yet (the stats modules
 // copy legacy -> new on load; this read-only fallback covers profile load,
 // which can run before the stats modules' first touch).
+static TempStr ProfileDataSessionSidecarPathTemp() {
+    TempStr root = ProfileDataGetDataRootTemp();
+    TempStr statsDir = path::JoinTemp(root, StrL("stats"));
+    return path::JoinTemp(statsDir, StrL("study-sessions.txt"));
+}
+
+// write whole sidecar file and reset dirty counters
+static void ProfileDataSessionFlush() {
+    TempStr sidecarPath = ProfileDataSessionSidecarPathTemp();
+    dir::CreateAll(Str(path::GetDirTemp(Str(sidecarPath))));
+    str::Builder sb;
+    for (auto& row : gSessionStats) {
+        sb.Append(fmt("%s\t%d\t%d\t%d\n", row.name, row.readSec, row.fcSec, row.fcCards));
+    }
+    file::WriteFile(sidecarPath, sb.TakeStr());
+    gSessionDirtySec = 0;
+    gSessionDirtyCards = 0;
+}
+
+// ensure session stats are loaded (triggers backfill on first call)
+static void ProfileDataEnsureSessionStatsLoaded() {
+    if (gSessionStatsLoaded) {
+        return;
+    }
+    gSessionStatsLoaded = true;
+
+    // ---- one-time backfill (seed) ----
+    // skip if marker file already exists
+    TempStr statsDir = ProfileDataGetDataRootTemp();
+    statsDir = path::JoinTemp(statsDir, StrL("stats"));
+    TempStr seededFile = path::JoinTemp(statsDir, StrL("study-sessions.seeded"));
+    if (file::Exists(seededFile)) {
+        // marker exists => already seeded, just ensure dir
+        if (!dir::CreateAll(Str(statsDir))) {
+            logf("[stats] could not create stats dir\n");
+        }
+        // load the sidecar file
+        ProfileDataLoadSessionStatsFromFile();
+        return;
+    }
+
+    // ensure stats dir exists
+    if (!dir::CreateAll(Str(statsDir))) {
+        logf("[stats] could not create stats dir for backfill\n");
+        // still try to load any existing file
+        ProfileDataLoadSessionStatsFromFile();
+        return;
+    }
+
+    // seed from gGlobalPrefs->tabGroups and gFileHistory
+    // include FileHistory.h if needed (already included at line 31)
+    if (gGlobalPrefs && gGlobalPrefs->tabGroups && len(*gGlobalPrefs->tabGroups) > 0) {
+        for (auto* group : *gGlobalPrefs->tabGroups) {
+            if (!group || !group->name || str::IsEmptyOrWhiteSpace(Str(group->name))) {
+                continue;
+            }
+            Str groupName = Str(group->name);
+            int rSec = 0, fcSec = 0, fcCards = 0;
+            if (group->tabFiles) {
+                for (auto* tf : *group->tabFiles) {
+                    FileState* fs = gFileHistory.FindByPath(Str(tf->path));
+                    if (fs) {
+                        rSec += fs->readingTimeSec;
+                        fcSec += fs->flashcardStudyTimeSec;
+                        fcCards += fs->flashcardCardsDone;
+                    }
+                }
+            }
+            // upsert: check if row with same name already exists
+            bool found = false;
+            for (auto& entry : gSessionStats) {
+                if (str::EqI(entry.name, groupName)) {
+                    entry.readSec += rSec;
+                    entry.fcSec += fcSec;
+                    entry.fcCards += fcCards;
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                gSessionStats.Append({str::Dup(groupName), rSec, fcSec, fcCards});
+            }
+        }
+    }
+    // write sidecar
+    {
+        str::Builder sb;
+        for (auto& entry : gSessionStats) {
+            sb.Append(fmt("%s\t%d\t%d\t%d\n", entry.name, entry.readSec, entry.fcSec, entry.fcCards));
+        }
+        TempStr sidecarPath = ProfileDataSessionSidecarPathTemp();
+        file::WriteFile(sidecarPath, sb.TakeStr());
+    }
+    // write marker file
+    {
+        TempStr markerPath = path::JoinTemp(statsDir, StrL("study-sessions.seeded"));
+        file::WriteFile(markerPath, StrL("1\n"));
+    }
+    logf("[stats] sessions backfill: %d groups seeded\n", gSessionStats.len);
+
+    // load the sidecar file into memory
+    ProfileDataLoadSessionStatsFromFile();
+}
+
+// load session stats from the sidecar file (called by EnsureLoaded after backfill)
+static void ProfileDataLoadSessionStatsFromFile() {
+    TempStr sidecarPath = ProfileDataSessionSidecarPathTemp();
+    if (!file::Exists(sidecarPath)) {
+        // no file yet; gSessionStats stays empty
+        return;
+    }
+    Str d = file::ReadFile(sidecarPath);
+    if (!d) {
+        logf("[stats] could not read sidecar file\n");
+        return;
+    }
+    StrVec lines;
+    Split(&lines, d, StrL("\n"), true);
+    gSessionStats.Clear();
+    for (Str line : lines) {
+        if (len(line) < 5) continue;
+        int t1 = str::IndexOfChar(line, '\t');
+        if (t1 <= 0) continue;
+        Str rest(line.s + t1 + 1, line.len - t1 - 1);
+        int t2 = str::IndexOfChar(rest, '\t');
+        if (t2 < 0) continue;
+        Str rest2(rest.s + t2 + 1, rest.len - t2 - 1);
+        int t3 = str::IndexOfChar(rest2, '\t');
+        Str name(line.s, t1);
+        Str rSecB(rest.s, t2);
+        int fs = t2 + 1;
+        int fcSecLen = (t3 >= 0) ? t3 : rest2.len;
+        Str fcSecB(rest2.s, fcSecLen);
+        Str fcCardsB(rest2.s + fcSecLen + (t3 >= 0 ? 1 : 0), rest2.len - fcSecLen - (t3 >= 0 ? 1 : 0));
+        int readSec = (int)_strtoi64(CStrTemp(rSecB), nullptr, 10);
+        int fcSec = (int)_strtoi64(CStrTemp(fcSecB), nullptr, 10);
+        int fcCards = (int)_strtoi64(CStrTemp(fcCardsB), nullptr, 10);
+        bool found = false;
+        for (auto& entry : gSessionStats) {
+            if (str::EqI(entry.name, name)) {
+                entry.readSec += readSec;
+                entry.fcSec += fcSec;
+                entry.fcCards += fcCards;
+                found = true;
+                break;
+            }
+        }
+        if (!found) gSessionStats.Append({str::Dup(name), readSec, fcSec, fcCards});
+    }
+}
+
+void ProfileDataAddSessionReadingSec(Str group, int sec) {
+    if (!group.s || !*group.s || sec <= 0) {
+        return;
+    }
+    ProfileDataEnsureSessionStatsLoaded();
+    Str g = ProfileDataSessionCleanName(group);
+    if (!g.s) return;
+    // find row (linear scan) or create (name dup'd into persistent arena)
+    bool found = false;
+    for (auto& entry : gSessionStats) {
+        if (str::EqI(entry.name, g)) {
+            entry.readSec += sec;
+            gSessionDirtySec += sec;
+            found = true;
+            break;
+        }
+    }
+    if (!found) {
+        gSessionStats.Append({g, sec, 0, 0});
+        gSessionDirtySec += sec;
+    }
+    // flush if threshold reached
+    if (gSessionDirtySec >= 60) {
+        ProfileDataSessionFlush();
+    }
+}
+
+// heap-owned dup of a name with TAB/CR/LF replaced by spaces; empty -> {}
+static Str ProfileDataSessionCleanName(Str s) {
+    if (!s.s || s.len == 0) return {};
+    TempStr d = str::DupTemp(s);
+    for (int i = 0; i < len(d); i++) {
+        if (d.s[i] == '\t' || d.s[i] == '\r' || d.s[i] == '\n') d.s[i] = ' ';
+    }
+    if (d.len == 0) return {};
+    return str::Dup(d);
+}
+
+void ProfileDataAddSessionStudySec(Str group, int sec) {
+    if (!group.s || !*group.s || sec <= 0) {
+        return;
+    }
+    ProfileDataEnsureSessionStatsLoaded();
+    Str g = ProfileDataSessionCleanName(group);
+    if (!g.s) return;
+    // find row or create
+    bool found = false;
+    for (auto& entry : gSessionStats) {
+        if (str::EqI(entry.name, g)) {
+            entry.fcSec += sec;
+            gSessionDirtySec += sec;
+            found = true;
+            break;
+        }
+    }
+    if (!found) {
+        gSessionStats.Append({g, 0, sec, 0});
+        gSessionDirtySec += sec;
+    }
+    if (gSessionDirtySec >= 60) {
+        ProfileDataSessionFlush();
+    }
+}
+
+void ProfileDataAddSessionCard(Str group) {
+    if (!group.s || !*group.s) {
+        return;
+    }
+    ProfileDataEnsureSessionStatsLoaded();
+    Str g = ProfileDataSessionCleanName(group);
+    if (!g.s) return;
+    // find row or create
+    bool found = false;
+    for (auto& entry : gSessionStats) {
+        if (str::EqI(entry.name, g)) {
+            entry.fcCards++;
+            gSessionDirtyCards++;
+            found = true;
+            break;
+        }
+    }
+    if (!found) {
+        gSessionStats.Append({g, 0, 0, 1});
+        gSessionDirtyCards++;
+    }
+    // flush if threshold reached (60 seconds OR 20 cards)
+    if (gSessionDirtySec >= 60 || gSessionDirtyCards >= 20) {
+        ProfileDataSessionFlush();
+    }
+}
+
+void ProfileDataGetSessionStats(Vec<SessionStatEntry>& out) {
+    ProfileDataEnsureSessionStatsLoaded();
+    out.Clear();
+    for (auto& entry : gSessionStats) {
+        // only append rows with any value > 0
+        if (entry.readSec > 0 || entry.fcSec > 0 || entry.fcCards > 0) {
+            out.Append({entry.name, entry.readSec, entry.fcSec, entry.fcCards});
+        }
+    }
+}
+
+void ProfileDataRenameSession(Str oldName, Str newName) {
+    if (!oldName.s || !*oldName.s) {
+        return;
+    }
+    if (!newName.s || *newName.s == 0) {
+        return; // no-op if new name empty
+    }
+    Str on = ProfileDataSessionCleanName(oldName);
+    Str nn = ProfileDataSessionCleanName(newName);
+    if (!on.s || !nn.s || str::EqI(on, nn)) {
+        return;
+    }
+    ProfileDataEnsureSessionStatsLoaded();
+    // find old row
+    int oldIdx = -1;
+    for (int i = 0; i < len(gSessionStats); i++) {
+        if (str::EqI(gSessionStats[i].name, on)) {
+            oldIdx = i;
+            break;
+        }
+    }
+    if (oldIdx < 0) {
+        return; // old name not found
+    }
+    // check if new name row already exists
+    int newIdx = -1;
+    for (int i = 0; i < len(gSessionStats); i++) {
+        if (str::EqI(gSessionStats[i].name, nn)) {
+            newIdx = i;
+            break;
+        }
+    }
+    if (newIdx >= 0) {
+        // MERGE: add old row's values into new row, then delete old row
+        gSessionStats[newIdx].readSec += gSessionStats[oldIdx].readSec;
+        gSessionStats[newIdx].fcSec += gSessionStats[oldIdx].fcSec;
+        gSessionStats[newIdx].fcCards += gSessionStats[oldIdx].fcCards;
+        // remove old row (swap-remove)
+        gSessionStats[oldIdx] = gSessionStats[len(gSessionStats) - 1];
+        gSessionStats.Pop();
+    } else {
+        // just rename old row's name
+        gSessionStats[oldIdx].name = nn;
+    }
+    ProfileDataSessionFlush();
+}
+
+// flush session stats if dirty threshold reached
+void ProfileDataFlushSessionsIfNeeded() {
+    if (gSessionDirtySec <= 0 && gSessionDirtyCards <= 0) {
+        return;
+    }
+    ProfileDataSessionFlush();
+}
+
+// legacy sidecar lived next to the settings file — kept readable as fallback
+// and as the copy source for the one-time migration; never deleted
 static TempStr ProfSidecarReadPathTemp(Str name) {
     TempStr root = ProfileDataGetDataRootTemp();
     TempStr newPath = path::JoinTemp(path::JoinTemp(root, StrL("stats")), name);
