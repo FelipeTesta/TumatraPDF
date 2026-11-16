@@ -1,3 +1,11 @@
+## 2026-11-16 (s64-R9x) - checkbox labels off-white on real screen
+
+### Fixed
+- Installer checkbox option texts rendered (near-)black on the dark background ON THE REAL SCREEN (themed button-class labels ignore WM_CTLCOLORSTATIC text color; PrintWindow captures show the classic path with off-white and misled prior verification).
+- Fix: SetWindowTheme(w->hwnd, L"", L"") on the 3 BS_AUTOCHECKBOX controls in CreateCheckbox (Installer.cpp) - drops the visual style so the classic rendering path honors WM_CTLCOLORSTATIC - plus w->SetColors(kInstallerSurfaceText, kInstallerWinBgColor) as belt & braces. uxtheme already linked (base/Base.h includes uxtheme.h).
+- Verified on real screen via DPI-aware CopyFromScreen capture (PrintWindow equivalent not trusted): labels render off-white, WC3 checkmark glyph visible, brightness matches folder label.
+- Lesson restated: never judge themed-control text by classic rendering; verify on screen. User eye beats capture tools.
+
 ## 2026-11-16 (s64-R9y) - installer polish round, logo recolor, build artifact trim
 
 ### Changed

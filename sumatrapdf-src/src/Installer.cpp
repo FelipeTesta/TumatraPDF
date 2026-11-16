@@ -101,6 +101,12 @@ static Checkbox* CreateCheckbox(HWND hwndParent, Str s, bool isChecked) {
 
     Checkbox* w = new Checkbox();
     w->Create(args);
+    // Themed button-class checkboxes draw their own label and ignore the text
+    // color from WM_CTLCOLORSTATIC - on real screens the option text renders
+    // (near-)black on the dark background. Drop the visual style and give the
+    // checkbox the dark palette so classic rendering honors the off-white text.
+    SetWindowTheme(w->hwnd, L"", L"");
+    w->SetColors(kInstallerSurfaceText, kInstallerWinBgColor);
     return w;
 }
 
