@@ -10,7 +10,7 @@
 - Diálogos mock = 4 of 24 dialogs in dot cluster_dialogs.
 - ~80 SUSPECT orphans (CmdDebug*, CmdScreenshot, CmdPdfBake, CmdCropImage, CmdSaveImage, CmdListPrinters, CmdSendByEmail, CmdToggleWindowsPreviewer/-SearchFilter ...) — no handler/menu/toolbar/shortcut found.
 - ~50 DEAD? commands (no HandleCmd* located) folded into SUSPECT groups.
-- registry correction: inventory REPORT SUSPECTED uninstall DisplayName="SumatraPDF"; VERIFIED false by reading source — both branches use kAppName ("TumatraPDF") (RegistryInstaller.cpp:117, :123-124). Uninstall KEY path remains `...\\Uninstall\\SumatraPDF` (upstream key name kept intentionally; renaming = separate decision, not done).
+- uninstall key: NOTE the audit inventory claimed `Uninstall\\SumatraPDF`. VERIFIED in source: fork REGISTRY path is built from kAppName ("TumatraPDF") — GetRegPathUninstTemp (InstallerCommon.cpp:124-126), used at RegistryInstaller.cpp:114/389/556 and InstallerCommon.cpp:149/262. Installed on this PC: HKLM\\...\\Uninstall\\TumatraPDF = DisplayName TumatraPDF, InstallLocation C:\\Program Files\\TumatraPDF. The HKLM\\...\\Uninstall\\SumatraPDF entry belongs to a REAL upstream SumatraPDF install (C:\\Program Files\\SumatraPDF) — NOT touched by the fork and NOT to be renamed/deleted (would break upstream uninstall).
 - RISK note: `Compiled/TumatraPDF.exe` missing since 16/11 release packaging (install/portable-win64.exe produced instead); captures use `sumatrapdf-src/out/dbg64/TumatraPDF.exe`.
 
 ### Notes

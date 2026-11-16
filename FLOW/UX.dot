@@ -65,7 +65,7 @@ digraph TumatraPDF_UX {
     n_btn_close_post [label="Close (post-uninstall)\ngButtonExit", tooltip="source:ui-inventory.md:23,38"];
 
     // Registry keys
-    n_reg_hklm [label="HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\SumatraPDF", tooltip="source:ui-inventory.md:40-52", shape=note, fillcolor="#0F172A", fontcolor="#94A3B8"];
+    n_reg_hklm [label="HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\TumatraPDF", tooltip="source:InstallerCommon.cpp:124-126 (GetRegPathUninstTemp(kAppName)); source:RegistryInstaller.cpp:114", shape=note, fillcolor="#0F172A", fontcolor="#94A3B8"];
     n_reg_keys [label="DisplayIcon, DisplayName, DisplayVersion,\nEstimatedSize, InstallDate, InstallLocation,\nNoModify=1, NoRepair=1, Publisher,\nUninstallString, QuietUninstallString,\nURLInfoAbout, URLUpdateInfo", tooltip="source:ui-inventory.md:40-52", shape=note, fillcolor="#0F172A", fontcolor="#94A3B8"];
 
     // Edges installer flow
