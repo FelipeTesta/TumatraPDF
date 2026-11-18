@@ -1,3 +1,15 @@
+## 2026-11-17 (s64) — Flashcards UX implementation
+
+### Added
+- FC-DUP: CmdFlashcardAdd duplicate guard — identical page set + bounds within 1pt (incl. extraPages) shows passive "Already a flashcard" toast (ShowTemporaryNotification 2.2s) and creates nothing; onion-skin (sub-char) selections still create. Helper FlashcardCardPageBoundsMatch (Flashcard.cpp) shared with import dedup.
+- FC-DEL: toolbar button Delete (flashcard toolbar, after Next) — study-gated; deletes active card annotations (primary + extraPages, author TumatraPDF-Flashcard, bounds ±1pt), prunes SM-2 states, removes studyOrder entry with full re-index, advances to next card or ends session; doc stays dirty (manual Ctrl+S). New command CmdFlashcardDeleteActive (Commands.h 537).
+- FC-IMP2: Import window "Import from Annotations" section (dialog 560x360->560x500) — 4 type checkboxes (Highlight/Underline/Squiggly/StrikeOut), dry-run "To convert: N (skipping X duplicates)", button duplicates current-doc annots into new flashcard Highlight annots (identical quad points, originals kept, flashcard-authored skipped, dedup ±1pt + intra-run). ImportAnnotComputeDryRun/ImportAnnotDoImport (FlashcardToolbar.cpp).
+- Contrast +/- buttons in main toolbar (after Contrast; autoscroll +/- pattern) — step contrast overlay opacity 10% (0-100); PDF layered veil, markdown in-page CSS filter.
+- ShowScanModeButton advanced setting (default false) — hides Scan Mode toolbar button to free space; menu + accelerators untouched.
+
+### Verified
+- All above built 0 errors / 0 warnings (dbg64 + rel64); release portable+install exes rebuilt to Compiled (17/11 21:20). GUI test pending user.
+
 ## 2026-11-16 (s64) — startup: async activeTabGroup restore + logo-dots loading overlay
 
 ### Fixed
