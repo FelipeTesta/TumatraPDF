@@ -254,7 +254,8 @@ TempStr KeyboardLinkFollowResultTemp(int* exitCodeOut) {
 }
 
 // Resolved at paint time via DsAccentsGet() — not constexpr (theme-aware)
-static void PaintLinkBadge(Gdiplus::Graphics& gs, Gdiplus::Font& font, const Rect& linkRect, int number, COLORREF badgeBg, COLORREF badgeText) {
+static void PaintLinkBadge(Gdiplus::Graphics& gs, Gdiplus::Font& font, const Rect& linkRect, int number,
+                           COLORREF badgeBg, COLORREF badgeText) {
     WCHAR label[2] = {(WCHAR)(L'0' + number), 0};
 
     Gdiplus::RectF layout(0, 0, 1000, 1000);

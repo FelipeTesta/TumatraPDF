@@ -52,7 +52,7 @@ void ProfileDataAddFlashcardCard(const char* pdfPath);
 void ProfileDataFlushSessionsIfNeeded(); // flush only if dirty > 0
 
 struct SessionStatEntry {
-    Str name;    // points into ProfileData's store, valid until the process flushes/loads
+    Str name; // points into ProfileData's store, valid until the process flushes/loads
     int readSec = 0;
     int fcSec = 0;
     int fcCards = 0;

@@ -7,4 +7,4 @@
 // exe keeps reporting the old version and the update check loops
 // (update.txt Latest is always compared against CURR_VERSION).
 #define CURR_VERSION 1.0.16
-#define CURR_VERSION_COMMA 1,0,16
+#define CURR_VERSION_COMMA 1, 0, 16

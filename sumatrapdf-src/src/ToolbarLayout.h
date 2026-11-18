@@ -43,18 +43,18 @@ struct DsAccents {
     COLORREF cellGrade[4];    // heatmap fill by minutes (<30, <60, <120, else)
 
     // Theme-paired tokens (dark/light may differ)
-    COLORREF bgSelToolbar;      // selection toolbar background
-    COLORREF accentErrorSoft;   // soft error red (paired with accentRed)
+    COLORREF bgSelToolbar;    // selection toolbar background
+    COLORREF accentErrorSoft; // soft error red (paired with accentRed)
 
     // Mid-luminance THEME-AGNOSTIC tokens (same value in both dark/light)
-    COLORREF accentBlue;        // primary blue
-    COLORREF accentGreen;       // primary green
-    COLORREF accentOrange;      // primary orange
-    COLORREF accentRed;         // primary red
-    COLORREF accentPurple;      // primary purple
-    COLORREF textMuted;         // muted grey text
-    COLORREF highlightYellow;   // highlight yellow
-    COLORREF textOnAccent;      // white text on accent backgrounds
+    COLORREF accentBlue;      // primary blue
+    COLORREF accentGreen;     // primary green
+    COLORREF accentOrange;    // primary orange
+    COLORREF accentRed;       // primary red
+    COLORREF accentPurple;    // primary purple
+    COLORREF textMuted;       // muted grey text
+    COLORREF highlightYellow; // highlight yellow
+    COLORREF textOnAccent;    // white text on accent backgrounds
 };
 DsAccents DsAccentsGet();
 
