@@ -102,6 +102,9 @@ static ToolbarButtonInfo gToolbarButtons[] = {
     {TbIcon::Text, CmdAutoScrollSpeedUp, _TRN("+")},
     {TbIcon::None, 0, nullptr}, // separator after autoscroll group
     {TbIcon::Text, CmdContrastToggle, _TRN("Contrast")},
+    {TbIcon::None, 0, nullptr}, // separator before contrast opacity group
+    {TbIcon::Text, CmdContrastDecrease, _TRN("-")},
+    {TbIcon::Text, CmdContrastIncrease, _TRN("+")},
     {TbIcon::Text, CmdInvertColors, _TRN("Invert")},
     {TbIcon::Text, CmdViewportCropToggle, _TRN("Scan Mode")},
     {TbIcon::Text, CmdViewportCropV2Toggle, _TRN("Two Columns")},
@@ -1181,6 +1184,10 @@ static LRESULT CALLBACK WndProcEditBg(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 static void AddAllToolbarButtons(MainWindow* win, HWND hwndToolbar, const bool* wrapAfter = nullptr) {
     TBBUTTON tbButtons[kButtonsCount];
     for (int i = 0; i < kButtonsCount; i++) {
+        // Hide Scan Mode (viewport crop) button when advanced setting is false
+        if (gToolbarButtons[i].cmdId == CmdViewportCropToggle && !gGlobalPrefs->showScanModeButton) {
+            continue;
+        }
         tbButtons[i] = TbButtonFromButtonInfo(gToolbarButtons[i]);
         // group-coherent wrap plan (see RebuildToolbarButtonsForWidth): the
         // caller measured the live indices, which match this table's order

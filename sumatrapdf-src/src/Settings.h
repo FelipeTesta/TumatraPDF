@@ -711,6 +711,9 @@ struct GlobalPrefs {
     // session that are not loaded yet (lazy tabs) in the background; off
     // by default - lazy books load on first visit as usual
     bool flashcardPreloadSessionBooks;
+    // if true, show the Scan Mode (viewport crop) button in the main
+    // toolbar
+    bool showScanModeButton;
     // data ROOT for ALL user study data (s64-R9o): single-file Profile
     // Memory store (tumatraPDF-data_1.json), the stats\ sidecars
     // (reading/flashcard stats) and, when FlashcardStudyDir is empty, the
@@ -1826,6 +1829,7 @@ static const FieldInfo gGlobalPrefsFields[] = {
     {(size_t)-1, SettingType::Comment, 0},
     {offsetof(GlobalPrefs, flashcardStudyDir), SettingType::String, (intptr_t)""},
     {offsetof(GlobalPrefs, flashcardPreloadSessionBooks), SettingType::Bool, false},
+    {offsetof(GlobalPrefs, showScanModeButton), SettingType::Bool, false},
     {offsetof(GlobalPrefs, profileDataDir), SettingType::String, (intptr_t)""},
     {offsetof(GlobalPrefs, defaultDisplayMode), SettingType::String, (intptr_t)"automatic"},
     {offsetof(GlobalPrefs, defaultZoom), SettingType::String, (intptr_t)"fit page"},
@@ -1975,42 +1979,43 @@ static const FieldInfo gGlobalPrefsFields[] = {
 };
 static const StructInfo gGlobalPrefsInfo = {
     sizeof(GlobalPrefs),
-    150,
+    151,
     gGlobalPrefsFields,
-    "\0\0FlashcardStudyDir\0FlashcardPreloadSessionBooks\0ProfileDataDir\0DefaultDisplayMode\0DefaultZoom\0DisableJavaS"
-    "cript\0AllowExternalImages\0EnableTeXEnhancements\0EscToExit\0FullPathInTitle\0InverseSearchCmdLine\0LazyLoading\0"
-    "MainWindowBackground\0NoHomeTab\0HomePageSortByFrequentlyRead\0HomePageViewMode\0FilePicker\0ReloadModifiedDocumen"
-    "ts\0RememberOpenedFiles\0RememberStatePerDocument\0RestoreSession\0ReuseInstance\0ShowMenubar\0ShowMenubarWithTabs"
-    "\0ShowTips\0CustomColors\0ShowToolbar\0Toolbar\0ToolbarPosition\0SearchUIFloating\0ShowFavorites\0SortFavoritesByN"
-    "ame\0ShowToc\0ShowLinks\0AutoScrollShowEta\0AutoScrollTimerMinutes\0AutoScrollTimerEnabled\0AutoScrollSpeedMultipl"
-    "ier\0ShowDocumentFocusIndicator\0ShowAnnotationNotification\0ShowTocPageNumbers\0ShowStartPage\0SidebarDx\0Scrollb"
-    "ars\0ScrollbarInSinglePage\0SmoothScroll\0PaddingAfterLastPage\0CitationHoverDelay\0ReadAloudVoiceId\0ReadAloudSpe"
-    "ed\0DisableReadAloud\0DisableAIChat\0ArchToolsEnabled\0ArchUnit\0ArchDecimalSeparator\0FastScrollOverScrollbar\0Pr"
-    "eventSleepInFullscreen\0TabWidth\0Theme\0LastLightTheme\0LastDarkTheme\0DocumentColorsFollowTheme\0TocDy\0ToolbarS"
-    "howReadAloud\0ToolbarSize\0TreeFontName\0TreeFontSize\0UIFontSize\0DisableAntiAlias\0EngineeringDrawingEnhance\0Di"
-    "sableAutoLinks\0UseSysColors\0UseTabs\0SelectionToolbar\0TabsMru\0CtrlTabPre36Behavior\0ZoomLevels\0ZoomIncrement"
-    "\0\0ViewportCrop\0Trim\0FlashcardSettings\0\0FixedPageUI\0\0EBookUI\0\0ComicBookUI\0\0ImageUI\0\0ChmUI\0\0Markdown"
-    "UI\0\0HtmlUI\0\0ClaudeCode\0\0GrokBuild\0\0CodexBuild\0\0AntiGravity\0\0AIChatSidebarDx\0\0TranslateToLang\0Transl"
-    "ateFromLang\0TranslateEngine\0\0Annotations\0\0ExternalViewers\0\0ForwardSearch\0\0PrinterDefaults\0\0Fullscreen\0"
-    "\0SelectionHandlers\0\0Shortcuts\0\0Themes\0\0TabGroups\0\0CustomScreenDPI\0\0\0DefaultPasswords\0UiLanguage\0Vers"
-    "ionToSkip\0WindowState\0WindowPos\0SearchUIWindowPos\0FileStates\0SessionData\0ReopenOnce\0TimeOfLastUpdateCheck\0"
-    "OpenCountWeek\0PropWinPos\0CheckForUpdates\0\0\0ActiveTabGroup",
+    "\0\0FlashcardStudyDir\0FlashcardPreloadSessionBooks\0ShowScanModeButton\0ProfileDataDir\0DefaultDisplayMode\0Defau"
+    "ltZoom\0DisableJavaScript\0AllowExternalImages\0EnableTeXEnhancements\0EscToExit\0FullPathInTitle\0InverseSearchCm"
+    "dLine\0LazyLoading\0MainWindowBackground\0NoHomeTab\0HomePageSortByFrequentlyRead\0HomePageViewMode\0FilePicker\0R"
+    "eloadModifiedDocuments\0RememberOpenedFiles\0RememberStatePerDocument\0RestoreSession\0ReuseInstance\0ShowMenubar"
+    "\0ShowMenubarWithTabs\0ShowTips\0CustomColors\0ShowToolbar\0Toolbar\0ToolbarPosition\0SearchUIFloating\0ShowFavori"
+    "tes\0SortFavoritesByName\0ShowToc\0ShowLinks\0AutoScrollShowEta\0AutoScrollTimerMinutes\0AutoScrollTimerEnabled\0A"
+    "utoScrollSpeedMultiplier\0ShowDocumentFocusIndicator\0ShowAnnotationNotification\0ShowTocPageNumbers\0ShowStartPag"
+    "e\0SidebarDx\0Scrollbars\0ScrollbarInSinglePage\0SmoothScroll\0PaddingAfterLastPage\0CitationHoverDelay\0ReadAloud"
+    "VoiceId\0ReadAloudSpeed\0DisableReadAloud\0DisableAIChat\0ArchToolsEnabled\0ArchUnit\0ArchDecimalSeparator\0FastSc"
+    "rollOverScrollbar\0PreventSleepInFullscreen\0TabWidth\0Theme\0LastLightTheme\0LastDarkTheme\0DocumentColorsFollowT"
+    "heme\0TocDy\0ToolbarShowReadAloud\0ToolbarSize\0TreeFontName\0TreeFontSize\0UIFontSize\0DisableAntiAlias\0Engineer"
+    "ingDrawingEnhance\0DisableAutoLinks\0UseSysColors\0UseTabs\0SelectionToolbar\0TabsMru\0CtrlTabPre36Behavior\0ZoomL"
+    "evels\0ZoomIncrement\0\0ViewportCrop\0Trim\0FlashcardSettings\0\0FixedPageUI\0\0EBookUI\0\0ComicBookUI\0\0ImageUI"
+    "\0\0ChmUI\0\0MarkdownUI\0\0HtmlUI\0\0ClaudeCode\0\0GrokBuild\0\0CodexBuild\0\0AntiGravity\0\0AIChatSidebarDx\0\0Tr"
+    "anslateToLang\0TranslateFromLang\0TranslateEngine\0\0Annotations\0\0ExternalViewers\0\0ForwardSearch\0\0PrinterDef"
+    "aults\0\0Fullscreen\0\0SelectionHandlers\0\0Shortcuts\0\0Themes\0\0TabGroups\0\0CustomScreenDPI\0\0\0DefaultPasswo"
+    "rds\0UiLanguage\0VersionToSkip\0WindowState\0WindowPos\0SearchUIWindowPos\0FileStates\0SessionData\0ReopenOnce\0Ti"
+    "meOfLastUpdateCheck\0OpenCountWeek\0PropWinPos\0CheckForUpdates\0\0\0ActiveTabGroup",
     "\0\0LEGACY override: directory where flashcard study history JSONs are stored (per-book files, MD5-named). Empty "
     "(recommended) = <ProfileDataDir>\\study. Set only to keep per-book files in a separate (e.g. cloud-synced) "
     "folder; the profile store already syncs the same states. Changing it migrates the files\0if true, flashcard "
     "sessions may preload books of this window's study session that are not loaded yet (lazy tabs) in the background; "
-    "off by default - lazy books load on first visit as usual\0data ROOT for ALL user study data (s64-R9o): "
-    "single-file Profile Memory store (tumatraPDF-data_1.json), the stats\\ sidecars (reading/flashcard stats) and, "
-    "when FlashcardStudyDir is empty, the per-book study JSONs under study\\. Empty = default app-data dir. Point it "
-    "at a cloud-synced folder (e.g. Google Drive) to sync everything between machines in ONE place\0default layout of "
-    "pages. valid values: automatic, single page, facing, book view, continuous, continuous facing, continuous book "
-    "view\0default zoom. valid values: fit page, fit width, fit height, fit content or percent like 100%\0if true, "
-    "JavaScript in PDF documents is disabled (e.g. form-field calculations won't run)\0if true, a PDF may load an "
-    "image stored in a separate file referenced by name (an external image stream); the file must sit next to the PDF. "
-    "Off by default for security (matches Acrobat)\0if true, show the SyncTeX inverse search command line in Settings "
-    "-> Options, so a double-click in the document can jump to the matching line in a LaTeX editor\0if true, Esc key "
-    "closes SumatraPDF\0if true, show the full path to the document in the title bar\0pattern used to launch the LaTeX "
-    "editor when doing inverse search\0if true, restoring a session delays loading each document until its tab is "
+    "off by default - lazy books load on first visit as usual\0if true, show the Scan Mode (viewport crop) button in "
+    "the main toolbar\0data ROOT for ALL user study data (s64-R9o): single-file Profile Memory store "
+    "(tumatraPDF-data_1.json), the stats\\ sidecars (reading/flashcard stats) and, when FlashcardStudyDir is empty, "
+    "the per-book study JSONs under study\\. Empty = default app-data dir. Point it at a cloud-synced folder (e.g. "
+    "Google Drive) to sync everything between machines in ONE place\0default layout of pages. valid values: automatic, "
+    "single page, facing, book view, continuous, continuous facing, continuous book view\0default zoom. valid values: "
+    "fit page, fit width, fit height, fit content or percent like 100%\0if true, JavaScript in PDF documents is "
+    "disabled (e.g. form-field calculations won't run)\0if true, a PDF may load an image stored in a separate file "
+    "referenced by name (an external image stream); the file must sit next to the PDF. Off by default for security "
+    "(matches Acrobat)\0if true, show the SyncTeX inverse search command line in Settings -> Options, so a "
+    "double-click in the document can jump to the matching line in a LaTeX editor\0if true, Esc key closes "
+    "SumatraPDF\0if true, show the full path to the document in the title bar\0pattern used to launch the LaTeX editor "
+    "when doing inverse search\0if true, restoring a session delays loading each document until its tab is "
     "selected\0background color of the area around the document, traditionally yellow. Only applies to the Light "
     "theme; the default #80fff200 is a marker meaning \"use the theme's color\", so setting any other value also "
     "colorizes the toolbar and sidebars\0if true, doesn't open Home tab\0if true, the home page lists documents by how "

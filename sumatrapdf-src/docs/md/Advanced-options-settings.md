@@ -43,6 +43,9 @@ FlashcardStudyDir =
 ; books load on first visit as usual
 FlashcardPreloadSessionBooks = false
 
+; if true, show the Scan Mode (viewport crop) button in the main toolbar
+ShowScanModeButton = false
+
 ; data ROOT for ALL user study data (s64-R9o): single-file Profile Memory store
 ; (tumatraPDF-data_1.json), the stats\ sidecars (reading/flashcard stats) and,
 ; when FlashcardStudyDir is empty, the per-book study JSONs under study\. Empty

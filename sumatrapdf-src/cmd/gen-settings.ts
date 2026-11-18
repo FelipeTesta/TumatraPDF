@@ -891,6 +891,12 @@ const globalPrefs: Field[] = [
     "if true, flashcard sessions may preload books of this window's study session that are not loaded yet (lazy tabs) in the background; off by default - lazy books load on first visit as usual",
   ),
   field(
+    "ShowScanModeButton",
+    Bool,
+    false,
+    "if true, show the Scan Mode (viewport crop) button in the main toolbar",
+  ),
+  field(
     "ProfileDataDir",
     Str,
     "",
