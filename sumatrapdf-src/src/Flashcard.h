@@ -106,6 +106,10 @@ Annotation* FlashcardCreateHighlightAnnot(EngineBase* engine, int pageNo, Vec<Re
 // of the FIRST page's first mask rect. Never returns 0 (0 means "single page").
 u64 FlashcardGroupToken(int firstPageNo, Vec<RectF>& firstPageRects);
 
+// True when `card` covers page `pageNo` with bounds within 1pt on x/y/dx/dy
+// (checks the primary page and all extraPages cross-page groups).
+bool FlashcardCardPageBoundsMatch(const Flashcard& card, int pageNo, const RectF& bounds);
+
 // Import the NEW flashcards (Highlight annots) from another copy of the SAME
 // document into ours, merging with existing cards (duplicate = same page +
 // same mask within 1pt). Study history is NOT imported — new cards are "new".

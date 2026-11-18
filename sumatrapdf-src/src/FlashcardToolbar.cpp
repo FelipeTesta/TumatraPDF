@@ -493,6 +493,7 @@ void FlashcardToolbarCreate(MainWindow* win) {
         {CmdFlashcardReveal, _TRN("Reveal")},
         {CmdFlashcardBack, _TRN("Back")},
         {CmdFlashcardNext, _TRN("Next")},
+        {CmdFlashcardDeleteActive, _TRN("Delete")},
         {CmdFlashcardOrderOptions, _TRN("Order")},
         {CmdFlashcardLista, _TRN("List")},
         {CmdFlashcardFilter, _TRN("Filter")},
@@ -691,6 +692,12 @@ void FlashcardToolbarUpdateState(MainWindow* win) {
     bool hasNext = win->flashcard.studyMode && win->flashcard.currentCardIdx + 1 < len(win->flashcard.studyOrder);
     WPARAM nextState = hasNext ? TBSTATE_ENABLED : 0;
     SendMessageW(hwnd, TB_SETSTATE, (WPARAM)CmdFlashcardNext, MAKELONG(nextState, 0));
+    // Delete button: same gating as Next but without the +1 lookahead -
+    // enabled whenever the current card is valid
+    bool canDelete = win->flashcard.studyMode && win->flashcard.currentCardIdx >= 0 &&
+                     win->flashcard.currentCardIdx < len(win->flashcard.studyOrder);
+    WPARAM deleteState = canDelete ? TBSTATE_ENABLED : 0;
+    SendMessageW(hwnd, TB_SETSTATE, (WPARAM)CmdFlashcardDeleteActive, MAKELONG(deleteState, 0));
     // Filter button: checked when the current tab has an ACTIVE page filter
     // (enabled + non-empty expression)
     WindowTab* tab = win->CurrentTab();
@@ -851,6 +858,13 @@ enum {
     IDC_FC_CONFIG_LIST = 60012,
     IDC_FC_SESSION_SEARCH = 60013,
     IDC_FC_SESSION_LIST = 60014,
+    // Import from Annotations (FC-IMP2)
+    IDC_FC_IMP_ANNOT_CHK_HIGHLIGHT = 60020,
+    IDC_FC_IMP_ANNOT_CHK_UNDERLINE = 60021,
+    IDC_FC_IMP_ANNOT_CHK_SQUIGGLY = 60022,
+    IDC_FC_IMP_ANNOT_CHK_STRIKEOUT = 60023,
+    IDC_FC_IMP_ANNOT_DRYRUN = 60024,
+    IDC_FC_IMP_ANNOT_BTN = 60025,
 };
 
 enum {
@@ -1550,7 +1564,22 @@ struct ImportDialog {
     int srcCards = -1;       // source card count (-1 = nothing picked yet)
     int newCards = -1;       // dry-run diff count (-1 = not computed)
     int importedTotal = 0;   // cards created during this dialog's lifetime
+    // Import from Annotations (FC-IMP2)
+    bool chkHighlight = true;
+    bool chkUnderline = true;
+    bool chkSquiggly = true;
+    bool chkStrikeOut = true;
+    HWND hwndChkHighlight = nullptr;
+    HWND hwndChkUnderline = nullptr;
+    HWND hwndChkSquiggly = nullptr;
+    HWND hwndChkStrikeOut = nullptr;
+    HWND hwndDryRun = nullptr;
+    HWND hwndImportAnnotBtn = nullptr;
+    int annotToConvert = 0; // dry-run: annotations matching checked types
+    int annotSkipped = 0;   // dry-run: duplicates (already flashcards)
     RECT rcPick{}, rcImportBtn{}, rcTable{}, rcNewLine{};
+    RECT rcAnnotCap{}, rcChkHighlight{}, rcChkUnderline{}, rcChkSquiggly{}, rcChkStrikeOut{};
+    RECT rcDryRun{}, rcImportAnnotBtn{};
 };
 
 static ImportDialog* gImportDialog = nullptr;
@@ -1563,14 +1592,39 @@ static void ImportLayout(ImportDialog* d) {
     int pad = DpiScale(d->hwnd, 14);
     int btnH = DpiScale(d->hwnd, 40);
     int capDy = DpiScale(d->hwnd, 22);
+    int ctrlH = DpiScale(d->hwnd, 24);
+    int gap = DpiScale(d->hwnd, 10);
+
+    // Existing PDF-import area
     d->rcTable = {pad, pad, w - pad, pad + DpiScale(d->hwnd, 108)};
     d->rcNewLine = {pad, d->rcTable.bottom + DpiScale(d->hwnd, 10), w - pad,
                     d->rcTable.bottom + DpiScale(d->hwnd, 10) + capDy};
+
+    // Import from Annotations section (below the PDF-import area)
+    int y = d->rcNewLine.bottom + DpiScale(d->hwnd, 16);
+    d->rcAnnotCap = {pad, y, w - pad, y + capDy};
+    y += capDy + DpiScale(d->hwnd, 6);
+
+    // Four checkboxes in a row
+    int chkW = DpiScale(d->hwnd, 120);
+    d->rcChkHighlight = {pad, y, pad + chkW, y + ctrlH};
+    d->rcChkUnderline = {pad + chkW + gap, y, pad + 2 * chkW + gap, y + ctrlH};
+    d->rcChkSquiggly = {pad + 2 * (chkW + gap), y, pad + 3 * chkW + 2 * gap, y + ctrlH};
+    d->rcChkStrikeOut = {pad + 3 * (chkW + gap), y, pad + 4 * chkW + 3 * gap, y + ctrlH};
+
+    y += ctrlH + DpiScale(d->hwnd, 10);
+    // Dry-run line
+    d->rcDryRun = {pad, y, w - pad, y + capDy};
+    y += capDy + DpiScale(d->hwnd, 10);
+
+    // Import from Annotations button (bottom right, like the existing Import button)
     int yBtn = h - pad - btnH;
     int pickW = DpiScale(d->hwnd, 130);
     int impW = DpiScale(d->hwnd, 240);
+    int impAnnotW = DpiScale(d->hwnd, 240);
     d->rcPick = {pad, yBtn, pad + pickW, yBtn + btnH};
     d->rcImportBtn = {w - pad - impW, yBtn, w - pad, yBtn + btnH};
+    d->rcImportAnnotBtn = {w - pad - impAnnotW - impW - gap, yBtn, w - pad - impW - gap, yBtn + btnH};
 }
 
 static void ImportPickSource(ImportDialog* d) {
@@ -1620,6 +1674,302 @@ static void ImportDoImport(ImportDialog* d) {
     InvalidateRect(d->hwnd, nullptr, FALSE);
 }
 
+// ---- Import from Annotations (FC-IMP2) ------------------------------------
+// Scan the current document's annotations of the checked types (Highlight,
+// Underline, Squiggly, StrikeOut), skip TumatraPDF-Flashcard* annotations
+// and widgets, dedupe against existing cards (page + bounds ±1pt) and
+// intra-run, return counts for the dry-run line.
+static void ImportAnnotComputeDryRun(ImportDialog* d) {
+    WindowTab* tab = d->win->CurrentTab();
+    if (!tab) {
+        d->annotToConvert = 0;
+        d->annotSkipped = 0;
+        return;
+    }
+    DisplayModel* dm = tab->AsFixed();
+    EngineBase* engine = dm ? dm->GetEngine() : nullptr;
+    if (!engine || !EngineSupportsAnnotations(engine)) {
+        d->annotToConvert = 0;
+        d->annotSkipped = 0;
+        return;
+    }
+    EngineMupdf* epdf = AsEngineMupdf(engine);
+    if (!epdf) {
+        d->annotToConvert = 0;
+        d->annotSkipped = 0;
+        return;
+    }
+
+    int toConvert = 0;
+    int skipped = 0;
+
+    fz_context* ctx = epdf->Ctx();
+    ScopedRecursiveMutex cs(&epdf->docLock);
+
+    int pageCount = fz_count_pages(ctx, epdf->_doc);
+    for (int pageIdx = 0; pageIdx < pageCount; pageIdx++) {
+        int pageNo = pageIdx + 1; // 1-based
+
+        // Check if page has annotations
+        bool hasAnnots = false;
+        fz_try(ctx) {
+            pdf_obj* pageObj = pdf_lookup_page_obj(ctx, epdf->pdfdoc, pageIdx);
+            pdf_obj* annots = pageObj ? pdf_dict_get(ctx, pageObj, PDF_NAME(Annots)) : nullptr;
+            hasAnnots = annots != nullptr && (pdf_is_array(ctx, annots) ? pdf_array_len(ctx, annots) > 0 : true);
+        }
+        fz_catch(ctx) {
+            fz_report_error(ctx);
+        }
+        if (!hasAnnots) {
+            continue;
+        }
+
+        fz_page* page = fz_load_page(ctx, epdf->_doc, pageIdx);
+        if (!page) {
+            continue;
+        }
+        pdf_page* pdfpage = pdf_page_from_fz_page(ctx, page);
+        if (!pdfpage) {
+            fz_drop_page(ctx, page);
+            continue;
+        }
+
+        for (pdf_annot* annot = pdf_first_annot(ctx, pdfpage); annot; annot = pdf_next_annot(ctx, annot)) {
+            int annotType = pdf_annot_type(ctx, annot);
+
+            // Only the four types we support
+            bool isTargetType = false;
+            if (annotType == PDF_ANNOT_HIGHLIGHT && d->chkHighlight)
+                isTargetType = true;
+            else if (annotType == PDF_ANNOT_UNDERLINE && d->chkUnderline)
+                isTargetType = true;
+            else if (annotType == PDF_ANNOT_SQUIGGLY && d->chkSquiggly)
+                isTargetType = true;
+            else if (annotType == PDF_ANNOT_STRIKE_OUT && d->chkStrikeOut)
+                isTargetType = true;
+            if (!isTargetType) {
+                continue;
+            }
+
+            // Skip widgets/form fields
+            if (annotType == PDF_ANNOT_WIDGET) {
+                continue;
+            }
+
+            // Skip TumatraPDF-Flashcard* annotations (already flashcards)
+            const char* author = pdf_annot_author(ctx, annot);
+            if (author && str::StartsWith(Str(author), StrL("TumatraPDF-Flashcard"))) {
+                continue;
+            }
+
+            // Get bounds from quad points (same as FlashcardLoadFromDocument)
+            RectF bounds;
+            Vec<RectF> rects;
+            bool ok = false;
+            fz_try(ctx) {
+                fz_rect rect = pdf_bound_annot(ctx, annot);
+                bounds = RectF(PointF(rect.x0, rect.y0), PointF(rect.x1, rect.y1));
+
+                int nQuads = pdf_annot_quad_point_count(ctx, annot);
+                for (int i = 0; i < nQuads; i++) {
+                    fz_quad q = pdf_annot_quad_point(ctx, annot, i);
+                    fz_rect qr = fz_rect_from_quad(q);
+                    rects.Append(RectF(PointF(qr.x0, qr.y0), PointF(qr.x1, qr.y1)));
+                }
+                if (len(rects) == 0) {
+                    rects.Append(bounds);
+                }
+                ok = true;
+            }
+            fz_catch(ctx) {
+                fz_report_error(ctx);
+            }
+            if (!ok) {
+                continue;
+            }
+
+            // Dedup against existing flashcards (page + bounds ±1pt)
+            bool dup = false;
+            for (int j = 0; j < len(tab->flashcard.cards); j++) {
+                const Flashcard& ec = tab->flashcard.cards[j];
+                if (FlashcardCardPageBoundsMatch(ec, pageNo, bounds)) {
+                    dup = true;
+                    break;
+                }
+            }
+            if (dup) {
+                skipped++;
+                continue;
+            }
+
+            toConvert++;
+        }
+
+        fz_drop_page(ctx, page);
+    }
+
+    d->annotToConvert = toConvert;
+    d->annotSkipped = skipped;
+}
+
+// Create flashcard Highlight annotations from the current document's
+// annotations of the checked types. Skips TumatraPDF-Flashcard* and widgets.
+// Dedupes against existing cards and intra-run. Returns number of cards created.
+static int ImportAnnotDoImport(ImportDialog* d) {
+    WindowTab* tab = d->win->CurrentTab();
+    if (!tab) {
+        return 0;
+    }
+    DisplayModel* dm = tab->AsFixed();
+    EngineBase* engine = dm ? dm->GetEngine() : nullptr;
+    if (!engine || !EngineSupportsAnnotations(engine)) {
+        logf("[fc] ImportAnnot - ERROR: current tab is not an annotation-capable PDF\n");
+        return 0;
+    }
+    EngineMupdf* epdf = AsEngineMupdf(engine);
+    if (!epdf) {
+        return 0;
+    }
+
+    int created = 0;
+    // Track intra-run dedup: pageNo + bounds
+    struct SeenBounds {
+        int pageNo;
+        RectF bounds;
+    };
+    Vec<SeenBounds> seenThisRun;
+
+    fz_context* ctx = epdf->Ctx();
+    ScopedRecursiveMutex cs(&epdf->docLock);
+
+    int pageCount = fz_count_pages(ctx, epdf->_doc);
+    for (int pageIdx = 0; pageIdx < pageCount; pageIdx++) {
+        int pageNo = pageIdx + 1; // 1-based
+
+        bool hasAnnots = false;
+        fz_try(ctx) {
+            pdf_obj* pageObj = pdf_lookup_page_obj(ctx, epdf->pdfdoc, pageIdx);
+            pdf_obj* annots = pageObj ? pdf_dict_get(ctx, pageObj, PDF_NAME(Annots)) : nullptr;
+            hasAnnots = annots != nullptr && (pdf_is_array(ctx, annots) ? pdf_array_len(ctx, annots) > 0 : true);
+        }
+        fz_catch(ctx) {
+            fz_report_error(ctx);
+        }
+        if (!hasAnnots) {
+            continue;
+        }
+
+        fz_page* page = fz_load_page(ctx, epdf->_doc, pageIdx);
+        if (!page) {
+            continue;
+        }
+        pdf_page* pdfpage = pdf_page_from_fz_page(ctx, page);
+        if (!pdfpage) {
+            fz_drop_page(ctx, page);
+            continue;
+        }
+
+        for (pdf_annot* annot = pdf_first_annot(ctx, pdfpage); annot; annot = pdf_next_annot(ctx, annot)) {
+            int annotType = pdf_annot_type(ctx, annot);
+
+            bool isTargetType = false;
+            if (annotType == PDF_ANNOT_HIGHLIGHT && d->chkHighlight)
+                isTargetType = true;
+            else if (annotType == PDF_ANNOT_UNDERLINE && d->chkUnderline)
+                isTargetType = true;
+            else if (annotType == PDF_ANNOT_SQUIGGLY && d->chkSquiggly)
+                isTargetType = true;
+            else if (annotType == PDF_ANNOT_STRIKE_OUT && d->chkStrikeOut)
+                isTargetType = true;
+            if (!isTargetType) {
+                continue;
+            }
+
+            if (annotType == PDF_ANNOT_WIDGET) {
+                continue;
+            }
+
+            const char* author = pdf_annot_author(ctx, annot);
+            if (author && str::StartsWith(Str(author), StrL("TumatraPDF-Flashcard"))) {
+                continue;
+            }
+
+            RectF bounds;
+            Vec<RectF> rects;
+            bool ok = false;
+            fz_try(ctx) {
+                fz_rect rect = pdf_bound_annot(ctx, annot);
+                bounds = RectF(PointF(rect.x0, rect.y0), PointF(rect.x1, rect.y1));
+
+                int nQuads = pdf_annot_quad_point_count(ctx, annot);
+                for (int i = 0; i < nQuads; i++) {
+                    fz_quad q = pdf_annot_quad_point(ctx, annot, i);
+                    fz_rect qr = fz_rect_from_quad(q);
+                    rects.Append(RectF(PointF(qr.x0, qr.y0), PointF(qr.x1, qr.y1)));
+                }
+                if (len(rects) == 0) {
+                    rects.Append(bounds);
+                }
+                ok = true;
+            }
+            fz_catch(ctx) {
+                fz_report_error(ctx);
+            }
+            if (!ok) {
+                continue;
+            }
+
+            // Dedup against existing flashcards
+            bool dup = false;
+            for (int j = 0; j < len(tab->flashcard.cards); j++) {
+                const Flashcard& ec = tab->flashcard.cards[j];
+                if (FlashcardCardPageBoundsMatch(ec, pageNo, bounds)) {
+                    dup = true;
+                    break;
+                }
+            }
+            if (dup) {
+                continue;
+            }
+
+            // Intra-run dedup
+            for (const SeenBounds& sb : seenThisRun) {
+                if (sb.pageNo == pageNo && sb.bounds.x == bounds.x && sb.bounds.y == bounds.y &&
+                    sb.bounds.dx == bounds.dx && sb.bounds.dy == bounds.dy) {
+                    dup = true;
+                    break;
+                }
+            }
+            if (dup) {
+                continue;
+            }
+
+            // Create the flashcard Highlight annotation with identical quad points
+            Annotation* newAnnot = FlashcardCreateHighlightAnnot(engine, pageNo, rects, 0);
+            if (newAnnot) {
+                created++;
+                seenThisRun.Append({pageNo, bounds});
+                // Mark as modified (same pattern as FlashcardCreateHighlightAnnot / CmdFlashcardAdd)
+                MarkNotificationAsModified(epdf, newAnnot);
+            }
+        }
+
+        fz_drop_page(ctx, page);
+    }
+
+    if (created > 0) {
+        // Reload cards so the new ones are visible everywhere
+        tab->flashcard.cards = FlashcardLoadFromDocument(epdf);
+        tab->flashcard.cardsLoaded = true;
+        FlashcardToolbarUpdateCount(d->win);
+        FlashcardToolbarUpdateState(d->win);
+        FlashcardSidebarPopulate(d->win);
+        MainWindowRerender(d->win);
+    }
+
+    return created;
+}
+
 static void ImportPaint(ImportDialog* d) {
     PAINTSTRUCT ps;
     HDC hdc = BeginPaint(d->hwnd, &ps);
@@ -1634,6 +1984,7 @@ static void ImportPaint(ImportDialog* d) {
     TempStr curName = tab ? FlashcardTabLogName(tab) : StrL("?");
     int curCards = tab ? len(tab->flashcard.cards) : 0;
 
+    // ---- Existing PDF-import area ----
     SetTextColor(hdc, ThemeWindowTextColor());
     RECT rcCap = d->rcTable;
     rcCap.bottom = rcCap.top + DpiScale(d->hwnd, 22);
@@ -1691,6 +2042,27 @@ static void ImportPaint(ImportDialog* d) {
 
     FlashcardDrawButton(hdc, d->rcPick, L"Select PDF...", false);
     FlashcardDrawButton(hdc, d->rcImportBtn, L"Import new cards to this document", false);
+
+    // ---- Import from Annotations section (FC-IMP2) ----
+    SetTextColor(hdc, ThemeWindowDarkerTextColor());
+    DrawTextW(hdc, L"Convert this document's annotations:", -1, &d->rcAnnotCap, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+
+    // Checkboxes are drawn by the system (BS_AUTOCHECKBOX), but we need to
+    // ensure their text is set. The text is set at creation time in
+    // FlashcardImportDialog, so nothing extra here.
+
+    // Dry-run line
+    SetTextColor(hdc, ThemeWindowTextColor());
+    TempStr dr;
+    if (d->annotToConvert > 0 || d->annotSkipped > 0) {
+        dr = fmt("To convert: %d (skipping %d duplicates)", d->annotToConvert, d->annotSkipped);
+    } else {
+        dr = fmt("To convert: —");
+    }
+    DrawTextW(hdc, CWStrTemp(ToWStrTemp(Str(dr))), -1, &d->rcDryRun, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+
+    FlashcardDrawButton(hdc, d->rcImportAnnotBtn, L"Import from Annotations", false);
+
     SelectObject(hdc, oldFont);
     EndPaint(d->hwnd, &ps);
 }
@@ -1714,6 +2086,35 @@ static LRESULT CALLBACK ImportWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         case WM_PAINT:
             ImportPaint(d);
             return 0;
+        case WM_COMMAND: {
+            int id = LOWORD(wp);
+            int code = HIWORD(wp);
+            // Checkbox clicks: recompute dry-run
+            if ((id == IDC_FC_IMP_ANNOT_CHK_HIGHLIGHT || id == IDC_FC_IMP_ANNOT_CHK_UNDERLINE ||
+                 id == IDC_FC_IMP_ANNOT_CHK_SQUIGGLY || id == IDC_FC_IMP_ANNOT_CHK_STRIKEOUT) &&
+                code == BN_CLICKED) {
+                // Update checkbox state from control
+                d->chkHighlight = (SendMessageW(d->hwndChkHighlight, BM_GETCHECK, 0, 0) == BST_CHECKED);
+                d->chkUnderline = (SendMessageW(d->hwndChkUnderline, BM_GETCHECK, 0, 0) == BST_CHECKED);
+                d->chkSquiggly = (SendMessageW(d->hwndChkSquiggly, BM_GETCHECK, 0, 0) == BST_CHECKED);
+                d->chkStrikeOut = (SendMessageW(d->hwndChkStrikeOut, BM_GETCHECK, 0, 0) == BST_CHECKED);
+                ImportAnnotComputeDryRun(d);
+                InvalidateRect(hwnd, &d->rcDryRun, FALSE);
+                return 0;
+            }
+            // Import from Annotations button
+            if (id == IDC_FC_IMP_ANNOT_BTN && code == BN_CLICKED) {
+                int created = ImportAnnotDoImport(d);
+                d->importedTotal += created;
+                // Update dry-run after import (usually 0)
+                ImportAnnotComputeDryRun(d);
+                InvalidateRect(hwnd, nullptr, FALSE);
+                logf("[fc] ImportAnnot - created %d new card(s), total imported this session %d\n", created,
+                     d->importedTotal);
+                return 0;
+            }
+            break;
+        }
         case WM_LBUTTONDOWN: {
             POINT pt{(short)LOWORD(lp), (short)HIWORD(lp)};
             if (PtInRect(&d->rcPick, pt)) {
@@ -1747,13 +2148,71 @@ void FlashcardImportDialog(MainWindow* win) {
     ImportDialog dlg; // no {}: explicit-ctor members
     dlg.win = win;
     gImportDialog = &dlg;
-    HWND hwnd = FlashcardCreateDialogWindow(L"TUMATRA_FLASHCARD_IMPORT", L"Import Flashcards", 560, 360, hwndParent);
+    // Increased height from 360 to 500 for the Import from Annotations section
+    HWND hwnd = FlashcardCreateDialogWindow(L"TUMATRA_FLASHCARD_IMPORT", L"Import Flashcards", 560, 500, hwndParent);
     if (!hwnd) {
         gImportDialog = nullptr;
         return;
     }
     logf("[fc] Import window - opened\n");
     ImportLayout(&dlg);
+
+    // Create checkbox controls for Import from Annotations (FC-IMP2)
+    HINSTANCE hinst = GetModuleHandle(nullptr);
+    HFONT font = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
+
+    dlg.hwndChkHighlight = CreateWindowExW(
+        0, L"Button", L"Highlight", BS_AUTOCHECKBOX | WS_CHILD | WS_VISIBLE | WS_TABSTOP, dlg.rcChkHighlight.left,
+        dlg.rcChkHighlight.top, dlg.rcChkHighlight.right - dlg.rcChkHighlight.left,
+        dlg.rcChkHighlight.bottom - dlg.rcChkHighlight.top, hwnd, (HMENU)(INT_PTR)IDC_FC_IMP_ANNOT_CHK_HIGHLIGHT, hinst,
+        nullptr);
+    dlg.hwndChkUnderline = CreateWindowExW(
+        0, L"Button", L"Underline", BS_AUTOCHECKBOX | WS_CHILD | WS_VISIBLE | WS_TABSTOP, dlg.rcChkUnderline.left,
+        dlg.rcChkUnderline.top, dlg.rcChkUnderline.right - dlg.rcChkUnderline.left,
+        dlg.rcChkUnderline.bottom - dlg.rcChkUnderline.top, hwnd, (HMENU)(INT_PTR)IDC_FC_IMP_ANNOT_CHK_UNDERLINE, hinst,
+        nullptr);
+    dlg.hwndChkSquiggly =
+        CreateWindowExW(0, L"Button", L"Squiggly", BS_AUTOCHECKBOX | WS_CHILD | WS_VISIBLE | WS_TABSTOP,
+                        dlg.rcChkSquiggly.left, dlg.rcChkSquiggly.top, dlg.rcChkSquiggly.right - dlg.rcChkSquiggly.left,
+                        dlg.rcChkSquiggly.bottom - dlg.rcChkSquiggly.top, hwnd,
+                        (HMENU)(INT_PTR)IDC_FC_IMP_ANNOT_CHK_SQUIGGLY, hinst, nullptr);
+    dlg.hwndChkStrikeOut = CreateWindowExW(
+        0, L"Button", L"StrikeOut", BS_AUTOCHECKBOX | WS_CHILD | WS_VISIBLE | WS_TABSTOP, dlg.rcChkStrikeOut.left,
+        dlg.rcChkStrikeOut.top, dlg.rcChkStrikeOut.right - dlg.rcChkStrikeOut.left,
+        dlg.rcChkStrikeOut.bottom - dlg.rcChkStrikeOut.top, hwnd, (HMENU)(INT_PTR)IDC_FC_IMP_ANNOT_CHK_STRIKEOUT, hinst,
+        nullptr);
+
+    // Static dry-run text
+    dlg.hwndDryRun =
+        CreateWindowExW(0, WC_STATICW, L"", SS_LEFT | WS_CHILD | WS_VISIBLE, dlg.rcDryRun.left, dlg.rcDryRun.top,
+                        dlg.rcDryRun.right - dlg.rcDryRun.left, dlg.rcDryRun.bottom - dlg.rcDryRun.top, hwnd,
+                        (HMENU)(INT_PTR)IDC_FC_IMP_ANNOT_DRYRUN, hinst, nullptr);
+
+    // Import from Annotations button
+    dlg.hwndImportAnnotBtn = CreateWindowExW(
+        0, L"Button", L"Import from Annotations", BS_PUSHBUTTON | WS_CHILD | WS_VISIBLE | WS_TABSTOP,
+        dlg.rcImportAnnotBtn.left, dlg.rcImportAnnotBtn.top, dlg.rcImportAnnotBtn.right - dlg.rcImportAnnotBtn.left,
+        dlg.rcImportAnnotBtn.bottom - dlg.rcImportAnnotBtn.top, hwnd, (HMENU)(INT_PTR)IDC_FC_IMP_ANNOT_BTN, hinst,
+        nullptr);
+
+    // Set font for all new controls
+    SendMessageW(dlg.hwndChkHighlight, WM_SETFONT, (WPARAM)font, TRUE);
+    SendMessageW(dlg.hwndChkUnderline, WM_SETFONT, (WPARAM)font, TRUE);
+    SendMessageW(dlg.hwndChkSquiggly, WM_SETFONT, (WPARAM)font, TRUE);
+    SendMessageW(dlg.hwndChkStrikeOut, WM_SETFONT, (WPARAM)font, TRUE);
+    SendMessageW(dlg.hwndDryRun, WM_SETFONT, (WPARAM)font, TRUE);
+    SendMessageW(dlg.hwndImportAnnotBtn, WM_SETFONT, (WPARAM)font, TRUE);
+
+    // Initialize checkboxes (all checked by default)
+    CheckDlgButton(hwnd, IDC_FC_IMP_ANNOT_CHK_HIGHLIGHT, BST_CHECKED);
+    CheckDlgButton(hwnd, IDC_FC_IMP_ANNOT_CHK_UNDERLINE, BST_CHECKED);
+    CheckDlgButton(hwnd, IDC_FC_IMP_ANNOT_CHK_SQUIGGLY, BST_CHECKED);
+    CheckDlgButton(hwnd, IDC_FC_IMP_ANNOT_CHK_STRIKEOUT, BST_CHECKED);
+    dlg.chkHighlight = dlg.chkUnderline = dlg.chkSquiggly = dlg.chkStrikeOut = true;
+
+    // Initial dry-run computation
+    ImportAnnotComputeDryRun(&dlg);
+
     FlashcardRunModalDialog(hwnd, hwndParent, nullptr);
     ::free(dlg.srcPath);
     gImportDialog = nullptr;

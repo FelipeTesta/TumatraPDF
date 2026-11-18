@@ -318,6 +318,33 @@ Annotation* FlashcardCreateHighlightAnnot(EngineBase* engine, int pageNo, Vec<Re
     return annot;
 }
 
+// True when `card` covers page `pageNo` with bounds within 1pt on x/y/dx/dy
+// (checks the primary page and all extraPages cross-page groups).
+// Uses the same `nearF` technique as FlashcardImportFromPdf.
+bool FlashcardCardPageBoundsMatch(const Flashcard& card, int pageNo, const RectF& bounds) {
+    auto nearF = [](float a, float b) {
+        float d = a - b;
+        return d < 0 ? -d : d;
+    };
+    // check primary page
+    if (card.pageNo == pageNo) {
+        if (nearF(card.bounds.x, bounds.x) < 1.0f && nearF(card.bounds.y, bounds.y) < 1.0f &&
+            nearF(card.bounds.dx, bounds.dx) < 1.0f && nearF(card.bounds.dy, bounds.dy) < 1.0f) {
+            return true;
+        }
+    }
+    // check extraPages (cross-page cloze groups)
+    for (const FlashcardPageGroup& g : card.extraPages) {
+        if (g.pageNo == pageNo) {
+            if (nearF(g.bounds.x, bounds.x) < 1.0f && nearF(g.bounds.y, bounds.y) < 1.0f &&
+                nearF(g.bounds.dx, bounds.dx) < 1.0f && nearF(g.bounds.dy, bounds.dy) < 1.0f) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 // Import the NEW flashcards from another copy of the SAME document (e.g. a
 // study partner's PDF): loads the friend's card annotations, skips the ones
 // we already have (same page + same mask, 1pt tolerance — identical text

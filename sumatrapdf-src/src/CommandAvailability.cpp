@@ -263,6 +263,7 @@ static UINT_PTR removeIfChm[] = {
     CmdFlashcardAdd,
     CmdFlashcardBack,
     CmdFlashcardNext,
+    CmdFlashcardDeleteActive,
     CmdFlashcardOrderOptions,
     CmdFlashcardConfig,
     CmdFlashcardFilter,
@@ -299,6 +300,7 @@ static UINT_PTR removeIfMarkdown[] = {
     CmdFlashcardAdd,
     CmdFlashcardBack,
     CmdFlashcardNext,
+    CmdFlashcardDeleteActive,
     CmdFlashcardOrderOptions,
     CmdFlashcardConfig,
     CmdFlashcardFilter,
@@ -797,8 +799,8 @@ CommandVisibility GetCommandVisibility(int cmdId, const AppCommandCtx& ctx, Comm
         return ctx.hasToc ? CommandVisibility::Show : CommandVisibility::Hide;
     }
     // bookmark edit commands need a TOC-capable document
-    if ((cmdId == CmdBookmarkAdd) || (cmdId == CmdBookmarkDelete) ||
-        (cmdId == CmdBookmarkUpdate) || (cmdId == CmdBookmarkRename)) {
+    if ((cmdId == CmdBookmarkAdd) || (cmdId == CmdBookmarkDelete) || (cmdId == CmdBookmarkUpdate) ||
+        (cmdId == CmdBookmarkRename)) {
         return ctx.hasToc ? CommandVisibility::Show : CommandVisibility::Hide;
     }
 

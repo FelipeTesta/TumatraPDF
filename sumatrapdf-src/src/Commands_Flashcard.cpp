@@ -27,12 +27,14 @@ extern "C" {
 #include "SumatraDialogs.h"
 #include "AppSettings.h"
 #include "Selection.h"
+#include "EditAnnotations.h"
 #include "Flashcard.h"
 #include "FlashcardSidebar.h"
 #include "FlashcardStats.h"
 #include "Canvas.h"   // kFlashcardStudyTimerID
 #include "Theme.h"    // ThemeWindowBackgroundColor, DpiScale
 #include "base/Dpi.h" // DpiScale
+#include "Notifications.h"
 #include "Commands_Flashcard.h"
 
 bool RelayoutFrame(MainWindow* win, bool updateToolbars = true, int sidebarDx = -1);
@@ -42,6 +44,77 @@ static void AddUniquePageNo(Vec<int>& pageNos, int pageNo) {
         if (pageNos[i] == pageNo) return;
     }
     pageNos.Append(pageNo);
+}
+
+// True when the current text selection re-creates an EXISTING flashcard:
+// identical page set with each page's union-bounds within 1pt. Single-char
+// differences shift the bounds by more than 1pt ("casca de cebola" allowed).
+static bool FlashcardSelectionIsDuplicate(WindowTab* tab, const Vec<SelectionOnPage>* sel, const Vec<int>& pageNos) {
+    if (!tab || !sel || len(pageNos) == 0) {
+        return false;
+    }
+    FlashcardEnsureTabCards(tab);
+    if (len(tab->flashcard.cards) == 0) {
+        return false;
+    }
+    // per-page union bounds of the selection
+    Vec<RectF> selByPage;
+    Vec<int> selPageNos;
+    auto UnionRectLocal = [](const RectF& a, const RectF& b) -> RectF {
+        float left = a.x < b.x ? a.x : b.x;
+        float top = a.y < b.y ? a.y : b.y;
+        float rightA = a.x + a.dx;
+        float rightB = b.x + b.dx;
+        float bottomA = a.y + a.dy;
+        float bottomB = b.y + b.dy;
+        float right = rightA > rightB ? rightA : rightB;
+        float bottom = bottomA > bottomB ? bottomA : bottomB;
+        return RectF(left, top, right - left, bottom - top);
+    };
+    for (auto& s : *sel) {
+        bool found = false;
+        for (int i = 0; i < len(selPageNos); i++) {
+            if (selPageNos[i] == s.pageNo) {
+                selByPage[i] = UnionRectLocal(selByPage[i], s.rect);
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            selPageNos.Append(s.pageNo);
+            selByPage.Append(s.rect);
+        }
+    }
+    for (int i = 0; i < len(selPageNos); i++) {
+        if (!(selByPage[i].dx > 0.f && selByPage[i].dy > 0.f)) {
+            return false; // selection not on this page? treat as non-duplicate… actually just skip this page
+        }
+    }
+    for (const Flashcard& card : tab->flashcard.cards) {
+        // card page list = primary + extraPages
+        Vec<int> cardPages;
+        Vec<RectF> cardRects;
+        cardPages.Append(card.pageNo);
+        cardRects.Append(card.bounds);
+        for (const FlashcardPageGroup& g : card.extraPages) {
+            cardPages.Append(g.pageNo);
+            cardRects.Append(g.bounds);
+        }
+        if (len(cardPages) != len(selPageNos)) {
+            continue;
+        }
+        bool allMatch = true;
+        for (int i = 0; i < len(selPageNos); i++) {
+            if (!FlashcardCardPageBoundsMatch(card, selPageNos[i], selByPage[i])) {
+                allMatch = false;
+                break;
+            }
+        }
+        if (allMatch) {
+            return true;
+        }
+    }
+    return false;
 }
 
 // xorshift128+ generator: better distribution than rand() (and rand()%n is
@@ -888,6 +961,12 @@ bool HandleCommandFlashcard(MainWindow* win, int cmd) {
                 AddUniquePageNo(pageNos, sel.pageNo);
             }
 
+            if (FlashcardSelectionIsDuplicate(tab, s, pageNos)) {
+                logf("[fc] CmdFlashcardAdd - duplicate selection, not creating a flashcard\n");
+                ShowTemporaryNotification(win->hwndCanvas, StrL("Already a flashcard"), 2200);
+                return true;
+            }
+
             Annotation* annot = nullptr;
             // Cross-page cloze: one highlight per page, but every page of the
             // same selection shares a group token (hashed from the first page's
@@ -1037,6 +1116,131 @@ bool HandleCommandFlashcard(MainWindow* win, int cmd) {
             FlashcardToolbarUpdateState(win);
             FlashcardNavigateToEntry(win, win->flashcard.studyOrder[next], true);
             FlashcardPrewarmEnqueue(win, next);
+            MainWindowRerender(win);
+            return true;
+        }
+        case CmdFlashcardDeleteActive: {
+            logf("[fc] CmdFlashcardDeleteActive - deleting active study card\n");
+            if (!win->flashcard.studyMode) {
+                return true;
+            }
+            int curIdx = win->flashcard.currentCardIdx;
+            if (curIdx < 0 || curIdx >= len(win->flashcard.studyOrder)) {
+                return true;
+            }
+            FlashcardQueueEntry e = win->flashcard.studyOrder[curIdx];
+            if (!e.tab || e.cardIdx < 0 || e.cardIdx >= len(e.tab->flashcard.cards)) {
+                logf("[fc] CmdFlashcardDeleteActive - invalid queue entry (tab=%p cardIdx=%d)\n", (void*)e.tab,
+                     e.cardIdx);
+                return true;
+            }
+            DisplayModel* dm = e.tab->AsFixed();
+            if (!dm) {
+                return true;
+            }
+            EngineBase* engine = dm->GetEngine();
+            if (!engine || !EngineSupportsAnnotations(engine)) {
+                return true;
+            }
+            Flashcard& card = e.tab->flashcard.cards[e.cardIdx];
+            int deletedIdx = e.cardIdx;
+            // capture the page list before the cards vec is reloaded below
+            Vec<int> pages;
+            pages.Append(card.pageNo);
+            for (const FlashcardPageGroup& g : card.extraPages) {
+                pages.Append(g.pageNo);
+            }
+
+            // collect the card's flashcard annotations on the primary page and
+            // every extraPage (cross-page group deleted as a unit)
+            Vec<Annotation*> toDelete;
+            for (int pageNo : pages) {
+                Vec<Annotation*> annots;
+                if (!EngineGetPageAnnotations(engine, pageNo, annots)) {
+                    continue;
+                }
+                for (Annotation* a : annots) {
+                    if (!a) {
+                        continue;
+                    }
+                    Str author = Author(a);
+                    if (!str::StartsWith(author, StrL("TumatraPDF-Flashcard"))) {
+                        continue;
+                    }
+                    if (!FlashcardCardPageBoundsMatch(card, pageNo, a->bounds)) {
+                        continue;
+                    }
+                    toDelete.Append(a);
+                }
+            }
+            logf("[fc] CmdFlashcardDeleteActive - removing %d annotation(s) of card %d ('%s')\n", len(toDelete),
+                 deletedIdx, FlashcardTabLogName(e.tab));
+            for (Annotation* a : toDelete) {
+                DeleteAnnotationAndUpdateUI(e.tab, a);
+            }
+
+            // reload the cards vec so the deleted card is gone everywhere;
+            // warm-render jobs are stale after the mutation
+            FlashcardPrewarmInvalidate();
+            e.tab->flashcard.cards = FlashcardLoadFromDocument(AsEngineMupdf(engine));
+            e.tab->flashcard.cardsLoaded = true;
+
+            // prune SM-2 states of cards that no longer exist (the deleted
+            // card's key is gone from the reloaded vec) and persist, like the
+            // rate flow does
+            if (e.tab->filePath) {
+                int pruned = FlashcardStudyPruneStates(e.tab->flashcard.studyDoc, e.tab->flashcard.cards);
+                if (pruned > 0) {
+                    logf("[fc] CmdFlashcardDeleteActive - pruned %d state(s) of deleted cards in '%s'\n", pruned,
+                         FlashcardTabLogName(e.tab));
+                }
+                FlashcardStudySave(e.tab->filePath.s, e.tab->flashcard.studyDoc);
+            }
+
+            // the cards vec shifted by one: drop every queued entry of the
+            // deleted card (the current one + any relearn re-appends) and
+            // shift down every later entry of this tab. Entries removed
+            // before the current position move the "next" entry up, so
+            // account for them.
+            int removedBefore = 0;
+            for (int i = len(win->flashcard.studyOrder) - 1; i >= 0; i--) {
+                const FlashcardQueueEntry& ent = win->flashcard.studyOrder[i];
+                if (ent.tab == e.tab && ent.cardIdx == deletedIdx) {
+                    win->flashcard.studyOrder.RemoveAt(i);
+                    if (i < curIdx) {
+                        removedBefore++;
+                    }
+                }
+            }
+            curIdx -= removedBefore;
+            for (FlashcardQueueEntry& ent : win->flashcard.studyOrder) {
+                if (ent.tab == e.tab && ent.cardIdx > deletedIdx) {
+                    ent.cardIdx--;
+                }
+            }
+
+            FlashcardToolbarUpdateCount(win);
+            // the Lista panel's rows changed (card gone, indices shifted)
+            FlashcardSidebarPopulate(win);
+
+            // same tail as HandleFlashcardRate: reset reveal/study time and
+            // advance to the entry now at curIdx, or end the session
+            win->flashcard.revealMode = false;
+            win->flashcard.studyTimeSec = 0.0f;
+            win->flashcard.currentCardIdx = curIdx;
+            if (win->flashcard.currentCardIdx >= len(win->flashcard.studyOrder)) {
+                win->flashcard.studyMode = false;
+                win->flashcard.currentCardIdx = -1;
+                FlashcardStudyTimerStop(win);
+                logf("[fc] CmdFlashcardDeleteActive - study session ended (queue empty)\n");
+            } else {
+                logf("[fc] CmdFlashcardDeleteActive - advancing to card %d/%d\n", win->flashcard.currentCardIdx + 1,
+                     len(win->flashcard.studyOrder));
+                FlashcardPrefetchUpcoming(win, win->flashcard.currentCardIdx, FlashcardPrewarmBudget(win));
+                FlashcardNavigateToEntry(win, win->flashcard.studyOrder[win->flashcard.currentCardIdx], true);
+                FlashcardPrewarmEnqueue(win, win->flashcard.currentCardIdx);
+            }
+            FlashcardToolbarUpdateState(win);
             MainWindowRerender(win);
             return true;
         }

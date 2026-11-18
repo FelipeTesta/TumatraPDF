@@ -345,7 +345,8 @@ enum {
     CmdBookmarkUpdate = 534,
     CmdBookmarkRename = 535,
     CmdArchPageCrop = 536,
-    CmdNone = 537,
+    CmdFlashcardDeleteActive = 537,
+    CmdNone = 538,
 
     /* range for file history */
     CmdFileHistoryFirst,
