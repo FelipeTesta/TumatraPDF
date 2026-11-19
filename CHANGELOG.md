@@ -4,7 +4,17 @@ Per-version changelog for TumatraPDF — new functions + bug fixes, newest first
 Feature details live in [README.md](README.md); full per-session development
 history in [LOG.md](LOG.md).
 
-## Unreleased
+## v1.0.19 (2026-11-19)
+
+- **Duplicate flashcards are refused:** selecting the exact same text twice no longer creates a second card. The check now reads the live document instead of the saved file, so it also works before you press Ctrl+S, and the second attempt answers with a passive "Already a flashcard" note. Selections that differ by even one character still create a new card.
+- **Delete a card for good:** the new Delete button on the flashcard bar removes the active card's annotations and its SM-2 study history in one action (a card that spans pages is removed as a single unit). The PDF itself still saves only when you ask it to.
+- **Import from annotations:** the Import window gained an "Import from Annotations" section that converts highlights, underlines, squiggly underlines and strikeouts already in the current PDF into flashcards. Pick the annotation types you want, see the count of cards to be created and how many duplicates will be skipped, then import in one click. The original annotations are kept.
+- **The List panel is a real navigator:** the card selected in the panel is the active card, so the page outlines it while the panel is open, Delete works straight from there, and the highlight persists until you pick another card, close the panel or switch tabs. Study mode and the List panel are now mutually exclusive, and the panel borrows the Bookmarks panel colors in both themes.
+- **Study time keeps counting while auto-scroll is paused:** holding Ctrl (or Shift for quick view) pauses only the scrolling. Reading and study time still accrue, so paused reading no longer disappears from the history.
+- **Home stats reworked:** the last studied document is pinned as the first row (white title on the dark theme); names, times and progress bars sit in fixed columns so the hours line up on the right and the bars start on the same x; the "N books - scroll" line has its own band and no longer covers the book names; the totals line is measured and wraps to two lines when the window is narrow; the whole band uses the full window width, and the chart can no longer paint over the Study History column at half-screen widths. The Sessions tab splits the time into Read, Flashcards and Total columns, remembers when each group was last used and pins the most recent group on top.
+- **Crisper small text:** text on the Home stats band now uses ClearType and whole-pixel font sizes. At 125% display scaling the label size used to land on 15.833 px and the title on 18.333 px, which made small letters look uneven.
+- **Toolbar:** contrast +/- buttons for the contrast overlay, an optional Scan Mode button (advanced setting `ShowScanModeButton`, off by default), and the empty toolbar slots are compacted without moving the page-number box.
+- **Dark theme details:** the Annotations window caption and the Import dialog are dark in the dark theme.
 
 ## v1.0.18 (2026-11-16)
 - **Markdown preview in Explorer Preview Pane:** `.md` files render in the Windows Preview Pane through TumatraPDF's preview handler (WebView2), with mermaid/markdown support — previously only PDFs/XPS/images were previewable.
