@@ -1957,6 +1957,7 @@ void ShowEditAnnotationsWindow(WindowTab* tab, Annotation* annot, EditAnnotFocus
     if (UseDarkModeLib()) {
         dmlib::setDarkWndNotifySafe(ew->hwnd);
         dmlib::setWindowEraseBgSubclass(ew->hwnd);
+        dmlib::setDarkTitleBarEx(ew->hwnd, true);
     }
 
     // important to call this after hooking up onSize to ensure

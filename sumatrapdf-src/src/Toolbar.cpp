@@ -132,7 +132,35 @@ static bool SkipBuiltInButton(const ToolbarButtonInfo& tbi) {
     return tbi.bmpIndex == TbIcon::None;
 }
 
+// table index -> live index map, filled on every AddAllToolbarButtons call:
+// -1 for built-ins that were skipped, compact index otherwise.
+// custom buttons live at sLiveBuiltInsCount + (tableIdx - kButtonsCount).
+static int sLiveIndexForTable[kButtonsCount]{};
+static int sLiveBuiltInsCount{};
+
+// Map a table index (into GetToolbarButtonInfoByIdx space) to the live toolbar index.
+// Returns -1 if skipped.
+static int TableIndexToLive(int tableIdx) {
+    if (tableIdx < 0) {
+        return -1;
+    }
+    if (tableIdx < kButtonsCount) {
+        return sLiveIndexForTable[tableIdx];
+    }
+    return sLiveBuiltInsCount + (tableIdx - kButtonsCount);
+}
+
 static void UpdateToolbarButtonStateByIdx(HWND hwnd, int idx, bool set, BYTE flag) {
+    // Map table index to live index only for the main toolbar.
+    // Secondary toolbars (Arch, Flashcard, Edit) use live indices directly via TB_COMMANDTOINDEX.
+    MainWindow* win = FindMainWindowByHwnd(hwnd);
+    if (win && hwnd == win->hwndToolbar) {
+        int live = TableIndexToLive(idx);
+        if (live < 0) {
+            return; // skipped built-in (e.g. Scan Mode when showScanModeButton=false)
+        }
+        idx = live;
+    }
     TBBUTTONINFOW bi{};
     bi.cbSize = sizeof(bi);
     bi.dwMask = TBIF_BYINDEX | TBIF_STATE;
@@ -491,6 +519,10 @@ void UpdateToolbarButtonsToolTipsForWindow(MainWindow* win) {
         if (bi.bmpIndex == TbIcon::Text) {
             continue;
         }
+        int live = TableIndexToLive(i);
+        if (live < 0) {
+            continue; // skipped built-in
+        }
         TempStr accelStr = AppendAccelKeyToMenuStringTemp(nullptr, bi.cmdId);
         TempStr s = trans::GetTranslation(bi.toolTip);
         if (accelStr) {
@@ -502,8 +534,7 @@ void UpdateToolbarButtonsToolTipsForWindow(MainWindow* win) {
         binfo.cbSize = sizeof(TBBUTTONINFO);
         binfo.dwMask = TBIF_TEXT | TBIF_BYINDEX;
         binfo.pszText = CWStrTemp(s);
-        WPARAM buttonId = (WPARAM)i;
-        TbSetButtonInfo(hwnd, (int)buttonId, &binfo);
+        TbSetButtonInfo(hwnd, live, &binfo);
     }
     // TODO: need an explicit tooltip window https://chatgpt.com/c/18fb77c8-761c-4314-a1ac-e55b93edfeef
 #if 0
@@ -522,14 +553,23 @@ void UpdateToolbarButtonsToolTipsForWindow(MainWindow* win) {
             binfo.cbSize = sizeof(TBBUTTONINFO);
             binfo.dwMask = TBIF_TEXT | TBIF_BYINDEX;
             binfo.pszText = CWStrTemp(s);
-            WPARAM buttonId = (WPARAM)(kButtonsCount + i);
-            TbSetButtonInfo(hwnd, buttonId, &binfo);
+            int live = sLiveBuiltInsCount + i;
+            TbSetButtonInfo(hwnd, live, &binfo);
         }
     }
 #endif
 }
 
 static void SetToolbarButtonImageByIdx(HWND hwnd, int idx, TbIcon icon) {
+    // Map table index to live index only for the main toolbar.
+    MainWindow* win = FindMainWindowByHwnd(hwnd);
+    if (win && hwnd == win->hwndToolbar) {
+        int live = TableIndexToLive(idx);
+        if (live < 0) {
+            return; // skipped built-in
+        }
+        idx = live;
+    }
     TBBUTTONINFOW bi{};
     bi.cbSize = sizeof(bi);
     bi.dwMask = TBIF_BYINDEX | TBIF_IMAGE;
@@ -543,6 +583,15 @@ static void SetToolbarButtonImageByIdx(HWND hwnd, int idx, TbIcon icon) {
 
 // sets button text, which the toolbar shows as its tooltip
 static void SetToolbarButtonToolTipByIdx(HWND hwnd, int idx, int cmdId, Str s) {
+    // Map table index to live index only for the main toolbar.
+    MainWindow* win = FindMainWindowByHwnd(hwnd);
+    if (win && hwnd == win->hwndToolbar) {
+        int live = TableIndexToLive(idx);
+        if (live < 0) {
+            return; // skipped built-in
+        }
+        idx = live;
+    }
     TempStr accelStr = AppendAccelKeyToMenuStringTemp(nullptr, cmdId);
     if (accelStr) {
         Str accel = accelStr.len > 1 ? Str(accelStr.s + 1, accelStr.len - 1) : accelStr;
@@ -1183,18 +1232,21 @@ static LRESULT CALLBACK WndProcEditBg(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 // deleting and re-adding every button at the current width.
 static void AddAllToolbarButtons(MainWindow* win, HWND hwndToolbar, const bool* wrapAfter = nullptr) {
     TBBUTTON tbButtons[kButtonsCount];
+    int j = 0; // compacted output index (live button position)
     for (int i = 0; i < kButtonsCount; i++) {
-        // Hide Scan Mode (viewport crop) button when advanced setting is false
+        sLiveIndexForTable[i] = -1; // fold init into main loop
         if (gToolbarButtons[i].cmdId == CmdViewportCropToggle && !gGlobalPrefs->showScanModeButton) {
-            continue;
+            continue; // Scan Mode stays -1 when hidden
         }
-        tbButtons[i] = TbButtonFromButtonInfo(gToolbarButtons[i]);
-        // group-coherent wrap plan (see RebuildToolbarButtonsForWidth): the
-        // caller measured the live indices, which match this table's order
-        if (wrapAfter && wrapAfter[i]) {
-            tbButtons[i].fsState |= TBSTATE_WRAP;
+        tbButtons[j] = TbButtonFromButtonInfo(gToolbarButtons[i]);
+        sLiveIndexForTable[i] = j;
+        if (wrapAfter && wrapAfter[j]) {
+            tbButtons[j].fsState |= TBSTATE_WRAP;
         }
+        j++;
     }
+    int nLiveButtons = j;
+    sLiveBuiltInsCount = j;
     // The Autoscroll button hosts the timer trio inside its rect (see
     // PositionToolbarChildWindows). comctl RECOMPUTES the width of text
     // buttons from their label on every layout pass, so an explicit
@@ -1216,25 +1268,26 @@ static void AddAllToolbarButtons(MainWindow* win, HWND hwndToolbar, const bool* 
         // clipped at the button's right edge (user 2026-10-21)
         int slack = DpiScale(win->hwndFrame, 24);
         int nSpaces = spaceDx > 0 ? (trioDx + slack + spaceDx - 1) / spaceDx + 1 : 0;
-        for (int i = 0; i < kButtonsCount; i++) {
-            if (gToolbarButtons[i].cmdId != CmdAutoScrollToggle || nSpaces <= 0) {
+        for (int k = 0; k < nLiveButtons; k++) {
+            // Find the Autoscroll button in the compacted array
+            if (tbButtons[k].idCommand != CmdAutoScrollToggle || nSpaces <= 0) {
                 continue;
             }
-            WCHAR* oldLbl = (WCHAR*)tbButtons[i].iString;
+            WCHAR* oldLbl = (WCHAR*)tbButtons[k].iString;
             if (!oldLbl) {
                 continue;
             }
             int oldLen = lstrlenW(oldLbl);
             WCHAR* buf = AllocArrayTemp<WCHAR>(nSpaces + oldLen + 1);
-            for (int k = 0; k < nSpaces; k++) {
-                buf[k] = L' ';
+            for (int m = 0; m < nSpaces; m++) {
+                buf[m] = L' ';
             }
             memcpy(buf + nSpaces, oldLbl, oldLen * sizeof(WCHAR));
             buf[nSpaces + oldLen] = 0;
-            tbButtons[i].iString = (INT_PTR)buf;
+            tbButtons[k].iString = (INT_PTR)buf;
         }
     }
-    TbAddButtons(hwndToolbar, kButtonsCount, tbButtons);
+    TbAddButtons(hwndToolbar, nLiveButtons, tbButtons);
 
     TBBUTTON* buttons = AllocArrayTemp<TBBUTTON>(gCustomButtonsCount);
     for (int i = 0; i < gCustomButtonsCount; i++) {
@@ -1389,6 +1442,14 @@ static void EnforceToolbarTextButtonWidths(MainWindow* win, HWND hwndToolbar) {
         // with leading spaces baked into the label (FlashcardToolbarCreate);
         // pinning cx and dropping BTNS_AUTOSIZE would collapse that reservation
         if (bi.idCommand == CmdFlashcardStudy) {
+            continue;
+        }
+        // the +/- buttons for autoscroll speed and contrast should be COMPACT
+        // (only as wide as the symbol needs) — skip the width enforcement so
+        // BTNS_AUTOSIZE derives natural width from the 1-char label; the
+        // item-postpaint draw path trims leading spaces gracefully (no spaces = no trim)
+        if (bi.idCommand == CmdAutoScrollSpeedDown || bi.idCommand == CmdAutoScrollSpeedUp ||
+            bi.idCommand == CmdContrastDecrease || bi.idCommand == CmdContrastIncrease) {
             continue;
         }
         // our labels carry leading spaces that reserve width (see the padding

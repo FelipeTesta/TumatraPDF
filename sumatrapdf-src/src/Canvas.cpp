@@ -4143,6 +4143,9 @@ static void PaintFlashcardMasks(MainWindow* win, DisplayModel* dm, HDC hdc) {
         // cards (user 2026-10-22: "o retângulo do flashcard ativo está pouco
         // identificável"). Inactive cards keep the gray marker.
         bool isActiveCard = (i == studyCardIdx);
+        // Lista-selected card (Peru outline, persistent): active when the Lista
+        // panel's selected row matches this card index AND the tab matches.
+        bool listActiveHere = (win->flashcard.activeListCardTab == fcTab && i == win->flashcard.activeListCardIdx);
         bool opaque = (isActiveCard && !win->flashcard.revealMode);
         // Paint each quad subrect separately so a multi-line cloze covers
         // exactly the highlighted text (not the union bbox). Under TC2 the
@@ -4196,6 +4199,9 @@ static void PaintFlashcardMasks(MainWindow* win, DisplayModel* dm, HDC hdc) {
                     } else {
                         gs.DrawRectangle(&edgePen, rc.x, rc.y, rc.dx - 1, rc.dy - 1);
                     }
+                } else if (listActiveHere) {
+                    // Lista-selected card: full Peru outline always (not underline)
+                    gs.DrawRectangle(&edgePen, rc.x, rc.y, rc.dx - 1, rc.dy - 1);
                 }
             }
         };

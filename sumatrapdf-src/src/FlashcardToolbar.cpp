@@ -683,30 +683,53 @@ void FlashcardToolbarUpdateState(MainWindow* win) {
         return;
     }
     HWND hwnd = win->flashcard.hwndToolbarFlashcard;
-    WPARAM studyState = win->flashcard.studyMode ? (TBSTATE_ENABLED | TBSTATE_CHECKED) : TBSTATE_ENABLED;
-    WPARAM revealState = win->flashcard.revealMode ? (TBSTATE_ENABLED | TBSTATE_CHECKED) : TBSTATE_ENABLED;
+
+    // Study button: disabled (state 0) when Lista panel is OPEN; when studyMode is true keep ENABLED+CHECKED
+    bool listaOpen = win->flashcard.hwndListaBox && win->uiState.fcListVisible;
+    WPARAM studyState;
+    if (listaOpen && !win->flashcard.studyMode) {
+        studyState = 0; // disabled
+    } else if (win->flashcard.studyMode) {
+        studyState = TBSTATE_ENABLED | TBSTATE_CHECKED;
+    } else {
+        studyState = TBSTATE_ENABLED;
+    }
     SendMessageW(hwnd, TB_SETSTATE, (WPARAM)CmdFlashcardStudy, MAKELONG(studyState, 0));
+
+    WPARAM revealState = win->flashcard.revealMode ? (TBSTATE_ENABLED | TBSTATE_CHECKED) : TBSTATE_ENABLED;
     SendMessageW(hwnd, TB_SETSTATE, (WPARAM)CmdFlashcardReveal, MAKELONG(revealState, 0));
+
     // Next button: only meaningful in study mode with a card after the current
     // one (state 0 = grayed out)
     bool hasNext = win->flashcard.studyMode && win->flashcard.currentCardIdx + 1 < len(win->flashcard.studyOrder);
     WPARAM nextState = hasNext ? TBSTATE_ENABLED : 0;
     SendMessageW(hwnd, TB_SETSTATE, (WPARAM)CmdFlashcardNext, MAKELONG(nextState, 0));
-    // Delete button: same gating as Next but without the +1 lookahead -
-    // enabled whenever the current card is valid
-    bool canDelete = win->flashcard.studyMode && win->flashcard.currentCardIdx >= 0 &&
-                     win->flashcard.currentCardIdx < len(win->flashcard.studyOrder);
-    WPARAM deleteState = canDelete ? TBSTATE_ENABLED : 0;
+
+    // Delete button: enabled when study-valid (existing) OR list-active card exists
+    bool canDeleteStudy = win->flashcard.studyMode && win->flashcard.currentCardIdx >= 0 &&
+                          win->flashcard.currentCardIdx < len(win->flashcard.studyOrder);
+    WindowTab* curTab = win->CurrentTab();
+    bool canDeleteList = win->flashcard.activeListCardTab == curTab && win->flashcard.activeListCardIdx >= 0 &&
+                         win->flashcard.activeListCardIdx < len(curTab->flashcard.cards);
+    WPARAM deleteState = (canDeleteStudy || canDeleteList) ? TBSTATE_ENABLED : 0;
     SendMessageW(hwnd, TB_SETSTATE, (WPARAM)CmdFlashcardDeleteActive, MAKELONG(deleteState, 0));
+
     // Filter button: checked when the current tab has an ACTIVE page filter
     // (enabled + non-empty expression)
     WindowTab* tab = win->CurrentTab();
     bool filterActive = tab && tab->flashcard.filterEnabled && tab->flashcard.filterExpr;
     WPARAM filterState = filterActive ? (TBSTATE_ENABLED | TBSTATE_CHECKED) : TBSTATE_ENABLED;
     SendMessageW(hwnd, TB_SETSTATE, (WPARAM)CmdFlashcardFilter, MAKELONG(filterState, 0));
-    // Lista button: checked while the Lista panel is open
-    bool listaVisible = win->flashcard.hwndListaBox && win->uiState.fcListVisible;
-    WPARAM listaState = listaVisible ? (TBSTATE_ENABLED | TBSTATE_CHECKED) : TBSTATE_ENABLED;
+
+    // Lista button: disabled (state 0) when studyMode is ON; else ENABLED (+CHECKED when panel open)
+    WPARAM listaState;
+    if (win->flashcard.studyMode) {
+        listaState = 0; // disabled
+    } else if (listaOpen) {
+        listaState = TBSTATE_ENABLED | TBSTATE_CHECKED;
+    } else {
+        listaState = TBSTATE_ENABLED;
+    }
     SendMessageW(hwnd, TB_SETSTATE, (WPARAM)CmdFlashcardLista, MAKELONG(listaState, 0));
 }
 
@@ -1664,6 +1687,10 @@ static void ImportDoImport(ImportDialog* d) {
     logf("[fc] Import window - created %d new card(s)\n", n);
     if (n > 0) {
         tab->flashcard.cards = FlashcardLoadFromDocument(AsEngineMupdf(engine));
+        if (d->win->flashcard.activeListCardTab == tab) {
+            d->win->flashcard.activeListCardIdx = -1;
+            d->win->flashcard.activeListCardTab = nullptr;
+        }
         FlashcardToolbarUpdateCount(d->win);
         FlashcardToolbarUpdateState(d->win);
         FlashcardSidebarPopulate(d->win);
@@ -1961,6 +1988,10 @@ static int ImportAnnotDoImport(ImportDialog* d) {
         // Reload cards so the new ones are visible everywhere
         tab->flashcard.cards = FlashcardLoadFromDocument(epdf);
         tab->flashcard.cardsLoaded = true;
+        if (d->win->flashcard.activeListCardTab == tab) {
+            d->win->flashcard.activeListCardIdx = -1;
+            d->win->flashcard.activeListCardTab = nullptr;
+        }
         FlashcardToolbarUpdateCount(d->win);
         FlashcardToolbarUpdateState(d->win);
         FlashcardSidebarPopulate(d->win);
@@ -2086,6 +2117,21 @@ static LRESULT CALLBACK ImportWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         case WM_PAINT:
             ImportPaint(d);
             return 0;
+        case WM_CTLCOLORSTATIC: {
+            // Theme checkboxes (BS_AUTOCHECKBOX) and static text (dry-run) in dark mode.
+            // SetWindowTheme(L"") forces classic path so CTLCOLOR is honored.
+            HDC hdc = (HDC)wp;
+            SetBkColor(hdc, ThemeWindowBackgroundColor());
+            SetTextColor(hdc, ThemeWindowTextColor());
+            return (LRESULT)FlashcardCtlColorBrush();
+        }
+        case WM_CTLCOLORBTN: {
+            // Theme the "Import from Annotations" push button (classic path via SetWindowTheme).
+            HDC hdc = (HDC)wp;
+            SetBkColor(hdc, ThemeWindowBackgroundColor());
+            SetTextColor(hdc, ThemeWindowTextColor());
+            return (LRESULT)FlashcardCtlColorBrush();
+        }
         case WM_COMMAND: {
             int id = LOWORD(wp);
             int code = HIWORD(wp);
@@ -2166,27 +2212,32 @@ void FlashcardImportDialog(MainWindow* win) {
         dlg.rcChkHighlight.top, dlg.rcChkHighlight.right - dlg.rcChkHighlight.left,
         dlg.rcChkHighlight.bottom - dlg.rcChkHighlight.top, hwnd, (HMENU)(INT_PTR)IDC_FC_IMP_ANNOT_CHK_HIGHLIGHT, hinst,
         nullptr);
+    SetWindowTheme(dlg.hwndChkHighlight, L"", L"");
     dlg.hwndChkUnderline = CreateWindowExW(
         0, L"Button", L"Underline", BS_AUTOCHECKBOX | WS_CHILD | WS_VISIBLE | WS_TABSTOP, dlg.rcChkUnderline.left,
         dlg.rcChkUnderline.top, dlg.rcChkUnderline.right - dlg.rcChkUnderline.left,
         dlg.rcChkUnderline.bottom - dlg.rcChkUnderline.top, hwnd, (HMENU)(INT_PTR)IDC_FC_IMP_ANNOT_CHK_UNDERLINE, hinst,
         nullptr);
+    SetWindowTheme(dlg.hwndChkUnderline, L"", L"");
     dlg.hwndChkSquiggly =
         CreateWindowExW(0, L"Button", L"Squiggly", BS_AUTOCHECKBOX | WS_CHILD | WS_VISIBLE | WS_TABSTOP,
                         dlg.rcChkSquiggly.left, dlg.rcChkSquiggly.top, dlg.rcChkSquiggly.right - dlg.rcChkSquiggly.left,
                         dlg.rcChkSquiggly.bottom - dlg.rcChkSquiggly.top, hwnd,
                         (HMENU)(INT_PTR)IDC_FC_IMP_ANNOT_CHK_SQUIGGLY, hinst, nullptr);
+    SetWindowTheme(dlg.hwndChkSquiggly, L"", L"");
     dlg.hwndChkStrikeOut = CreateWindowExW(
         0, L"Button", L"StrikeOut", BS_AUTOCHECKBOX | WS_CHILD | WS_VISIBLE | WS_TABSTOP, dlg.rcChkStrikeOut.left,
         dlg.rcChkStrikeOut.top, dlg.rcChkStrikeOut.right - dlg.rcChkStrikeOut.left,
         dlg.rcChkStrikeOut.bottom - dlg.rcChkStrikeOut.top, hwnd, (HMENU)(INT_PTR)IDC_FC_IMP_ANNOT_CHK_STRIKEOUT, hinst,
         nullptr);
+    SetWindowTheme(dlg.hwndChkStrikeOut, L"", L"");
 
     // Static dry-run text
     dlg.hwndDryRun =
         CreateWindowExW(0, WC_STATICW, L"", SS_LEFT | WS_CHILD | WS_VISIBLE, dlg.rcDryRun.left, dlg.rcDryRun.top,
                         dlg.rcDryRun.right - dlg.rcDryRun.left, dlg.rcDryRun.bottom - dlg.rcDryRun.top, hwnd,
                         (HMENU)(INT_PTR)IDC_FC_IMP_ANNOT_DRYRUN, hinst, nullptr);
+    SetWindowTheme(dlg.hwndDryRun, L"", L"");
 
     // Import from Annotations button
     dlg.hwndImportAnnotBtn = CreateWindowExW(
@@ -2194,6 +2245,7 @@ void FlashcardImportDialog(MainWindow* win) {
         dlg.rcImportAnnotBtn.left, dlg.rcImportAnnotBtn.top, dlg.rcImportAnnotBtn.right - dlg.rcImportAnnotBtn.left,
         dlg.rcImportAnnotBtn.bottom - dlg.rcImportAnnotBtn.top, hwnd, (HMENU)(INT_PTR)IDC_FC_IMP_ANNOT_BTN, hinst,
         nullptr);
+    SetWindowTheme(dlg.hwndImportAnnotBtn, L"", L"");
 
     // Set font for all new controls
     SendMessageW(dlg.hwndChkHighlight, WM_SETFONT, (WPARAM)font, TRUE);

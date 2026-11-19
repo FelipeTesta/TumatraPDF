@@ -358,6 +358,12 @@ static LRESULT CALLBACK WndProcListaHeader(HWND hwnd, UINT msg, WPARAM wp, LPARA
     return CallWindowProc(gWndProcListaHeader, hwnd, msg, wp, lp);
 }
 
+// Clear the Lista-selected active card state
+static void FlashcardActiveListClear(MainWindow* win) {
+    win->flashcard.activeListCardIdx = -1;
+    win->flashcard.activeListCardTab = nullptr;
+}
+
 // ---- container (box) subclass ---------------------------------------------
 
 // manual layout: title strip, column-header strip, list fills the rest (the
@@ -438,7 +444,12 @@ static LRESULT CALLBACK WndProcListaBox(HWND hwnd, UINT msg, WPARAM wp, LPARAM l
             if (id == IDC_FLASHCARD_LIST && HIWORD(wp) == LBN_SELCHANGE) {
                 LRESULT sel = SendMessageW(win->flashcard.hwndListaView, LB_GETCURSEL, 0, 0);
                 if (sel != LB_ERR && sel < len(win->flashcard.listaRows)) {
-                    FlashcardNavigateToCardInCurrentTab(win, win->flashcard.listaRows[(int)sel].cardIdx);
+                    int cardIdx = win->flashcard.listaRows[(int)sel].cardIdx;
+                    win->flashcard.activeListCardTab = win->CurrentTab();
+                    win->flashcard.activeListCardIdx = cardIdx;
+                    FlashcardNavigateToCardInCurrentTab(win, cardIdx);
+                    MainWindowRerender(win);
+                    FlashcardToolbarUpdateState(win);
                 }
                 return 0;
             }
@@ -574,6 +585,7 @@ void FlashcardSidebarDestroy(MainWindow* win) {
     logf("[fc] FlashcardSidebarDestroy - destroying Lista panel\n");
 
     win->uiState.fcListVisible = false;
+    FlashcardActiveListClear(win);
     win->flashcard.listaRows.Reset();
     if (win->flashcard.listaSplitter) {
         delete win->flashcard.listaSplitter;
@@ -608,6 +620,8 @@ void FlashcardSidebarToggle(MainWindow* win) {
         win->uiState.fcListVisible = !win->uiState.fcListVisible;
         if (win->uiState.fcListVisible) {
             FlashcardSidebarPopulate(win);
+        } else {
+            FlashcardActiveListClear(win);
         }
     }
     // apply the geometry change (canvas grows/shrinks)

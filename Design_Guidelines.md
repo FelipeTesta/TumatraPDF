@@ -154,7 +154,7 @@ Code smells to avoid (refactoring.guru):
 - **Feedback**: every mutation → log line + count update + (if list open)
   list refresh. Silent state change = bug factory.
 
-### 6.2 Menu popup patterns (TrackPopupMenuEx)
+### 6.1 Menu popup patterns (TrackPopupMenuEx)
 
 Right-click context INSIDE a TrackPopupMenuEx menu (tab-group dropdown right-click → options popup):
 
@@ -171,7 +171,7 @@ Traps burned 4 rounds (s36-ch..s36-cl):
 
 Owner-draw button dark pattern: BS_OWNERDRAW class erases COLOR_BTNFACE before WM_DRAWITEM → subclass button (`SetWindowSubclass`) WM_ERASEBKGND fill `ThemeWindowControlBackgroundColor()` + return 1, PLUS frame `WM_CTLCOLORBTN` returning theme brush (both cheap). Reference: SumatraPDF.cpp `TabGroupBtnSubclassProc` (tab-group button, s36-cm/cn). Cross-ref LOG s36-cl/cm/cn/co.
 
-### 6.1 Visual system for fork-authored UI (added 2026-10-16, design-canon audit)
+### 6.2 Visual system for fork-authored UI (added 2026-10-16, design-canon audit)
 
 Scope: OWN UI (autoscroll toolbar/overlay, contrast overlay, flashcard dialogs +
 sidebar, AI-chat panel, home-page additions). Upstream look stays upstream.
@@ -209,7 +209,16 @@ sidebar, AI-chat panel, home-page additions). Upstream look stays upstream.
   (`-Client WxH` to pin a size, `-List` to find a popup/overlay by class).
   No screenshot = not done; name the PNG in the LOG.md entry.
 
-### 6.2 Color tokens (added 2026-11-15, s64 color-token migration)
+### 6.3 Theme sensitivity (mandatory for all agents)
+Every UI surface created or reshaped by an agent must render correctly in BOTH dark and light themes.
+
+- Use Theme tokens/accent colors (Theme.cpp accessors) — NEVER hardcoded RGB.
+- Button-class controls (BS_CHECKBOX/BS_AUTOCHECKBOX/BUTTON) with visual styles active draw their own label and IGNORE text colors from WM_CTLCOLORSTATIC/WM_CTLCOLORBTN (recurrent bug: 2026-11-16 installer checkboxes, 2026-11-17 flashcard Import checkboxes). Canonical fix: per-control `SetWindowTheme(hwnd, L"", L"")` right after creation + explicit CTLCOLOR answers using the file's existing theme brush pattern.
+- Precedents: FindBar, FlashcardToolbar `FilterOptionsWndProc` (s30-A), ProfileBackupWnd.
+- New controls added to an EXISTING themed dialog must be wired into the dialog's EXISTING ctlcolor/theme handling — adding a control without it is the #1 regression.
+- Verification = §6.2 screenshot loop, executed in dark AND light.
+
+### 6.4 Color tokens (added 2026-11-15, s64 color-token migration)
 - COLOR RULE: new UI color = DsAccents token (dark/light pair OR mid-luminance = same value in both DsAccentsGet branches). No raw RGB literals in fork UI paint code.
 - Exceptions: chroma-key (magenta), translucent scrims, F7 brand palette kBrandPalette, pure black/white overlay pairs.
 - Static-baked GDI+ pens/brushes FORBIDDEN for palette colors (theme-switch hazard — Commands_Edit fixed 2026-11-16).

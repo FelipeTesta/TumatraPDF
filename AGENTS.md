@@ -14,6 +14,7 @@
 - ALWAYS run `clang-format` on `.cpp`/`.c`/`.h` files after edits (before build).
 - ALWAYS pass `-for-testing` when launching for ad-hoc testing.
 - ALWAYS read \FLOW\ .dot files
+- EVERY new UI (Win32 dialogs, toolbars, VirtWnd overlays, native or web surfaces) MUST be theme-sensitive — correct in dark AND light theme. Button-class controls with visual styles IGNORE WM_CTLCOLOR* text colors — use the repo canonical pattern: per-control `SetWindowTheme(hwnd, L"", L"")` (classic path) + `WM_CTLCOLORSTATIC`/`WM_CTLCOLOREDIT` answered with Theme tokens (precedents: FindBar, FlashcardToolbar FilterOptionsWndProc, ProfileBackupWnd). Never hardcode colors. Screenshot verification in BOTH themes before declaring done (Design_Guidelines §6.2)
 
 # 0b. USE tree-sitter for exploration & debugging (MANDATORY)
 
@@ -51,7 +52,7 @@ TumatraPDF is a fork of SumatraPDF (upstream baseline ~912ecf2, Aug 2026) — Wi
 | `CHANGELOG.md` (root)                                | per-version public changelog (v1.0.x releases, Keep a Changelog style, release checklist)                                                                                                                                              | agents/users |
 | `LICENSE` / `SECURITY.md` / `CONTRIBUTING.md` (root) | GitHub community-health files: GPL-3.0 (verbatim text), vuln reporting, contributor ground rules                                                                                                                                       | users        |
 | `update.txt` (root)                                  | update metadata served to running apps (`Latest:` + download URLs) — bumped by the release workflow, do NOT hand-edit except the URL keys                                                                                              | agents       |
-| `Design_Guidelines.md` (root)                        | conventions + known traps distilled from sessions. **§6 / §6.1 = UI rules for Win32 dialogs, panels, toolbar, overlays — read before ANY visible UI change; §6.1 ends with the mandatory screenshot verification loop (dark + light)** | agents       |
+| `Design_Guidelines.md` (root)                        | conventions + known traps distilled from sessions. **§6 / §6.2 = UI rules for Win32 dialogs, panels, toolbar, overlays — read before ANY visible UI change; §6.2 ends with the mandatory screenshot verification loop (dark + light)** | agents       |
 | `DEBUG.md` (root)                                    | Win32 toolbar/UI debugging toolchain — win-automation + control pipe pattern for secondary toolbars (Arch Tools, Edit, Flashcard)                                                                                                      | agents       |
 | `FLOW/*.dot`                                         | process maps only (never code architecture — §0b)                                                                                                                                                                                      | agents       |
 | `TEMP/`                                              | deprecated informativos (gitignored)                                                                                                                                                                                                   | —            |

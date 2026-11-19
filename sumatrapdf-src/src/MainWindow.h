@@ -566,6 +566,10 @@ struct MainWindow {
         Splitter* listaSplitter = nullptr;       // drags the panel width
         int listaDx = 0;                         // applied panel width (0 = default)
         Vec<FcListRow> listaRows;                // per-row state backing the listbox
+        // Lista-selected card = the "active" card for the flashcard Delete button
+        // (Peru outline on canvas). Cleared on tab switch, Lista close, cards reload.
+        int activeListCardIdx = -1;
+        WindowTab* activeListCardTab = nullptr;
     } flashcard;
     // --- end flashcard state ---
 

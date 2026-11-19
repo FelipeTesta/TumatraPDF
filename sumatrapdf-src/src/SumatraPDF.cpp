@@ -5008,6 +5008,12 @@ void CloseTab(WindowTab* tab, bool quitIfLast) {
     logf("CloseTab: tab: 0x%p win: 0x%p, hwndFrame: 0x%x, quitIfLast: %d, dm: 0x%p\n", tab, win, win->hwndFrame,
          (int)quitIfLast, tab->AsFixed());
 
+    // Clear Lista-selected active card if the closed tab was the active one
+    if (win->flashcard.activeListCardTab == tab) {
+        win->flashcard.activeListCardIdx = -1;
+        win->flashcard.activeListCardTab = nullptr;
+    }
+
     AbortFinding(win, true);
     // Dismiss find UI when closing the active tab so floating results from that
     // document cannot be clicked after a different tab is shown (issue #5807).

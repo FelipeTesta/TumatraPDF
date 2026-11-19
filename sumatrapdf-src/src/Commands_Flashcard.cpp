@@ -53,10 +53,6 @@ static bool FlashcardSelectionIsDuplicate(WindowTab* tab, const Vec<SelectionOnP
     if (!tab || !sel || len(pageNos) == 0) {
         return false;
     }
-    FlashcardEnsureTabCards(tab);
-    if (len(tab->flashcard.cards) == 0) {
-        return false;
-    }
     // per-page union bounds of the selection
     Vec<RectF> selByPage;
     Vec<int> selPageNos;
@@ -90,31 +86,48 @@ static bool FlashcardSelectionIsDuplicate(WindowTab* tab, const Vec<SelectionOnP
             return false; // selection not on this page? treat as non-duplicate… actually just skip this page
         }
     }
-    for (const Flashcard& card : tab->flashcard.cards) {
-        // card page list = primary + extraPages
-        Vec<int> cardPages;
-        Vec<RectF> cardRects;
-        cardPages.Append(card.pageNo);
-        cardRects.Append(card.bounds);
-        for (const FlashcardPageGroup& g : card.extraPages) {
-            cardPages.Append(g.pageNo);
-            cardRects.Append(g.bounds);
+    DisplayModel* dm = tab ? tab->AsFixed() : nullptr;
+    EngineBase* engine = dm ? dm->GetEngine() : nullptr;
+    if (!engine) {
+        return false;
+    }
+    auto nearF = [](float a, float b) {
+        float d = a - b;
+        return d < 0 ? -d : d;
+    };
+    bool allPagesMatch = true;
+    for (int i = 0; i < len(selPageNos); i++) {
+        int pageNo = selPageNos[i];
+        const RectF& u = selByPage[i];
+        Vec<Annotation*> annots;
+        if (!EngineGetPageAnnotations(engine, pageNo, annots)) {
+            allPagesMatch = false;
+            break;
         }
-        if (len(cardPages) != len(selPageNos)) {
-            continue;
-        }
-        bool allMatch = true;
-        for (int i = 0; i < len(selPageNos); i++) {
-            if (!FlashcardCardPageBoundsMatch(card, selPageNos[i], selByPage[i])) {
-                allMatch = false;
+        bool pageHasDup = false;
+        for (Annotation* a : annots) {
+            if (!a) {
+                continue;
+            }
+            if (a->type != AnnotationType::Highlight) {
+                continue;
+            }
+            Str author = Author(a);
+            if (!str::StartsWith(author, StrL("TumatraPDF-Flashcard"))) {
+                continue;
+            }
+            if (nearF(a->bounds.x, u.x) < 1.0f && nearF(a->bounds.y, u.y) < 1.0f &&
+                nearF(a->bounds.dx, u.dx) < 1.0f && nearF(a->bounds.dy, u.dy) < 1.0f) {
+                pageHasDup = true;
                 break;
             }
         }
-        if (allMatch) {
-            return true;
+        if (!pageHasDup) {
+            allPagesMatch = false;
+            break;
         }
     }
-    return false;
+    return allPagesMatch;
 }
 
 // xorshift128+ generator: better distribution than rand() (and rand()%n is
@@ -174,6 +187,15 @@ bool FlashcardEnsureTabCards(WindowTab* tab) {
              len(tab->flashcard.cards), len(tab->flashcard.studyDoc.states));
     }
     return true;
+}
+
+// Clear the Lista-selected active card state when a tab's cards are reloaded.
+// Call this at every site that reassigns tab->flashcard.cards via FlashcardLoadFromDocument.
+static void FlashcardActiveListClearIfTab(MainWindow* win, WindowTab* tab) {
+    if (win->flashcard.activeListCardTab == tab) {
+        win->flashcard.activeListCardIdx = -1;
+        win->flashcard.activeListCardTab = nullptr;
+    }
 }
 
 // Index of a tab inside win->tabs, -1 when the tab is no longer in this
@@ -258,6 +280,52 @@ static void CollectTabCards(MainWindow* win, WindowTab* tab, i64 now, Vec<Flashc
     }
     logf("[fc] CollectTabCards - '%s': %d cards pass (of %d)\n", FlashcardTabLogName(tab),
          len(newCards) + len(dueCards) - nBefore, len(tab->flashcard.cards));
+}
+
+// Helper: delete all flashcard annotations belonging to a card (primary page + extraPages)
+// Returns true on success, false if the engine doesn't support annotations
+static bool FlashcardDeleteCardAnnotations(WindowTab* tab, Flashcard& card) {
+    DisplayModel* dm = tab->AsFixed();
+    if (!dm) {
+        return false;
+    }
+    EngineBase* engine = dm->GetEngine();
+    if (!engine || !EngineSupportsAnnotations(engine)) {
+        return false;
+    }
+    // capture the page list (primary + extraPages)
+    Vec<int> pages;
+    pages.Append(card.pageNo);
+    for (const FlashcardPageGroup& g : card.extraPages) {
+        pages.Append(g.pageNo);
+    }
+    // collect the card's flashcard annotations on all pages
+    Vec<Annotation*> toDelete;
+    for (int pageNo : pages) {
+        Vec<Annotation*> annots;
+        if (!EngineGetPageAnnotations(engine, pageNo, annots)) {
+            continue;
+        }
+        for (Annotation* a : annots) {
+            if (!a) {
+                continue;
+            }
+            Str author = Author(a);
+            if (!str::StartsWith(author, StrL("TumatraPDF-Flashcard"))) {
+                continue;
+            }
+            if (!FlashcardCardPageBoundsMatch(card, pageNo, a->bounds)) {
+                continue;
+            }
+            toDelete.Append(a);
+        }
+    }
+    logf("[fc] FlashcardDeleteCardAnnotations - removing %d annotation(s) of card ('%s')\n", len(toDelete),
+         FlashcardTabLogName(tab));
+    for (Annotation* a : toDelete) {
+        DeleteAnnotationAndUpdateUI(tab, a);
+    }
+    return true;
 }
 
 static void BuildFilteredStudyOrder(MainWindow* win) {
@@ -884,6 +952,10 @@ void FlashcardStopSession(MainWindow* win) {
 // previous book being painted over the new document) and refresh count/list.
 void FlashcardOnTabChanged(MainWindow* win) {
     FlashcardPrewarmInvalidate(); // tab switch / doc reload: drop stale warm jobs
+    // Clear Lista-selected active card on tab switch (spec: cleared on tab change)
+    win->flashcard.activeListCardIdx = -1;
+    win->flashcard.activeListCardTab = nullptr;
+
     if (!win->flashcard.on) {
         return;
     }
@@ -1005,6 +1077,7 @@ bool HandleCommandFlashcard(MainWindow* win, int cmd) {
                 if (tab->filePath) {
                     tab->flashcard.studyDoc = FlashcardStudyLoad(tab->filePath.s);
                 }
+                FlashcardActiveListClearIfTab(win, tab);
                 MainWindowRerender(win);
                 ToolbarUpdateStateForWindow(win, true);
                 FlashcardToolbarUpdateCount(win);
@@ -1016,6 +1089,11 @@ bool HandleCommandFlashcard(MainWindow* win, int cmd) {
             return true;
         }
         case CmdFlashcardStudy: {
+            // Bidirectional block: with Lista open, Study CANNOT be activated
+            if (win->flashcard.hwndListaBox && win->uiState.fcListVisible) {
+                logf("[fc] CmdFlashcardStudy - blocked: Lista panel is open\n");
+                return true;
+            }
             logf("[fc] CmdFlashcardStudy - toggling study mode\n");
             win->flashcard.studyMode = !win->flashcard.studyMode;
             win->flashcard.revealMode = false;
@@ -1120,7 +1198,49 @@ bool HandleCommandFlashcard(MainWindow* win, int cmd) {
             return true;
         }
         case CmdFlashcardDeleteActive: {
-            logf("[fc] CmdFlashcardDeleteActive - deleting active study card\n");
+            logf("[fc] CmdFlashcardDeleteActive - deleting active card\n");
+            // LIST path (priority when Lista is accessible: studyMode is off)
+            WindowTab* targetTab = nullptr;
+            int targetCardIdx = -1;
+            bool fromList = false;
+            WindowTab* listTab = win->flashcard.activeListCardTab;
+            if (listTab == win->CurrentTab() && win->flashcard.activeListCardIdx >= 0 &&
+                win->flashcard.activeListCardIdx < len(listTab->flashcard.cards)) {
+                targetTab = listTab;
+                targetCardIdx = win->flashcard.activeListCardIdx;
+                fromList = true;
+            }
+            if (fromList) {
+                logf("[fc] CmdFlashcardDeleteActive - deleting from Lista (cardIdx=%d)\n", targetCardIdx);
+                Flashcard& card = targetTab->flashcard.cards[targetCardIdx];
+                FlashcardDeleteCardAnnotations(targetTab, card);
+                // reload cards
+                FlashcardPrewarmInvalidate();
+                EngineBase* engine = targetTab->AsFixed() ? targetTab->AsFixed()->GetEngine() : nullptr;
+                if (engine) {
+                    targetTab->flashcard.cards = FlashcardLoadFromDocument(AsEngineMupdf(engine));
+                    targetTab->flashcard.cardsLoaded = true;
+                }
+                // SM-2 prune + persist (same as study path) — AFTER reload so deleted card's key is absent
+                if (targetTab->filePath) {
+                    int pruned = FlashcardStudyPruneStates(targetTab->flashcard.studyDoc, targetTab->flashcard.cards);
+                    if (pruned > 0) {
+                        logf("[fc] CmdFlashcardDeleteActive - pruned %d state(s) of deleted cards in '%s'\n", pruned,
+                             FlashcardTabLogName(targetTab));
+                    }
+                    FlashcardStudySave(targetTab->filePath.s, targetTab->flashcard.studyDoc);
+                }
+                // clear list-active state (card is gone)
+                win->flashcard.activeListCardIdx = -1;
+                win->flashcard.activeListCardTab = nullptr;
+                // update UI
+                FlashcardToolbarUpdateCount(win);
+                FlashcardSidebarPopulate(win);
+                FlashcardToolbarUpdateState(win);
+                MainWindowRerender(win);
+                return true;
+            }
+            // STUDY path (original behavior, unchanged)
             if (!win->flashcard.studyMode) {
                 return true;
             }
@@ -1260,6 +1380,11 @@ bool HandleCommandFlashcard(MainWindow* win, int cmd) {
             return true;
         }
         case CmdFlashcardLista:
+            // Bidirectional block: with studyMode ON, Lista CANNOT be opened
+            if (win->flashcard.studyMode) {
+                logf("[fc] CmdFlashcardLista - blocked: study mode is active\n");
+                return true;
+            }
             logf("[fc] CmdFlashcardLista - toggling sidebar\n");
             FlashcardSidebarToggle(win);
             return true;

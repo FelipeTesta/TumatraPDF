@@ -1034,6 +1034,15 @@ void UpdateControlsColors(MainWindow* win) {
         win->sidebarSplitter->SetColors(kColorNoChange, splitterCol);
     }
 
+    // Flashcard Lista panel (mirror ToC/Fav treatment)
+    auto& fc = win->flashcard;
+    if (fc.listaLabel) {
+        fc.listaLabel->SetColors(txtCol, bgCol);
+    }
+    if (fc.listaSplitter) {
+        fc.listaSplitter->SetColors(kColorNoChange, splitterCol);
+    }
+
     auto* favTreeView = win->favTreeView;
     if (favTreeView) {
         favTreeView->SetColors(txtCol, bgCol);
