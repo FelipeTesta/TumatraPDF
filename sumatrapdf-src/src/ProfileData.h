@@ -56,6 +56,7 @@ struct SessionStatEntry {
     int readSec = 0;
     int fcSec = 0;
     int fcCards = 0;
+    u32 lastUsedTs = 0; // unix seconds of the last recorded activity; 0 = unknown (old sidecar)
 };
 void ProfileDataAddSessionReadingSec(Str group, int sec);
 void ProfileDataAddSessionStudySec(Str group, int sec);

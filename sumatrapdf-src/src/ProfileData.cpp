@@ -90,6 +90,7 @@ struct SessionStatRow {
     int readSec = 0;
     int fcSec = 0;
     int fcCards = 0;
+    u32 lastUsedTs = 0; // unix seconds of the last recorded activity
 };
 
 static Vec<SessionStatRow> gSessionStats;
@@ -523,7 +524,7 @@ static void ProfileDataSessionFlush() {
     dir::CreateAll(Str(path::GetDirTemp(Str(sidecarPath))));
     str::Builder sb;
     for (auto& row : gSessionStats) {
-        sb.Append(fmt("%s\t%d\t%d\t%d\n", row.name, row.readSec, row.fcSec, row.fcCards));
+        sb.Append(fmt("%s\t%d\t%d\t%d\t%u\n", row.name, row.readSec, row.fcSec, row.fcCards, (unsigned)row.lastUsedTs));
     }
     file::WriteFile(sidecarPath, sb.TakeStr());
     gSessionDirtySec = 0;
@@ -599,7 +600,8 @@ static void ProfileDataEnsureSessionStatsLoaded() {
     {
         str::Builder sb;
         for (auto& entry : gSessionStats) {
-            sb.Append(fmt("%s\t%d\t%d\t%d\n", entry.name, entry.readSec, entry.fcSec, entry.fcCards));
+            sb.Append(fmt("%s\t%d\t%d\t%d\t%u\n", entry.name, entry.readSec, entry.fcSec, entry.fcCards,
+                          (unsigned)entry.lastUsedTs));
         }
         TempStr sidecarPath = ProfileDataSessionSidecarPathTemp();
         file::WriteFile(sidecarPath, sb.TakeStr());
@@ -638,27 +640,39 @@ static void ProfileDataLoadSessionStatsFromFile() {
         int t2 = str::IndexOfChar(rest, '\t');
         if (t2 < 0) continue;
         Str rest2(rest.s + t2 + 1, rest.len - t2 - 1);
+        // fields: name \t readSec \t fcSec \t fcCards [\t lastUsedTs]
         int t3 = str::IndexOfChar(rest2, '\t');
+        Str fcSecB = (t3 >= 0) ? Str(rest2.s, t3) : rest2;
+        Str tail = (t3 >= 0) ? Str(rest2.s + t3 + 1, rest2.len - t3 - 1) : Str{};
+        Str fcCardsB = tail;
+        u32 lastUsed = 0;
+        if (tail.s) {
+            int t4 = str::IndexOfChar(tail, '\t');
+            if (t4 >= 0) {
+                fcCardsB = Str(tail.s, t4);
+                Str tsB(tail.s + t4 + 1, tail.len - t4 - 1);
+                lastUsed = (u32)_strtoi64(CStrTemp(tsB), nullptr, 10);
+            }
+        }
         Str name(line.s, t1);
         Str rSecB(rest.s, t2);
-        int fs = t2 + 1;
-        int fcSecLen = (t3 >= 0) ? t3 : rest2.len;
-        Str fcSecB(rest2.s, fcSecLen);
-        Str fcCardsB(rest2.s + fcSecLen + (t3 >= 0 ? 1 : 0), rest2.len - fcSecLen - (t3 >= 0 ? 1 : 0));
         int readSec = (int)_strtoi64(CStrTemp(rSecB), nullptr, 10);
         int fcSec = (int)_strtoi64(CStrTemp(fcSecB), nullptr, 10);
-        int fcCards = (int)_strtoi64(CStrTemp(fcCardsB), nullptr, 10);
+        int fcCards = fcCardsB.s ? (int)_strtoi64(CStrTemp(fcCardsB), nullptr, 10) : 0;
         bool found = false;
         for (auto& entry : gSessionStats) {
             if (str::EqI(entry.name, name)) {
                 entry.readSec += readSec;
                 entry.fcSec += fcSec;
                 entry.fcCards += fcCards;
+                if (lastUsed > entry.lastUsedTs) {
+                    entry.lastUsedTs = lastUsed;
+                }
                 found = true;
                 break;
             }
         }
-        if (!found) gSessionStats.Append({str::Dup(name), readSec, fcSec, fcCards});
+        if (!found) gSessionStats.Append({str::Dup(name), readSec, fcSec, fcCards, lastUsed});
     }
 }
 
@@ -669,18 +683,20 @@ void ProfileDataAddSessionReadingSec(Str group, int sec) {
     ProfileDataEnsureSessionStatsLoaded();
     Str g = ProfileDataSessionCleanName(group);
     if (!g.s) return;
+    u32 now = (u32)time(nullptr);
     // find row (linear scan) or create (name dup'd into persistent arena)
     bool found = false;
     for (auto& entry : gSessionStats) {
         if (str::EqI(entry.name, g)) {
             entry.readSec += sec;
+            entry.lastUsedTs = now;
             gSessionDirtySec += sec;
             found = true;
             break;
         }
     }
     if (!found) {
-        gSessionStats.Append({g, sec, 0, 0});
+        gSessionStats.Append({g, sec, 0, 0, now});
         gSessionDirtySec += sec;
     }
     // flush if threshold reached
@@ -707,18 +723,20 @@ void ProfileDataAddSessionStudySec(Str group, int sec) {
     ProfileDataEnsureSessionStatsLoaded();
     Str g = ProfileDataSessionCleanName(group);
     if (!g.s) return;
+    u32 now = (u32)time(nullptr);
     // find row or create
     bool found = false;
     for (auto& entry : gSessionStats) {
         if (str::EqI(entry.name, g)) {
             entry.fcSec += sec;
+            entry.lastUsedTs = now;
             gSessionDirtySec += sec;
             found = true;
             break;
         }
     }
     if (!found) {
-        gSessionStats.Append({g, 0, sec, 0});
+        gSessionStats.Append({g, 0, sec, 0, now});
         gSessionDirtySec += sec;
     }
     if (gSessionDirtySec >= 60) {
@@ -733,18 +751,20 @@ void ProfileDataAddSessionCard(Str group) {
     ProfileDataEnsureSessionStatsLoaded();
     Str g = ProfileDataSessionCleanName(group);
     if (!g.s) return;
+    u32 now = (u32)time(nullptr);
     // find row or create
     bool found = false;
     for (auto& entry : gSessionStats) {
         if (str::EqI(entry.name, g)) {
             entry.fcCards++;
+            entry.lastUsedTs = now;
             gSessionDirtyCards++;
             found = true;
             break;
         }
     }
     if (!found) {
-        gSessionStats.Append({g, 0, 0, 1});
+        gSessionStats.Append({g, 0, 0, 1, now});
         gSessionDirtyCards++;
     }
     // flush if threshold reached (60 seconds OR 20 cards)
@@ -759,7 +779,7 @@ void ProfileDataGetSessionStats(Vec<SessionStatEntry>& out) {
     for (auto& entry : gSessionStats) {
         // only append rows with any value > 0
         if (entry.readSec > 0 || entry.fcSec > 0 || entry.fcCards > 0) {
-            out.Append({entry.name, entry.readSec, entry.fcSec, entry.fcCards});
+            out.Append({entry.name, entry.readSec, entry.fcSec, entry.fcCards, entry.lastUsedTs});
         }
     }
 }

@@ -482,6 +482,19 @@ void StartAutoScrollAtCursor(MainWindow* win) {
     SetCanvasCursor(win, IDC_SIZEALL);
 }
 
+// Reading time keeps accruing while auto-scroll is only PAUSED (Ctrl held, or
+// quick-view shift-hold): the user is still studying, only the scrolling stops.
+// Credit the wall-clock delta since the last tick and refresh the time base so
+// that resuming does not scroll by the whole paused amount in one tick.
+static void CreditPausedReadingTime(MainWindow* win) {
+    u64 now = GetTickCount64();
+    float dt = (float)(now - win->autoScroll.lastScrollTick) / 1000.0f;
+    win->autoScroll.lastScrollTick = now;
+    if (dt > 0.0f && dt <= 1.5f) {
+        ReadingStatsAddSeconds(win, dt);
+    }
+}
+
 // Timer tick handler for continuous auto-scroll
 void AutoScrollContinuousTick(MainWindow* win, HWND hwnd) {
     if (!win->autoScroll.active) {
@@ -496,17 +509,19 @@ void AutoScrollContinuousTick(MainWindow* win, HWND hwnd) {
         // Fixed-page ONLY: webview documents pause their JS rAF loop in the
         // else-branch below (webviewCtrlDown state machine) — an early return
         // here would starve it and Ctrl would never pause the .md scroll.
+        // Time base is refreshed by CreditPausedReadingTime so reading time
+        // continues to accrue while paused (Ctrl held or quick-view shift-hold).
         if (GetKeyState(VK_CONTROL) & 0x8000) {
-            win->autoScroll.lastScrollTick = GetTickCount64();
-            ReadingStatsResetTick();
+            CreditPausedReadingTime(win);
             return;
         }
         // v2 quick view (shift-hold): temporarily pause the auto-scroll so the
         // user can freely drag/pan the full page; releasing Shift resumes it.
+        // While paused, reading time still accrues via CreditPausedReadingTime
+        // so the time base stays fresh and resuming never jumps.
         if (dm->viewportCropV2QuickToggled) {
             win->autoScroll.accum = 0;
-            win->autoScroll.lastScrollTick = GetTickCount64();
-            ReadingStatsResetTick();
+            CreditPausedReadingTime(win);
             return;
         }
         // Check end of document (quick view returns above, so this only sees
@@ -597,9 +612,6 @@ void AutoScrollContinuousTick(MainWindow* win, HWND hwnd) {
         if (ctrlDown != win->autoScroll.webviewCtrlDown) {
             win->autoScroll.webviewCtrlDown = ctrlDown;
             SetWebviewAutoScroll(win, ctrlDown ? 0 : win->autoScroll.webviewPxPerSec);
-            if (ctrlDown) {
-                ReadingStatsResetTick();
-            }
         }
         // Timer check (same as fixed-page)
         if (win->autoScroll.timerMinutes > 0 && win->autoScroll.startTick > 0) {
@@ -621,11 +633,10 @@ void AutoScrollContinuousTick(MainWindow* win, HWND hwnd) {
                 return;
             }
         }
-        // Reading time: the rAF loop scrolls continuously — credit the
-        // wall-clock delta since the last tick (reset on Ctrl-pause)
-        if (!win->autoScroll.webviewCtrlDown) {
-            ReadingStatsTickWebview(win);
-        }
+        // Reading time: credit the wall-clock delta since the last tick. This
+        // runs even while Ctrl pauses the rAF loop — the user is still reading,
+        // and keeping lastTick fresh means resuming never jumps.
+        ReadingStatsTickWebview(win);
         // ETA: the rAF loop inside the page throttles an 'autoscrollProgress'
         // notify every ~10s (see SetWebviewAutoScroll); OnAutoScrollProgress
         // turns it into the ETA label. No page-change signal exists for

@@ -1,3 +1,24 @@
+## 2026-11-19 (s65) - study time while paused + home stats layout
+
+### Added
+- Home Study History: the last studied document is pinned as the first row, title in white on the dark theme (`textStrong` on light, where white would vanish). It is the first entry of the MRU order (`gFileHistory.GetRecentlyOpenedOrder`) that actually has stats for the active tab.
+- Sessions tab: three fixed numeric columns (Read | Flashcards | Total) before the progress bar; Flashcards shows `10m (13)` (time first, card count last) so an ellipsized column never loses the time.
+- Session stats persist `lastUsedTs` as an optional 5th field of `stats\study-sessions.txt`; the most recently active group is pinned on top. Old 4-field rows load with 0 (= no pin, time order kept) and an older binary still parses `fcCards` correctly because `_strtoi64` stops at the TAB.
+- Home stats band spans the full content width instead of the thumbnail-grid width; band height 200 -> 220 DIP.
+
+### Changed
+- Ranking columns are fixed: name left (GDI+ ellipsis), time right-aligned in a fixed rect, bars starting at a constant x with a constant max width - same in Read / Flashcards / Sessions.
+- The "N books - scroll" hint moved out of the list into its own band between the list and the totals.
+- Totals line is measured: one line only when both halves plus the gap fit together, otherwise two lines. Previously the concatenated string overflowed the column and was silently clipped.
+- Bars are scaled by the largest value in the list, not by row 0 (the pinned row is usually not the biggest reader).
+
+### Fixed
+- Reading time stopped accruing while auto-scroll was merely paused: Ctrl held (fixed-page and webview/markdown) and quick-view shift-hold now credit the elapsed wall clock - only the scrolling pauses, and the time base is refreshed so resuming never jumps.
+- At half-screen widths the chart appeared to overlap the Study History column: the totals text and long names painted past the column into the chart. Both regions now have GDI+ clip rects, and the band no longer shrinks to the thumbnail-grid width.
+
+### Verified
+- Build 0 errors / 0 warnings (dbg64 + rel64); portable + install rebuilt to Compiled (19/11). Screenshots at 960 px and 1938 px widths: columns aligned, hint outside the list, two-line totals at narrow width, no chart overlap.
+
 ## 2026-11-17 (s64) — Flashcards UX implementation
 
 ### Added
