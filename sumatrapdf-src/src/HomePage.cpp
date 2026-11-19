@@ -1251,6 +1251,23 @@ static Gdiplus::Color GpCol(COLORREF c) {
     return Gdiplus::Color(255, GetRValue(c), GetGValue(c), GetBValue(c));
 }
 
+// GDI+ text sizes must be WHOLE PIXELS. DsFontSize*() are POINTS and
+// Gdiplus::Font(family, emSize) defaults to UnitPoint, so at 125% DPI a 9.5 pt
+// label becomes 15.833 px and rasterizes unevenly (blurry small text - s65).
+// Convert the token to an integer pixel size for the window's DPI and pass
+// Gdiplus::UnitPixel when constructing the font.
+static float DsFontSizePx(HWND hwnd, float ptSize) {
+    int dpi = DpiGetForHwnd(hwnd);
+    if (dpi <= 0) {
+        dpi = USER_DEFAULT_SCREEN_DPI;
+    }
+    int px = (int)(ptSize * (float)dpi / 72.0f + 0.5f);
+    if (px < 1) {
+        px = 1;
+    }
+    return (float)px;
+}
+
 struct HomeStatsWnd : VirtWnd {
     MainWindow* win = nullptr;
     int year = 0; // browsed year; 0 = initialize to the current year on paint
@@ -1340,11 +1357,18 @@ void HomeStatsWnd::Paint(VirtWndPaintCtx& ctx) {
         return;
     }
     Gdiplus::Graphics* g = &gStorage;
+    // ClearType for the small text. Deliberately NOT InitGraphicsMode(): it also
+    // turns on SmoothingModeAntiAlias, which would soften the 1px heatmap cells
+    // and progress bars. Must be set BEFORE the first MeasureString so that
+    // measurement and drawing agree.
+    g->SetTextRenderingHint(Gdiplus::TextRenderingHintClearTypeGridFit);
     // DpiScale needs an HWND (frame), not the HDC
     auto dpi = [this](int v) { return DpiScale(win->hwndFrame, v); };
     DsAccents ac = DsAccentsGet(); // theme design tokens (D4); resolved per paint
-    Gdiplus::Font fontLabel(DsFontFamily(), DsFontSizeLabel());
-    Gdiplus::Font fontTitle(DsFontFamily(), DsFontSizeTitle(), Gdiplus::FontStyleBold);
+    Gdiplus::Font fontLabel(DsFontFamily(), DsFontSizePx(win->hwndFrame, DsFontSizeLabel()), Gdiplus::FontStyleRegular,
+                            Gdiplus::UnitPixel);
+    Gdiplus::Font fontTitle(DsFontFamily(), DsFontSizePx(win->hwndFrame, DsFontSizeTitle()), Gdiplus::FontStyleBold,
+                            Gdiplus::UnitPixel);
     Gdiplus::SolidBrush txtBrush(GpCol(ac.text));
     Gdiplus::SolidBrush valBrush(GpCol(ac.textStrong));
     Gdiplus::SolidBrush hotBrush(GpCol(ac.textHot));     // silver accent
@@ -1961,7 +1985,8 @@ void HomeStatsWnd::Paint(VirtWndPaintCtx& ctx) {
 void HomeStatsWnd::PaintGraph(Gdiplus::Graphics* g, Rect b, int heatX0, int heatW, int pad) {
     auto dpi = [this](int v) { return DpiScale(win->hwndFrame, v); };
     DsAccents ac = DsAccentsGet(); // theme design tokens (D4); resolved per paint
-    Gdiplus::Font fontLabel(DsFontFamily(), DsFontSizeLabel());
+    Gdiplus::Font fontLabel(DsFontFamily(), DsFontSizePx(win->hwndFrame, DsFontSizeLabel()), Gdiplus::FontStyleRegular,
+                            Gdiplus::UnitPixel);
     Gdiplus::SolidBrush txtBrush(GpCol(ac.text));
     Gdiplus::SolidBrush valBrush(GpCol(ac.textStrong));
     Gdiplus::SolidBrush silverBrush(GpCol(ac.silverHi));
@@ -1973,6 +1998,10 @@ void HomeStatsWnd::PaintGraph(Gdiplus::Graphics* g, Rect b, int heatX0, int heat
 
     // the chart may never paint over the ranking column
     g->SetClip(Gdiplus::RectF((float)heatX0, (float)b.y, (float)heatW, (float)b.dy));
+
+    // ClearType for the small text. Must be set BEFORE the first MeasureString so that
+    // measurement and drawing agree.
+    g->SetTextRenderingHint(Gdiplus::TextRenderingHintClearTypeGridFit);
 
     int chartTop = b.y + dpi(16) + dpi(12);
     // extra reserve below the axis: the month | ticks + 3-letter names
