@@ -224,6 +224,52 @@ Every UI surface created or reshaped by an agent must render correctly in BOTH d
 - Static-baked GDI+ pens/brushes FORBIDDEN for palette colors (theme-switch hazard — Commands_Edit fixed 2026-11-16).
 - Agent scratch: tests/tmp/ only (gitignored), clean at round end (TumatraPDF residue incident 2026-11-15).
 
+### 6.5 Typography tokens (added 2026-11-19, typography audit)
+
+Single source: ToolbarLayout.h/.cpp only.
+
+- DsFontFamily() = L"MS Shell Dlg" (ToolbarLayout.cpp:90-92)
+- DsFontSizeLabel() = 9.5f points (ToolbarLayout.cpp:94-96)
+- DsFontSizeTitle() = 11.0f points (ToolbarLayout.cpp:98-100)
+- DsIsDarkTheme() (ToolbarLayout.cpp:23-27) + DsAccentsGet() (ToolbarLayout.cpp:29-88) = theme/color side.
+
+Family distribution:
+
+| Family       | Sites | Locations                                                                                                                                 |
+| ------------ | ----- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| MS Shell Dlg | 28    | ToolbarLayout.cpp:91, HomePage.cpp:783/1148/2450/2451/2498/2986/3724, Canvas.cpp:4528/4548/4800/4959/4964/6527, RenderCache.cpp:1453, SumatraProperties.cpp:928, TextViewWnd.cpp:112 |
+| Segoe UI     | 4     | AutoScroll.cpp:404, Commands_Flashcard.cpp:1703, LinkFollow.cpp:314, MarkdownToc.cpp:407 (CSS in WebView; other 3 use px from DpiScale) |
+| Georgia      | 3     | EngineEbook.cpp:63/80, HtmlFormatter.cpp:1650 (EPUB serif fallback)                                                                       |
+| Arial        | 1     | FormFields.cpp:160 (AcroForm fallback)                                                                                                    |
+| Consolas     | 4     | RenderCache.cpp:1453, SumatraProperties.cpp:928, TextViewWnd.cpp:112, logview.cpp:1117 (mono/debug views, 14 pt)                         |
+
+Two rendering stacks:
+
+- GDI DrawTextW ~45 sites (FlashcardSidebar.cpp, FlashcardToolbar.cpp, HomePage.cpp, Canvas.cpp, AutoScroll.cpp, Commands_Flashcard.cpp)
+- GDI ExtTextOutW 8 (Win.cpp:3855/3864, logview.cpp:571/576/601/633/637/915/918/923)
+- GDI+ Graphics::DrawString ~25 (HomePage.cpp, Canvas.cpp, InstallerCommon.cpp, LinkFollow.cpp)
+- No DirectWrite in app code (only vendored ext/harfbuzz).
+
+THE UNIT RULE (design tokens are POINTS, no DPI scaling):
+
+- GDI path correct: HdcCreateSimpleFont(HDC, Str, int pt) (base/Win.cpp) does lfHeight = -MulDiv(pt, LOGPIXELSY, 96); negative = char height.
+- GDI+ trap: Gdiplus::Font(family, emSize) default UnitPoint → 9.5 pt @ 125% (LOGPIXELSY 120) = 15.833 px, 11 pt = 18.333 px → fractional em, uneven rasterization.
+- Canonical fix (HomePage.cpp s65): DsFontSizePx(hwnd, pt) = round(pt * DpiGetForHwnd(hwnd) / 72), then Gdiplus::Font(DsFontFamily(), DsFontSizePx(hwnd, DsFontSizeTitle()), style, UnitPixel).
+- Wrong usage (do NOT copy): Gdiplus::Font(L"MS Shell Dlg", 9) at Canvas.cpp:4800/4959/4964 (implicit UnitPoint).
+- DpiScale(hwnd, n) (Dpi_win.cpp:97) = MulDiv(x, GetDpiForWindow(hwnd), 96), returns int (truncates); manifest PerMonitorV2 (TumatraPDF.exe.manifest:25-26).
+
+Crispness rule: GDI+ text needs SetTextRenderingHint(TextRenderingHintClearTypeGridFit) (GdiPlusUtil.cpp:25, HomePage.cpp:1364/2004, TabsCtrl.cpp:41/152/403). Do NOT use InitGraphicsMode() where 1 px rects/bars must stay crisp (heatmap cells, progress bars) — also enables SmoothingModeAntiAlias.
+
+Mandatory rules for new UI:
+
+1. New text = DsFontFamily() + DsFontSizeLabel()/DsFontSizeTitle(); never literal family.
+2. GDI+ = DsFontSizePx(hwnd, pt) + UnitPixel; never points overload on DPI-aware surface.
+3. GDI = HdcCreateSimpleFont (does MulDiv); never raw lfHeight constant.
+4. Always set ClearType hint on fresh GDI+ Graphics from HDC.
+5. Mono (Consolas) and serif (Georgia) = deliberate per-surface, not defaults to spread.
+6. Verify dark AND light via §6.2 screenshot loop; no screenshot = not done.
+7. Out of scope: changing families. Document only what exists.
+
 ## 7. Dual namespaces — HARD rules (project bug history)
 
 - **virtual pageNo vs physical pageNo** (TC2 crop): features MUST route through

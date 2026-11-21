@@ -154,7 +154,7 @@ Feature shipped: single profile file `tumatraPDF-data_1.json` (exportable/syncab
 
 ## Bugs open
 
-- [ ] Linha de botão=on está aparecendo no botão errado trim:on→'trim config':line
+- [ ] Quando eu abro duas janelas diferentes, o app não consegue saber qual janela é qual e está somando tempos de estudos no lugar errado; inclusive sobrepondo tempos de leitura no livro errado;
 
 - [ ] TOC Reorder / bookmark toolbar: click-nav FIXED (s51-d — WM_LBUTTONDOWN gated behind tocReorderMode, default OFF = pass-through); top bar (Add + Reorder toggle, accent underline when ON) DONE s51-e; rename/update/delete right-click-menu only. s52 crash FIXED (TOC custom-draw use-after-free; `IsTocItemInCurrentTree` guard + ReloadTocTree after OutlineEdit). s53 wedge FIXED (async debounced ReloadTocTree + O(1) ownerTree validity check). Build 0/0; regressions PASS. Details: LOG s51→s55. USER live validation pending — see queue.
 - [ ] Session Tabs: closed books not correctly removed from session — [s45] MainWindowTabClosed pre-syncs active group on last-tab close; build 0/0, ad-hoc-tab-session(-sync/-e2e) PASS — awaiting USER validation (keep [ ]). [s46] audited: 7 latent sync bugs fixed (RemoveTab choke point + suppression guard + MoveTab pinned guard + drag/reorder sync + boot-restore SaveSettings + SyncActiveGroupToEmpty suppression); #8 missing-file-at-restore = pending design decision (skip vs error).

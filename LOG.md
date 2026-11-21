@@ -1,3 +1,25 @@
+## 2026-11-21 (s66) — Page Hold, per-window stats attribution, themed update dialog
+
+### Added
+- CmdPageHoldToggle toolbar toggle ("Hold", text button): captures reading position (virtual page + page-point offsets + physical anchor + column + zoom) per tab in DisplayModel::pageHold, restores exactly; works with Two Columns v2 and zoom changes; DisplayModel::PageHoldCapture/PageHoldRestore.
+- debug-control hooks TestRunCommand, TestPageHold, TestGetZoom, TestNewWindow, TestWindowStats, TestOpenInWindow (cmd/control.ts + SumatraControl.cpp).
+- tests/ad-hoc-page-hold.ts — 3 scenarios (normal, TC2 during hold, zoom during hold); verified it FAILS when SetScrollState is removed from restore.
+
+### Fixed
+- two-window stats attribution — sub-second carry was process-global (whole seconds credited to whichever window ticked last); now per window (MainWindow::readingStatsAccumSec, flashcardStatsAccumSec, readingStatsLastTick), FlashcardStatsAddSeconds takes owning window.
+- flashcard study tick credited fixed 0.01 s per tick while USER_TIMER_MINIMUM ~15.6 ms (~64% of wall clock); now measured with GetTickCount64, base reset at all 5 studyTimeSec reset sites.
+- update confirmation used stock TaskDialogIndirect (unthemeable, white buttons in dark theme) -> fork-themed window with app palette, owner-drawn buttons, ApplyDarkModeToPopupWindow; downloaded installer ProductVersion now compared against update.txt Latest: and rejected on mismatch.
+- PageHoldRestore validated physical anchor against virtual page count (PageCount() returns 2N with TC2) -> now engine->PageCount().
+
+### Changed
+- Design_Guidelines.md §6.5 Typography — single source (ToolbarLayout tokens), family inventory, GDI vs GDI+ split, points-vs-pixels rule (DsFontSizePx + UnitPixel), ClearType rule.
+
+### Verified
+- build time 655 s -> 18.3 s after excluding repo + sumatrapdf-src/out from Defender real-time scanning; Page Hold E2E: page 1->4->1, zoom 100 -> -0.99 restored.
+
+### Notes
+- gGlobalPrefs->activeTabGroup stays global (drives tab-group sync; session rows follow last active group). Update-dialog visuals pending user validation.
+
 ## 2026-11-19 (s65) - study time while paused + home stats layout
 
 ### Added
