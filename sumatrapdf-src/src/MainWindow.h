@@ -385,6 +385,13 @@ struct MainWindow {
         // pointer would move the target). Resumed when the dialog closes.
         bool autoPausedByTrimConfig = false;
     } autoScroll;
+    // Reading-stats webview path: per-window wall-clock reference so two
+    // windows don't compute dt from each other's timestamp (ReadingStats.cpp).
+    u64 readingStatsLastTick = 0;
+    // Per-window sub-second carry accumulators for stats attribution (one
+    // accumulator per window so two windows' ticks don't interleave).
+    float readingStatsAccumSec = 0.0f;
+    float flashcardStatsAccumSec = 0.0f;
     // --- end auto-scroll feature ---
 
     // --- trim config dialog state ---
@@ -529,6 +536,10 @@ struct MainWindow {
         // Capped at maxPerCardSec: each card contributes at most 60s to the
         // flashcard study-time stats (prevents one hard card inflating stats).
         float studyTimeSec = 0.0f;
+        // Real per-tick delta base (GetTickCount64), so crediting matches the
+        // USER_TIMER_MINIMUM ~15.6 ms tick instead of assuming 10 ms. Reset to
+        // 0 wherever studyTimeSec is reset so a stale base never credits a gap.
+        u64 lastStudyTick = 0;
         static constexpr float maxPerCardSec = 60.0f;
         // Session timer (like autoscroll's): user-configured minutes that
         // limit the study SESSION duration. Independent from the per-card

@@ -32,8 +32,6 @@ static bool kProfDualWriteSidecars = true;
 
 static struct {
     Vec<DailyEntry> daily; // kept sorted by dateKey
-    u64 lastTick = 0;      // wall-clock reference for the webview path
-    float accumSec = 0.0f; // sub-second carry: ticks arrive ~64Hz with ~0.01s
     int dirtySec = 0;      // unsaved seconds (write threshold)
     bool loaded = false;   // sidecar parsed
 } gReadingStats;
@@ -156,12 +154,12 @@ void ReadingStatsAddSeconds(MainWindow* win, float sec) {
     }
     // ticks arrive at ~64Hz with ~0.01s each — accumulate the fractional part
     // and only credit whole seconds (the stores hold Int seconds)
-    gReadingStats.accumSec += sec;
-    int whole = (int)gReadingStats.accumSec;
+    win->readingStatsAccumSec += sec;
+    int whole = (int)win->readingStatsAccumSec;
     if (whole <= 0) {
         return;
     }
-    gReadingStats.accumSec -= (float)whole;
+    win->readingStatsAccumSec -= (float)whole;
 
     {
         Str group = gGlobalPrefs->activeTabGroup;
@@ -188,21 +186,21 @@ void ReadingStatsAddSeconds(MainWindow* win, float sec) {
 
 void ReadingStatsTickWebview(MainWindow* win) {
     u64 now = GetTickCount64();
-    if (gReadingStats.lastTick == 0) {
-        gReadingStats.lastTick = now;
-        return;
+    u64 prev = win->readingStatsLastTick;
+    win->readingStatsLastTick = now;
+    if (prev == 0) {
+        return; // first tick: just arm the base, credit nothing
     }
     // the rAF loop scrolls continuously; credit the real elapsed wall-clock,
     // capped so a laptop-sleep gap never inflates a reading session
-    float dt = (float)(now - gReadingStats.lastTick) / 1000.0f;
-    gReadingStats.lastTick = now;
+    float dt = (float)(now - prev) / 1000.0f;
     if (dt > 0.0f && dt <= 1.5f) {
         ReadingStatsAddSeconds(win, dt);
     }
 }
 
-void ReadingStatsResetTick() {
-    gReadingStats.lastTick = 0;
+void ReadingStatsResetTick(MainWindow* win) {
+    win->readingStatsLastTick = 0;
 }
 
 void ReadingStatsFlush(bool force) {

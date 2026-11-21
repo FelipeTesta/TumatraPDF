@@ -16,8 +16,8 @@ void ReadingStatsAddSeconds(MainWindow* win, float sec);
 void ReadingStatsTickWebview(MainWindow* win);
 
 // drop the webview wall-clock reference (call on every stall/stop so a later
-// tick doesn't credit the gap)
-void ReadingStatsResetTick();
+// tick doesn't credit the gap). Per-window: `win` owns the timestamp.
+void ReadingStatsResetTick(MainWindow* win);
 
 // write the daily-stats sidecar file; pass force=false to skip when nothing
 // changed since the last write

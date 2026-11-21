@@ -116,8 +116,8 @@ static bool FlashcardSelectionIsDuplicate(WindowTab* tab, const Vec<SelectionOnP
             if (!str::StartsWith(author, StrL("TumatraPDF-Flashcard"))) {
                 continue;
             }
-            if (nearF(a->bounds.x, u.x) < 1.0f && nearF(a->bounds.y, u.y) < 1.0f &&
-                nearF(a->bounds.dx, u.dx) < 1.0f && nearF(a->bounds.dy, u.dy) < 1.0f) {
+            if (nearF(a->bounds.x, u.x) < 1.0f && nearF(a->bounds.y, u.y) < 1.0f && nearF(a->bounds.dx, u.dx) < 1.0f &&
+                nearF(a->bounds.dy, u.dy) < 1.0f) {
                 pageHasDup = true;
                 break;
             }
@@ -916,6 +916,7 @@ static void HandleFlashcardRate(MainWindow* win, int rating) {
     // Advance to next card: reset the per-card stats accumulator so the next
     // card gets its own 60s cap, and stop the timer when the session ends.
     win->flashcard.studyTimeSec = 0.0f;
+    win->flashcard.lastStudyTick = 0;
     win->flashcard.currentCardIdx++;
     if (win->flashcard.currentCardIdx >= len(win->flashcard.studyOrder)) {
         win->flashcard.studyMode = false;
@@ -943,6 +944,7 @@ void FlashcardStopSession(MainWindow* win) {
     win->flashcard.revealMode = false;
     win->flashcard.currentCardIdx = -1;
     win->flashcard.studyTimeSec = 0;
+    win->flashcard.lastStudyTick = 0;
     win->flashcard.studyOrder.Reset();
     FlashcardStudyTimerStop(win);
 }
@@ -1099,6 +1101,7 @@ bool HandleCommandFlashcard(MainWindow* win, int cmd) {
             win->flashcard.revealMode = false;
             win->flashcard.currentCardIdx = -1;
             win->flashcard.studyTimeSec = 0;
+            win->flashcard.lastStudyTick = 0;
             if (win->flashcard.studyMode) {
                 FlashcardPrewarmInvalidate(); // session (re)start: drop stale warm jobs
                 FlashcardPrewarmEnsureWorker();
@@ -1347,6 +1350,7 @@ bool HandleCommandFlashcard(MainWindow* win, int cmd) {
             // advance to the entry now at curIdx, or end the session
             win->flashcard.revealMode = false;
             win->flashcard.studyTimeSec = 0.0f;
+            win->flashcard.lastStudyTick = 0;
             win->flashcard.currentCardIdx = curIdx;
             if (win->flashcard.currentCardIdx >= len(win->flashcard.studyOrder)) {
                 win->flashcard.studyMode = false;
@@ -1497,6 +1501,7 @@ void FlashcardStudyTick(MainWindow* win, HWND hwnd) {
             win->flashcard.revealMode = false;
             win->flashcard.currentCardIdx = -1;
             win->flashcard.studyTimeSec = 0.0f;
+            win->flashcard.lastStudyTick = 0;
             win->flashcard.studyOrder.Reset();
             FlashcardStudyTimerStop(win);
             FlashcardToolbarUpdateState(win);
@@ -1529,9 +1534,21 @@ void FlashcardStudyTick(MainWindow* win, HWND hwnd) {
     // (studyOrder[curIdx].tab) — correct even when the user Ctrl+Tab'd away
     // from the card's document mid-session. e.tab null/closed → skip the
     // tick entirely (no credit, no crash).
+    //
+    // Measure the real delta instead of assuming 10 ms: the timer is armed
+    // with USER_TIMER_MINIMUM (~15.6 ms), so a fixed 0.01f credit under-reports
+    // wall clock by ~36%. Same pattern as AutoScrollContinuousTick
+    // (AutoScroll.cpp:577-582).
+    u64 now = GetTickCount64();
+    u64 prev = win->flashcard.lastStudyTick;
+    win->flashcard.lastStudyTick = now;
+    float dt = prev ? (float)(now - prev) / 1000.0f : 0.0f;
+    if (dt <= 0.0f || dt > 1.5f) {
+        dt = 0.0f; // first tick, clock went backwards, or a sleep/blocked gap
+    }
     if (win->flashcard.studyTimeSec < win->flashcard.maxPerCardSec) {
-        win->flashcard.studyTimeSec += 0.01f; // 10ms per tick
-        FlashcardStatsAddSeconds(e.tab, 0.01f);
+        win->flashcard.studyTimeSec += dt;
+        FlashcardStatsAddSeconds(win, e.tab, dt);
     }
     // --- 3. Idle prewarm pump (s64-R9p): one-shot per advance; enqueue is
     // self-deduping via prewarmFilledForIdx ---

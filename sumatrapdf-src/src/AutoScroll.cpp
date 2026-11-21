@@ -236,7 +236,7 @@ void AutoScrollToggle(MainWindow* win) {
             win->autoScroll.webviewCtrlDown = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
             SetWebviewAutoScroll(win, win->autoScroll.webviewCtrlDown ? 0 : win->autoScroll.webviewPxPerSec);
         }
-        ReadingStatsResetTick();
+        ReadingStatsResetTick(win);
     } else {
         KillTimer(win->hwndCanvas, kContinuousAutoScrollTimerID);
         if (mm) {
@@ -532,7 +532,7 @@ void AutoScrollContinuousTick(MainWindow* win, HWND hwnd) {
         // mouse while scrolling. Skip the tick when the canvas isn't valid.
         if (dm->GetCanvasSize().dy <= 0) {
             win->autoScroll.lastScrollTick = GetTickCount64();
-            ReadingStatsResetTick();
+            ReadingStatsResetTick(win);
             return;
         }
         if (dm->IsAtDocumentEnd()) {

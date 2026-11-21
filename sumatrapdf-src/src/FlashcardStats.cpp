@@ -36,7 +36,6 @@ static bool kProfDualWriteSidecars = true;
 
 static struct {
     Vec<DailyEntry> daily; // kept sorted by dateKey
-    float accumSec = 0.0f; // sub-second carry: ticks arrive ~64Hz with ~0.01s
     int dirtySec = 0;      // unsaved seconds (write threshold)
     int dirtyCards = 0;    // unsaved rated cards (secondary write threshold)
     bool loaded = false;   // sidecar parsed
@@ -205,22 +204,22 @@ void FlashcardStatsAddCard(WindowTab* tab) {
     }
 }
 
-void FlashcardStatsAddSeconds(WindowTab* tab, float sec) {
+void FlashcardStatsAddSeconds(MainWindow* win, WindowTab* tab, float sec) {
     if (sec <= 0.0f) {
         return;
     }
-    // Accumulator spaces: gFlashcardStats.accumSec is a window/machine-level
-    // sub-second carry (shared across docs; whole seconds may straddle a tab
-    // switch, <1s drift). Whole seconds are credited per-document via the
-    // OWNING tab passed by the caller (studyOrder[curIdx].tab), never via
+    // Accumulator spaces: win->flashcardStatsAccumSec is a per-window
+    // sub-second carry (so two windows' ticks don't interleave into one
+    // carry). Whole seconds are credited per-document via the OWNING tab
+    // passed by the caller (studyOrder[curIdx].tab), never via
     // win->CurrentTab() — see FlashcardStats.h. The daily bucket + dirtySec
     // stay window/machine-level.
-    gFlashcardStats.accumSec += sec;
-    int whole = (int)gFlashcardStats.accumSec;
+    win->flashcardStatsAccumSec += sec;
+    int whole = (int)win->flashcardStatsAccumSec;
     if (whole <= 0) {
         return;
     }
-    gFlashcardStats.accumSec -= (float)whole;
+    win->flashcardStatsAccumSec -= (float)whole;
 
     {
         Str group = gGlobalPrefs->activeTabGroup;
