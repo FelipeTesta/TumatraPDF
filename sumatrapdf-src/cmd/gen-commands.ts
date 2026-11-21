@@ -346,6 +346,7 @@ export const commands = [
     "CmdBookmarkRename", "Rename Bookmark",
     "CmdArchPageCrop", "Arch: Page Crop (image-editor bounding box)",
     "CmdFlashcardDeleteActive", "Flashcard Delete Active Card",
+    "CmdPageHoldToggle", "Toggle Page Hold",
     "CmdNone", "Do nothing",
 ];
 

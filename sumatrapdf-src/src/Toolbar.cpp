@@ -110,6 +110,7 @@ static ToolbarButtonInfo gToolbarButtons[] = {
     {TbIcon::Text, CmdViewportCropV2Toggle, _TRN("Two Columns")},
     {TbIcon::Text, CmdMarginTrimToggle, _TRN("Trim")},
     {TbIcon::Text, CmdTrimConfig, _TRN("Trim Config")},
+    {TbIcon::Text, CmdPageHoldToggle, _TRN("Hold")},
     {TbIcon::None, 0, nullptr}, // separator
     {TbIcon::Text, CmdFlashcardToggle, _TRN("Flashcard")},
     {TbIcon::None, 0, nullptr}, // separator before Arch Tools toggle
@@ -494,7 +495,7 @@ static TBBUTTON TbButtonFromButtonInfo(const ToolbarButtonInfo& bi, bool noTrans
         bi.cmdId == CmdContrastToggle || bi.cmdId == CmdAutoScrollToggle || bi.cmdId == CmdViewportCropToggle ||
         bi.cmdId == CmdViewportCropV2Toggle || bi.cmdId == CmdMarginTrimToggle || bi.cmdId == CmdArchToolsToggle ||
         bi.cmdId == CmdFlashcardToggle || bi.cmdId == CmdEditToolsToggle || bi.cmdId == CmdToggleBookmarks ||
-        bi.cmdId == CmdInvertColors) {
+        bi.cmdId == CmdInvertColors || bi.cmdId == CmdPageHoldToggle) {
         b.fsStyle = BTNS_CHECK;
     }
     if (bi.bmpIndex == TbIcon::Text) {
@@ -715,6 +716,7 @@ void ToolbarUpdateStateForWindow(MainWindow* win, bool setButtonsVisibility) {
     DisplayModel* dmChecked = win->AsFixed();
     SetToolbarButtonCheckedState(win, CmdViewportCropV2Toggle, dmChecked ? dmChecked->viewportCropV2Enabled : false);
     SetToolbarButtonCheckedState(win, CmdMarginTrimToggle, dmChecked ? dmChecked->marginTrimEnabled : false);
+    SetToolbarButtonCheckedState(win, CmdPageHoldToggle, dmChecked ? dmChecked->pageHold.active : false);
     // Crop Align (moved to Edit toolbar): sync checked state from archTools.toolMode
     SetToolbarButtonCheckedState(win, CmdArchAlign, win->archTools.toolMode == 5);
     SetToolbarButtonCheckedState(win, CmdArchPageCrop, win->archTools.toolMode == 6);

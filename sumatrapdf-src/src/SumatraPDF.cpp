@@ -11988,6 +11988,22 @@ static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, L
             }
             break;
 
+        case CmdPageHoldToggle: {
+            auto holdDm = win->AsFixed();
+            if (!holdDm) break; // fixed-layout docs only
+            if (holdDm->pageHold.active) {
+                if (holdDm->PageHoldRestore()) {
+                    holdDm->pageHold.active = false;
+                }
+            } else {
+                holdDm->PageHoldCapture();
+                holdDm->pageHold.active = holdDm->pageHold.valid;
+            }
+            SetToolbarButtonCheckedState(win, CmdPageHoldToggle, holdDm->pageHold.active);
+            HwndRepaintNow(win->hwndCanvas);
+            break;
+        }
+
         case CmdMarginTrimToggle:
             if (ShouldToggle(cmd, win->AsFixed() ? win->AsFixed()->marginTrimEnabled : false)) {
                 auto trimDm = win->AsFixed();

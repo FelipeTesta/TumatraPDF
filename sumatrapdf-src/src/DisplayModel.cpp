@@ -3000,6 +3000,65 @@ void DisplayModel::SetScrollState(const ScrollState& state) {
     stableNavPoint.suppress = false;
 }
 
+// Page Hold: capture the current view (page, scroll offsets, zoom) so the user
+// can navigate away and return exactly to the same position.
+void DisplayModel::PageHoldCapture() {
+    pageHold.state = GetScrollState();
+    int virtPage = pageHold.state.page;
+    if (ValidPageNo(virtPage)) {
+        pageHold.physAnchor = IsViewportCropV2Active() ? VirtualToPhysical(virtPage) : virtPage;
+        pageHold.column = IsViewportCropV2Active() ? ColumnOfVirtual(virtPage) : 0;
+        pageHold.zoomVirtual = zoomVirtual;
+        pageHold.valid = virtPage >= 1 && virtPage <= VirtualPageCount();
+    } else {
+        pageHold.valid = false;
+    }
+    logf("[hold] capture: page=%d phys=%d col=%d zoom=%g", virtPage, pageHold.physAnchor, pageHold.column,
+         pageHold.zoomVirtual);
+}
+
+// Page Hold: restore the captured view. Returns true if restored, false if
+// the saved state is no longer valid (e.g. document changed).
+bool DisplayModel::PageHoldRestore() {
+    if (!pageHold.valid) {
+        logf("[hold] restore: invalid state");
+        return false;
+    }
+    // Validate physical anchor against ENGINE page count FIRST (before any clamping)
+    // PageCount() = virtual pages (2N in v2); engine->PageCount() = physical pages
+    if (pageHold.physAnchor < 1 || pageHold.physAnchor > engine->PageCount()) {
+        logf("[hold] restore: physAnchor=%d not in current doc (engine pages=1..%d)", pageHold.physAnchor,
+             engine->PageCount());
+        return false;
+    }
+    // Map physical anchor + column back to the CURRENT layout domain
+    int restorePage;
+    if (IsViewportCropV2Active()) {
+        int col = pageHold.column;
+        if (GetDisplayR2L()) {
+            col = 1 - col;
+        }
+        restorePage = pageHold.physAnchor * 2 - 1 + col;
+    } else {
+        restorePage = pageHold.physAnchor;
+    }
+    // Clamp to valid page range (defensive)
+    if (restorePage < 1) restorePage = 1;
+    if (restorePage > VirtualPageCount()) restorePage = VirtualPageCount();
+    // Restore zoom FIRST if it differs (SetZoomVirtual relayouts and preserves position)
+    if (zoomVirtual != pageHold.zoomVirtual && IsValidZoom(pageHold.zoomVirtual)) {
+        logf("[hold] restore: zoom change %g -> %g", zoomVirtual, pageHold.zoomVirtual);
+        SetZoomVirtual(pageHold.zoomVirtual, nullptr);
+    }
+    // Restore scroll position (ss.zoom = 0 so SetScrollState doesn't try to set zoom again)
+    ScrollState ss(restorePage, pageHold.state.x, pageHold.state.y);
+    ss.zoom = 0;
+    SetScrollState(ss);
+    logf("[hold] restore: page=%d phys=%d col=%d zoom=%g", restorePage, pageHold.physAnchor, pageHold.column,
+         pageHold.zoomVirtual);
+    return true;
+}
+
 // don't remember more than "enough" history entries (same number as Firefox uses)
 #define MAX_NAV_HISTORY_LEN 50
 

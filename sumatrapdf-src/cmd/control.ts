@@ -69,6 +69,14 @@ export enum ControlCommand {
   TestGetPageNo = 69,
   TestTocToolbarButton = 70,
   TestBookmarkDelete = 71,
+  TestRunCommand = 72,
+  TestPageHold = 73,
+  TestGetZoom = 74,
+  TestNewWindow = 75,
+  TestWindowStats = 76,
+  TestOpenInWindow = 77,
+  TestFocusWindow = 78,
+  TestRunCommandInWindow = 79,
 }
 
 export type ControlArg = number | string | Uint8Array | ControlArg[];

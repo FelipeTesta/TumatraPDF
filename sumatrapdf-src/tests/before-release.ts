@@ -24,6 +24,7 @@ import { testit as adHocProfileLiveWrites } from "./ad-hoc-profile-live-writes.t
 import { testit as adHocTabSession } from "./ad-hoc-tab-session.ts";
 import { testit as adHocTabMenu } from "./ad-hoc-tab-menu.ts";
 import { testit as adHocTabSessionE2E } from "./ad-hoc-tab-session-e2e.ts";
+import { testit as adHocPageHold } from "./ad-hoc-page-hold.ts";
 import { testit as adHocAnnotSaveIntegrity } from "./ad-hoc-annot-save-integrity.ts";
 import { testit as adHocRestoreNoFileStates } from "./ad-hoc-restore-no-filestates.ts";
 import { testit as adHocPerfStartup } from "./ad-hoc-perf-startup.ts";
@@ -58,6 +59,7 @@ const adHocTests: [string, () => void | Promise<void>][] = [
   ["ad-hoc-tab-session-sync2", adHocTabSessionSync2],
   ["ad-hoc-tab-menu", adHocTabMenu],
   ["ad-hoc-tab-session-e2e", adHocTabSessionE2E],
+  ["ad-hoc-page-hold", adHocPageHold],
   ["ad-hoc-annot-save-integrity", adHocAnnotSaveIntegrity],
   ["ad-hoc-restore-no-filestates", adHocRestoreNoFileStates],
   ["ad-hoc-perf-startup", adHocPerfStartup],

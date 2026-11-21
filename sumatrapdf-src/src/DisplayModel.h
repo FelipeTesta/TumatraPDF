@@ -74,6 +74,16 @@ struct ScrollState {
     float zoom = 0;
 };
 
+/* Per-tab Page Hold state: capture position+zoom, navigate, restore exactly */
+struct PageHold {
+    bool active = false;   // user toggled the hold button on
+    bool valid = false;    // capture produced a restorable state
+    int physAnchor = 0;    // physical (engine) page, 1-based
+    int column = 0;        // 0 = left, 1 = right column in TC2
+    float zoomVirtual = 0; // zoomVirtual at capture time (fit mode or percent)
+    ScrollState state;     // virtual page + PAGE-point offsets
+};
+
 struct TextSelection;
 struct TextSearch;
 struct TextSel;
@@ -205,6 +215,9 @@ struct DisplayModel : DocController {
 
     ScrollState GetScrollState();
     void SetScrollState(const ScrollState& state);
+
+    void PageHoldCapture();
+    bool PageHoldRestore();
 
     void CopyNavHistory(DisplayModel& orig);
 
@@ -363,6 +376,9 @@ struct DisplayModel : DocController {
     bool viewportCropV2QuickToggled = false; // currently showing full page
     float viewportCropV2SavedZoom = 1.0f;    // column zoom restored on quick-view release
     int viewportCropV2SavedColumn = 0; // column (0 left / 1 right) the user was reading when the quick view started
+
+    // page hold: capture position+zoom per tab, restore exactly
+    PageHold pageHold;
 
     // margin trim (independent of viewport crop); the margins are per document
     // so each book keeps the trim setup it was last saved with

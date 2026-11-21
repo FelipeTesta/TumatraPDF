@@ -407,6 +407,14 @@ enum class ControlCmd : u16 {
     TestGetPageNo = 69,
     TestTocToolbarButton = 70,
     TestBookmarkDelete = 71,
+    TestRunCommand = 72,
+    TestPageHold = 73,
+    TestGetZoom = 74,
+    TestNewWindow = 75,
+    TestWindowStats = 76,
+    TestOpenInWindow = 77,
+    TestFocusWindow = 78,
+    TestRunCommandInWindow = 79,
 };
 
 enum class ControlArgType : u16 {
@@ -1373,6 +1381,254 @@ static void ExecuteControlRequest(ControlRequest* req) {
                 break;
             }
             AppendTestResult(req, 0, StrL("OK\n"));
+            break;
+        }
+
+        case ControlCmd::TestRunCommand: {
+            // Execute a command by ID on the focused window's frame (same as toolbar/menu)
+            // Request: int32 commandId
+            // Response: int32 ok/result (1 = dispatched, 0 = error)
+            i32 cmdId = 0;
+            if (!IntArg(req, 0, cmdId)) {
+                AppendError(req, "TestRunCommand expects int commandId");
+                break;
+            }
+            if (len(gWindows) == 0) {
+                AppendError(req, "TestRunCommand no-window");
+                break;
+            }
+            MainWindow* win = gWindows[0];
+            if (!win || !win->hwndFrame) {
+                AppendError(req, "TestRunCommand no-frame");
+                break;
+            }
+            // Post to UI thread via SendMessage (same as toolbar buttons do)
+            SendMessageW(win->hwndFrame, WM_COMMAND, (WPARAM)cmdId, 0);
+            AppendTestResult(req, 1, StrL("OK\n"));
+            break;
+        }
+
+        case ControlCmd::TestPageHold: {
+            // Toggle Page Hold and return state
+            // Returns list: [active, virtualPage, physAnchor, x, y, zoomTimes100, tc2Flag]
+            if (len(gWindows) == 0) {
+                AppendError(req, "TestPageHold no-window");
+                break;
+            }
+            MainWindow* win = gWindows[0];
+            if (!win || !win->ctrl) {
+                AppendError(req, "TestPageHold no-doc");
+                break;
+            }
+            DisplayModel* dm = win->AsFixed();
+            if (!dm) {
+                AppendError(req, "TestPageHold not-fixed-layout");
+                break;
+            }
+            // Toggle the hold (same as CmdPageHoldToggle handler)
+            if (dm->pageHold.active) {
+                dm->PageHoldRestore();
+                dm->pageHold.active = false;
+            } else {
+                dm->PageHoldCapture();
+                dm->pageHold.active = dm->pageHold.valid;
+            }
+            SetToolbarButtonCheckedState(win, CmdPageHoldToggle, dm->pageHold.active);
+            HwndRepaintNow(win->hwndCanvas);
+
+            // Build response list: [active, virtualPage, physAnchor, x, y, zoomTimes100, tc2Flag]
+            ScrollState ss = dm->GetScrollState();
+            int active = dm->pageHold.active ? 1 : 0;
+            int virtPage = ss.page;
+            int physAnchor = dm->pageHold.physAnchor;
+            int x = ss.x;
+            int y = ss.y;
+            int zoomTimes100 = (int)(dm->zoomVirtual * 100.0f + 0.5f);
+            int tc2Flag = dm->IsViewportCropV2Active() ? 1 : 0;
+
+            // Manually encode list: type=List(4), count=7, then 7 Int32 elements
+            AppendU16(req->results, (u16)ControlArgType::List);
+            AppendU16(req->results, 7);
+            AppendArgInt(req->results, active);
+            AppendArgInt(req->results, virtPage);
+            AppendArgInt(req->results, physAnchor);
+            AppendArgInt(req->results, x);
+            AppendArgInt(req->results, y);
+            AppendArgInt(req->results, zoomTimes100);
+            AppendArgInt(req->results, tc2Flag);
+            AppendArgEnd(req->results);
+            break;
+        }
+
+        case ControlCmd::TestGetZoom: {
+            // Returns current zoom * 100 (no toggle, no state change)
+            if (len(gWindows) == 0) {
+                AppendError(req, "TestGetZoom no-window");
+                break;
+            }
+            MainWindow* win = gWindows[0];
+            if (!win || !win->ctrl) {
+                AppendError(req, "TestGetZoom no-doc");
+                break;
+            }
+            DisplayModel* dm = win->AsFixed();
+            if (!dm) {
+                AppendError(req, "TestGetZoom not-fixed-layout");
+                break;
+            }
+            int zoomTimes100 = (int)(dm->zoomVirtual * 100.0f + 0.5f);
+            AppendArgInt(req->results, zoomTimes100);
+            AppendArgEnd(req->results);
+            break;
+        }
+
+        case ControlCmd::TestNewWindow: {
+            // Dispatch CmdNewWindow and return the number of open windows
+            if (len(gWindows) == 0) {
+                AppendError(req, "TestNewWindow no-window");
+                break;
+            }
+            MainWindow* win = gWindows[0];
+            SendMessageW(win->hwndFrame, WM_COMMAND, CmdNewWindow, 0);
+            // Wait a bit for the window to be created
+            Sleep(200);
+            int numWindows = len(gWindows);
+            AppendArgInt(req->results, numWindows);
+            AppendArgEnd(req->results);
+            break;
+        }
+
+        case ControlCmd::TestWindowStats: {
+            // Returns stats for gWindows[index]
+            // Request: int32 index
+            // Response: list [filePath, readingTimeSec, flashcardStudyTimeSec, readingStatsAccumSec,
+            // flashcardStatsAccumSec]
+            i32 index = 0;
+            if (!IntArg(req, 0, index)) {
+                AppendError(req, "TestWindowStats expects int index");
+                break;
+            }
+            if (index < 0 || index >= len(gWindows)) {
+                // Out of range: return zeros/empty
+                AppendU16(req->results, (u16)ControlArgType::List);
+                AppendU16(req->results, 5);
+                AppendArgString(req->results, StrL(""));
+                AppendArgInt(req->results, 0);
+                AppendArgInt(req->results, 0);
+                AppendArgInt(req->results, 0);
+                AppendArgInt(req->results, 0);
+                AppendArgEnd(req->results);
+                break;
+            }
+            MainWindow* win = gWindows[index];
+            Str filePath = StrL("");
+            int readingTimeSec = 0;
+            int flashcardStudyTimeSec = 0;
+            int readingStatsAccumSec = 0;
+            int flashcardStatsAccumSec = 0;
+
+            if (win && win->ctrl) {
+                WindowTab* tab = win->CurrentTab();
+                if (tab && tab->filePath) {
+                    filePath = tab->filePath;
+                    FileState* fs = gFileHistory.FindByPath(tab->filePath);
+                    if (fs) {
+                        readingTimeSec = fs->readingTimeSec;
+                        flashcardStudyTimeSec = fs->flashcardStudyTimeSec;
+                    }
+                }
+                readingStatsAccumSec = (int)(win->readingStatsAccumSec + 0.5f);
+                flashcardStatsAccumSec = (int)(win->flashcardStatsAccumSec + 0.5f);
+            }
+
+            // Manually encode list: type=List(4), count=5, then 5 elements (string + 4 ints)
+            AppendU16(req->results, (u16)ControlArgType::List);
+            AppendU16(req->results, 5);
+            AppendArgString(req->results, filePath);
+            AppendArgInt(req->results, readingTimeSec);
+            AppendArgInt(req->results, flashcardStudyTimeSec);
+            AppendArgInt(req->results, readingStatsAccumSec);
+            AppendArgInt(req->results, flashcardStatsAccumSec);
+            AppendArgEnd(req->results);
+            break;
+        }
+
+        case ControlCmd::TestOpenInWindow: {
+            // Open a file in a specific window
+            // Request: int32 index, string filePath
+            i32 index = 0;
+            Str filePath = StringArg(req, 1);
+            if (!IntArg(req, 0, index) || !filePath) {
+                AppendError(req, "TestOpenInWindow expects int index, string filePath");
+                break;
+            }
+            if (index < 0 || index >= len(gWindows)) {
+                AppendError(req, "TestOpenInWindow index out of range");
+                break;
+            }
+            MainWindow* win = gWindows[index];
+            if (!win) {
+                AppendError(req, "TestOpenInWindow no-window");
+                break;
+            }
+            // Create LoadArgs for the target window
+            LoadArgs* args = new LoadArgs(filePath, win);
+            args->forceReuse = false;
+            args->noPlaceWindow = false;
+            // Use StartLoadDocument to load asynchronously on the UI thread
+            StartLoadDocument(args);
+            AppendArgInt(req->results, 1);
+            AppendArgEnd(req->results);
+            break;
+        }
+
+        case ControlCmd::TestFocusWindow: {
+            // Focus/activate window by index
+            // Request: int32 index
+            // Response: int32 ok (1 = focused, 0 = error)
+            i32 index = 0;
+            if (!IntArg(req, 0, index)) {
+                AppendError(req, "TestFocusWindow expects int index");
+                break;
+            }
+            if (index < 0 || index >= len(gWindows)) {
+                AppendError(req, "TestFocusWindow index out of range");
+                break;
+            }
+            MainWindow* win = gWindows[index];
+            if (!win || !win->hwndFrame) {
+                AppendError(req, "TestFocusWindow no-frame");
+                break;
+            }
+            SetForegroundWindow(win->hwndFrame);
+            AppendArgInt(req->results, 1);
+            AppendArgEnd(req->results);
+            break;
+        }
+
+        case ControlCmd::TestRunCommandInWindow: {
+            // Run a command by ID on a specific window's frame (unlike
+            // TestRunCommand, which uses the focused window gWindows[0])
+            // Request: int32 index, int32 commandId
+            // Response: int32 ok/result (1 = dispatched, 0 = error)
+            i32 index = 0;
+            i32 cmdId = 0;
+            if (!IntArg(req, 0, index) || !IntArg(req, 1, cmdId)) {
+                AppendError(req, "TestRunCommandInWindow expects int index, int commandId");
+                break;
+            }
+            if (index < 0 || index >= len(gWindows)) {
+                AppendError(req, "TestRunCommandInWindow index out of range");
+                break;
+            }
+            MainWindow* win = gWindows[index];
+            if (!win || !win->hwndFrame) {
+                AppendError(req, "TestRunCommandInWindow no-frame");
+                break;
+            }
+            SendMessageW(win->hwndFrame, WM_COMMAND, (WPARAM)cmdId, 0);
+            AppendArgInt(req->results, 1);
+            AppendArgEnd(req->results);
             break;
         }
 
