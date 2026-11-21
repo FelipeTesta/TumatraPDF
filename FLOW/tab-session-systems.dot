@@ -1,5 +1,5 @@
 // ===================== TAB SESSION SYSTEM =====================
-// Snapshot 2026-11-06 pre-s46. Red dashed = sync gaps found by audit;
+// Snapshot 2026-11-21 per-window active group s67. Red dashed = sync gaps found by audit;
 // s46 fix applied : RemoveTab now syncs, last-tab pre-sync covers
 // programmatic path, drag/keyboard reorder sync, pinned keyboard lock,
 // boot re-save. Remaining red = direct SetSelected bypass
@@ -15,7 +15,7 @@ digraph TabSessionSystem {
     TabsMgmt [label="Tabs.cpp mgmt\n(AddTabToWindow/RemoveTab/CloseAllTabs/MoveTab)"];
     SumatraPDF [label="SumatraPDF.cpp\n(CloseTab:4950 / CloseWindow:5079 / SaveSettings)"];
     TabGroups [label="gGlobalPrefs->tabGroups\n(Settings.h:1025)", shape=database];
-    ActiveGroup [label="gGlobalPrefs->activeTabGroup\n(Settings.h:1067)", shape=note];
+    ActiveGroup [label="MainWindow::activeTabGroup\n(per-window live state)\ngGlobalPrefs->activeTabGroup\n(persistence mirror only)", shape=note];
     SettingsFile [label="TumatraPDF-settings.txt\n(on disk)", shape=database];
     Window [label="MainWindow / Win->Tabs()\n(WindowTab per-doc state)"];
     Restore [label="Startup restore\n(SumatraStartup.cpp:2677)"];
@@ -46,9 +46,9 @@ digraph TabSessionSystem {
     TabsMgmt -> TabsMgmt [label="MoveTab/SwapTabs (892)", color=red, style=dashed];
     TabsMgmt -> TabGroups [label="NO sync", color=red, style=dashed];
     TabsCtrlBar -> TabsMgmt [label="drag out to new window\nMainWindowTabMigration (645)"];
-    TabsMgmt -> ActiveGroup [label="activeTabGroup='' (663)"];
+    TabsMgmt -> ActiveGroup [label="new window unsynced; original keeps group"];
     User -> SumatraPDF [label="Ctrl+N"];
-    SumatraPDF -> ActiveGroup [label="activeTabGroup='' (9848)"];
+    SumatraPDF -> ActiveGroup [label="new window starts unsynced; other windows keep theirs"];
     User -> TabsCtrlBar [label="Tab Group dropdown"];
     TabsCtrlBar -> SumatraPDF [label="HandleTabGroupMenuCmd (12447)"];
     SumatraPDF -> Window [label="ActivateTabGroupInWindow (617)\nclose current, load group files"];
@@ -60,4 +60,5 @@ digraph TabSessionSystem {
     SettingsFile -> Restore [label="read tabGroups + activeTabGroup"];
     Restore -> Window [label="load each tabFiles entry (2690)"];
     Restore -> TabGroups [label="SuppressGroupAutoSave during boot (2686)\nNO final SaveSettings (6)"];
+    Window -> ActiveGroup [label="tab change syncs into owning window's group"];
 }

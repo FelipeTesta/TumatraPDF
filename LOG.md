@@ -1,3 +1,21 @@
+## 2026-11-21 (s67) — Per-window tab-group (session) state
+
+### Fixed
+- tab-group sync state was a process-global pointer (gGlobalPrefs->activeTabGroup); with two windows the first window's sync button and dropdown check mark showed/applied the SECOND window's session (check mark on wrong session).
+- tab changes in one window overwrote the other window's session document list (auto-sync destination is now the owning window's group).
+- reading and flashcard study seconds were credited to the global active group; now credited to the session of the owning window (GetWindowActiveTabGroup).
+- (pre-existing leak found during the audit) str::Free(oldName) missing in both tab-group rename paths (menu rename + dialog rename).
+
+### Changed
+- new per-window field MainWindow::activeTabGroup + helpers GetWindowActiveTabGroup / SetWindowActiveTabGroup (TabGroupsManage.h); gGlobalPrefs->activeTabGroup stays only as persistence mirror (settings format unchanged, boot restore still seeds the first window).
+- Ctrl+N and drag-out no longer clear the global; new window starts unsynced, existing windows keep their groups; rename/delete of a group now fix up every window referencing it.
+
+### Verified
+- build 0 errors / 0 warnings (38.7 s debug build after Defender exclusion); BOM-free (no UTF-8 BOM in touched files); grep over src/ shows no remaining read of the global that decides a per-window state.
+
+### Notes
+- two windows can hold two different synced sessions at the same time; the persisted ActiveTabGroup is the last group ASSIGNED to any window (not the focused one) and is used only for boot restore.
+
 ## 2026-11-21 (s66) — Page Hold, per-window stats attribution, themed update dialog
 
 ### Added
