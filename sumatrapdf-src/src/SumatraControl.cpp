@@ -416,6 +416,9 @@ enum class ControlCmd : u16 {
     TestRunCommand = 72,
     TestPageHold = 73,
     TestGetZoom = 74,
+    // Manual multi-window test instrumentation (intentional, kept).
+    // Drives/focuses/reads stats per window via the control pipe.
+    // No automated test uses these hooks yet.
     TestNewWindow = 75,
     TestWindowStats = 76,
     TestOpenInWindow = 77,

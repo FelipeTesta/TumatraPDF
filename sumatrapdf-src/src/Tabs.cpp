@@ -188,6 +188,11 @@ void RemoveTab(WindowTab* tab) {
     // itself treats Home-only as "no tabs").
     UpdateTabWidth(win);
 
+    // DEFECT 8: re-sync the active tab group after ANY tab removal
+    // (programmatic close: Ctrl+W, command palette, Favorites, NavFilesInFolder)
+    // Must run for both current and non-current tabs, so BEFORE the early returns.
+    UpdateActiveGroupAutoSave(win);
+
     int nTabs = win->TabCount();
     if (nTabs < 1) {
         return;
@@ -259,6 +264,7 @@ static void MaybeMigrateTab(WindowTab* tab, MainWindow* newWin, Point releasePt)
     }
 
     RemoveTab(tab);
+    UpdateActiveGroupAutoSave(oldWin);
 
     if (!newWin) {
         if (IsZoomed(oldWin->hwndFrame)) {
@@ -648,7 +654,11 @@ static void MainWindowTabClosed(MainWindow* win, TabsCtrl::ClosedEvent* ev) {
         SyncActiveGroupToEmpty(win);
     }
     CloseTab(tab, false);
-    UpdateActiveGroupAutoSave(win);
+    // DEFECT 9: CloseTab -> CloseWindow -> DeleteMainWindow may free win
+    // (when the closed tab was the last one). Only re-sync if win is still valid.
+    if (IsMainWindowValid(win)) {
+        UpdateActiveGroupAutoSave(win);
+    }
 }
 
 static void MainWindowTabSelectionChanging(MainWindow* win, TabsCtrl::SelectionChangingEvent* ev) {

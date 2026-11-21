@@ -53,7 +53,7 @@ void ToolbarRewrapAfterSizing(MainWindow* win, HWND hwndToolbar, bool force);
 // state (R6-left lesson — keyboard/palette invocation stays in sync).
 
 // subclass ids for the flashcard-specific rebar/toolbar layers (the generic
-// ones installed by ToolbarApplyThemeToRebar use 0)
+// ones use 0)
 constexpr UINT_PTR kFcRebarSubclassId = 0x4652;   // 'FR'
 constexpr UINT_PTR kFcToolbarSubclassId = 0x4653; // 'FS'
 
@@ -437,18 +437,18 @@ void FlashcardToolbarCreate(MainWindow* win) {
                                        (HMENU)IDC_FLASHCARD_TOOLBAR, hinst, nullptr);
     TbSetButtonStructSize(hwndToolbar, sizeofi(TBBUTTON));
 
-    // ---- theming + subclassing, ALL inline (no ToolbarApplyThemeToRebar) ----
+    // ---- theming + subclassing, ALL inline (no shared theme helper) ----
     // s36-ax traps that forced this layout (all reproduced empirically):
     //  - SetWindowTheme(toolbar, L"", L"") AFTER TbAddButtons invalidates
     //    comctl's per-button layout: TB_GETITEMRECT returns FALSE (debug
     //    assert kills the creation), and a second strip after the buttons
     //    paints the band blank with no buttons (white bar, only the trio);
-    //  - ToolbarApplyThemeToRebar BEFORE TbAddButtons makes TB_ADDBUTTONS
+    //  - A shared theme helper run BEFORE TbAddButtons makes TB_ADDBUTTONS
     //    itself fail (regardless of iBitmap);
-    //  - ToolbarApplyThemeToRebar's WndProcToolbar (base proc via
-    //    SetWindowLongPtr) must NOT be wrapped with a SetWindowSubclass
-    //    layer — its CallWindowProc(DefWndProcToolbar) fallthrough
-    //    re-dispatches the chain head and recurses forever (hang).
+    //  - That shared helper's WndProcToolbar (base proc via SetWindowLongPtr)
+    //    must NOT be wrapped with a SetWindowSubclass layer — its
+    //    CallWindowProc(DefWndProcToolbar) fallthrough re-dispatches the chain
+    //    head and recurses forever (hang).
     // So: strip the theme HERE (the only strip, before buttons), theme the
     // rebar directly, and use the flashcard's OWN subclass pair (see
     // FlashcardReBarSubclassProc / FlashcardToolbarSubclassProc).

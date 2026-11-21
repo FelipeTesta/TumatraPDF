@@ -3346,26 +3346,12 @@ void CreateToolbar2(MainWindow* win) {
     ToolbarSubclassPaint(win, win->archTools.hwndToolbar2);
 }
 
-// Legacy helper: strips the toolbar theme AND installs WndProcToolbar on an
-// already-populated toolbar. Kept for callers that still use it, but a
-// theme strip AFTER TbAddButtons invalidates comctl's per-button layout
-// (TB_GETITEMRECT starts failing -> ReportIf terminates the app) and paints
-// the band blank. New code must strip the theme BEFORE adding buttons — see
-// ToolbarSetupSecondaryRebar.
-void ToolbarApplyThemeToRebar(HWND hwndRebar, HWND hwndToolbar) {
-    SetWindowSubclass(hwndRebar, ReBarWndProc, 0, 0);
-    SetWindowTheme(hwndToolbar, L"", L"");
-    if (UseDarkModeLib()) {
-        dmlib::setWindowNotifyCustomDrawSubclass(hwndRebar);
-    }
-    SetWindowLongPtr(hwndToolbar, GWLP_WNDPROC, (LONG_PTR)WndProcToolbar);
-    if (!IsCurrentThemeDefault()) {
-        SendMessageW(hwndRebar, RB_SETBKCOLOR, 0, ThemeControlBackgroundColor());
-    }
-}
-
-// Rebar side of an on-demand secondary toolbar: subclass, bar info, band
-// background. Must run BEFORE the band is inserted.
+// ORDERING RULE (see FLOW/toolbar-critical-ordering.dot): SetWindowTheme
+// MUST run BEFORE TbAddButtons on a secondary toolbar. A theme strip AFTER
+// TbAddButtons invalidates comctl's per-button layout (TB_GETITEMRECT starts
+// failing -> ReportIf terminates the app) and paints the band blank.
+// ToolbarSetupSecondaryRebar strips the theme first, before any buttons are
+// added — see ToolbarApplyThemeToRebar (deleted, s68) for the old, wrong order.
 void ToolbarSetupSecondaryRebar(HWND hwndRebar) {
     SetWindowSubclass(hwndRebar, ReBarWndProc, 0, 0);
     REBARINFO rbi{};

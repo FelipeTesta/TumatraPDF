@@ -335,11 +335,28 @@ void TabGroupsWnd::DeleteTabGroup() {
         return;
     }
     TabGroup* group = (*groups)[sel];
+    // Duplicate name BEFORE freeing: we need it to clear activeTabGroup in all windows
+    // and the global mirror (copied from HandleTabGroupMenuCmd case 3 in SumatraPDF.cpp)
+    Str deletedName = str::Dup(group->name);
+    // If deleted group was active in ANY window, clear that window's group
+    for (MainWindow* w : gWindows) {
+        Str wActive = GetWindowActiveTabGroup(w);
+        if (wActive.s && str::EqI(wActive, deletedName)) {
+            SetWindowActiveTabGroup(w, "");
+            RefreshTabGroupButton(w);
+        }
+    }
+    // Also clear global mirror
+    if (gGlobalPrefs->activeTabGroup && str::EqI(Str(gGlobalPrefs->activeTabGroup), deletedName)) {
+        str::ReplaceWithCopy(&gGlobalPrefs->activeTabGroup, Str(""));
+    }
+    // free the group
     groups->Remove(group);
     FreeTabGroup(group);
     SaveSettings();
     PopulateListBox(this);
     UpdateDeleteButton();
+    str::Free(deletedName);
 }
 
 static void DrawTabGroupItem(TabGroupsWnd* w, ListBox::DrawItemEvent* ev) {

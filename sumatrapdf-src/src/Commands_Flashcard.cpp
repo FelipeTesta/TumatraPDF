@@ -750,11 +750,15 @@ void FlashcardApplyStudyOrder(MainWindow* win) {
         win->flashcard.revealMode = false;
         if (len(win->flashcard.studyOrder) > 0) {
             win->flashcard.currentCardIdx = 0;
+            win->flashcard.studyTimeSec = 0.0f;
+            win->flashcard.lastStudyTick = 0;
             FlashcardPrefetchUpcoming(win, 0, FlashcardPrewarmBudget(win));
             FlashcardPrewarmEnqueue(win, 0);
             FlashcardNavigateToEntry(win, win->flashcard.studyOrder[0], true);
         } else {
             win->flashcard.currentCardIdx = -1;
+            win->flashcard.studyTimeSec = 0.0f;
+            win->flashcard.lastStudyTick = 0;
         }
         MainWindowRerender(win);
     }
@@ -1193,6 +1197,8 @@ bool HandleCommandFlashcard(MainWindow* win, int cmd) {
             // skip WITHOUT revealing or rating: the next card arrives masked
             // (front state), vertically centered; no SM-2 update, no save
             win->flashcard.currentCardIdx = next;
+            win->flashcard.studyTimeSec = 0.0f;
+            win->flashcard.lastStudyTick = 0;
             win->flashcard.revealMode = false;
             FlashcardToolbarUpdateState(win);
             FlashcardNavigateToEntry(win, win->flashcard.studyOrder[next], true);
@@ -1546,9 +1552,14 @@ void FlashcardStudyTick(MainWindow* win, HWND hwnd) {
     if (dt <= 0.0f || dt > 1.5f) {
         dt = 0.0f; // first tick, clock went backwards, or a sleep/blocked gap
     }
-    if (win->flashcard.studyTimeSec < win->flashcard.maxPerCardSec) {
-        win->flashcard.studyTimeSec += dt;
-        FlashcardStatsAddSeconds(win, e.tab, dt);
+    float room = win->flashcard.maxPerCardSec - win->flashcard.studyTimeSec;
+    float credit = dt;
+    if (credit > room) {
+        credit = room;
+    }
+    if (credit > 0.0f) {
+        win->flashcard.studyTimeSec += credit;
+        FlashcardStatsAddSeconds(win, e.tab, credit);
     }
     // --- 3. Idle prewarm pump (s64-R9p): one-shot per advance; enqueue is
     // self-deduping via prewarmFilledForIdx ---

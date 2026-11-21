@@ -48,9 +48,6 @@ void CreateToolbar2(MainWindow*);
 void DestroyToolbar2(MainWindow*);
 void UpdateToolbar2State(MainWindow*);
 
-// Apply theme settings (dark mode, custom draw, etc.) to a rebar+toolbar pair
-// Matches the pattern used in CreateToolbar/CreateToolbar2
-void ToolbarApplyThemeToRebar(HWND hwndRebar, HWND hwndToolbar);
 void ToolbarSetupSecondaryRebar(HWND hwndRebar);
 
 // Arch/Edit rebar custom-draw subclass: wipes comctl's own button face +
