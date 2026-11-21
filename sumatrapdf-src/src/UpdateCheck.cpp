@@ -28,6 +28,8 @@
 #include "HomePage.h"
 #include "Installer.h"
 #include "UpdateCheck.h"
+#include "Theme.h"
+#include "base/Dpi.h"
 
 static Kind kNotifUpdateCheckInProgress = StrL("notifUpdateCheckInProgress").s;
 
@@ -322,6 +324,47 @@ static void ExitAfterStartingUpdater() {
     ::ExitProcess(0);
 }
 
+// Reads ProductVersion string from a file's VERSIONINFO resource.
+// Returns empty TempStr on failure (missing resource, parse error, etc.).
+static TempStr GetFileProductVersionTemp(Str path) {
+    TempStr result;
+    DWORD dummy;
+    DWORD size = GetFileVersionInfoSizeW(CWStrTemp(path), &dummy);
+    if (size == 0) {
+        return result;
+    }
+    ScopedMem<void> versionInfo(malloc(size));
+    if (!versionInfo || !GetFileVersionInfoW(CWStrTemp(path), 0, size, versionInfo)) {
+        return result;
+    }
+
+    struct Translation {
+        WORD lang;
+        WORD codepage;
+    };
+    Translation* trans = nullptr;
+    UINT len = 0;
+    if (VerQueryValueW(versionInfo, L"\\VarFileInfo\\Translation", (LPVOID*)&trans, &len)) {
+        int count = len / sizeof(Translation);
+        for (int i = 0; i < count; i++) {
+            WCHAR subBlock[64];
+            wsprintfW(subBlock, L"\\StringFileInfo\\%04x%04x\\ProductVersion", trans[i].lang, trans[i].codepage);
+            void* ptr = nullptr;
+            UINT vlen = 0;
+            if (VerQueryValueW(versionInfo, subBlock, &ptr, &vlen)) {
+                if (ptr && vlen > 0) {
+                    result = ToUtf8Temp(WStr((WCHAR*)ptr));
+                    return result;
+                }
+            }
+        }
+    }
+    return result;
+}
+
+// Forward declaration
+static int ShowUpdateAvailableDialog(UpdateInfo* updateInfo);
+
 static void NotifyUserOfUpdate(UpdateInfo* updateInfo) {
     auto installerPathAuto = updateInfo->installerPath;
     // auto-install path: the user already opted in via the "Download and update"
@@ -339,58 +382,15 @@ static void NotifyUserOfUpdate(UpdateInfo* updateInfo) {
         return;
     }
 
-    auto mainInstr = _TRA("New version available");
-    auto ver = updateInfo->latestVer;
-    auto fmtStr = _TRA("You have version '%s' and version '%s' is available.\nDo you want to install the new version?");
-    auto content = str::Dup(fmt(fmtStr.s, StrL(CURR_VERSION_STRA), ver));
-
-    auto installerPath = updateInfo->installerPath;
-    bool didDownloadInstaller = file::Exists(installerPath);
-
-    constexpr int kBtnIdDontInstall = 100;
-    constexpr int kBtnIdInstall = 101;
-    auto title = fmt(_TRA("%s Update").s, StrL(kAppName));
-    TASKDIALOGCONFIG dialogConfig{};
-    TASKDIALOG_BUTTON buttons[2];
-
-    buttons[0].nButtonID = kBtnIdDontInstall;
-    auto s = _TRA("Don't install");
-    buttons[0].pszButtonText = CWStrTemp(s);
-    buttons[1].nButtonID = kBtnIdInstall;
-    if (didDownloadInstaller) {
-        s = _TRA("Install and relaunch");
-    } else {
-        s = _TRA("Download update");
-    }
-    buttons[1].pszButtonText = CWStrTemp(s);
-
-    DWORD flags =
-        TDF_ALLOW_DIALOG_CANCELLATION | TDF_SIZE_TO_CONTENT | TDF_ENABLE_HYPERLINKS | TDF_POSITION_RELATIVE_TO_WINDOW;
-    if (trans::IsCurrLangRtl()) {
-        flags |= TDF_RTL_LAYOUT;
-    }
-    dialogConfig.cbSize = sizeof(TASKDIALOGCONFIG);
-    dialogConfig.pszWindowTitle = CWStrTemp(title);
-    dialogConfig.pszMainInstruction = CWStrTemp(mainInstr);
-    dialogConfig.pszContent = CWStrTemp(content);
-    dialogConfig.nDefaultButton = kBtnIdInstall;
-    dialogConfig.dwFlags = (TASKDIALOG_FLAGS)flags;
-    dialogConfig.cxWidth = 0;
-    dialogConfig.pfCallback = nullptr;
-    dialogConfig.dwCommonButtons = 0;
-    dialogConfig.cButtons = dimof(buttons);
-    dialogConfig.pButtons = &buttons[0];
-    dialogConfig.pszMainIcon = TD_INFORMATION_ICON;
-    dialogConfig.hwndParent = updateInfo->hwndParent;
-
-    int buttonPressedId = 0;
-
-    auto hr = TaskDialogIndirect(&dialogConfig, &buttonPressedId, nullptr, nullptr);
-    ReportIf(hr == E_INVALIDARG);
-    bool doInstall = (hr == S_OK) && (buttonPressedId == kBtnIdInstall);
+    int buttonId = ShowUpdateAvailableDialog(updateInfo);
 
     // persist timeOfLastUpdateCheck
     SaveSettings();
+    constexpr int kBtnIdDontInstall = 100;
+    constexpr int kBtnIdInstall = 101;
+    bool doInstall = (buttonId == kBtnIdInstall);
+    auto installerPath = updateInfo->installerPath;
+    bool didDownloadInstaller = file::Exists(installerPath);
     if (!doInstall) {
         file::Delete(installerPath);
         return;
@@ -404,6 +404,296 @@ static void NotifyUserOfUpdate(UpdateInfo* updateInfo) {
 
     StartInstallerAutoUpgrade(installerPath);
     ExitAfterStartingUpdater();
+}
+
+// --- Themed update dialog (replaces TaskDialogIndirect) --------------------
+
+struct UpdateDialogData {
+    HWND hwnd = nullptr;
+    HWND hwndParent = nullptr;
+    Str title;
+    Str mainInstr;
+    Str content;
+    Str btnDontInstallText;
+    Str btnInstallText;
+    bool didDownloadInstaller = false;
+    bool isRtl = false;
+    int result = 0; // 0 = none/cancel, 100 = don't install, 101 = install
+    Button* btnDontInstall = nullptr;
+    Button* btnInstall = nullptr;
+    // Cached theme brush
+    HBRUSH bgBrush = nullptr;
+    COLORREF bgColor = 0;
+};
+
+static LRESULT CALLBACK UpdateDialogWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp);
+
+static void UpdateDialogRegisterClass() {
+    static bool registered = false;
+    if (registered) {
+        return;
+    }
+    WNDCLASSEXW wc{};
+    wc.cbSize = sizeof(wc);
+    wc.style = CS_HREDRAW | CS_VREDRAW;
+    wc.lpfnWndProc = UpdateDialogWndProc;
+    wc.hInstance = GetModuleHandle(nullptr);
+    wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
+    wc.hbrBackground = nullptr; // painted in WM_ERASEBKGND
+    wc.lpszClassName = L"TUMATRA_UPDATE_DIALOG";
+    RegisterClassExW(&wc);
+    registered = true;
+}
+
+// Static callbacks for buttons
+static void UpdateDialogOnDontInstall(UpdateDialogData* d) {
+    d->result = 100;
+    DestroyWindow(d->hwnd);
+}
+static void UpdateDialogOnInstall(UpdateDialogData* d) {
+    d->result = 101;
+    DestroyWindow(d->hwnd);
+}
+
+// Cached theme brush for static/button controls
+static HBRUSH UpdateDialogCtlColorBrush() {
+    static HBRUSH brush = nullptr;
+    static COLORREF brushCol = (COLORREF)-1;
+    COLORREF col = ThemeWindowBackgroundColor();
+    if (!brush || brushCol != col) {
+        if (brush) {
+            DeleteObject(brush);
+        }
+        brush = CreateSolidBrush(col);
+        brushCol = col;
+    }
+    return brush;
+}
+
+static LRESULT CALLBACK UpdateDialogWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    UpdateDialogData* d = (UpdateDialogData*)GetWindowLongPtrW(hwnd, GWLP_USERDATA);
+    if (msg == WM_CREATE) {
+        CREATESTRUCTW* cs = (CREATESTRUCTW*)lp;
+        d = (UpdateDialogData*)cs->lpCreateParams;
+        SetWindowLongPtrW(hwnd, GWLP_USERDATA, (LONG_PTR)d);
+        d->hwnd = hwnd;
+
+        // Dark title bar / system buttons when a dark theme is active
+        ApplyDarkModeToPopupWindow(hwnd);
+
+        // Build UI
+        HFONT font = GetAppFont(hwnd);
+
+        // Measure text for sizing
+        HDC hdc = GetDC(hwnd);
+        HFONT oldFont = (HFONT)SelectObject(hdc, font);
+        RECT rcMeasure = {0, 0, DpiScale(hwnd, 400), 0};
+
+        // Main instruction
+        DrawTextW(hdc, CWStrTemp(d->mainInstr), -1, &rcMeasure, DT_CALCRECT | DT_WORDBREAK | DT_NOPREFIX);
+        int mainInstrH = rcMeasure.bottom - rcMeasure.top;
+
+        // Content text
+        rcMeasure.bottom = 0;
+        DrawTextW(hdc, CWStrTemp(d->content), -1, &rcMeasure, DT_CALCRECT | DT_WORDBREAK | DT_NOPREFIX);
+        int contentH = rcMeasure.bottom - rcMeasure.top;
+
+        SelectObject(hdc, oldFont);
+        ReleaseDC(hwnd, hdc);
+
+        int pad = DpiScale(hwnd, 20);
+        int vgap = DpiScale(hwnd, 12);
+
+        // Create buttons first to get their ideal sizes
+        d->btnDontInstall = CreateButton(hwnd, d->btnDontInstallText,
+            MkFunc0(&UpdateDialogOnDontInstall, d), d->isRtl);
+        d->btnInstall = CreateButton(hwnd, d->btnInstallText,
+            MkFunc0(&UpdateDialogOnInstall, d), d->isRtl);
+        d->btnInstall->isDefault = true;
+
+        Size szDont = d->btnDontInstall->GetIdealSize();
+        Size szInst = d->btnInstall->GetIdealSize();
+        int btnH = std::max(szDont.dy, szInst.dy);
+        int btnW = std::max(szDont.dx, szInst.dx);
+        int gap = DpiScale(hwnd, 10);
+
+        int totalClientW = std::max(DpiScale(hwnd, 400), 2 * pad + btnW * 2 + gap);
+        int totalClientH = pad + mainInstrH + vgap + contentH + vgap + btnH + pad;
+
+        // Compute window rect from client size
+        RECT wr = {0, 0, totalClientW, totalClientH};
+        AdjustWindowRectEx(&wr, WS_POPUP | WS_CAPTION | WS_SYSMENU, FALSE, WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT);
+        int winW = wr.right - wr.left;
+        int winH = wr.bottom - wr.top;
+
+        // Center on parent
+        RECT rw;
+        GetWindowRect(d->hwndParent, &rw);
+        int x = rw.left + ((rw.right - rw.left) - winW) / 2;
+        int y = rw.top + ((rw.bottom - rw.top) - winH) / 2;
+        SetWindowPos(hwnd, nullptr, x, y, winW, winH, SWP_NOZORDER | SWP_NOACTIVATE);
+
+        // Now get the real client rect and position children
+        RECT rc;
+        GetClientRect(hwnd, &rc);
+        int clientW = rc.right - rc.left;
+
+        // Main instruction static
+        HWND hwndMainInstr = CreateWindowExW(
+            0, WC_STATICW, CWStrTemp(d->mainInstr),
+            WS_CHILD | WS_VISIBLE | SS_LEFT | SS_NOPREFIX,
+            pad, pad, clientW - 2 * pad, mainInstrH,
+            hwnd, nullptr, GetModuleHandle(nullptr), nullptr);
+        SetWindowTheme(hwndMainInstr, L"", L"");
+        SendMessageW(hwndMainInstr, WM_SETFONT, (WPARAM)font, TRUE);
+
+        // Content static
+        HWND hwndContent = CreateWindowExW(
+            0, WC_STATICW, CWStrTemp(d->content),
+            WS_CHILD | WS_VISIBLE | SS_LEFT | SS_NOPREFIX,
+            pad, pad + mainInstrH + vgap, clientW - 2 * pad, contentH,
+            hwnd, nullptr, GetModuleHandle(nullptr), nullptr);
+        SetWindowTheme(hwndContent, L"", L"");
+        SendMessageW(hwndContent, WM_SETFONT, (WPARAM)font, TRUE);
+
+        // Position buttons (right-aligned, RTL-aware)
+        int btnY = pad + mainInstrH + vgap + contentH + vgap;
+        int btnDontInstallX, btnInstallX;
+        if (d->isRtl) {
+            btnInstallX = pad;
+            btnDontInstallX = btnInstallX + btnW + gap;
+        } else {
+            btnDontInstallX = clientW - pad - btnW;
+            btnInstallX = btnDontInstallX - btnW - gap;
+        }
+        Rect rDont{btnDontInstallX, btnY, btnW, btnH};
+        Rect rInst{btnInstallX, btnY, btnW, btnH};
+        d->btnDontInstall->SetPos(&rDont);
+        d->btnInstall->SetPos(&rInst);
+
+        // Create background brush
+        d->bgColor = ThemeWindowBackgroundColor();
+        d->bgBrush = CreateSolidBrush(d->bgColor);
+
+        return 0;
+    }
+    if (!d || d->hwnd != hwnd) {
+        return DefWindowProcW(hwnd, msg, wp, lp);
+    }
+
+    switch (msg) {
+        case WM_DESTROY: {
+            if (d->bgBrush) {
+                DeleteObject(d->bgBrush);
+                d->bgBrush = nullptr;
+            }
+            // Buttons are owned by the dialog window, destroyed automatically
+            break;
+        }
+        case WM_ERASEBKGND: {
+            HDC hdc = (HDC)wp;
+            RECT rc;
+            GetClientRect(hwnd, &rc);
+            FillRect(hdc, &rc, d->bgBrush);
+            return 1;
+        }
+        case WM_CTLCOLORSTATIC:
+        case WM_CTLCOLORBTN: {
+            HDC hdc = (HDC)wp;
+            SetBkColor(hdc, d->bgColor);
+            SetTextColor(hdc, ThemeWindowTextColor());
+            return (LRESULT)UpdateDialogCtlColorBrush();
+        }
+        case WM_COMMAND: {
+            int id = LOWORD(wp);
+            int code = HIWORD(wp);
+            if (id == IDCANCEL) {
+                d->result = 100; // Don't install (Esc or X)
+                DestroyWindow(hwnd);
+            } else if ((id == 100 || id == 101) && code == BN_CLICKED) {
+                // Buttons use callbacks, but keep this as fallback
+                d->result = id;
+                DestroyWindow(hwnd);
+            }
+            break;
+        }
+        case WM_CLOSE: {
+            d->result = 100; // Don't install on X/close
+            DestroyWindow(hwnd);
+            break;
+        }
+        default:
+            break;
+    }
+    return DefWindowProcW(hwnd, msg, wp, lp);
+}
+
+static int ShowUpdateAvailableDialog(UpdateInfo* updateInfo) {
+    UpdateDialogData dlgData;
+    dlgData.hwndParent = updateInfo->hwndParent;
+    dlgData.isRtl = trans::IsCurrLangRtl();
+
+    dlgData.title = fmt(_TRA("%s Update").s, StrL(kAppName));
+    dlgData.mainInstr = _TRA("New version available");
+    Str ver = updateInfo->latestVer;
+    Str fmtStr = _TRA("You have version '%s' and version '%s' is available.\nDo you want to install the new version?");
+    dlgData.content = str::Dup(fmt(fmtStr.s, StrL(CURR_VERSION_STRA), ver));
+
+    dlgData.btnDontInstallText = _TRA("Don't install");
+    if (file::Exists(updateInfo->installerPath)) {
+        dlgData.btnInstallText = _TRA("Install and relaunch");
+        dlgData.didDownloadInstaller = true;
+    } else {
+        dlgData.btnInstallText = _TRA("Download update");
+        dlgData.didDownloadInstaller = false;
+    }
+
+    UpdateDialogRegisterClass();
+
+    // Create with a minimal size; WM_CREATE will compute and resize
+    int initW = DpiScale(dlgData.hwndParent, 440);
+    int initH = DpiScale(dlgData.hwndParent, 220);
+
+    RECT rw;
+    GetWindowRect(dlgData.hwndParent, &rw);
+    int x = rw.left + ((rw.right - rw.left) - initW) / 2;
+    int y = rw.top + ((rw.bottom - rw.top) - initH) / 2;
+
+    HWND hwnd = CreateWindowExW(
+        WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT, L"TUMATRA_UPDATE_DIALOG", CWStrTemp(dlgData.title),
+        WS_POPUP | WS_CAPTION | WS_SYSMENU, x, y, initW, initH,
+        dlgData.hwndParent, nullptr, GetModuleHandle(nullptr), &dlgData);
+
+    if (!hwnd) {
+        logf("ShowUpdateAvailableDialog: CreateWindowExW failed\n");
+        str::Free(dlgData.content);
+        return 100; // Don't install on failure
+    }
+
+    // Modal pump with IsDialogMessage for Tab/Esc/Enter handling
+    EnableWindow(dlgData.hwndParent, FALSE);
+    ShowWindow(hwnd, SW_SHOW);
+    UpdateWindow(hwnd);
+    SetActiveWindow(hwnd);
+    SetFocus(dlgData.btnInstall->hwnd);
+
+    MSG msg;
+    while (IsWindow(hwnd) && GetMessageW(&msg, nullptr, 0, 0) > 0) {
+        if (msg.message == WM_QUIT) {
+            break;
+        }
+        if (!IsDialogMessage(hwnd, &msg)) {
+            TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
+    }
+
+    EnableWindow(dlgData.hwndParent, TRUE);
+    SetActiveWindow(dlgData.hwndParent);
+
+    int result = dlgData.result;
+    str::Free(dlgData.content);
+    return result;
 }
 
 struct UpdateProgressData {
@@ -476,6 +766,36 @@ static void DownloadUpdateAsync(DownloadUpdateAsyncData* data) {
         ok = size >= kMinExeSize && hdr.s[0] == 'M' && hdr.s[1] == 'Z';
         str::Free(hdr);
         logf("ShowAutoUpdateDialog: size=%lld, PE header ok=%d\n", size, (int)ok);
+    }
+    // Verify downloaded file version matches expected version (FIX 2)
+    if (ok) {
+        TempStr fileVer = GetFileProductVersionTemp(installerPath);
+        Str expectedVer = updateInfo->latestVer;
+        if (fileVer) {
+            // Normalize both strings (trim whitespace)
+            Str fv = str::Dup(fileVer);
+            str::TrimWSInPlace(fv, str::TrimOpt::Both);
+            Str ev = str::Dup(expectedVer);
+            str::TrimWSInPlace(ev, str::TrimOpt::Both);
+            // Pre-release channel uses plain build number (no '.') - log only, don't block
+            if (!str::ContainsChar(ev, '.')) {
+                logf("DownloadUpdateAsync: pre-release channel (build %s), file version '%s' - logging only\n",
+                     ev, fv);
+            } else if (!str::Eq(fv, ev)) {
+                logf("DownloadUpdateAsync: version mismatch for '%s': file version '%s' expected '%s'\n",
+                     installerPath, fv, ev);
+                file::Delete(installerPath);
+                ok = false;
+            } else {
+                logf("DownloadUpdateAsync: version OK for '%s': '%s'\n", installerPath, fv);
+            }
+            str::Free(fv);
+            str::Free(ev);
+        } else {
+            // No version info - log and accept (don't block)
+            logf("DownloadUpdateAsync: no VERSIONINFO in '%s', expected '%s' - accepting\n",
+                 installerPath, expectedVer);
+        }
     }
     if (ok) {
         updateInfo->installerPath = str::Dup(installerPath);
@@ -909,3 +1229,5 @@ void UpdateSelfTo(Str dstPath) {
     TempStr args = fmt(R"(-sleep-ms 500 -delete-file "%s")", srcPath);
     CreateProcessHelper(dstPath, args);
 }
+
+
