@@ -1,4 +1,4 @@
-﻿/* Copyright 2022 the SumatraPDF project authors (see AUTHORS file).
+/* Copyright 2022 the SumatraPDF project authors (see AUTHORS file).
    License: GPLv3 */
 
 #include "base/Base.h"
@@ -9996,15 +9996,10 @@ static void PrintCurrentFileDeferred(MainWindow* win) {
 // ---- File command wrappers (C5 extraction) ----
 
 static void HandleCmdNewWindow(MainWindow* win) {
-    // T2: Ctrl+N opens an unsynced window — clear the global activeTabGroup so
-    // the new window is not attached to any group. Single-global-pointer
-    // semantics: only the last-focused window can be attached; switching back
-    // to a previously-attached window re-asserts its group via T1 hooks (user
-    // re-attaches via T3 dropdown if needed). Previous window's group data is
-    // already persisted by T1 auto-sync on every tab change.
-    str::ReplaceWithCopy(&gGlobalPrefs->activeTabGroup, Str(""));
+    // T3: Ctrl+N opens an unsynced window — the new window starts with empty activeTabGroup.
+    // Existing windows KEEP their groups. No global clear.
     CreateAndShowMainWindow(nullptr);
-    logf("[tabs] new window unsynced\n");
+    logf("[tabs] new window unsynced (others keep groups)\n");
 }
 
 static void HandleCmdOpenFile(MainWindow* win) {
@@ -12544,12 +12539,15 @@ static void DrawTabGroupButton(DRAWITEMSTRUCT* dis) {
     Graphics gfx(hdc);
     gfx.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
 
-    logf("[tabs] drawbtn rc=(%d,%d,%d,%d) hwnd=%p synced=%d", (int)dis->rcItem.left, (int)dis->rcItem.top,
-         (int)dis->rcItem.right, (int)dis->rcItem.bottom, dis->hwndItem,
-         gGlobalPrefs->activeTabGroup.s && *gGlobalPrefs->activeTabGroup.s ? 1 : 0);
+    // Find the owning MainWindow from the button's HWND (parent is win->hwndFrame)
+    MainWindow* win = FindMainWindowByHwnd(dis->hwndItem);
+    Str winActive = GetWindowActiveTabGroup(win);
+    bool synced = winActive.s && *winActive.s;
+
+    logf("[tabs] drawbtn rc=(%d,%d,%d,%d) hwnd=%p synced=%d win=%p", (int)dis->rcItem.left, (int)dis->rcItem.top,
+         (int)dis->rcItem.right, (int)dis->rcItem.bottom, dis->hwndItem, synced ? 1 : 0, win);
 
     DsAccents ac = DsAccentsGet();
-    bool synced = gGlobalPrefs->activeTabGroup.s && *gGlobalPrefs->activeTabGroup.s;
 
     // button bg (button-local coords: rcItem is parent-relative, draw on button DC at 0,0)
     COLORREF bgc = ThemeControlBackgroundColor();
@@ -12598,12 +12596,13 @@ static HMENU BuildTabGroupMenu(MainWindow* win) {
 
     // Groups
     if (gGlobalPrefs->tabGroups) {
+        Str winActive = GetWindowActiveTabGroup(win);
         for (int i = 0; i < len(*gGlobalPrefs->tabGroups); i++) {
             TabGroup* g = (*gGlobalPrefs->tabGroups)[i];
             if (!g || !g->name) continue;
             int nFiles = g->tabFiles ? len(*g->tabFiles) : 0;
             // mark the active group with a filled-circle prefix + checkmark
-            bool isActive = gGlobalPrefs->activeTabGroup.s && str::EqI(g->name, gGlobalPrefs->activeTabGroup);
+            bool isActive = winActive.s && str::EqI(g->name, winActive);
             TempStr label = fmt("%s%s (%d file(s))", isActive ? StrL("\xe2\x96\x8f ") : StrL(""), Str(g->name), nFiles);
             UINT itemFlags = MF_STRING | (isActive ? MF_CHECKED : 0);
             // plain MF_STRING item: left-click opens in current window (OpenHere routing).
@@ -12628,8 +12627,11 @@ static HMENU BuildTabGroupMenu(MainWindow* win) {
 void HandleTabGroupMenuCmd(MainWindow* win, int cmdId) {
     logf("[tabs] menu cmd=%d\n", cmdId);
     if (cmdId == kTabGroupMenuUnsynced) {
-        SetActiveTabGroup(win, "");
-        logf("[tabs] menu activate unsynced\n");
+        // Clear ONLY this window's group; other windows keep theirs
+        SetWindowActiveTabGroup(win, "");
+        SaveSettings();
+        RefreshTabGroupButton(win);
+        logf("[tabs] menu activate unsynced (window-only)\n");
         return;
     }
     if (cmdId == kTabGroupMenuNewSession) {
@@ -12637,7 +12639,7 @@ void HandleTabGroupMenuCmd(MainWindow* win, int cmdId) {
         if (ShowTabGroupNameDialog(win, &name, false)) {
             // new session = empty group: just set active pointer, do NOT sync
             // current open tabs into it (that would clobber saved groups)
-            str::ReplaceWithCopy(&gGlobalPrefs->activeTabGroup, Str(name.s));
+            SetWindowActiveTabGroup(win, name.s);
             // ensure the group exists in tabGroups (empty tabFiles)
             if (!gGlobalPrefs->tabGroups) {
                 gGlobalPrefs->tabGroups = new Vec<TabGroup*>();
@@ -12688,9 +12690,8 @@ void HandleTabGroupMenuCmd(MainWindow* win, int cmdId) {
 
     switch (action) {
         case 0: { // open here
-            // set activeTabGroup directly (bypass SyncGroupFromWindow which would clobber
-            // destination group's tabFiles with the current window's tabs)
-            str::ReplaceWithCopy(&gGlobalPrefs->activeTabGroup, Str(g->name.s));
+            // set this window's group to the group name, then activate
+            SetWindowActiveTabGroup(win, g->name.s);
             ActivateTabGroupInWindow(win, g->name.s);
             logf("[tabs] menu activate '%s' (open here)\n", Str(g->name));
             break;
@@ -12701,8 +12702,8 @@ void HandleTabGroupMenuCmd(MainWindow* win, int cmdId) {
             Str groupName = str::Dup(g->name);
             MainWindow* newWin = CreateAndShowMainWindow(nullptr);
             if (newWin) {
-                // set activeTabGroup AFTER window init (init hooks may reset it)
-                str::ReplaceWithCopy(&gGlobalPrefs->activeTabGroup, groupName);
+                // NEW window gets that group; origin window keeps its own
+                SetWindowActiveTabGroup(newWin, groupName.s);
                 SuppressGroupAutoSave(true);
                 bool first = true;
                 for (TabFile* tf : *g->tabFiles) {
@@ -12719,27 +12720,41 @@ void HandleTabGroupMenuCmd(MainWindow* win, int cmdId) {
                 RefreshTabGroupButton(newWin);
                 ShowMainWindow(newWin, WIN_STATE_NORMAL);
             }
+            str::Free(groupName);
             break;
         }
         case 2: { // rename
             // deep-copy original name BEFORE dialog: dialog's ReplaceWithCopy frees
             // d->nameOut.s which aliases g->name.s via shallow copy -> double-free/UAF
             Str newName = str::Dup(g->name);
-            // TUMATRA-FORK(s49): remember if this is the active group BEFORE we
-            // clobber g->name (upstream re-apply: gate activeTabGroup update on
-            // old-name equality, not post-rename g->name).
-            bool wasActive = gGlobalPrefs->activeTabGroup.s && str::EqI(g->name, gGlobalPrefs->activeTabGroup);
+            // TUMATRA-FORK(s49): remember if this is the active group in ANY window
+            // BEFORE we clobber g->name.
+            bool wasActiveInAny = false;
+            for (MainWindow* w : gWindows) {
+                Str wActive = GetWindowActiveTabGroup(w);
+                if (wActive.s && str::EqI(wActive, g->name)) {
+                    wasActiveInAny = true;
+                    break;
+                }
+            }
             if (ShowTabGroupNameDialog(win, &newName, true)) {
                 // TUMATRA-FORK(s49): record old name before ReplaceWithCopy
                 Str oldName = str::Dup(g->name);
                 str::ReplaceWithCopy(&g->name, newName.s);
-                // TUMATRA-FORK(s49): keep activeTabGroup pointing at the renamed
-                // group so it stays valid (no ghost). Upstream re-apply note:
-                // same gate at both rename call sites (menu + dialog test).
-                if (wasActive) {
+                // TUMATRA-FORK(s49): update activeTabGroup in ANY window that had it
+                if (wasActiveInAny) {
+                    for (MainWindow* w : gWindows) {
+                        Str wActive = GetWindowActiveTabGroup(w);
+                        if (wActive.s && str::EqI(wActive, oldName)) {
+                            SetWindowActiveTabGroup(w, newName.s);
+                            RefreshTabGroupButton(w);
+                        }
+                    }
+                    // Also update global mirror
                     str::ReplaceWithCopy(&gGlobalPrefs->activeTabGroup, newName.s);
                 }
                 ProfileDataRenameSession(Str(oldName.s), Str(newName.s));
+                str::Free(oldName);
                 SaveSettings();
                 RefreshTabGroupButton(win);
                 logf("[tabs] menu rename '%s' -> '%s'\n", Str(g->name), Str(newName));
@@ -12752,6 +12767,15 @@ void HandleTabGroupMenuCmd(MainWindow* win, int cmdId) {
             int res = MessageBoxW(win->hwndFrame, ToWStrTemp(msg).s, L"Tab Group",
                                   MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2);
             if (res == IDYES) {
+                // If deleted group was active in ANY window, clear that window's group
+                for (MainWindow* w : gWindows) {
+                    Str wActive = GetWindowActiveTabGroup(w);
+                    if (wActive.s && str::EqI(wActive, g->name)) {
+                        SetWindowActiveTabGroup(w, "");
+                        RefreshTabGroupButton(w);
+                    }
+                }
+                // Also clear global mirror
                 if (gGlobalPrefs->activeTabGroup && str::EqI(Str(gGlobalPrefs->activeTabGroup), Str(g->name))) {
                     str::ReplaceWithCopy(&gGlobalPrefs->activeTabGroup, Str(""));
                 }
@@ -15038,14 +15062,21 @@ LRESULT CALLBACK WndProcSumatraFrame(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) 
                 extern bool gTestDialogIsRename;
                 extern Str gTestDialogName;
                 Str tmp;
-                bool wasActive = false;
+                bool wasActiveInAny = false;
                 if (gTestDialogIsRename) {
                     // prefill with the group's current name (like the rename menu case)
                     TabGroup* g = FindTabGroup(gTestDialogName.s);
-                    // TUMATRA-FORK(s49): remember if this is the active group BEFORE
-                    // we clobber g->name (upstream re-apply: gate activeTabGroup
-                    // update on old-name equality, not post-rename g->name).
-                    wasActive = g && gGlobalPrefs->activeTabGroup.s && str::EqI(g->name, gGlobalPrefs->activeTabGroup);
+                    // TUMATRA-FORK(s49): remember if this is the active group in ANY window BEFORE
+                    // we clobber g->name.
+                    if (g) {
+                        for (MainWindow* w : gWindows) {
+                            Str wActive = GetWindowActiveTabGroup(w);
+                            if (wActive.s && str::EqI(wActive, g->name)) {
+                                wasActiveInAny = true;
+                                break;
+                            }
+                        }
+                    }
                     tmp = (g && g->name) ? str::Dup(g->name) : str::Dup(gTestDialogName);
                 } else {
                     tmp = str::Dup(gTestDialogName);
@@ -15058,18 +15089,27 @@ LRESULT CALLBACK WndProcSumatraFrame(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) 
                             // TUMATRA-FORK(s49): record old name before ReplaceWithCopy
                             Str oldName = str::Dup(g->name);
                             str::ReplaceWithCopy(&g->name, tmp);
-                            // TUMATRA-FORK(s49): keep activeTabGroup pointing at the
-                            // renamed group so it stays valid (no ghost).
-                            if (wasActive) {
+                            // TUMATRA-FORK(s49): update activeTabGroup in ANY window that had it
+                            if (wasActiveInAny) {
+                                for (MainWindow* w : gWindows) {
+                                    Str wActive = GetWindowActiveTabGroup(w);
+                                    if (wActive.s && str::EqI(wActive, oldName)) {
+                                        SetWindowActiveTabGroup(w, tmp.s);
+                                        RefreshTabGroupButton(w);
+                                    }
+                                }
+                                // Also update global mirror
                                 str::ReplaceWithCopy(&gGlobalPrefs->activeTabGroup, Str(tmp.s));
                             }
                             ProfileDataRenameSession(Str(oldName.s), Str(tmp.s));
+                            str::Free(oldName);
                             SaveSettings();
                             RefreshTabGroupButton(win);
                             logf("[tabs] dialog rename '%s' -> '%s'\n", Str(gTestDialogName), Str(g->name));
                         }
                     } else {
-                        str::ReplaceWithCopy(&gGlobalPrefs->activeTabGroup, Str(tmp.s));
+                        // new session: set this window's group
+                        SetWindowActiveTabGroup(win, tmp.s);
                         if (!gGlobalPrefs->tabGroups) {
                             gGlobalPrefs->tabGroups = new Vec<TabGroup*>();
                         }

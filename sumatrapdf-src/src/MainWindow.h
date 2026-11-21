@@ -697,6 +697,9 @@ struct MainWindow {
     // (e.g. when a document tab is active)
     Str homeSearchQuery;
 
+    // Tab system T3: per-window active tab group (owning copy, freed in ~MainWindow)
+    Str activeTabGroup;
+
     bool isToolbarVisible = false;
     // overlay toolbar mode: the toolbar floats over the page (doesn't reserve
     // space) and is only revealed when the mouse is near the top

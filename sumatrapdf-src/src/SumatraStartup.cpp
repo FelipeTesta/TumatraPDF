@@ -2686,6 +2686,8 @@ ContinueOpenWindow:
             SuppressGroupAutoSave(true);
             win = CreateAndShowMainWindow(nullptr, false);
             if (win) {
+                // Set this window's per-window active group from the persisted global
+                SetWindowActiveTabGroup(win, gGlobalPrefs->activeTabGroup.s);
                 bool first = true;
                 for (TabFile* tf : *activeGroup->tabFiles) {
                     if (!tf->path.s) {

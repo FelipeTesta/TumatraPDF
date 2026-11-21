@@ -21,6 +21,7 @@
 #include "FileHistory.h"
 #include "WindowTab.h"
 #include "MainWindow.h"
+#include "TabGroupsManage.h"
 #include "ProfileData.h"
 #include "FlashcardStats.h"
 
@@ -197,7 +198,7 @@ void FlashcardStatsAddCard(WindowTab* tab) {
     }
 
     {
-        Str group = gGlobalPrefs->activeTabGroup;
+        Str group = GetWindowActiveTabGroup(tab ? tab->win : nullptr);
         if (group.s && *group.s) {
             ProfileDataAddSessionCard(group);
         }
@@ -222,7 +223,8 @@ void FlashcardStatsAddSeconds(MainWindow* win, WindowTab* tab, float sec) {
     win->flashcardStatsAccumSec -= (float)whole;
 
     {
-        Str group = gGlobalPrefs->activeTabGroup;
+        MainWindow* ownerWin = tab ? tab->win : win;
+        Str group = GetWindowActiveTabGroup(ownerWin);
         if (group.s && *group.s) {
             ProfileDataAddSessionStudySec(group, whole);
         }

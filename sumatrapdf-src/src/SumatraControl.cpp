@@ -152,6 +152,7 @@ static TempStr TabGroupActivateResultTemp(Str name, int* exitCodeOut) {
     if (!g) {
         return finish(fmt("ERROR no-such-group name=%s", Str(name)), 1);
     }
+    SetWindowActiveTabGroup(win, name.s);
     ActivateTabGroupInWindow(win, name.s);
     return finish(fmt("OK activated=%s tabs=%d", Str(name), len(*g->tabFiles)), 0);
 }
@@ -177,9 +178,11 @@ static TempStr TabGroupListResultTemp(int* exitCodeOut) {
         out.Append(fmt("%d", n));
     }
     out.AppendChar('\n');
-    // report activeTabGroup so tests can verify it without reading settings file
-    // (SaveSettings is a no-op under -for-testing)
-    out.Append(fmt("active=%s", gGlobalPrefs->activeTabGroup.s ? gGlobalPrefs->activeTabGroup.s : StrL("")));
+    // report activeTabGroup of the first window (gWindows[0]) so tests can verify it
+    // (SaveSettings is a no-op under -for-testing; no focused-window helper exists)
+    MainWindow* win = len(gWindows) ? gWindows[0] : nullptr;
+    Str winActive = GetWindowActiveTabGroup(win);
+    out.Append(fmt("active=%s", winActive.s ? winActive.s : StrL("")));
     out.AppendChar('\n');
     if (exitCodeOut) *exitCodeOut = 0;
     return ToStrTemp(out);
@@ -201,7 +204,8 @@ static TempStr TabGroupNewSessionResultTemp(Str name, int* exitCodeOut) {
         return finish(StrL("ERROR empty-name"), 1);
     }
     // new session = empty group: just set active pointer, do NOT sync current tabs
-    str::ReplaceWithCopy(&gGlobalPrefs->activeTabGroup, Str(name));
+    SetWindowActiveTabGroup(win, name.s);
+    RefreshTabGroupButton(win);
     // ensure the group exists in tabGroups (empty tabFiles) so TestTabGroupList sees it
     if (!FindTabGroup(name.s) && gGlobalPrefs->tabGroups) {
         auto* g = AllocStruct<TabGroup>();
@@ -232,7 +236,9 @@ static TempStr TabGroupOpenNewResultTemp(Str name, int* exitCodeOut) {
     if (!newWin) {
         return finish(StrL("ERROR create-window-failed"), 1);
     }
-    str::ReplaceWithCopy(&gGlobalPrefs->activeTabGroup, Str(name.s));
+    // NEW window gets that group; origin window keeps its own
+    SetWindowActiveTabGroup(newWin, name.s);
+    RefreshTabGroupButton(newWin);
     bool first = true;
     for (TabFile* tf : *g->tabFiles) {
         if (!tf->path.s) continue;

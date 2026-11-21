@@ -24,6 +24,8 @@
 #include "Theme.h"
 #include "Darkmodelib.h"
 
+#include "TabGroupsManage.h"
+
 constexpr int kPadding = 8;
 
 // T2 data-loss fix: when set, UpdateActiveGroupAutoSave skips syncing current
@@ -212,7 +214,7 @@ void SetActiveTabGroup(MainWindow* win, const char* name) {
     if (!win) {
         return;
     }
-    str::ReplaceWithCopy(&gGlobalPrefs->activeTabGroup, Str(name ? name : ""));
+    SetWindowActiveTabGroup(win, name);
     if (name && *name) {
         // only sync when there are document tabs to record — empty sessions stay empty
         bool hasFileTab = false;
@@ -245,8 +247,9 @@ void UpdateActiveGroupAutoSave(MainWindow* win) {
     if (sSuppressGroupAutoSave) {
         return;
     }
-    // (b) empty active group → unsynced, nothing to save
-    if (!gGlobalPrefs->activeTabGroup.s || !*gGlobalPrefs->activeTabGroup.s) {
+    // (b) empty active group for THIS window → unsynced, nothing to save
+    Str winActive = GetWindowActiveTabGroup(win);
+    if (!winActive.s || !*winActive.s) {
         return;
     }
     // genuine last-tab close: sync EMPTY (0 files) — empty sessions are first-class
@@ -254,7 +257,7 @@ void UpdateActiveGroupAutoSave(MainWindow* win) {
     if (win->tabsCtrl->draggingTab) {
         return;
     }
-    SyncGroupFromWindow(gGlobalPrefs->activeTabGroup.s, win);
+    SyncGroupFromWindow(winActive.s, win);
     SaveSettings();
 }
 
@@ -618,6 +621,23 @@ void ShowOpenTabGroupDialog(MainWindow* win) {
 //   2. Set activeTabGroup directly (not via SetActiveTabGroup, which calls
 //      SyncGroupFromWindow and would clobber the group's file list before
 //      load).
+// Per-window active tab group: returns the owning window's activeTabGroup (empty if win is null or unsynced)
+// Returned Str is a BORROWED view of win->activeTabGroup — callers MUST NOT free it and MUST NOT keep it across
+// a SetWindowActiveTabGroup() call on that window.
+Str GetWindowActiveTabGroup(MainWindow* win) {
+    if (!win) return Str{};
+    return win->activeTabGroup;
+}
+
+// Per-window active tab group: copies name into win->activeTabGroup (owning) AND mirrors into
+// gGlobalPrefs->activeTabGroup (persistence mirror only)
+void SetWindowActiveTabGroup(MainWindow* win, const char* name) {
+    if (!win) return;
+    str::ReplaceWithCopy(&win->activeTabGroup, Str(name ? name : ""));
+    // Mirror to global as "last active group" for persistence only. Do NOT use global for per-window decisions.
+    str::ReplaceWithCopy(&gGlobalPrefs->activeTabGroup, Str(name ? name : ""));
+}
+
 void ActivateTabGroupInWindow(MainWindow* win, const char* name) {
     if (!name || !*name || !win) {
         return;
@@ -636,7 +656,7 @@ void ActivateTabGroupInWindow(MainWindow* win, const char* name) {
         }
     }
     // set the active pointer without syncing current tabs into the group
-    str::ReplaceWithCopy(&gGlobalPrefs->activeTabGroup, Str(name));
+    SetWindowActiveTabGroup(win, name);
     logf("[tabs] activate '%s' close-loop start %d ms\n", Str(name), (int)GetTickCount());
     // close tabs not in destination group (keep already-open dest tabs to
     // preserve scroll position and avoid rebuild churn)

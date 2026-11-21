@@ -118,6 +118,7 @@ MainWindow::~MainWindow() {
     ReportIf(linkOnLastButtonDown);
     str::Free(urlOnLastButtonDown);
     str::Free(homeSearchQuery);
+    str::Free(activeTabGroup);
 
     UnsubclassToc(this);
     HomePageDestroyChrome(this);

@@ -19,6 +19,7 @@
 #include "WindowTab.h"
 #include "MainWindow.h"
 #include "ProfileData.h"
+#include "TabGroupsManage.h"
 #include "ReadingStats.h"
 
 struct DailyEntry {
@@ -162,7 +163,7 @@ void ReadingStatsAddSeconds(MainWindow* win, float sec) {
     win->readingStatsAccumSec -= (float)whole;
 
     {
-        Str group = gGlobalPrefs->activeTabGroup;
+        Str group = GetWindowActiveTabGroup(win);
         if (group.s && *group.s) {
             ProfileDataAddSessionReadingSec(group, whole);
         }

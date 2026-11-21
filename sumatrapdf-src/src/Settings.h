@@ -1072,8 +1072,10 @@ struct GlobalPrefs {
     Point propWinPos;
     // if true, check once a day whether an update is available
     bool checkForUpdates;
-    // name of the tab group session this window auto-syncs to (empty =
-    // unsynced)
+    // persistence mirror: name of the tab-group session last assigned to a window
+    // (empty = none). Used only for boot restore to seed the first window.
+    // LIVE per-window state is MainWindow::activeTabGroup (see GetWindowActiveTabGroup
+    // in TabGroupsManage.h).
     Str activeTabGroup;
 };
 // for parsing themes

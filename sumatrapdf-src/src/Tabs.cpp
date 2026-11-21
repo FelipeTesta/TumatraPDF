@@ -620,10 +620,11 @@ static void SyncActiveGroupToEmpty(MainWindow* win) {
     if (IsGroupAutoSaveSuppressed()) {
         return;
     }
-    if (!gGlobalPrefs || !gGlobalPrefs->activeTabGroup.s || !*gGlobalPrefs->activeTabGroup.s) {
+    Str winActive = GetWindowActiveTabGroup(win);
+    if (!gGlobalPrefs || !winActive.s || !*winActive.s) {
         return;
     }
-    TabGroup* group = FindTabGroup(gGlobalPrefs->activeTabGroup.s);
+    TabGroup* group = FindTabGroup(winActive.s);
     if (!group || !group->tabFiles) {
         return;
     }
@@ -688,15 +689,11 @@ static void MainWindowTabMigration(MainWindow* win, TabsCtrl::MigrationEvent* ev
         releaseWnd = nullptr;
     }
     MaybeMigrateTab(tab, releaseWnd, ev->releasePoint);
-    // T2: if the tab was dragged out to a brand-new window (not onto another
-    // SumatraPDF frame), the new window is unsynced. Single-global-pointer
-    // semantics: clearing activeTabGroup unsyncs all windows, but the original
-    // window's group data was already persisted by T1 hooks (RemoveTab →
-    // MainWindowTabClosed → UpdateActiveGroupAutoSave fired before MaybeMigrateTab
-    // returned, with activeTabGroup still pointing at the group).
+    // T3: if the tab was dragged out to a brand-new window (not onto another
+    // SumatraPDF frame), the new window starts unsynced (activeTabGroup is empty by default).
+    // The original window KEEPS its group — do NOT clear the global mirror.
     if (!releaseWnd) {
-        str::ReplaceWithCopy(&gGlobalPrefs->activeTabGroup, Str(""));
-        logf("[tabs] drag-out new window unsynced\n");
+        logf("[tabs] drag-out new window unsynced (original keeps group)\n");
     }
 }
 

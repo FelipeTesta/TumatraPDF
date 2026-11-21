@@ -15,3 +15,9 @@ void SuppressGroupAutoSave(bool suppress);
 bool IsGroupAutoSaveSuppressed();
 // Tab system T3: activate a group in a specific window (close current tabs, load group files)
 void ActivateTabGroupInWindow(MainWindow* win, const char* name);
+// Per-window active tab group helpers (T3: active group is per-window; gGlobalPrefs->activeTabGroup is a persistence
+// mirror only)
+// Returned Str is a BORROWED view of win->activeTabGroup — callers MUST NOT free it and MUST NOT keep it across
+// a SetWindowActiveTabGroup() call on that window.
+Str GetWindowActiveTabGroup(MainWindow* win);
+void SetWindowActiveTabGroup(MainWindow* win, const char* name);
