@@ -176,8 +176,8 @@ flashcardStudyDir kept only as migration shim", fillcolor="#fff9c4", style=fille
         style=filled;
         fillcolor="#ffebee";
 
-        p1 [label="P1-migration — URGENT (TODO §Profile)
-gFileStateInfo blob missing 'FlashcardStudyTimeSec'\n(44 fields / 43 names); pre-s36-at settings files shift\nfield >=23 (invertColors ... flashcardCardsDone);\nProfPullHistory snapshots WRONG values into perDoc;\nfix: append name at END in gen-settings.ts + 3-gen\nLoadSettings migration", fillcolor="#ffcdd2", style=filled];
+        p1 [label="P1-migration — FIXED (s64-R9m / s68)
+FileState blob: 44 fields + 44 names, FlashcardStudyTimeSec appended LAST\n(AppSettings.cpp:170 kMigDst ends 'FlashcardStudyTimeSec'; L152 'names blob 44')\nReal migration: MigrateFileStateNames (AppSettings.cpp:193)\ngen3 has FlashcardStudyTimeSec key -> NO-OP skip;\ngen2 has FlashcardCardsDone but not FlashcardStudyTimeSec -> migrate;\ngen1 has neither -> migrate with same shift\n(AppSettings.cpp:189-192 comment)", fillcolor="#c8e6c9", style=filled];
         f8 [label="F8 — dual-write gate flip (TODO)
 slices 1-2 shipped (s36-bs/bt): live stats -> profile;
 Config list merge; remaining: FlashcardStudyListDocs iterate

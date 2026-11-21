@@ -1,3 +1,23 @@
+## 2026-11-21 (s68) — audit fixes: flashcard cap, session sync, stats flush, orphan removal
+
+### Fixed
+- programmatic tab close (Ctrl+W, menu, command palette, Favorites, folder nav) did not re-sync the session group - the closed document stayed in the saved session file list; the sync now runs at the RemoveTab choke point (Tabs.cpp).
+- use-after-free in MainWindowTabClosed - the post-CloseTab re-sync touched a MainWindow freed by DeleteMainWindow; now guarded by IsMainWindowValid.
+- flashcard per-card 60s cap could be exceeded by one tick and credited more than the cap allowed (now clamped, stats credit matches the cap).
+- CmdFlashcardNext (skip) and a study-order rebuild did not reset the per-card time base, so the next card inherited the previous card's time (cap hit almost immediately).
+- deleting a tab-group session through the dialog left windows pointing at the deleted group (the menu path already cleaned up; the dialog path now does too).
+- dragging a tab out of a window left the origin session listing the file that moved away.
+- pending flashcard study seconds (up to ~59s) were lost when the app closed without stopping the study session - SaveSettings now flushes them (no sidecar write when nothing is pending).
+
+### Changed
+- removed the orphaned ToolbarApplyThemeToRebar (zero callers, carried the wrong SetWindowTheme/TbAddButtons ordering); the ordering rule stays documented on ToolbarSetupSecondaryRebar.
+
+### Verified
+- build 0 errors / 0 warnings; BOM-free; no remaining read of the global active group that decides a per-window state.
+
+### Notes
+- the 5 multi-window control-pipe hooks (TestNewWindow, TestWindowStats, TestOpenInWindow, TestFocusWindow, TestRunCommandInWindow) are kept on purpose as manual two-window test instrumentation (no automated test uses them yet); drag-reorder and MoveTab session sync were verified as already working, so those .dot edges were relabeled FIXED.
+
 ## 2026-11-21 (s67) — Per-window tab-group (session) state
 
 ### Fixed

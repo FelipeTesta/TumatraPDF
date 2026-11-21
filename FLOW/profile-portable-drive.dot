@@ -172,7 +172,7 @@ primary is NOT clobbered if already present)", fillcolor="#bbdefb", style=filled
     stale [label="FLOW/profile-system.dot is STALE:
 shows 'UNIFICATION PLANNED' + 6-button Sync dialog;
 Set Folder (id=7) + <root>\\stats + <root>\\study shipped s64-R9o (v1.0.17);
-this file supersedes that cluster for the portable/installed split", shape=note, fillcolor="#ffcdd2", style=filled];
+this file supersedes that cluster for the portable/installed split\n(s68: gaps cluster refreshed; split still documented here)", shape=note, fillcolor="#ffcdd2", style=filled];
 
     // ===================== EDGES =====================
     f5_result -> p_profile [style=dashed, label="still only looks here (never finds)"];

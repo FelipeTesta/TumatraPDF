@@ -1,8 +1,10 @@
 // ===================== TAB SESSION SYSTEM =====================
-// Snapshot 2026-11-21 per-window active group s67. Red dashed = sync gaps found by audit;
-// s46 fix applied : RemoveTab now syncs, last-tab pre-sync covers
-// programmatic path, drag/keyboard reorder sync, pinned keyboard lock,
-// boot re-save. Remaining red = direct SetSelected bypass
+// Snapshot 2026-11-21 per-window active group s67/s68. Red dashed = sync gaps found by audit;
+// s46 fix applied : RemoveTab now syncs (pre-sync covers programmatic close),
+// drag/keyboard reorder sync, pinned keyboard lock, boot re-save. ACTIVE GROUP IS PER WINDOW.
+// Session re-sync now happens at the RemoveTab choke point:
+//   Tabs.cpp RemoveTab -> UpdateActiveGroupAutoSave(win);  (Tabs.cpp:194)
+// Remaining red = direct SetSelected bypass
 // (SumatraPDF.cpp:3970, hard-banned file) + #8 missing-file-at-restore
 // pending design decision. Line numbers drift with edits — re-verify
 // before trusting.
@@ -31,20 +33,21 @@ digraph TabSessionSystem {
     SumatraPDF -> SettingsFile [label="SaveSettings (5035)"];
     SumatraPDF -> TabsMgmt [label="Ctrl+W / menu Close\nCloseTab (4950) → RemoveTab (155)"];
     TabsMgmt -> SumatraPDF [label="SaveSettings (5035)"];
-    SumatraPDF -> TabGroups [label="STALE: tabFiles not updated", color=red, style=dashed];
-    SumatraPDF -> SettingsFile [label="persists stale group", color=red];
+    TabsMgmt -> TabGroups [label="programmatic close (Ctrl+W / palette / Favorites / folder)\n→ RemoveTab choke point → UpdateActiveGroupAutoSave re-sync (s68)\n(Tabs.cpp:194 UpdateActiveGroupAutoSave(win))", color=green];
+    SumatraPDF -> TabGroups [label="tabFiles re-synced at RemoveTab choke point (s46 FIXED)", color=green, style=dashed];
+    SumatraPDF -> SettingsFile [label="group re-synced before save (s46 FIXED)", color=green];
     TabsCtrlBar -> TabsMgmt [label="last tab Alt+click / mid-click"];
     TabsMgmt -> SumatraPDF [label="MainWindowTabClosed (616)"];
     SumatraPDF -> TabGroups [label="SyncActiveGroupToEmpty (600)\n[s45 FIX] clears tabFiles→0", color=green];
     SumatraPDF -> TabsMgmt [label="CloseTab → CloseWindow (5079)"];
     SumatraPDF -> SettingsFile [label="SaveSettings (5173) persists EMPTY group"];
-    SumatraPDF -> SumatraPDF [label="CloseTab (4950) tabCount==1 → CloseWindow (4996)", color=red];
-    SumatraPDF -> TabGroups [label="NO SyncActiveGroupToEmpty", color=red, style=dashed];
-    SumatraPDF -> SettingsFile [label="SaveSettings (5173) persists STALE group\n(s45 bug unfixed)", color=red];
-    TabsCtrlBar -> TabsCtrlBar [label="drag reorder\nUpdateAfterDrag (505)", color=red, style=dashed];
-    TabsCtrlBar -> TabGroups [label="NO sync — order diverges", color=red, style=dashed];
-    TabsMgmt -> TabsMgmt [label="MoveTab/SwapTabs (892)", color=red, style=dashed];
-    TabsMgmt -> TabGroups [label="NO sync", color=red, style=dashed];
+    SumatraPDF -> SumatraPDF [label="CloseTab (4950) tabCount==1 → CloseWindow (4996) — pre-sync via SyncActiveGroupToEmpty (s45 FIXED)", color=green];
+    SumatraPDF -> TabGroups [label="SyncActiveGroupToEmpty (600) — last-tab clears tabFiles→0 (s45 FIXED)", color=green, style=dashed];
+    SumatraPDF -> SettingsFile [label="SaveSettings (5173) persists EMPTY group — last-tab pre-sync (s45 FIXED)", color=green];
+    TabsCtrlBar -> TabsCtrlBar [label="drag reorder\nUpdateAfterDrag (505) → UpdateActiveGroupAutoSave(win) (TabsCtrl.cpp:532) (FIXED)", color=green, style=dashed];
+    TabsCtrlBar -> TabGroups [label="order re-synced after drag reorder (TabsCtrl.cpp:532) (FIXED)", color=green, style=dashed];
+    TabsMgmt -> TabsMgmt [label="MoveTab/SwapTabs (892) → UpdateActiveGroupAutoSave(win) (Tabs.cpp:956) (FIXED)", color=green, style=dashed];
+    TabsMgmt -> TabGroups [label="order re-synced after MoveTab/SwapTabs (Tabs.cpp:956) (FIXED)", color=green, style=dashed];
     TabsCtrlBar -> TabsMgmt [label="drag out to new window\nMainWindowTabMigration (645)"];
     TabsMgmt -> ActiveGroup [label="new window unsynced; original keeps group"];
     User -> SumatraPDF [label="Ctrl+N"];

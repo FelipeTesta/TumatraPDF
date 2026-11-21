@@ -186,7 +186,7 @@ digraph ToolbarSystem {
     Note1 [label="ROOT CAUSE: dmlib intercepts NM_CUSTOMDRAW\nbefore subclass chain sees it\n(LOG s36-bb: only CDDS_POSTPAINT reaches ReBarWndProc)", shape=note, color=red];
     Note2 [label="FLASHCARD WORKS: FlashcardReBarSubclassProc\ninstalled after dmlib (LIFO -> first)\nhandles NM_CUSTOMDRAW directly\n+ TBSTYLE_EX_MIXEDBUTTONs", shape=note, color=green];
     Note3 [label="OUR FIX: Replicate flashcard pattern for Arch/Edit:\n1. TBSTYLE_EX_MIXEDBUTTONs on both toolbars\n2. Dedicated rebar subclass (ID 42) handling NM_CUSTOMDRAW\n3. Paint subclass on toolbar HWND for WM_PAINT bypass\n4. Removed conflicting ReBarWndProc (ID 0) from Arch rebar", shape=note, color=blue];
-    Note4 [label="CRITICAL ORDERING (Serena):\nSetWindowTheme MUST run BEFORE TbAddButtons\nToolbarApplyThemeToRebar() does it AFTER → BUG\n→ TB_GETITEMRECT=0 → ReportIf → exitCode=105\n→ Band paints BLANK (white toolbar)\nFix: ToolbarSetupSecondaryRebar + ToolbarSubclassSecondaryToolbar", shape=note, color=orange];
+    Note4 [label="CRITICAL ORDERING (Serena):\nSetWindowTheme MUST run BEFORE TbAddButtons\nToolbarApplyThemeToRebar() REMOVED s68 (zero callers; only a comment remains: Toolbar.cpp:3354 'see ToolbarApplyThemeToRebar (deleted, s68)')\n(the ordering rule is enforced by ToolbarSetupSecondaryRebar)\n→ TB_GETITEMRECT=0 → ReportIf → exitCode=105 → Band paints BLANK (white toolbar)\nFix: ToolbarSetupSecondaryRebar + ToolbarSubclassSecondaryToolbar", shape=note, color=orange];
 
     Note1 -> ArchCreate [style=dashed];
     Note1 -> EditCreate [style=dashed];

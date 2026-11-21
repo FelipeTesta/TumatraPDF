@@ -140,7 +140,7 @@ digraph TumatraPDF {
         style=dashed;
         color="#b71c1c";
 
-        dead1 [label="V1 crop stack: QuickToggleViewportCrop()\nDisplayModel.cpp:343-355 — STILL ZERO callers (2026-09-21)\n+ v1/v2 parallel fields DisplayModel.h:340-349\n+ CmdCommandPaletteOnlyTabs accel commented (docs stale)\n+ flashcard dead: hwndCardCount/CmdFlashcardNext\n-> TODO.md R5 prune", fillcolor="#ffebee", style=filled];
+        dead1 [label="V1 crop: QuickToggleViewportCrop() v1 REMOVED 2026-09-22 (zero callers)\n(DisplayModel.cpp:443-444 'QuickToggleViewportCrop (v1) was removed 2026-09-22')\n+ v1 CROP still live: ApplyViewportCrop() (DisplayModel.cpp:415), used by CmdViewportCropToggle\n  (SumatraPDF.cpp:11892 'cropDm->ApplyViewportCrop();')\n+ v1/v2 fields coexist in DisplayModel.h: viewportCropEnabled (L368), viewportCropV2Enabled (L375)\n+ hwndCardCount / studyModeType: PRUNED (no longer exist)\n+ CmdFlashcardNext IS wired (Commands_Flashcard.cpp:1187 'case CmdFlashcardNext:')\n-> TODO.md R5 prune (stale entry)", fillcolor="#ffebee", style=filled];
     }
 
     // ===================== DEPENDENCIES =====================
@@ -154,7 +154,7 @@ digraph TumatraPDF {
     mupdf -> render;
 
     // ===================== NOTES / FINDINGS =====================
-    notes [label="AUDIT 2026-11-01 (tree-sitter + serena):\ndup: colX math x4, trim rect x3, contrast JS x3 divergent,\ntrim-drag lines x3. Bug: TrimConfigDialog no VirtualToPhysical.\nGod files: SumatraPDF.cpp 14.2k lines (16C continues).\nRefactor phases R1-R7 in TODO.md.", shape=note, fillcolor="#fff9c4", style=filled];
+    notes [label="AUDIT 2026-11-01 (tree-sitter + serena):\ndup: colX math x4, trim rect x3, contrast JS x3 divergent,\ntrim-drag lines x3. Bug: TrimConfigDialog no VirtualToPhysical → FIXED: TrimConfigDialog.cpp:93-95 comment + L96 'RectF mb = dm->PageMediaBox(dm->CurrentPageNo());' routes virtual->physical under TC2.\nGod files: SumatraPDF.cpp 14.2k lines (16C continues).\nRefactor phases R1-R7 in TODO.md.", shape=note, fillcolor="#fff9c4", style=filled];
     audit [label="AUDIT 2026-08-24:\ndiagram rewritten from real code\n(gToolbarButtons, menuDefNewTools, Accelerators,\ngen-settings.ts, explore agent).\nBottlenecks logged in lemma memory.\n\nBATCHES 1-3 (2026-08-24):\n· dead close-icon code removed (TabsCtrl)\n· AutoScroll module extracted (src/AutoScroll.{h,cpp})\n· perf guards: gAnyToggleChecked early-out,\n  width-gated ETA reposition, StringFormat statics\n  in TabWnd::Paint\n· lint: RenderCache unused param, static\n  SafeDeleteTrimConfigDialog, comment moved .h→.cpp\n· MERGE.md corrected (factual, fork point ~912ecf2)"];
 
     // ===================== LEGEND =====================

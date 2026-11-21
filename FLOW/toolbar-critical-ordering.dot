@@ -22,7 +22,7 @@ digraph ToolbarCriticalOrdering {
         r1_subclass [label="SetWindowLongPtr(hwndToolbar,\nGWLP_WNDPROC, WndProcToolbar)\n✅ CORRECT: Subclass AFTER buttons", fillcolor="#c8e6c9", style=filled, penwidth=2.0, color="#2e7d32"];
         r1_show [label="ShowWindow(hwndToolbar, SW_SHOW)", fillcolor="#c8e6c9", style=filled];
         
-        r1_wrong_theme [label="❌ WRONG: SetWindowTheme AFTER TbAddButtons\nToolbarApplyThemeToRebar() does this!\n→ Invalidates comctl per-button layout\n→ TB_GETITEMRECT returns 0\n→ ReportIf → TerminateProcess (exitCode=105)\n→ Band paints BLANK (white toolbar)", fillcolor="#ffcdd2", style=filled, shape=note, color="#ff0000", penwidth=2.0];
+        r1_wrong_theme [label="❌ WRONG: SetWindowTheme AFTER TbAddButtons\nToolbarApplyThemeToRebar() REMOVED s68 (zero callers; legacy helper deleted)\n(the ordering rule is enforced by ToolbarSetupSecondaryRebar)\n→ Invalidates comctl per-button layout\n→ TB_GETITEMRECT returns 0\n→ ReportIf → TerminateProcess (exitCode=105)\n→ Band paints BLANK (white toolbar)", fillcolor="#ffcdd2", style=filled, shape=note, color="#ff0000", penwidth=2.0];
         r1_wrong_subclass [label="❌ WRONG: Subclass BEFORE TbAddButtons\n→ WndProcToolbar WM_SIZE interferes\n→ TbAddButtons fails", fillcolor="#ffcdd2", style=filled, shape=note, color="#ff0000", penwidth=2.0];
         
         r1_start -> r1_tbset -> r1_theme -> r1_add_btns -> r1_subclass -> r1_show;
