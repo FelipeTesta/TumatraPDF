@@ -117,4 +117,12 @@ Lista column set; import dry-run diff semantics; session window search scope
 none of these were re-read in code - trust prior sessions", shape=note, fillcolor="#ffe0b2", style=filled];
     filterdlg -> verifynote [style=dotted];
     lista -> verifynote [style=dotted];
+
+    ctrlclick [label="Ctrl+click on highlight -> Canvas.cpp:3655 ctrl+click handler\nmatches annot page+bounds to flashcard key -> FlashcardSidebarSelectAndScrollToCard\n(FlashcardSidebar.cpp:734-757) -> opens List panel, selects card, scrolls to it", fillcolor="#e3f2fd", style=filled];
+    rectsel [label="Rectangular selection semantics\nCtrl+drag = ONE sharp rectangle + ONE card (Selection.cpp:893-903,\nCmdFlashcardAdd Commands_Flashcard.cpp:1016) ignoring text underneath\nCtrl+Alt+drag = N rectangles -> ONE grouped card\n(Selection.cpp:972-990 ctrlAltAccum per page; Flashcard.cpp extraPages\ncross-page group token + Flashcard::extraPages secondary pages)", fillcolor="#e3f2fd", style=filled];
+    planned [label="PLANNED (TODO.md only, NOT implemented):\nGroup / Ungroup / Duplicate + Ranking (stars)", fillcolor="#ffcdd2", style=filled];
+
+    lista -> ctrlclick [style=dotted, label="Ctrl+click selects+scrolls"];
+    create -> rectsel [style=dotted, label="Ctrl+drag / Ctrl+Alt+drag"];
+    rectsel -> planned [style=dotted, label="Group/Ungroup/Duplicate/Ranking"];
 }

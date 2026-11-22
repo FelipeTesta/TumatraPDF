@@ -50,6 +50,10 @@ The features below were developed on top of SumatraPDF and **do not exist in the
 
 - Markdown opens full-width with word-wrap that reflows on resize; auto-scroll and contrast work in WebView2 mode.
 
+#### Page Hold
+
+- Remembers the reading position; draws a peru frame of the area it will return to; pauses auto-scroll; works in PDF and in Markdown tabs.
+
 ### Page tools
 
 #### Image editing (right-click on an image)
@@ -90,6 +94,8 @@ The features below were developed on top of SumatraPDF and **do not exist in the
 - Turn text selections into cloze cards — a gray highlight mask over the PDF's own text, nothing duplicated.
 - SM-2 spaced repetition per book; rate 1–4 on reveal; Alt+drag and cross-page selections make one grouped card.
 - Study timer, per-day stats, Order/Filter/List windows, cross-document sessions, export/import, and local backups.
+- Ctrl+click on a flashcard highlight selects it in the List panel and scrolls the list to it.
+- Ctrl+drag = one sharp rectangle + one flashcard; Ctrl+Alt+drag = several rectangles in one grouped flashcard.
 
 ### Tabs & sessions
 
@@ -119,6 +125,7 @@ The features below were developed on top of SumatraPDF and **do not exist in the
 
 - All reading time, flashcard data, and per-book state in a single `tumatraPDF-data_1.json` that can be exported, imported, and synced (e.g. via Google Drive).
 - Home "🔁 Sync" button opens the Profile Sync window; 9 rolling local backups; `profileDataDir` setting points at a synced folder; portable→install import.
+- Profile Sync: Set data folder (one root for profile + backups + stats + study), correct merge (keeps the larger daily total and the newer per-card state), honest UI with a status line and keyboard-navigable Backups.
 
 ### Update & identity
 

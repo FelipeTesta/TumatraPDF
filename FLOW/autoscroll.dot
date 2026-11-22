@@ -32,4 +32,9 @@ digraph AutoScroll {
 
     speed [label="Speed: round-step table 25-1600 px/min\nF7 +20% / F8 -20%\npersist FileState AutoScrollSpeedMultiplier", shape=box, fillcolor="#f5f5f5", style=filled];
     start -> speed [style=dotted];
+
+    hold [label="Hold active = third pause reason (MainWindow.h:387-395):\nautoPausedByHold = fact (Hold is ON) vs autoSuspendedByHold = intent\n(scroll was running, Hold stopped it, wants to resume).\nStart refused while Hold active; resume only when foreground\nand no other pause owns it. AutoScrollSetHoldActive (AutoScroll.cpp:370).", fillcolor="#fff9c4", style=filled];
+
+    tick -> hold [style=dotted];
+    hold -> shift [style=dotted, label="both pause tick"];
 }

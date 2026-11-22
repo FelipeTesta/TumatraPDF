@@ -4,6 +4,18 @@ Per-version changelog for TumatraPDF — new functions + bug fixes, newest first
 Feature details live in [README.md](README.md); full per-session development
 history in [LOG.md](LOG.md).
 
+## v1.0.20 (2026-11-21)
+
+- **Page Hold with a visual frame:** the Hold button on the toolbar now remembers exactly where you were reading. While it is on, a thin peru frame marks the area that will come back, and the frame stays anchored to the page as you scroll or zoom. Turning Hold off restores the same view and clears the frame. Hold also pauses auto-scroll while it is active.
+- **Page Hold works in Markdown documents:** in .md and .html tabs the Hold button now draws a full-width peru frame at the reading line and takes you back to the same spot. It was a dead button there before.
+- **Ctrl+click picks the flashcard you clicked:** clicking a flashcard highlight with Ctrl now opens the List panel AND selects the matching card and scrolls the list to it.
+- **Rectangular selections are clean rectangles:** drawing a rectangle with Ctrl held (over text, over an image or over nothing at all) now shows a single sharp rectangle and creates a single flashcard, ignoring the text underneath. Ctrl+Alt lets you draw several rectangles and turn them into ONE grouped flashcard with several masked areas — the image-occlusion trick without extra machinery.
+- **Profile Sync is honest and correct:** importing a profile no longer wipes newer local study progress or lowers your reading totals (the merge keeps the larger total for each day and the newer state for each card). Replace now really replaces (and keeps a copy of the previous profile). The exported snapshot includes the backups, the daily stats and the per-book study files. "Set data folder" tells you what it does and when it takes effect, the window shows the result of the last action, both windows repaint when you switch the Windows theme, and the Backups window can be driven from the keyboard.
+- **One data folder for everything:** "Set data folder" points the profile, its backups, the daily statistics and the per-book study files at a single folder (a synced cloud folder, for instance), so two installations can share the same reading and study history. Sessions and per-document settings stay with each installation.
+- **Each window keeps its own session:** the green dot on the toolbar marks the session of THAT window, so two windows can sync two different sessions at the same time. Reading and study time are credited to the window that earned them.
+- **Themed update confirmation:** the "a new version is available" window now uses the app's own theme in dark and light instead of a stock white dialog, and the downloaded update is checked against the published version before it is allowed to install.
+- **Profile Sync in the command palette:** the command palette (Ctrl+K) now lists a "Profile: Sync..." command that opens the Profile Sync window.
+
 ## v1.0.19 (2026-11-19)
 
 - **Duplicate flashcards are refused:** selecting the exact same text twice no longer creates a second card. The check now reads the live document instead of the saved file, so it also works before you press Ctrl+S, and the second attempt answers with a passive "Already a flashcard" note. Selections that differ by even one character still create a new card.

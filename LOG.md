@@ -1,3 +1,60 @@
+## 2026-11-21 (s70) — Page Hold frame, rectangular flashcards, release 1.0.20
+
+### Added
+- Page Hold peru frame (2px border-only, anchored in PAGE coords so it is zoom/scroll faithful) for PDF; Page Hold in markdown/webview (DOM frame, full width, no canvas) — the Hold button was a dead button in .md; auto-scroll pauses while Hold is active and resumes only in the foreground; Ctrl+click on a flashcard highlight selects the card in the List panel and scrolls the list to it; Ctrl+Alt rectangle accumulation -> ONE grouped flashcard with several quads; control-pipe hooks TestProfileSetFolder/TestProfileExport/TestProfileImport/TestProfileStatus (80-83); new command CmdProfileSync (539), listed in the command palette (Ctrl+K) as "Profile: Sync...".
+
+### Changed
+- Ctrl+drag paints ONE sharp rectangle (union of the drawn rect) and creates ONE card, ignoring text underneath; selection border drawn with DrawRectangle instead of GDI+ path.Outline (which rounded the corners); Profile Sync window: 7 buttons + status line + explanatory import text + "Set data folder"/"Open data folder" labels; Backups window keyboard reachable (Up/Down/Home/End + SPACE hold-to-restore).
+
+### Fixed
+- Profile merge kept the larger daily total and the newer per-card state instead of replacing/wiping local data; Replace import now really replaces (atomic temp + MoveFileExW) and keeps a .pre-import copy; import validates the source checksum before touching anything; export writes all four trees (profile + backup + stats + study); F4 migration copies stats/ and study/ too; Hold restores the zoom before the position; markdown Hold uses the page-side JS as the scroll authority (first click now works).
+
+### Verified
+- debug build 0 errors/0 warnings; release build 0 errors/0 warnings -> Compiled/TumatraPDF-portable-win64.exe + TumatraPDF-install-win64.exe; version bumped to 1.0.20 in BuildConfig.h (same commit as the tag); 19 modified files checked: no UTF-8 BOM, no U+FFFD; Page Hold E2E (ad-hoc-page-hold.ts) 3 scenarios PASS.
+
+### Notes
+- `update.txt` is written by the release bot on tag push — never hand-edited; sessions/tab groups/FileStates live in the per-installation settings file and never travel through the profile; `gGlobalPrefs->activeTabGroup` is a persistence mirror, the live state is per window.
+
+## 2026-11-21 (s69) — Profile Sync: correct merge, complete migration, honest UI
+
+### Added
+- `ProfileSyncSetFolderToPath`, `ProfileSyncExportToPath`, `ProfileSyncImportFromPath` — reusable profile-sync API (no dialogs, no `-for-testing` gate) declared in ProfileSyncWnd.h:14-16, defined in ProfileSyncWnd.cpp:976-1004.
+- `TestProfileSetFolder = 80`, `TestProfileExport = 81`, `TestProfileImport = 82`, `TestProfileStatus = 83` debug-control commands (cmd/control.ts:82-85, SumatraControl.cpp:431-434) — Profile Sync actions scriptable through the control pipe; UI buttons stay disabled under `-for-testing`.
+- `CmdProfileSync` (palette title "Profile: Sync...") — opens the Sync window from the command palette (Ctrl+K); previously reachable only via the Home page button (gen-commands.ts:350, Commands.h:357/700, SumatraPDF.cpp:10473).
+- Status line at the bottom of the Sync window showing the outcome of the last action, seeded with the F4 migration result (ProfileSyncWnd.cpp:326, 799-802).
+- Import validates the SOURCE checksum before touching anything: mismatch aborts with a log line; absent checksum (old-format file) accepted with a log line (ProfileData.cpp:1290-1299).
+
+### Changed
+- Import with `replace=true` now WORKS: overwrites the `.pre-import` backup (previously failed when that file existed) and installs atomically over the primary (temp + `MoveFileExW(MOVEFILE_REPLACE_EXISTING)`) (ProfileData.cpp:1280).
+- Import with `replace=false` (merge) keeps the LARGER cumulative total per day (MAX on seconds and cards independently — local reading total can no longer shrink) and merges books per study-state key with newest `lastReviewedAt` winning; local-only states kept; imported book with no timestamps keeps local states and adopts only missing ones (ProfileData.cpp:1280-1481).
+- `ProfEnsureProfileDirAndMigrate` (F4, ProfileData.cpp:1706) now copies `stats/` and `study/` trees as well as profile files and `backup/`, with overwrite semantics, and records a human-readable outcome via `ProfileDataLastMigrationStatusTemp()` (ProfileData.h:106, ProfileData.cpp:1792).
+- `ProfileDataExportToDir` (ProfileData.cpp:1206) now copies FOUR trees: primary profile, `backup/`, `stats/` and `study/`; `overwriteExisting=true` overwrites the destination primary atomically.
+- "Set data folder" asks before applying when the chosen folder already contains a profile (keeps that profile, does NOT merge yours); confirms afterwards that the switch applies on the NEXT START, data is copied, old folder keeps its files (ProfileSyncWnd.cpp:441-491).
+- "Export" asks before overwriting an existing destination and confirms the result naming the destination and what was written; failure message names the likely reason instead of "see log" (ProfileSyncWnd.cpp:515-558).
+- Import prompt explains itself (Replace keeps a `.pre-import` copy; Merge keeps the larger total per day and the newer state per flashcard card) and shows both dates; Merge button reads "Merge (keep newer)" (ProfileSyncWnd.cpp:561-708).
+- Both windows repaint on live system theme change (`WM_SETTINGCHANGE` / `WM_THEMECHANGED`): theme re-resolved, dark caption re-applied, all children repainted; cached background brush released on destroy (ProfileSyncWnd.cpp:717-718).
+- Backups window keyboard reachable: Up/Down/Home/End move a visible slot selection, holding SPACE performs the same 5-second hold-to-restore, failed restore reported in a message box instead of only in the log (ProfileBackupWnd.cpp:228-274).
+- Button labels honest: "Set data folder", "Open data folder", plus hint line stating the new folder takes effect on the next start (ProfileSyncWnd.cpp:441-491).
+
+### Fixed
+- Broken "Replace local data" import could never replace anything on an installation that already had a profile (the `.pre-import` copy failed when that file existed).
+- Import merge could lower local reading totals and wipe local flashcard study states (file-level timestamp decide).
+- F4 "Set data folder" migration left `stats/` and `study/` sidecars behind when pointing apps at one shared root.
+- Export could neither overwrite an existing destination nor produce a complete snapshot (was primary + backup only).
+- Silent Set Folder / Export / Import — no user feedback on outcome.
+- Misleading "newest-wins" import label (was actually adopt-absent / file-level timestamp).
+- Live theme-switch repaint + cached background brush leak.
+- Mouse-only hold-to-restore in Backups window (no keyboard path).
+
+### Verified
+- Source-level audit: every line reference in FLOW/profile-system.dot and FLOW/profile-portable-drive.dot checked against current code (ProfileData.cpp, ProfileData.h, ProfileSyncWnd.cpp, ProfileSyncWnd.h, ProfileBackupWnd.cpp, SumatraControl.cpp, SumatraPDF.cpp, Commands.h, cmd/control.ts, cmd/gen-commands.ts).
+- On-disk evidence: export writes primary + backup + stats + study; import replace leaves `.pre-import` copy; F4 migration log line confirms stats/study copied; status line shows last action outcome.
+- UTF-8 without BOM on all four edited files; no U+FFFD.
+
+### Notes
+- The v1.0.17 CHANGELOG line overstating import merge semantics ("truly newest-wins per item") is corrected in the new Unreleased section — the published section is left untouched.
+- TODO.md: the item about Profile Sync import scriptability now says actions are scriptable via the control pipe (TestProfile* = 80-83) but UI buttons stay disabled under `-for-testing`; user owns TODO.md.
+
 ## 2026-11-21 (s68) — audit fixes: flashcard cap, session sync, stats flush, orphan removal
 
 ### Fixed

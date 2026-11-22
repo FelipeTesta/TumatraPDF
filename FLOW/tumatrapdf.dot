@@ -167,4 +167,12 @@ digraph TumatraPDF {
         tumatraN [label="[TUMATRA] fork-exclusive", fillcolor="#c8e6c9", style="rounded,filled"];
         deadN [label="Dead code", fillcolor="#ffebee", style=filled];
     }
+
+    hold_pdf [label="Page Hold frame (PDF)\nPageHoldCapture (DisplayModel.cpp:3022) + PaintPageHoldFrame\n(DisplayModel.cpp:3102): 2px peru border-only, stored in PAGE coords\nof anchor page, repainted via CvtToScreen -> zoom/scroll faithful.\nCmdPageHoldToggle (SumatraPDF.cpp:11991) toggles hold + auto-scroll pause.", fillcolor="#e3f2fd", style=filled];
+    hold_md [label="Page Hold (markdown/webview)\nDOM frame full-width at reading line (MarkdownModel.cpp:823 HoldCapture,\n854 HoldInjectFrame, 885 HoldRestore); page-side JS is scroll authority;\nfirst click now works.", fillcolor="#e3f2fd", style=filled];
+    hold_autoscroll [label="Hold -> auto-scroll pause\nAutoScrollSetHoldActive (AutoScroll.cpp:370);\nautoPausedByHold (fact) vs autoSuspendedByHold (intent,\nMainWindow.h:387-395); start refused while Hold active;\nresume only when foreground + no other pause owns it.", fillcolor="#e3f2fd", style=filled];
+
+    feat_scroll -> hold_pdf [style=dotted];
+    hold_pdf -> hold_md [style=dotted];
+    hold_md -> hold_autoscroll [style=dotted];
 }
