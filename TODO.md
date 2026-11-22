@@ -108,6 +108,14 @@ Source: external agent's perf map (archived TEMP/performance-code-arch.dot), cla
 
 - [ ] Flashcard study preload: pre-load next cards' pages/annots during study=on (esp. cross-doc session) to cut card-to-card load time; ADAPTIVE lookahead (budget by measured render time; low-priority background; caps so weak machines not burdened). P1+P2 shipped s64-R9p (EWMA-driven N, BELOW_NORMAL worker, epoch invalidation, caps, silent N=0 degrade; probe mechanism-verified; warm jobs untested — dev box memory-degraded). P3 = opt-in setting only (`flashcardPreloadSessionBooks`, lazy-tab background load NOT implemented). Awaiting user live validation + lighter-machine check of warm-job path (see USER validation queue).
 
+### Group / Ungroup / Duplicate
+
+Toolbar replacing the redundant "Flashcards" title at the top of the List panel; Group / Ungroup / Duplicate buttons; Ctrl+hold multi-select of several list cards; Group merges the selected cards into ONE card; Ungroup dissolves a group back into its individual cards; Duplicate clones the selected card (independent copy + its own study state). Implementation anchors: `FlashcardGroupToken` (Flashcard.h:112), `Flashcard::extraPages` (Flashcard.h:38), `FlashcardCreateHighlightAnnot` (Flashcard.cpp:279), `FlashcardStudyPruneStates` (Flashcard.cpp:662). Open decisions: how the reverse mapping works from merged quads back to the original cards, what happens to the study state of merged cards (policy: keep primary / mark all new / average), whether grouping survives save/reload. Marked PLANNED / not implemented.
+
+### Ranking (importance stars)
+
+Levels ⭐⭐⭐/⭐⭐/⭐/-; default = 2 stars; the user sets the level during study or from the List; later it becomes a modifier of the SM-2 algorithm (cards more important have a slightly LOWER ease → repeat sooner, since the user needs to learn that information first); 1 star → slightly higher ease. Persistence proposal: encode the star level in the annotation AUTHOR using `§` separator, surviving save/reload without breaking existing parsers (e.g. `TumatraPDF-Flashcard§3` for single-page, `TumatraPDF-Flashcard#A1B2C3D4§3` for cross-page). The `§` does not collide with the existing `#` group-token separator. This ranking also must reflect in the filters and add a column to the List panel. Marked PLANNED / not implemented. Implementation anchors: `FlashcardSm2Update` (Flashcard.cpp:1447), `FlashcardAuthorPrefix` (Flashcard.cpp:49-51), `FlashcardAuthorToken` (Flashcard.cpp:66-92), `FlashcardFilterEval` (Flashcard.cpp:872).
+
 ## Image Occlusion cards — PLANNED (awaiting user decisions)
 
 Boxes over images/diagrams as cards — same Highlight-annot + mask/reveal/rate pipeline as text clozes; only the DRAWING MODE at creation is new. 4 steps (IO-1 state `boxMode`+`pendingBoxes`; IO-2 canvas rubber-band before selection branches; IO-3 screen→page conversion like cloze rects; IO-4 `S` creates ONE Highlight with N quads, Esc/Box-off discards).

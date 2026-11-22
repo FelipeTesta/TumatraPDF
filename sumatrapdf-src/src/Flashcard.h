@@ -102,6 +102,11 @@ Vec<Flashcard> FlashcardLoadFromDocument(EngineMupdf* engine);
 // merge.
 Annotation* FlashcardCreateHighlightAnnot(EngineBase* engine, int pageNo, Vec<RectF>& rects, u64 groupToken = 0);
 
+// Stable card key: FNV-1a hash of page + quantized bounds. Matches the key
+// computed during FlashcardLoadFromDocument (used to find the card for an
+// annotation under the cursor).
+u64 FlashcardKey(int pageNo, const RectF& bounds);
+
 // Deterministic token shared by every annotation of a cross-page cloze: hash
 // of the FIRST page's first mask rect. Never returns 0 (0 means "single page").
 u64 FlashcardGroupToken(int firstPageNo, Vec<RectF>& firstPageRects);
@@ -252,5 +257,8 @@ void FlashcardSidebarPopulate(MainWindow* win);
 void RelayoutFlashcardListPanel(MainWindow* win);
 // scroll the current tab to a card (used by the Lista panel's click)
 void FlashcardNavigateToCardInCurrentTab(MainWindow* win, int cardIdx);
+// Select and scroll to a card in the Lista panel (used by Canvas ctrl+click)
+// Returns true if the card was found and selected.
+bool FlashcardSidebarSelectAndScrollToCard(MainWindow* win, int cardIdx);
 
 #endif

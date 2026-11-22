@@ -1619,7 +1619,7 @@ static void ExecuteControlRequest(ControlRequest* req) {
                 dm->PageHoldRestore();
                 dm->pageHold.active = false;
             } else {
-                dm->PageHoldCapture();
+                dm->PageHoldCapture(win->hwndCanvas);
                 dm->pageHold.active = dm->pageHold.valid;
             }
             SetToolbarButtonCheckedState(win, CmdPageHoldToggle, dm->pageHold.active);

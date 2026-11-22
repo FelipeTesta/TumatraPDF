@@ -384,6 +384,15 @@ struct MainWindow {
         // open (the red margin lines are being dragged; scrolling under the
         // pointer would move the target). Resumed when the dialog closes.
         bool autoPausedByTrimConfig = false;
+        // Page Hold is currently active for this window (a fact about Hold,
+        // not about scroll state). Set when Hold turns ON, cleared when Hold
+        // turns OFF. The start guard reads this to refuse scrolling while Hold
+        // is active.
+        bool autoPausedByHold = false;
+        // auto-scroll was running and Hold stopped it; it wants to resume when
+        // Hold ends (an intent). Cleared by a manual toggle-off (the user
+        // decided) and when the resume happens.
+        bool autoSuspendedByHold = false;
     } autoScroll;
     // Reading-stats webview path: per-window wall-clock reference so two
     // windows don't compute dt from each other's timestamp (ReadingStats.cpp).
@@ -676,6 +685,12 @@ struct MainWindow {
         Vec<SelectionOnPage>* altAccum = nullptr;
         // true while the current drag is an Alt+drag (additive selection)
         bool altSelecting = false;
+        // Ctrl+Alt+drag rectangle accumulation: each drag adds a drawn
+        // rectangle to this list; previous rectangles stay. 's' creates one
+        // flashcard from all accumulated rectangles (image-occlusion use case).
+        Vec<SelectionOnPage>* ctrlAltAccum = nullptr;
+        // true while the current drag is a Ctrl+Alt+drag (rectangle accumulation)
+        bool ctrlAltSelecting = false;
     } selection;
     // --- end selection & touch input state ---
 

@@ -173,6 +173,23 @@ int DisplayModel::ColumnOfVirtual(int virtualPageNo) const {
     return -1; // no column split
 }
 
+// Maps the stored physical anchor + column to the CURRENT virtual page
+// (respecting v2 layout and R2L column flip). Single source of truth
+// for capture, paint, and restore so the three can never diverge.
+int DisplayModel::PageHoldPhysToVirtual() const {
+    if (!pageHold.valid) {
+        return kInvalidPageNo;
+    }
+    if (!IsViewportCropV2Active()) {
+        return pageHold.physAnchor;
+    }
+    int col = pageHold.column;
+    if (displayR2L) {
+        col = 1 - col;
+    }
+    return pageHold.physAnchor * 2 - 1 + col;
+}
+
 int DisplayModel::PhysicalToVirtualForRect(int physicalPageNo, RectF rect, RectF* rectOut) const {
     if (!IsViewportCropV2Active()) {
         if (rectOut) {
@@ -1808,7 +1825,7 @@ int DisplayModel::GetPageNextToPoint(Point pt) const {
 
 // TODO: try to track down why sometimes zoom on a page is 0
 // like https://github.com/sumatrapdfreader/sumatrapdf/issues/2014
-static float getZoomSafe(DisplayModel* dm, int pageNo, const PageInfo* pageInfo) {
+static float getZoomSafe(const DisplayModel* dm, int pageNo, const PageInfo* pageInfo) {
     float zoom = pageInfo->zoomReal;
     if (zoom > 0) {
         return zoom;
@@ -1831,7 +1848,7 @@ static float getZoomSafe(DisplayModel* dm, int pageNo, const PageInfo* pageInfo)
     return 1.f;
 }
 
-Point DisplayModel::CvtToScreen(int pageNo, PointF pt) {
+Point DisplayModel::CvtToScreen(int pageNo, PointF pt) const {
 #if defined(DEBUG)
     // DEBUG guard: pageNo must be a live virtual page in [1, pageCount].
     // Invariant: CvtToScreen dereferences pageInfo->pageOnScreen and calls
@@ -1890,13 +1907,13 @@ Point DisplayModel::CvtToScreen(int pageNo, PointF pt) {
     return ToPoint(p);
 }
 
-Rect DisplayModel::CvtToScreen(int pageNo, RectF r) {
+Rect DisplayModel::CvtToScreen(int pageNo, RectF r) const {
     Point TL = CvtToScreen(pageNo, r.TL());
     Point BR = CvtToScreen(pageNo, r.BR());
     return Rect::FromXY(TL, BR);
 }
 
-PointF DisplayModel::CvtFromScreen(Point pt, int pageNo) {
+PointF DisplayModel::CvtFromScreen(Point pt, int pageNo) const {
     if (!ValidPageNo(pageNo)) {
         pageNo = GetPageNextToPoint(pt);
     }
@@ -1929,7 +1946,7 @@ PointF DisplayModel::CvtFromScreen(Point pt, int pageNo) {
     return res;
 }
 
-RectF DisplayModel::CvtFromScreen(Rect r, int pageNo) {
+RectF DisplayModel::CvtFromScreen(Rect r, int pageNo) const {
     if (!ValidPageNo(pageNo)) {
         pageNo = GetPageNextToPoint(r.TL());
     }
@@ -3002,7 +3019,7 @@ void DisplayModel::SetScrollState(const ScrollState& state) {
 
 // Page Hold: capture the current view (page, scroll offsets, zoom) so the user
 // can navigate away and return exactly to the same position.
-void DisplayModel::PageHoldCapture() {
+void DisplayModel::PageHoldCapture(HWND hwndCanvas) {
     pageHold.state = GetScrollState();
     int virtPage = pageHold.state.page;
     if (ValidPageNo(virtPage)) {
@@ -3010,11 +3027,29 @@ void DisplayModel::PageHoldCapture() {
         pageHold.column = IsViewportCropV2Active() ? ColumnOfVirtual(virtPage) : 0;
         pageHold.zoomVirtual = zoomVirtual;
         pageHold.valid = virtPage >= 1 && virtPage <= VirtualPageCount();
+
+        // Capture the visible viewport in PAGE coordinates of the anchor page
+        // so the frame stays anchored to the page content while scrolling/zooming.
+        int anchorVirt = PageHoldPhysToVirtual();
+        if (ValidPageNo(anchorVirt) && hwndCanvas) {
+            // Get the canvas client rect in screen coords, convert to PAGE coords
+            Rect clientRect = HwndClientRect(hwndCanvas);
+            RectF pageRect = CvtFromScreen(clientRect, anchorVirt);
+            // Clip to the anchor page's media box so the frame never spills
+            // outside the page
+            RectF mediaBox = PageMediaBox(anchorVirt);
+            if (IsMediaBoxKnown(mediaBox)) {
+                pageRect.Intersect(mediaBox);
+                pageHold.visibleRectPage = pageRect;
+                pageHold.hasVisibleRect = true;
+            }
+        }
     } else {
         pageHold.valid = false;
+        pageHold.hasVisibleRect = false;
     }
-    logf("[hold] capture: page=%d phys=%d col=%d zoom=%g", virtPage, pageHold.physAnchor, pageHold.column,
-         pageHold.zoomVirtual);
+    logf("[hold] capture: page=%d phys=%d col=%d zoom=%g hasRect=%d", virtPage, pageHold.physAnchor, pageHold.column,
+         pageHold.zoomVirtual, pageHold.hasVisibleRect);
 }
 
 // Page Hold: restore the captured view. Returns true if restored, false if
@@ -3056,7 +3091,47 @@ bool DisplayModel::PageHoldRestore() {
     SetScrollState(ss);
     logf("[hold] restore: page=%d phys=%d col=%d zoom=%g", restorePage, pageHold.physAnchor, pageHold.column,
          pageHold.zoomVirtual);
+    // Clear the captured visible rect so the frame disappears
+    pageHold.hasVisibleRect = false;
+    pageHold.visibleRectPage = RectF();
     return true;
+}
+
+// Paint the Page Hold frame (2px peru border-only rect) for the anchor page
+// in the canvas overlay pass. Called from Canvas.cpp.
+void DisplayModel::PaintPageHoldFrame(HDC hdc, MainWindow* win) const {
+    if (!pageHold.active || !pageHold.valid || !pageHold.hasVisibleRect) {
+        return;
+    }
+    int anchorVirt = PageHoldPhysToVirtual();
+    if (!ValidPageNo(anchorVirt)) {
+        return;
+    }
+    // Only draw if the anchor page is currently visible
+    if (!PageVisible(anchorVirt)) {
+        return;
+    }
+    // Convert the captured PAGE rect to screen/canvas coords
+    Rect rcScreen = CvtToScreen(anchorVirt, pageHold.visibleRectPage);
+    if (rcScreen.IsEmpty()) {
+        return;
+    }
+    // 2px peru border (#CD853F), DPI-scaled
+    int penWidth = DpiScale(win->hwndCanvas, 2);
+    // Inset by half pen width so the visible frame stays inside the captured area
+    rcScreen.Inflate(-penWidth / 2, -penWidth / 2);
+    if (rcScreen.IsEmpty()) {
+        return;
+    }
+    // peru = RGB(205, 133, 63) = #CD853F
+    COLORREF peru = RGB(205, 133, 63);
+    HPEN hPen = CreatePen(PS_SOLID, penWidth, peru);
+    HPEN hOldPen = (HPEN)SelectObject(hdc, hPen);
+    HBRUSH hOldBrush = (HBRUSH)SelectObject(hdc, GetStockObject(HOLLOW_BRUSH));
+    Rectangle(hdc, rcScreen.x, rcScreen.y, rcScreen.x + rcScreen.dx, rcScreen.y + rcScreen.dy);
+    SelectObject(hdc, hOldPen);
+    SelectObject(hdc, hOldBrush);
+    DeleteObject(hPen);
 }
 
 // don't remember more than "enough" history entries (same number as Firefox uses)

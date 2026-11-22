@@ -3640,6 +3640,25 @@ static void OnMouseLeftButtonUp(MainWindow* win, int x, int y, WPARAM key) {
                 HwndSendCommand(win->hwndFrame, CmdFlashcardToggle);
             }
             FlashcardSidebarShow(win);
+
+            // Identify the clicked card by matching the annotation's page + bounds
+            // to a flashcard's key (same algorithm as FlashcardLoadFromDocument)
+            int annotPageNo = annotUnderCursor->pageNo;
+            RectF annotBounds = annotUnderCursor->bounds;
+            u64 cardKey = FlashcardKey(annotPageNo, annotBounds);
+
+            WindowTab* curTab = win->CurrentTab();
+            if (curTab && curTab->flashcard.cardsLoaded) {
+                for (int i = 0; i < len(curTab->flashcard.cards); i++) {
+                    if (curTab->flashcard.cards[i].key == cardKey) {
+                        logf("[fc] ctrl+click matched card idx=%d key=%llu\n", i, cardKey);
+                        FlashcardSidebarSelectAndScrollToCard(win, i);
+                        break;
+                    }
+                }
+            } else {
+                logf("[fc] ctrl+click - cards not loaded yet, cannot select\n");
+            }
             return;
         }
         ShowEditAnnotationsWindow(tab, win->annotationUnderCursor);
@@ -4614,6 +4633,11 @@ static bool DrawDocument(MainWindow* win, HDC hdc, Rect rcArea) {
     UpdateSelectionToolbarPosition(win);
 
     PaintReadAloudHighlight(win, hdc);
+
+    // Page Hold frame (border-only rect marking captured viewport)
+    if (dm->AsFixed()) {
+        dm->AsFixed()->PaintPageHoldFrame(hdc, win);
+    }
 
     if (win->fwdSearchMark.show) {
         PaintForwardSearchMark(win, hdc);

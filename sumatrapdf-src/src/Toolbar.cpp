@@ -21,6 +21,7 @@ extern "C" {
 #include "base/GuessFileType.h"
 #include "EngineAll.h"
 #include "DisplayModel.h"
+#include "MarkdownModel.h"
 #include "ImageReader.h"
 #include "GlobalPrefs.h"
 #include "ProgressUpdateUI.h"
@@ -716,7 +717,17 @@ void ToolbarUpdateStateForWindow(MainWindow* win, bool setButtonsVisibility) {
     DisplayModel* dmChecked = win->AsFixed();
     SetToolbarButtonCheckedState(win, CmdViewportCropV2Toggle, dmChecked ? dmChecked->viewportCropV2Enabled : false);
     SetToolbarButtonCheckedState(win, CmdMarginTrimToggle, dmChecked ? dmChecked->marginTrimEnabled : false);
-    SetToolbarButtonCheckedState(win, CmdPageHoldToggle, dmChecked ? dmChecked->pageHold.active : false);
+    // Page Hold: checked for PDF or markdown hold
+    bool holdActive = false;
+    if (dmChecked) {
+        holdActive = dmChecked->pageHold.active;
+    } else {
+        auto mmChecked = win->AsMarkdown();
+        if (mmChecked) {
+            holdActive = mmChecked->hold.active;
+        }
+    }
+    SetToolbarButtonCheckedState(win, CmdPageHoldToggle, holdActive);
     // Crop Align (moved to Edit toolbar): sync checked state from archTools.toolMode
     SetToolbarButtonCheckedState(win, CmdArchAlign, win->archTools.toolMode == 5);
     SetToolbarButtonCheckedState(win, CmdArchPageCrop, win->archTools.toolMode == 6);

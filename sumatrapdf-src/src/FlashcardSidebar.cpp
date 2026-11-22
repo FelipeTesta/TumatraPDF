@@ -728,3 +728,30 @@ void RelayoutFlashcardListPanel(MainWindow* win) {
         HwndInvalidate(win->flashcard.listaSplitter->hwnd, true);
     }
 }
+
+// Select and scroll to a card in the Lista panel. Used by Canvas ctrl+click
+// on a flashcard highlight. Returns true if the card was found and selected.
+bool FlashcardSidebarSelectAndScrollToCard(MainWindow* win, int cardIdx) {
+    if (!win || !win->flashcard.hwndListaView) {
+        return false;
+    }
+    HWND hwndList = win->flashcard.hwndListaView;
+    int nItems = (int)SendMessageW(hwndList, LB_GETCOUNT, 0, 0);
+    for (int i = 0; i < nItems; i++) {
+        LRESULT itemData = SendMessageW(hwndList, LB_GETITEMDATA, (WPARAM)i, 0);
+        if (itemData == cardIdx) {
+            // Select the item
+            SendMessageW(hwndList, LB_SETCURSEL, (WPARAM)i, 0);
+            // Scroll to make it visible
+            SendMessageW(hwndList, LB_SETTOPINDEX, (WPARAM)i, 0);
+            // Update active card state (mirrors LBN_SELCHANGE handler at FlashcardSidebar.cpp:444-454)
+            win->flashcard.activeListCardTab = win->CurrentTab();
+            win->flashcard.activeListCardIdx = cardIdx;
+            FlashcardNavigateToCardInCurrentTab(win, cardIdx);
+            MainWindowRerender(win);
+            FlashcardToolbarUpdateState(win);
+            return true;
+        }
+    }
+    return false;
+}

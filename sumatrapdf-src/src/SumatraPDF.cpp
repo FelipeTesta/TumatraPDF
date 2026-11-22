@@ -11990,17 +11990,42 @@ static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, L
 
         case CmdPageHoldToggle: {
             auto holdDm = win->AsFixed();
-            if (!holdDm) break; // fixed-layout docs only
-            if (holdDm->pageHold.active) {
-                if (holdDm->PageHoldRestore()) {
-                    holdDm->pageHold.active = false;
+            if (holdDm) {
+                // Fixed-layout (PDF) path
+                if (holdDm->pageHold.active) {
+                    if (holdDm->PageHoldRestore()) {
+                        holdDm->pageHold.active = false;
+                        AutoScrollSetHoldActive(win, false);
+                    }
+                } else {
+                    holdDm->PageHoldCapture(win->hwndCanvas);
+                    holdDm->pageHold.active = holdDm->pageHold.valid;
+                    if (holdDm->pageHold.active) {
+                        AutoScrollSetHoldActive(win, true);
+                    }
                 }
+                SetToolbarButtonCheckedState(win, CmdPageHoldToggle, holdDm->pageHold.active);
+                HwndRepaintNow(win->hwndCanvas);
             } else {
-                holdDm->PageHoldCapture();
-                holdDm->pageHold.active = holdDm->pageHold.valid;
+                // Markdown (webview) path
+                auto holdMm = win->AsMarkdown();
+                if (holdMm) {
+                    if (holdMm->hold.active) {
+                        // Deactivate Hold: remove frame, restore position
+                        holdMm->HoldRemoveFrame();
+                        holdMm->HoldRestore();
+                        AutoScrollSetHoldActive(win, false);
+                    } else {
+                        // Activate Hold: capture position, inject frame
+                        if (holdMm->HoldCapture()) {
+                            holdMm->hold.active = true;
+                            holdMm->HoldInjectFrame();
+                            AutoScrollSetHoldActive(win, true);
+                        }
+                    }
+                    SetToolbarButtonCheckedState(win, CmdPageHoldToggle, holdMm->hold.active);
+                }
             }
-            SetToolbarButtonCheckedState(win, CmdPageHoldToggle, holdDm->pageHold.active);
-            HwndRepaintNow(win->hwndCanvas);
             break;
         }
 

@@ -214,30 +214,41 @@ void AutoScrollToggle(MainWindow* win) {
     win->autoScroll.autoPausedByFocus = false;
     win->autoScroll.autoPausedByTrimConfig = false;
     if (win->autoScroll.active) {
-        win->autoScroll.accum = 0;
-        win->autoScroll.startTick = GetTickCount64();
-        // time-based scroll: the first tick measures elapsed from "now"
-        win->autoScroll.lastScrollTick = win->autoScroll.startTick;
-        win->autoScroll.etaLastShown = -1;
-        // Feed the timer stop-logic: use configured minutes if timer enabled, else 0 (no limit)
-        win->autoScroll.timerMinutes = win->autoScroll.timerEnabled ? win->autoScroll.timerMinutesSetting : 0;
-        // Snap to the multiplier range/step on start
-        win->autoScroll.speedMultiplier = SnapSpeedMultiplier(win->autoScroll.speedMultiplier);
-        // persist snapped speed to global prefs
-        gGlobalPrefs->autoScrollSpeedMultiplier = win->autoScroll.speedMultiplier;
-        RecalcAutoScrollEta(win);
-        UpdateToolbarEtaText(win, win->autoScroll.etaMinutes);
-        SetTimer(win->hwndCanvas, kContinuousAutoScrollTimerID, USER_TIMER_MINIMUM, nullptr);
-        const char* mode = dm ? "fixed" : "webview";
-        LogInfo("[autoscroll] start mode=%s speed=%.2f mlt timerMinutes=%u", mode, win->autoScroll.speedMultiplier,
-                win->autoScroll.timerMinutes);
-        if (mm) {
-            win->autoScroll.webviewPxPerSec = AutoScrollPxPerSec(win);
-            win->autoScroll.webviewCtrlDown = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
-            SetWebviewAutoScroll(win, win->autoScroll.webviewCtrlDown ? 0 : win->autoScroll.webviewPxPerSec);
-        }
-        ReadingStatsResetTick(win);
+        // Page Hold overrides the start request: refuse to start while Hold is
+        // active; the user must end Page Hold first.
+        if (win->autoScroll.autoPausedByHold) {
+            win->autoScroll.active = false;
+            LogInfo("[autoscroll] start refused: Page Hold is active");
+        } else {
+            win->autoScroll.accum = 0;
+            win->autoScroll.startTick = GetTickCount64();
+            // time-based scroll: the first tick measures elapsed from "now"
+            win->autoScroll.lastScrollTick = win->autoScroll.startTick;
+            win->autoScroll.etaLastShown = -1;
+            // Feed the timer stop-logic: use configured minutes if timer enabled, else 0 (no limit)
+            win->autoScroll.timerMinutes = win->autoScroll.timerEnabled ? win->autoScroll.timerMinutesSetting : 0;
+            // Snap to the multiplier range/step on start
+            win->autoScroll.speedMultiplier = SnapSpeedMultiplier(win->autoScroll.speedMultiplier);
+            // persist snapped speed to global prefs
+            gGlobalPrefs->autoScrollSpeedMultiplier = win->autoScroll.speedMultiplier;
+            RecalcAutoScrollEta(win);
+            UpdateToolbarEtaText(win, win->autoScroll.etaMinutes);
+            SetTimer(win->hwndCanvas, kContinuousAutoScrollTimerID, USER_TIMER_MINIMUM, nullptr);
+            const char* mode = dm ? "fixed" : "webview";
+            LogInfo("[autoscroll] start mode=%s speed=%.2f mlt timerMinutes=%u", mode, win->autoScroll.speedMultiplier,
+                    win->autoScroll.timerMinutes);
+            if (mm) {
+                win->autoScroll.webviewPxPerSec = AutoScrollPxPerSec(win);
+                win->autoScroll.webviewCtrlDown = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+                SetWebviewAutoScroll(win, win->autoScroll.webviewCtrlDown ? 0 : win->autoScroll.webviewPxPerSec);
+            }
+            ReadingStatsResetTick(win);
+        } // close the "start normally" else branch
     } else {
+        // a manual toggle off clears the hold suspension intent (the user
+        // decided) but NOT autoPausedByHold: Hold is still active, so the
+        // start guard at :219 must keep refusing to start.
+        win->autoScroll.autoSuspendedByHold = false;
         KillTimer(win->hwndCanvas, kContinuousAutoScrollTimerID);
         if (mm) {
             SetWebviewAutoScroll(win, 0);
@@ -344,6 +355,75 @@ void AutoScrollResumeFromTrimConfig(MainWindow* win) {
     }
     SetToolbarButtonCheckedState(win, CmdAutoScrollToggle, true);
     LogInfo("[autoscroll] resumed: trim config dialog closed");
+}
+
+// Pause/resume auto-scroll while Page Hold is active.
+// holdActive=true: if scrolling, stop it like the focus pause does and remember
+//   it must resume when Hold ends. If not scrolling, just record Hold is active
+//   so a later start attempt is refused.
+// holdActive=false: resume only if Hold suspended this auto-scroll, the window
+//   is foreground, and no other pause reason is active. If not foreground or
+//   another pause is active, leave it stopped but hand off to the focus-resume
+//   path (set autoPausedByFocus) so it comes back when the user returns to the
+//   window — never scrolls in a background window. Safe to call repeatedly, in
+//   any order, with a null or invalid window.
+void AutoScrollSetHoldActive(MainWindow* win, bool holdActive) {
+    if (!win) {
+        return;
+    }
+    auto& as = win->autoScroll;
+    if (holdActive) {
+        // Hold ON: record it. If scrolling, stop it now.
+        as.autoPausedByHold = true;
+        if (!as.active) {
+            LogInfo("[autoscroll] hold active, auto-scroll not running (start refused later)");
+            return;
+        }
+        // stop motion exactly like the focus pause
+        as.active = false;
+        KillTimer(win->hwndCanvas, kContinuousAutoScrollTimerID);
+        if (win->AsMarkdown()) {
+            SetWebviewAutoScroll(win, 0);
+            as.webviewCtrlDown = false;
+        }
+        UpdateToolbarEtaText(win, -1);
+        SetToolbarButtonCheckedState(win, CmdAutoScrollToggle, false);
+        as.autoSuspendedByHold = true;
+        LogInfo("[autoscroll] paused: Page Hold active");
+    } else {
+        // Hold OFF: resume only if Hold suspended it, window is foreground,
+        // and no other pause reason is active.
+        if (!as.autoSuspendedByHold) {
+            // Hold was never the thing that paused it; nothing to resume.
+            as.autoPausedByHold = false;
+            return;
+        }
+        as.autoSuspendedByHold = false;
+        if (GetForegroundWindow() != win->hwndFrame || as.autoPausedByFocus || as.autoPausedByTrimConfig) {
+            // Can't resume now: background window or another pause owns it.
+            // Hand off to the focus-resume path so it comes back when the user
+            // returns to the window.
+            as.autoPausedByFocus = true;
+            LogInfo("[autoscroll] hold off but can't resume yet (background / other pause); focus path owns resume");
+            return;
+        }
+        as.autoPausedByHold = false;
+        as.active = true;
+        as.accum = 0;
+        as.startTick = GetTickCount64();
+        // time-based scroll: measure elapsed from "now" so resuming doesn't jump
+        as.lastScrollTick = as.startTick;
+        RecalcAutoScrollEta(win);
+        UpdateToolbarEtaText(win, as.etaMinutes);
+        SetTimer(win->hwndCanvas, kContinuousAutoScrollTimerID, USER_TIMER_MINIMUM, nullptr);
+        if (win->AsMarkdown()) {
+            as.webviewPxPerSec = AutoScrollPxPerSec(win);
+            as.webviewCtrlDown = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+            SetWebviewAutoScroll(win, as.webviewCtrlDown ? 0 : as.webviewPxPerSec);
+        }
+        SetToolbarButtonCheckedState(win, CmdAutoScrollToggle, true);
+        LogInfo("[autoscroll] resumed: Page Hold ended");
+    }
 }
 
 // Adjust continuous auto-scroll speed multiplier (step of 0.01)

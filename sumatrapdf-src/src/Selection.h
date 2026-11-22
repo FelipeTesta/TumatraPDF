@@ -29,7 +29,8 @@ constexpr u8 kSelectionDefaultAlpha = 0x5f;
 
 void DeleteOldSelectionInfo(MainWindow* win, bool alsoTextSel = false);
 void PaintTransparentRectangles(HDC hdc, Rect screenRc, Vec<Rect>& rects, COLORREF selectionColor,
-                                u8 alpha = kSelectionDefaultAlpha, int pad = 2, bool drawBorder = false);
+                                u8 alpha = kSelectionDefaultAlpha, int pad = 2, bool drawBorder = false,
+                                bool forceSharpBorder = false);
 void PaintSelection(MainWindow* win, HDC hdc);
 void UpdateTextSelection(MainWindow* win, bool select = true);
 void CopySelectionToClipboard(MainWindow* win);

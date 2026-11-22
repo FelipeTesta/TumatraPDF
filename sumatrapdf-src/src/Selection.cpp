@@ -126,6 +126,10 @@ void DeleteOldSelectionInfo(MainWindow* win, bool alsoTextSel) {
         delete win->selection.altAccum;
         win->selection.altAccum = nullptr;
     }
+    // Ctrl+Alt rectangle accumulation persists across selections until the user
+    // creates a flashcard with 's' (CmdFlashcardAdd clears it explicitly) or
+    // starts a new plain selection (OnSelectionStart clears it explicitly).
+    // Do NOT clear it here — callers that need to clear it do so explicitly.
 }
 
 // Rectangular (Ctrl+drag) selection: move/resize after it exists.
@@ -340,10 +344,12 @@ void UpdateRectangularSelectionEdit(MainWindow* win, int x, int y) {
 }
 
 void PaintTransparentRectangles(HDC hdc, Rect screenRc, Vec<Rect>& rects, COLORREF selectionColor, u8 alpha, int pad,
-                                bool drawBorder) {
+                                bool drawBorder, bool forceSharpBorder) {
     // create path from rectangles
     Gdiplus::GraphicsPath path(Gdiplus::FillModeWinding);
     screenRc.Inflate(pad, pad);
+    int nonEmpty = 0;
+    Rect lastRc;
     for (int i = 0; i < len(rects); i++) {
         Rect rc = rects[i];
         if (pad > 0) {
@@ -352,6 +358,8 @@ void PaintTransparentRectangles(HDC hdc, Rect screenRc, Vec<Rect>& rects, COLORR
         rc = rc.Intersect(screenRc);
         if (!rc.IsEmpty()) {
             path.AddRectangle(ToGdipRect(rc));
+            nonEmpty++;
+            lastRc = rc;
         }
     }
 
@@ -364,9 +372,18 @@ void PaintTransparentRectangles(HDC hdc, Rect screenRc, Vec<Rect>& rects, COLORR
     if (drawBorder && pad > 0) {
         // black outline around the filled region (only the selection asks for this;
         // find-match and read-aloud highlights stay borderless)
-        path.Outline(nullptr, 0.2f);
-        Gdiplus::Pen tmpPen(Gdiplus::Color(alpha, 0, 0, 0), (float)pad);
-        gs.DrawPath(&tmpPen, &path);
+        // path.Outline() converts the path to a stroked approximation whose edges are
+        // curves — that rounds the corners. For a rectangular selection (Ctrl+drag)
+        // or when forceSharpBorder is set, draw a sharp rectangle border instead;
+        // keep the curved union outline for multi-rect text selections.
+        if (forceSharpBorder || nonEmpty == 1) {
+            Gdiplus::Pen tmpPen(Gdiplus::Color(alpha, 0, 0, 0), (float)pad);
+            gs.DrawRectangle(&tmpPen, ToGdipRect(lastRc));
+        } else {
+            path.Outline(nullptr, 0.2f);
+            Gdiplus::Pen tmpPen(Gdiplus::Color(alpha, 0, 0, 0), (float)pad);
+            gs.DrawPath(&tmpPen, &path);
+        }
     }
 }
 
@@ -449,6 +466,8 @@ void PaintSelection(MainWindow* win, HDC hdc) {
     ReportIf(!win->AsFixed());
 
     Vec<Rect> rects;
+    bool paintingAccum = false;
+    bool isRectSel = false;
 
     if (win->mouseAction == MouseAction::Selecting) {
         // during rectangle selection
@@ -463,6 +482,7 @@ void PaintSelection(MainWindow* win, HDC hdc) {
         }
 
         rects.Append(selRect);
+        isRectSel = true;
     } else {
         // during text selection or after selection is done
         if (MouseAction::SelectingText == win->mouseAction) {
@@ -482,12 +502,40 @@ void PaintSelection(MainWindow* win, HDC hdc) {
         }
 
         ReportDebugIf(!win->CurrentTab()->selectionOnPage);
-        if (!win->CurrentTab()->selectionOnPage) {
+        // Paint from selectionOnPage if it exists; otherwise, if there's a
+        // Ctrl+Alt rectangle accumulation, paint that so the user sees the
+        // accumulated rectangles while not actively dragging.
+        Vec<SelectionOnPage>* source = win->CurrentTab()->selectionOnPage;
+        if (!source && win->selection.ctrlAltAccum && len(*win->selection.ctrlAltAccum) > 0) {
+            source = win->selection.ctrlAltAccum;
+            paintingAccum = true;
+        }
+        if (!source) {
             return;
         }
 
-        for (SelectionOnPage& sel : *win->CurrentTab()->selectionOnPage) {
-            rects.Append(sel.GetRect(win->AsFixed()));
+        // For a rectangular selection (Ctrl+drag), the selectionOnPage contains
+        // one entry per intersected page. But the drawn rectangle is a SINGLE
+        // rect in screen coords. Use GetRectangularSelectionScreenRect to get
+        // the union (the drawn rectangle) so the border is drawn once around
+        // the whole thing, not once per page. For text selection and accumulation,
+        // keep the per-page rects (text selection may be disjoint; accumulation
+        // is multiple rectangles).
+        if (IsRectangularSelection(win)) {
+            Rect drawnRect = GetRectangularSelectionScreenRect(win);
+            if (!drawnRect.IsEmpty()) {
+                rects.Append(drawnRect);
+                isRectSel = true;
+            }
+        } else {
+            for (SelectionOnPage& sel : *source) {
+                rects.Append(sel.GetRect(win->AsFixed()));
+            }
+        }
+
+        // When painting the accumulation, it's a rectangular selection (sharp borders)
+        if (paintingAccum) {
+            win->selection.showSelection = true;
         }
     }
 
@@ -499,7 +547,9 @@ void PaintSelection(MainWindow* win, HDC hdc) {
     if (alpha == 0) {
         alpha = kSelectionDefaultAlpha;
     }
-    PaintTransparentRectangles(hdc, win->canvasRc, rects, parsedCol->col, alpha, 2, /*drawBorder*/ true);
+    bool forceSharpBorder = isRectSel || paintingAccum;
+    PaintTransparentRectangles(hdc, win->canvasRc, rects, parsedCol->col, alpha, 2, /*drawBorder*/ true,
+                               forceSharpBorder);
     PaintTouchSelHandles(win, hdc);
 }
 
@@ -800,8 +850,13 @@ void OnSelectionStart(MainWindow* win, int x, int y, WPARAM key) {
     // rectangular selection. Physical Alt via GetKeyState; the MK_ALT wParam
     // bit mirrors Canvas.cpp and enables synthetic (test) input.
     bool isAlt = (IsAltPressed() || (LOWORD(key) & MK_ALT)) && !isCtrl;
-    logf("OnSelectionStart: alt=%d at (%d,%d)\n", (int)isAlt, x, y);
+    // Ctrl+Alt+drag: rectangle accumulation (image occlusion). Each drag adds
+    // a drawn rectangle to the accumulation list. Ctrl+Alt forces rectangular
+    // selection like Ctrl alone. Mutually exclusive with Alt-only text accumulation.
+    bool isCtrlAlt = (IsAltPressed() || (LOWORD(key) & MK_ALT)) && isCtrl && !isShift;
+    logf("OnSelectionStart: alt=%d ctrlAlt=%d at (%d,%d)\n", (int)isAlt, (int)isCtrlAlt, x, y);
     win->selection.altSelecting = isAlt;
+    win->selection.ctrlAltSelecting = isCtrlAlt;
     if (isAlt) {
         // park the current selection entries before the wipe below frees
         // them; each drag update merges them back into selectionOnPage
@@ -811,6 +866,18 @@ void OnSelectionStart(MainWindow* win, int x, int y, WPARAM key) {
         if (tabAlt) {
             tabAlt->selectionOnPage = nullptr;
         }
+        // Alt and Ctrl+Alt are mutually exclusive: clear any rectangle accumulation
+        delete win->selection.ctrlAltAccum;
+        win->selection.ctrlAltAccum = nullptr;
+    }
+    if (isCtrlAlt) {
+        // Keep existing ctrlAltAccum (if any) — each drag ADDS to it.
+        // Do NOT clear it here. Just ensure we're in accumulation mode.
+    }
+    // Plain selection (no Alt, no Ctrl+Alt): clear any rectangle accumulation
+    if (!isAlt && !isCtrlAlt) {
+        delete win->selection.ctrlAltAccum;
+        win->selection.ctrlAltAccum = nullptr;
     }
     // selecting with the mouse takes over: leave keyboard selection mode so its
     // caret and help bar don't linger over a mouse selection
@@ -823,7 +890,7 @@ void OnSelectionStart(MainWindow* win, int x, int y, WPARAM key) {
     win->selection.selectingByWord = false;
     win->mouseAction = MouseAction::Selecting;
 
-    // Ctrl+drag forces a rectangular selection
+    // Ctrl+drag (or Ctrl+Alt+drag) forces a rectangular selection
     if (!isCtrl || isShift) {
         DisplayModel* dm = win->AsFixed();
         int pageNo = dm->GetPageNoByPoint(Point(x, y));
@@ -888,6 +955,11 @@ void OnSelectionStop(MainWindow* win, int x, int y, bool aborted) {
                 win->CurrentTab()->selectionOnPage = win->selection.altAccum;
                 win->selection.altAccum = nullptr;
                 win->selection.showSelection = true;
+            } else if (win->selection.ctrlAltSelecting && win->selection.ctrlAltAccum) {
+                // Ctrl+Alt+click without a drag: keep the accumulation intact
+                // (do not clear it). The user can continue adding rectangles.
+                // Selection is cleared but accumulation stays.
+                DeleteOldSelectionInfo(win, false); // don't wipe ctrlAltAccum
             } else {
                 DeleteOldSelectionInfo(win, true);
             }
@@ -896,6 +968,26 @@ void OnSelectionStop(MainWindow* win, int x, int y, bool aborted) {
             win->CurrentTab()->selectionOnPage =
                 SelectionOnPage::FromRectangle(win->AsFixed(), win->selection.selectionRect);
             win->selection.showSelection = win->CurrentTab()->selectionOnPage != nullptr;
+
+            // Ctrl+Alt rectangle accumulation: add the completed rectangle to
+            // the accumulation list. The drawn rectangle becomes one entry per
+            // page it intersects (like regular rectangular selection).
+            if (win->selection.ctrlAltSelecting && win->CurrentTab()->selectionOnPage) {
+                if (!win->selection.ctrlAltAccum) {
+                    win->selection.ctrlAltAccum = new Vec<SelectionOnPage>();
+                }
+                for (SelectionOnPage& sel : *win->CurrentTab()->selectionOnPage) {
+                    win->selection.ctrlAltAccum->Append(sel);
+                }
+                // Rebuild live selection from accumulation (so each accumulated
+                // rectangle appears exactly once, in order). This replaces the
+                // previous selectionOnPage content.
+                delete win->CurrentTab()->selectionOnPage;
+                win->CurrentTab()->selectionOnPage = new Vec<SelectionOnPage>();
+                for (SelectionOnPage& accum : *win->selection.ctrlAltAccum) {
+                    win->CurrentTab()->selectionOnPage->Append(accum);
+                }
+            }
         }
         win->selection.selectionDragEdge = SelectionDragEdge::None;
     }
@@ -905,6 +997,9 @@ void OnSelectionStop(MainWindow* win, int x, int y, bool aborted) {
     win->selection.altSelecting = false;
     delete win->selection.altAccum;
     win->selection.altAccum = nullptr;
+    // Ctrl+Alt accumulation persists across drags until user presses 's' or
+    // clears it (Esc, click elsewhere without Ctrl+Alt, new plain selection).
+    win->selection.ctrlAltSelecting = false;
     // refresh selection-dependent toolbar buttons once, when the selection is
     // finalized, rather than on every repaint while dragging (UpdateTextSelection
     // runs from PaintSelection on each frame, which flickered the toolbar)

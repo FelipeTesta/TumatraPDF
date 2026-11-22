@@ -76,12 +76,14 @@ struct ScrollState {
 
 /* Per-tab Page Hold state: capture position+zoom, navigate, restore exactly */
 struct PageHold {
-    bool active = false;   // user toggled the hold button on
-    bool valid = false;    // capture produced a restorable state
-    int physAnchor = 0;    // physical (engine) page, 1-based
-    int column = 0;        // 0 = left, 1 = right column in TC2
-    float zoomVirtual = 0; // zoomVirtual at capture time (fit mode or percent)
-    ScrollState state;     // virtual page + PAGE-point offsets
+    bool active = false;         // user toggled the hold button on
+    bool valid = false;          // capture produced a restorable state
+    int physAnchor = 0;          // physical (engine) page, 1-based
+    int column = 0;              // 0 = left, 1 = right column in TC2
+    float zoomVirtual = 0;       // zoomVirtual at capture time (fit mode or percent)
+    ScrollState state;           // virtual page + PAGE-point offsets
+    RectF visibleRectPage;       // captured visible viewport in PAGE coords (anchor page)
+    bool hasVisibleRect = false; // true when visibleRectPage is valid
 };
 
 struct TextSelection;
@@ -205,10 +207,10 @@ struct DisplayModel : DocController {
     Annotation* GetWidgetAtPos(Point pt);
 
     int GetPageNoByPoint(Point pt) const;
-    Point CvtToScreen(int pageNo, PointF pt);
-    Rect CvtToScreen(int pageNo, RectF r);
-    PointF CvtFromScreen(Point pt, int pageNo = kInvalidPageNo);
-    RectF CvtFromScreen(Rect r, int pageNo = kInvalidPageNo);
+    Point CvtToScreen(int pageNo, PointF pt) const;
+    Rect CvtToScreen(int pageNo, RectF r) const;
+    PointF CvtFromScreen(Point pt, int pageNo = kInvalidPageNo) const;
+    RectF CvtFromScreen(Rect r, int pageNo = kInvalidPageNo) const;
 
     bool ShowResultRectToScreen(TextSel* res);
     bool ScrollScreenToRect(int pageNo, Rect rec);
@@ -216,8 +218,11 @@ struct DisplayModel : DocController {
     ScrollState GetScrollState();
     void SetScrollState(const ScrollState& state);
 
-    void PageHoldCapture();
+    void PageHoldCapture(HWND hwndCanvas);
     bool PageHoldRestore();
+    // Paints the Page Hold frame (2px peru border-only rect) for the anchor page
+    // in the canvas overlay pass. Called from Canvas.cpp.
+    void PaintPageHoldFrame(HDC hdc, MainWindow* win) const;
 
     void CopyNavHistory(DisplayModel& orig);
 
@@ -264,6 +269,10 @@ struct DisplayModel : DocController {
     int VirtualToPhysical(int virtualPageNo) const;
     int ColumnOfVirtual(int virtualPageNo) const;
     int VirtualPageCount() const;
+    // Maps the stored physical anchor + column to the CURRENT virtual page
+    // (respecting v2 layout and R2L column flip). Single source of truth
+    // for capture, paint, and restore so the three can never diverge.
+    int PageHoldPhysToVirtual() const;
     // maps a PHYSICAL page + rect (physical page coords, full width) to the
     // correct VIRTUAL page + column-local rect (right column shifted -halfW).
     // Non-v2: identity. v2: physical k -> virtual 2k-1 (left) / 2k (right).

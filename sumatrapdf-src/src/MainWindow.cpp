@@ -130,6 +130,15 @@ MainWindow::~MainWindow() {
     DeleteObject(bmpMovePattern);
     DeleteObject(brControlBgColor);
 
+    // Free selection accumulation buffers (altAccum for Alt+drag text
+    // accumulation, ctrlAltAccum for Ctrl+Alt+drag rectangle accumulation).
+    // These are heap-allocated Vec<SelectionOnPage>* that persist across
+    // drags and must not leak when the window is destroyed.
+    delete selection.altAccum;
+    selection.altAccum = nullptr;
+    delete selection.ctrlAltAccum;
+    selection.ctrlAltAccum = nullptr;
+
     // Disconnect UIA clients and release our provider. Clients that still hold
     // refs get UIA_E_ELEMENTNOTAVAILABLE after FreeDocument.
     if (uiaProvider) {

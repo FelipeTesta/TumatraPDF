@@ -14,6 +14,10 @@ void AutoScrollToggle(MainWindow* win);
 void AutoScrollPauseForFocus(MainWindow* win);
 void AutoScrollResumeFromFocus(MainWindow* win);
 
+// Pause/resume auto-scroll while Page Hold is active. Safe to call repeatedly,
+// in any order, with a null or invalid window.
+void AutoScrollSetHoldActive(MainWindow* win, bool holdActive);
+
 // Pause while the trim-config dialog is open (dragging the red margin lines
 // while the page keeps scrolling under the pointer is unusable) and resume
 // when it closes. Independent of the focus pause, so both can nest.

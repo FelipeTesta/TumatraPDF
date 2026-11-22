@@ -78,6 +78,14 @@ struct MarkdownModel : DocController {
     // Restore contrast overlay for webview mode
     void RestoreContrastOverlay();
 
+    // Page Hold state for markdown documents (mirrors DisplayModel::PageHold)
+    struct MarkdownHold {
+        bool active = false;   // user has toggled Hold ON
+        bool valid = false;    // captured position was known and frame was shown
+        int pageNo = 1;        // page number where Hold was activated
+        PointF scrollPos = PointF(-1, -1); // CSS pixel scroll position at capture time
+    } hold;
+
     Str fileName;
     Str baseDir;
     // true when displaying .html/.htm files: they are served to the browser raw
@@ -129,6 +137,12 @@ struct MarkdownModel : DocController {
     void RestoreHtmlScrollPos();
     void ZoomTo(float zoomLevel) const;
 
+    // Page Hold methods for markdown documents
+    bool HoldCapture();
+    void HoldInjectFrame();
+    void HoldRemoveFrame();
+    bool HoldRestore();
+
     TempStr FileToVirtualUrlTemp(Str filePath) const;
     TempStr VirtualUrlToFileTemp(Str url) const;
     TempStr LinkedDocPathTemp(Str url) const;
@@ -139,3 +153,14 @@ struct MarkdownModel : DocController {
 // page to apply/clear the contrast filter. Single source shared by the contrast
 // toggle, the opacity change and MarkdownModel::RestoreContrastOverlay.
 TempStr MarkdownContrastJs(bool enabled, int opacity, bool invert);
+
+// Page Hold JS for webview (markdown) documents: injects/removes the hold frame.
+// Single source shared by the hold toggle and page navigation cleanup.
+// enable=true: reads current scrollY from page, stores in window.__tumatraHold, creates frame.
+// enable=false: removes frame and clears window.__tumatraHold.
+// height is read from window.innerHeight inside the page.
+TempStr MarkdownHoldJs(bool enable);
+
+// Restore JS: scrolls to the position stored in window.__tumatraHold (if present).
+// Used for same-page restore so the page is the authority for the captured offset.
+TempStr MarkdownHoldRestoreJs();

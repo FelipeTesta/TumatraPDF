@@ -1021,8 +1021,18 @@ bool HandleCommandFlashcard(MainWindow* win, int cmd) {
             if (!dm) return true;
             EngineBase* engine = dm->GetEngine();
             if (!engine || !EngineSupportsAnnotations(engine)) return true;
-            if (!win->selection.showSelection || !tab->selectionOnPage) {
-                logf("[fc] CmdFlashcardAdd - ERROR: no text selected or no engine\n");
+
+            // Use Ctrl+Alt accumulated rectangles if available; otherwise use current selection
+            Vec<SelectionOnPage>* s = nullptr;
+            bool usingAccum = false;
+            if (win->selection.ctrlAltAccum && len(*win->selection.ctrlAltAccum) > 0) {
+                s = win->selection.ctrlAltAccum;
+                usingAccum = true;
+                logf("[fc] CmdFlashcardAdd - using %d accumulated rectangles\n", len(*s));
+            } else if (win->selection.showSelection && tab->selectionOnPage) {
+                s = tab->selectionOnPage;
+            } else {
+                logf("[fc] CmdFlashcardAdd - ERROR: no selection or accumulation\n");
                 return true;
             }
 
@@ -1031,8 +1041,7 @@ bool HandleCommandFlashcard(MainWindow* win, int cmd) {
             // (content empty). Creation lives in FlashcardCreateHighlightAnnot
             // (shared with the import merge).
 
-            // Collect pages from selection
-            Vec<SelectionOnPage>* s = tab->selectionOnPage;
+            // Collect pages from selection/accumulation
             Vec<int> pageNos;
             for (auto& sel : *s) {
                 if (!dm->ValidPageNo(sel.pageNo)) continue;
@@ -1075,6 +1084,11 @@ bool HandleCommandFlashcard(MainWindow* win, int cmd) {
                 FlashcardPrewarmInvalidate(); // annot add: cards reload, warm jobs stale
                 if (groupToken) {
                     logf("[fc] cross-page cloze: group token %08X spans %d page(s)\n", (u32)groupToken, len(pageNos));
+                }
+                // Clear the Ctrl+Alt accumulation after successfully creating the flashcard
+                if (usingAccum) {
+                    delete win->selection.ctrlAltAccum;
+                    win->selection.ctrlAltAccum = nullptr;
                 }
                 DeleteOldSelectionInfo(win, true);
                 // Reload cards so count/order reflect the new cloze immediately

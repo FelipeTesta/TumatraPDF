@@ -29,7 +29,7 @@ extern "C" {
 // annotation objects on save (pdf_to_num is not stable), so we key study state
 // by position instead. Bounds are quantized to 0.01 page units so the key does
 // not change across zoom levels.
-static u64 FlashcardKey(int pageNo, const RectF& b) {
+u64 FlashcardKey(int pageNo, const RectF& b) {
     u64 h = 14695981039346656037ULL; // FNV-1a offset basis
     auto mix = [&](u64 v) {
         h ^= v;

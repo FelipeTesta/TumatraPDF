@@ -448,6 +448,59 @@ TempStr MarkdownContrastJs(bool enabled, int opacity, bool invert) {
         invert ? StrL("#050505") : StrL("#FAFAFA"), gray, gray, gray);
 }
 
+// Page Hold frame JS: injects a border-only frame spanning full viewport width
+// at the captured document position (top = CSS px from document top).
+// The frame is appended to document.documentElement so width:100% spans the
+// full viewport even when the markdown body is narrower/centered. Height is
+// set to viewport height (window.innerHeight) so it marks the reading line.
+// enable=true: reads current scrollY from page, stores in window.__tumatraHold, creates frame.
+// enable=false: removes frame and clears window.__tumatraHold.
+// height is read from window.innerHeight inside the page.
+TempStr MarkdownHoldJs(bool enable) {
+    if (!enable) {
+        return fmt(
+            "try {"
+            "  var el = document.getElementById('__tumatra_hold_frame');"
+            "  if (el) el.remove();"
+            "  window.__tumatraHold = null;"
+            "} catch(e) {}");
+    }
+    // Use a high z-index so it's above content but below browser chrome
+    // Read scrollY and innerHeight inside the page; the page is the authority.
+    return fmt(
+        "try {"
+        "  var existing = document.getElementById('__tumatra_hold_frame');"
+        "  if (existing) existing.remove();"
+        "  var y = Math.round(window.scrollY || window.pageYOffset || 0);"
+        "  var h = window.innerHeight || document.documentElement.clientHeight || 0;"
+        "  window.__tumatraHold = { y: y, h: h };"
+        "  var el = document.createElement('div');"
+        "  el.id = '__tumatra_hold_frame';"
+        "  el.style.position = 'absolute';"
+        "  el.style.left = '0';"
+        "  el.style.width = '100%';"
+        "  el.style.boxSizing = 'border-box';"
+        "  el.style.border = '2px solid #CD853F';"
+        "  el.style.background = 'transparent';"
+        "  el.style.pointerEvents = 'none';"
+        "  el.style.zIndex = '2147483647';"
+        "  el.style.top = y + 'px';"
+        "  el.style.height = h + 'px';"
+        "  document.documentElement.appendChild(el);"
+        "} catch(e) {}");
+}
+
+// Restore JS: scrolls to the position stored in window.__tumatraHold (if present).
+// Used for same-page restore so the page is the authority for the captured offset.
+TempStr MarkdownHoldRestoreJs() {
+    return fmt(
+        "try {"
+        "  if (window.__tumatraHold && typeof window.__tumatraHold.y === 'number') {"
+        "    window.scrollTo(0, window.__tumatraHold.y);"
+        "  }"
+        "} catch(e) {}");
+}
+
 void MarkdownModel::RestoreContrastOverlay() {
     if (!cb) {
         return;
@@ -767,6 +820,114 @@ void MarkdownModel::RestoreHtmlScrollPos() {
     docView->SetScrollPos(Point(x, y));
 }
 
+// Capture the current reading position for Page Hold.
+// Reads scroll position from docView (CSS pixels) and current page number.
+// The native value is used when known (>=0); unknown (-1,-1) is treated as
+// valid capture with fallback to (0,0) because the page-side JS is the
+// authority and will read the actual scroll position at injection time.
+// Returns true if docView exists, false otherwise.
+bool MarkdownModel::HoldCapture() {
+    if (!docView) {
+        logf("[hold-md] no docView");
+        return false;
+    }
+    Point pos = docView->GetScrollPos();
+    if (pos.x < 0 && pos.y < 0) {
+        // Native scroll pos unknown (fresh page, no scroll yet).
+        // Treat as valid capture; JS will read actual position at injection.
+        hold.scrollPos = PointF(0.0f, 0.0f);
+        logf("[hold-md] scroll pos unknown, capturing at (0,0) - JS will read actual");
+    } else {
+        hold.scrollPos = PointF((float)pos.x, (float)pos.y);
+        logf("[hold-md] captured native page=%d scroll=(%.1f,%.1f)", currentPageNo, hold.scrollPos.x, hold.scrollPos.y);
+    }
+    hold.pageNo = currentPageNo;
+    hold.valid = true;
+    logf("[hold-md] hold active page=%d", hold.pageNo);
+    return true;
+}
+
+// Inject the hold frame into the webview page at the captured position.
+// Must be called after HoldCapture() succeeded and hold.valid is true.
+// The JS reads the actual scroll position from the page and stores it in
+// window.__tumatraHold, so the frame position is authoritative from the page.
+void MarkdownModel::HoldInjectFrame() {
+    if (!hold.valid || !docView) {
+        return;
+    }
+    struct WebviewWnd* wv = GetWebviewWnd();
+    if (!wv) {
+        logf("[hold-md] no webview for frame injection");
+        return;
+    }
+    TempStr js = MarkdownHoldJs(true);
+    wv->Eval(js);
+    logf("[hold-md] frame injected (JS reads actual scrollY)");
+}
+
+// Remove the hold frame from the webview page.
+// Also clears window.__tumatraHold so a later capture cannot reuse a stale value.
+void MarkdownModel::HoldRemoveFrame() {
+    if (!docView) {
+        return;
+    }
+    struct WebviewWnd* wv = GetWebviewWnd();
+    if (!wv) {
+        return;
+    }
+    TempStr js = MarkdownHoldJs(false);
+    wv->Eval(js);
+    logf("[hold-md] frame removed, __tumatraHold cleared");
+}
+
+// Restore the captured reading position (page + scroll).
+// Returns true if restore was performed.
+bool MarkdownModel::HoldRestore() {
+    if (!hold.valid) {
+        return false;
+    }
+    // Navigate back to the captured page if we're on a different one
+    if (currentPageNo != hold.pageNo) {
+        logf("[hold-md] restoring page %d (was %d)", hold.pageNo, currentPageNo);
+        GoToPage(hold.pageNo, false);
+        // The scroll will be restored in OnDocumentComplete via restoreHtmlScrollPos
+        // We need to save the captured scroll for that page
+        if (ValidPageNo(hold.pageNo)) {
+            TempStr url = this->FileToVirtualUrlTemp(this->pages[hold.pageNo - 1]);
+            SaveHtmlScrollPosForUrl(url, hold.scrollPos);
+        }
+        restoreHtmlScrollPos = true;
+    } else {
+        // Same page: restore scroll using the page-stored value (window.__tumatraHold).
+        // The page is the authority for the captured offset. Inject JS that scrolls
+        // to __tumatraHold.y if it exists; if not (e.g. page reload), fall back to native.
+        logf("[hold-md] restoring scroll on page %d via JS", hold.pageNo);
+        if (docView) {
+            struct WebviewWnd* wv = GetWebviewWnd();
+            if (wv) {
+                TempStr js = MarkdownHoldRestoreJs();
+                wv->Eval(js);
+                // Also call native restore as fallback for page-reload case
+                // (where __tumatraHold was lost). The JS does nothing if __tumatraHold is absent.
+                htmlScrollPos = hold.scrollPos;
+                restoreHtmlScrollPos = true;
+                RestoreHtmlScrollPos();
+            } else {
+                htmlScrollPos = hold.scrollPos;
+                restoreHtmlScrollPos = true;
+                RestoreHtmlScrollPos();
+            }
+        } else {
+            htmlScrollPos = hold.scrollPos;
+            restoreHtmlScrollPos = true;
+            RestoreHtmlScrollPos();
+        }
+    }
+    hold.valid = false;
+    hold.active = false;
+    return true;
+}
+
 void MarkdownModel::ZoomTo(float zoomLevel) const {
     if (docView) {
         docView->SetZoomPercent((int)zoomLevel);
@@ -889,6 +1050,14 @@ void MarkdownModel::OnDocumentComplete(Str url) {
 
     // Restore contrast overlay for webview mode
     RestoreContrastOverlay();
+
+    // Page Hold: remove frame if we navigated to a different page than the
+    // captured one. The hold state stays active but the frame is page-specific.
+    if (hold.active && hold.valid && pageNo != hold.pageNo) {
+        HoldRemoveFrame();
+        hold.valid = false; // frame gone; capture invalid for new page
+        logf("[hold-md] frame removed on page change %d -> %d", hold.pageNo, pageNo);
+    }
 
     LogInfo("[md] doc complete");
 
