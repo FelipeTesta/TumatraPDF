@@ -18,6 +18,8 @@ struct ProfileBackupDialog {
     RECT rcSlot[9];
     RECT rcRestore[9];
     int holdingSlot = -1;
+    int keyboardSlot = -1;     // B6: keyboard-selected slot (Up/Down/Home/End)
+    bool keyboardHold = false; // B6: SPACE held on keyboardSlot
     ULONGLONG holdStartTick = 0;
     double progress = 1.0;
 };
@@ -108,6 +110,12 @@ static void BackupPaint(ProfileBackupDialog* d) {
             wcscpy(btnText, L"Restore");
         }
         DrawTextW(hdc, btnText, -1, &rcBtnInner, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        // B6: keyboard focus indicator for the selected slot
+        if (d->keyboardSlot == i) {
+            RECT focusRc = d->rcSlot[i];
+            InflateRect(&focusRc, -3, -3);
+            DrawFocusRect(hdc, &focusRc);
+        }
         y += rowH + DpiScale(d->hwnd, 8);
     }
     SelectObject(hdc, oldFont);
@@ -115,18 +123,29 @@ static void BackupPaint(ProfileBackupDialog* d) {
 }
 
 // TUMATRA-FORK(s64-R9l): cached theme-bg brush for WM_CTLCOLOR* (never fresh per message, never stale)
+// The handle lives in file-statics so WM_DESTROY can release it (B5).
+static HBRUSH gBackupBgBrush = nullptr;
+static COLORREF gBackupBgColor = 0;
+
 static HBRUSH ThemeBgBrush() {
-    static HBRUSH sBrush = nullptr;
-    static COLORREF sColor = 0;
     COLORREF col = ThemeWindowBackgroundColor();
-    if (!sBrush || sColor != col) {
-        if (sBrush) {
-            DeleteObject(sBrush);
+    if (!gBackupBgBrush || gBackupBgColor != col) {
+        if (gBackupBgBrush) {
+            DeleteObject(gBackupBgBrush);
         }
-        sBrush = CreateSolidBrush(col);
-        sColor = col;
+        gBackupBgBrush = CreateSolidBrush(col);
+        gBackupBgColor = col;
     }
-    return sBrush;
+    return gBackupBgBrush;
+}
+
+// Release the cached theme brush on window destruction (B5).
+static void BackupReleaseBgBrush() {
+    if (gBackupBgBrush) {
+        DeleteObject(gBackupBgBrush);
+        gBackupBgBrush = nullptr;
+        gBackupBgColor = 0;
+    }
 }
 
 static LRESULT CALLBACK BackupWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
@@ -186,6 +205,8 @@ static LRESULT CALLBACK BackupWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
                     logf("[profile] Backup slot %d restored\n", slot);
                 } else {
                     logf("[profile] Backup slot %d restore failed\n", slot);
+                    TempStr failMsg = fmt("Restore of backup slot %d failed.", slot);
+                    MessageBoxW(hwnd, CWStrTemp(ToWStrTemp(Str(failMsg))), L"Profile Backups", MB_OK | MB_ICONERROR);
                 }
                 InvalidateRect(hwnd, nullptr, FALSE);
             } else {
@@ -204,15 +225,79 @@ static LRESULT CALLBACK BackupWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             }
             return 0;
         }
-        case WM_KEYDOWN:
+        case WM_KEYDOWN: {
             if (wp == VK_ESCAPE) {
                 DestroyWindow(hwnd);
+                return 0;
+            }
+            // B6: keyboard slot selection (Up/Down/Home/End)
+            int newSlot = d->keyboardSlot;
+            if (wp == VK_UP) {
+                newSlot = newSlot <= 0 ? 0 : newSlot - 1;
+            } else if (wp == VK_DOWN) {
+                newSlot = newSlot >= 8 ? 8 : newSlot + 1;
+            } else if (wp == VK_HOME) {
+                newSlot = 0;
+            } else if (wp == VK_END) {
+                newSlot = 8;
+            }
+            if (newSlot != d->keyboardSlot) {
+                d->keyboardSlot = newSlot;
+                d->keyboardHold = false;
+                d->holdingSlot = -1;
+                d->progress = 1.0;
+                KillTimer(hwnd, 1);
+                if (GetCapture() == hwnd) ReleaseCapture();
+                InvalidateRect(hwnd, nullptr, FALSE);
+                return 0;
+            }
+            // B6: SPACE starts the same 5-second hold as the mouse
+            if (wp == VK_SPACE && d->keyboardSlot >= 0 && !d->keyboardHold) {
+                TempStr stamp = ProfileDataBackupStampTemp(d->keyboardSlot);
+                if (!stamp) {
+                    logf("[profile] Backup slot %d empty, ignore restore\n", d->keyboardSlot);
+                    return 0;
+                }
+                d->keyboardHold = true;
+                d->holdingSlot = d->keyboardSlot;
+                d->holdStartTick = GetTickCount64();
+                d->progress = 1.0;
+                SetCapture(hwnd);
+                SetTimer(hwnd, 1, 30, nullptr);
+                logf("[profile] Backup restore hold start slot %d (keyboard)\n", d->keyboardSlot);
+                InvalidateRect(hwnd, nullptr, FALSE);
+                return 0;
             }
             return 0;
+        }
+        case WM_KEYUP:
+            if (wp == VK_SPACE && d->keyboardHold) { // B6: release SPACE cancels the hold
+                d->keyboardHold = false;
+                if (d->holdingSlot == d->keyboardSlot) {
+                    d->holdingSlot = -1;
+                    d->progress = 1.0;
+                    KillTimer(hwnd, 1);
+                    if (GetCapture() == hwnd) ReleaseCapture();
+                }
+                InvalidateRect(hwnd, nullptr, FALSE);
+                return 0;
+            }
+            return 0;
+        case WM_SETTINGCHANGE:
+        case WM_THEMECHANGED: { // B5: live theme switch — re-resolve theme, re-apply dark caption, repaint
+            UpdateThemeAfterSystemColorChange();
+            {
+                BOOL darkTitle = TRUE;
+                DwmSetWindowAttribute(hwnd, 20, &darkTitle, sizeof(darkTitle));
+            }
+            RedrawWindow(hwnd, nullptr, nullptr, RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_UPDATENOW);
+            return 0;
+        }
         case WM_CLOSE:
             DestroyWindow(hwnd);
             return 0;
         case WM_DESTROY:
+            BackupReleaseBgBrush(); // B5: release cached theme brush
             gBackupDialog = nullptr;
             return 0;
     }

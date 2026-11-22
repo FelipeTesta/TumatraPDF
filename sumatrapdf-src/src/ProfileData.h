@@ -93,9 +93,17 @@ i64 ProfileDataCloudRevertPrimaryTs();
 i64 ProfileDataCloudRevertNewestBackupTs();
 int ProfileDataCloudRevertNewestBackupSlot();
 
-// F7: export / import. Export copies primary + backup/ subtree to destDir.
-// Import replaces primary or merges (newest-wins-adopt-absent) into live profile.
-bool ProfileDataExportToDir(const char* destDir);
+// F7: export / import. Export copies primary + backup/ + stats/ + study/ to destDir.
+// overwriteExisting=false: refuse when dest primary exists.
+// overwriteExisting=true: overwrite dest primary atomically.
+// Import: replace=true replaces primary (atomic), replace=false merges per-item.
+// Import validates source checksum before any modification (if present).
+bool ProfileDataExportToDir(const char* destDir, bool overwriteExisting = false);
 bool ProfileDataImportFromJson(const char* srcJsonPath, bool replace);
+
+// A6: return human-readable status of the LAST startup data migration (F4 + F5).
+// Safe to call before/after load; never crashes.
+// Returns a BORROWED Str view; callers must NOT free it.
+TempStr ProfileDataLastMigrationStatusTemp();
 
 #endif

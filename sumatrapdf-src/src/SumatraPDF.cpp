@@ -141,6 +141,7 @@ extern "C" {
 #include "ReadAloudPlaybackBar.h"
 #include "SumatraLog.h"
 #include "ProfileBackupWnd.h"
+#include "ProfileSyncWnd.h"
 
 using Gdiplus::Color;
 using Gdiplus::Graphics;
@@ -10467,6 +10468,10 @@ static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, L
 
         case CmdProfileBackups:
             ShowProfileBackupsDialog(win);
+            break;
+
+        case CmdProfileSync:
+            ShowProfileSyncDialog(win);
             break;
 
         case CmdToggleBoolSetting: {

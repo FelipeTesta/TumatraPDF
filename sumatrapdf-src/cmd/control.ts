@@ -76,6 +76,13 @@ export enum ControlCommand {
   // Drives/focuses/reads stats per window via the control pipe.
   // No automated test uses these hooks yet.
   TestNewWindow = 75,
+  // Manual profile sync test instrumentation (intentional, kept).
+  // Drives profile sync actions via the control pipe.
+  // No automated test uses these hooks yet.
+  TestProfileSetFolder = 80,
+  TestProfileExport = 81,
+  TestProfileImport = 82,
+  TestProfileStatus = 83,
   TestWindowStats = 76,
   TestOpenInWindow = 77,
   TestFocusWindow = 78,

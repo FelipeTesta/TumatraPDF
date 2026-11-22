@@ -347,6 +347,7 @@ export const commands = [
     "CmdArchPageCrop", "Arch: Page Crop (image-editor bounding box)",
     "CmdFlashcardDeleteActive", "Flashcard Delete Active Card",
     "CmdPageHoldToggle", "Toggle Page Hold",
+    "CmdProfileSync", "Profile: Sync...",
     "CmdNone", "Do nothing",
 ];
 

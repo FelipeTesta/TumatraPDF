@@ -22,22 +22,35 @@ extern bool gForTesting;
 
 // TUMATRA-FORK(s64-R9l): cached theme-bg brush. WM_CTLCOLOR* must not hand out a fresh
 // CreateSolidBrush per message (GDI leak); re-create only when the theme color changes.
+// The handle lives in file-statics so WM_DESTROY can release it (B5).
+static HBRUSH gSyncBgBrush = nullptr;
+static COLORREF gSyncBgColor = 0;
+
 static HBRUSH ThemeBgBrush() {
-    static HBRUSH sBrush = nullptr;
-    static COLORREF sColor = 0;
     COLORREF col = ThemeWindowBackgroundColor();
-    if (!sBrush || sColor != col) {
-        if (sBrush) {
-            DeleteObject(sBrush);
+    if (!gSyncBgBrush || gSyncBgColor != col) {
+        if (gSyncBgBrush) {
+            DeleteObject(gSyncBgBrush);
         }
-        sBrush = CreateSolidBrush(col);
-        sColor = col;
+        gSyncBgBrush = CreateSolidBrush(col);
+        gSyncBgColor = col;
     }
-    return sBrush;
+    return gSyncBgBrush;
+}
+
+// Release the cached theme brush on window destruction (B5).
+static void SyncReleaseBgBrush() {
+    if (gSyncBgBrush) {
+        DeleteObject(gSyncBgBrush);
+        gSyncBgBrush = nullptr;
+        gSyncBgColor = 0;
+    }
 }
 
 // Import prompt result: IDOK=Replace, 2=Merge, IDCANCEL=Cancel
 static int gImportChoice = IDCANCEL;
+// B3: explanatory body text for the import prompt (owned copy, set per prompt).
+static Str gImportBodyText = {};
 static LRESULT CALLBACK ImportPromptProc(HWND h, UINT m, WPARAM wp, LPARAM lp) {
     switch (m) {
         case WM_ERASEBKGND: {
@@ -72,6 +85,14 @@ static LRESULT CALLBACK ImportPromptProc(HWND h, UINT m, WPARAM wp, LPARAM lp) {
             GetWindowTextW(h, caption, dimof(caption));
             RECT trc{DpiScale(h, 16), DpiScale(h, 14), rc.right - DpiScale(h, 16), DpiScale(h, 14) + DpiScale(h, 22)};
             DrawTextW(hdc, caption, -1, &trc, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+            // B3: explanatory body text above the buttons
+            if (gImportBodyText.s && len(gImportBodyText) > 0) {
+                int pad = DpiScale(h, 16);
+                int textY = DpiScale(h, 42);
+                RECT lrc{pad, textY, rc.right - pad, rc.bottom - DpiScale(h, 40)};
+                DrawTextW(hdc, CWStrTemp(ToWStrTemp(gImportBodyText)), -1, &lrc,
+                          DT_LEFT | DT_TOP | DT_WORDBREAK | DT_END_ELLIPSIS);
+            }
             SelectObject(hdc, oldFont);
             EndPaint(h, &ps);
             return 0;
@@ -122,6 +143,8 @@ struct ProfileSyncDialog {
     Str readingDays;
     Str studyDays;
     Str backupsCount;
+    // last action outcome (UTF-8), shown in the bottom status line (B4)
+    Str statusText;
 };
 
 static ProfileSyncDialog* gSyncDialog = nullptr;
@@ -299,6 +322,14 @@ static void SyncRefreshRows(ProfileSyncDialog* d) {
     d->backupsCount = fmt("%d", backups);
 }
 
+// B4: set the bottom status line text and repaint.
+static void SetStatusLine(ProfileSyncDialog* d, TempStr text) {
+    str::ReplaceWithCopy(&d->statusText, Str(text));
+    if (d->hwnd) {
+        InvalidateRect(d->hwnd, nullptr, TRUE);
+    }
+}
+
 // ---- paint -----------------------------------------------------------------
 
 static void SyncPaint(ProfileSyncDialog* d) {
@@ -358,6 +389,22 @@ static void SyncPaint(ProfileSyncDialog* d) {
     DrawTextW(hdc, L"Place this folder in Google Drive to sync across devices", -1, &hr,
               DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
 
+    // B7: set-folder hint (explains next-start copy behavior)
+    y += gap / 2 + rowH;
+    SetTextColor(hdc, hintCol);
+    RECT hr2{pad, y, rc.right - pad, y + rowH};
+    DrawTextW(hdc, L"Set data folder: takes effect on next start; copies profile data into the chosen folder.", -1,
+              &hr2, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+
+    // B4: status line (bottom strip, reserved below buttons)
+    if (len(d->statusText) > 0) {
+        SetTextColor(hdc, textCol);
+        int statusH = DpiScale(d->hwnd, 20);
+        RECT src{pad, rc.bottom - pad - statusH, rc.right - pad, rc.bottom - pad};
+        DrawTextW(hdc, CWStrTemp(ToWStrTemp(d->statusText)), -1, &src,
+                  DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+    }
+
     SelectObject(hdc, oldFont);
     EndPaint(d->hwnd, &ps);
 }
@@ -400,21 +447,55 @@ static LRESULT CALLBACK SyncWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 if (!SyncPickFolder(hwnd, picked)) {
                     return 0; // cancelled or picker failed
                 }
+                // B1: if the picked folder already holds a profile, confirm before repointing
+                TempStr pickedProfile = path::JoinTemp(Str(picked), StrL("tumatraPDF-data_1.json"));
+                if (file::Exists(Str(pickedProfile))) {
+                    TempStr ask =
+                        fmt("The folder already contains a profile (%s).\n\n"
+                            "If you continue:\n"
+                            "• The existing profile in that folder is KEPT (not overwritten).\n"
+                            "• The profile currently in use is NOT merged into it.\n"
+                            "• All files in the currently used folder are kept.\n"
+                            "• The switch takes effect on the NEXT start.\n\n"
+                            "Set this folder as the data folder anyway?",
+                            Str(pickedProfile));
+                    int ans = MessageBoxW(hwnd, CWStrTemp(ToWStrTemp(Str(ask))), L"Profile Sync",
+                                          MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2);
+                    if (ans == IDNO) {
+                        return 0; // aborted by user
+                    }
+                }
                 // flush pending in-memory profile state into the OLD root
                 // before repointing the setting; the existing ProfEnsureProfileDirAndMigrate
                 // copies primary json + backup\ (copy-only) on next launch
                 ProfileDataSaveNow();
-                str::ReplaceWithCopy(&gGlobalPrefs->profileDataDir, Str(picked));
-                SaveSettings();
+                if (!ProfileSyncSetFolderToPath(d->win, Str(picked).s)) {
+                    return 0; // shouldn't happen: picker returned a valid path
+                }
+                // ProfileSyncSetFolderToPath already called SaveSettings()
                 logf("[profile] data root set to '%s' (migrates on next launch)\n", Str(picked));
                 SyncRefreshRows(d);
                 InvalidateRect(hwnd, nullptr, TRUE);
+                // B1: confirm after applying
+                {
+                    TempStr confirm =
+                        fmt("Data folder set to:\n%s\n\n"
+                            "The switch takes effect on the NEXT start.\n"
+                            "On that start, the profile, its backups, the stats files "
+                            "and the per-book study files are copied into it "
+                            "(copy-only — the old folder keeps everything).\n"
+                            "You can delete the old folder later if you wish.",
+                            Str(picked));
+                    MessageBoxW(hwnd, CWStrTemp(ToWStrTemp(Str(confirm))), L"Profile Sync", MB_OK | MB_ICONINFORMATION);
+                }
+                SetStatusLine(d, fmt("Data folder set to '%s' (takes effect on next start).", Str(picked))); // B4
                 return 0;
             }
             if (id == 1) { // Save Now
                 ProfileDataSaveNow();
                 SyncRefreshRows(d);
                 InvalidateRect(hwnd, nullptr, TRUE);
+                SetStatusLine(d, fmt("Save Now: profile flushed to data folder.")); // B4
                 return 0;
             }
             if (id == 2) { // Open Folder
@@ -440,13 +521,41 @@ static LRESULT CALLBACK SyncWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 if (!SyncPickFolder(hwnd, destDir)) {
                     return 0; // cancelled or picker failed
                 }
-                if (ProfileDataExportToDir(Str(destDir).s)) {
-                    logf("[profile] export: OK to '%s'\n", Str(destDir));
-                    SyncRefreshRows(d);
-                    InvalidateRect(hwnd, nullptr, TRUE);
-                } else {
-                    MessageBoxW(hwnd, L"Export failed — see log.", L"Profile Sync", MB_OK | MB_ICONWARNING);
+                // B2: if the destination already holds a profile, ask before overwriting
+                TempStr destProfile = path::JoinTemp(Str(destDir), StrL("tumatraPDF-data_1.json"));
+                bool overwrite = false;
+                if (file::Exists(Str(destProfile))) {
+                    TempStr ask =
+                        fmt("This folder already contains a profile (%s).\n\n"
+                            "The exported snapshot includes the profile, its backups, "
+                            "the stats files and the per-book study files.\n\n"
+                            "Overwrite it?",
+                            Str(destProfile));
+                    int ans = MessageBoxW(hwnd, CWStrTemp(ToWStrTemp(Str(ask))), L"Profile Sync",
+                                          MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2);
+                    if (ans == IDNO) {
+                        return 0; // abort silently, no error message
+                    }
+                    overwrite = true;
                 }
+                bool ok = ProfileSyncExportToPath(d->win, Str(destDir).s, overwrite);
+                TempStr status;
+                if (ok) {
+                    logf("[profile] export: OK to '%s'\n", Str(destDir));
+                    status =
+                        fmt("Export OK: snapshot written to '%s' (profile + backups + stats + study).", Str(destDir));
+                    MessageBoxW(hwnd, CWStrTemp(ToWStrTemp(Str(status))), L"Profile Sync", MB_OK | MB_ICONINFORMATION);
+                } else {
+                    status =
+                        fmt("Export failed: could not write to '%s'. "
+                            "The folder may already contain a profile and overwrite was declined, "
+                            "or the copy failed.",
+                            Str(destDir));
+                    MessageBoxW(hwnd, CWStrTemp(ToWStrTemp(Str(status))), L"Profile Sync", MB_OK | MB_ICONWARNING);
+                }
+                SyncRefreshRows(d);
+                InvalidateRect(hwnd, nullptr, TRUE);
+                SetStatusLine(d, status); // B4
                 return 0;
             }
             if (id == 6) { // Import
@@ -469,7 +578,7 @@ static LRESULT CALLBACK SyncWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 wc.hbrBackground = nullptr; // TUMATRA-FORK(s64-R9l): WM_ERASEBKGND paints the theme surface
                 RegisterClassW(&wc);
                 int w = DpiScale(hwnd, 360);
-                int h = DpiScale(hwnd, 180);
+                int h = DpiScale(hwnd, 240); // B3: taller to fit explanatory text above buttons
                 RECT rcParent;
                 GetWindowRect(hwnd, &rcParent);
                 int px = rcParent.left + (rcParent.right - rcParent.left - w) / 2;
@@ -483,9 +592,39 @@ static LRESULT CALLBACK SyncWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 int pad = DpiScale(hwnd, 4);
                 int btnH = DpiScale(hwnd, 28);
                 int g = DpiScale(hwnd, 4);
+                // B3: build explanatory body text with both files' modification dates
+                TempStr srcDateTemp;
+                if (file::Exists(Str(srcPath))) {
+                    FILETIME srcFt = file::GetModificationTime(Str(srcPath));
+                    SYSTEMTIME srcSt;
+                    FileTimeToSystemTime(&srcFt, &srcSt);
+                    wchar_t srcBuf[64]{};
+                    swprintf(srcBuf, dimof(srcBuf), L"%04d-%02d-%02d %02d:%02d", srcSt.wYear, srcSt.wMonth, srcSt.wDay,
+                             srcSt.wHour, srcSt.wMinute);
+                    srcDateTemp = ToUtf8Temp(WStr(srcBuf, (int)wcslen(srcBuf)));
+                }
+                TempStr locDateTemp;
+                TempStr localProfile = ProfileDataPathTemp();
+                if (file::Exists(Str(localProfile))) {
+                    FILETIME locFt = file::GetModificationTime(Str(localProfile));
+                    SYSTEMTIME locSt;
+                    FileTimeToSystemTime(&locFt, &locSt);
+                    wchar_t locBuf[64]{};
+                    swprintf(locBuf, dimof(locBuf), L"%04d-%02d-%02d %02d:%02d", locSt.wYear, locSt.wMonth, locSt.wDay,
+                             locSt.wHour, locSt.wMinute);
+                    locDateTemp = ToUtf8Temp(WStr(locBuf, (int)wcslen(locBuf)));
+                }
+                TempStr body =
+                    fmt("Replace: overwrites your local profile. A copy of the current profile is kept as "
+                        "tumatraPDF-data_1.json.pre-import.\n"
+                        "Merge: keeps the larger total for each day, and the newer state for each flashcard card.\n"
+                        "The imported file's date: %s. Your local profile's date: %s.",
+                        Str(srcDateTemp), Str(locDateTemp));
+                str::Free(gImportBodyText); // free previous allocation before storing new one
+                gImportBodyText = str::Dup(Str(body));
                 // size each button to its label extent so long labels are not truncated
                 WStr lblReplace = WStrL(L"Replace local data");
-                WStr lblMerge = WStrL(L"Merge (newest-wins)");
+                WStr lblMerge = WStrL(L"Merge (keep newer)");
                 WStr lblCancel = WStrL(L"Cancel");
                 int tr = BtnTextW(phwnd, lblReplace);
                 int tm = BtnTextW(phwnd, lblMerge);
@@ -552,16 +691,21 @@ static LRESULT CALLBACK SyncWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                         break;
                     }
                 }
+                str::Free(gImportBodyText); // free owned body text; field ends as empty non-owning view
+                gImportBodyText = {};
                 if (gImportChoice == IDCANCEL) {
                     return 0; // aborted
                 }
                 bool replace = (gImportChoice == IDOK);
-                if (ProfileDataImportFromJson(Str(srcPath).s, replace)) {
+                if (ProfileSyncImportFromPath(d->win, Str(srcPath).s, replace)) {
                     logf("[profile] import: %s OK from '%s'\n", Str(replace ? "replace" : "merge"), Str(srcPath));
                     SyncRefreshRows(d);
                     InvalidateRect(hwnd, nullptr, TRUE);
+                    SetStatusLine(
+                        d, fmt("Import OK: %s from '%s'.", Str(replace ? "replace" : "merge"), Str(srcPath))); // B4
                 } else {
                     MessageBoxW(hwnd, L"Import failed — see log.", L"Profile Sync", MB_OK | MB_ICONWARNING);
+                    SetStatusLine(d, fmt("Import failed from '%s'.", Str(srcPath))); // B4
                 }
                 return 0;
             }
@@ -572,10 +716,21 @@ static LRESULT CALLBACK SyncWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 DestroyWindow(hwnd);
             }
             return 0;
+        case WM_SETTINGCHANGE:
+        case WM_THEMECHANGED: { // B5: live theme switch — re-resolve theme, re-apply dark caption, repaint
+            UpdateThemeAfterSystemColorChange();
+            {
+                BOOL darkTitle = TRUE;
+                DwmSetWindowAttribute(hwnd, 20, &darkTitle, sizeof(darkTitle));
+            }
+            RedrawWindow(hwnd, nullptr, nullptr, RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_UPDATENOW);
+            return 0;
+        }
         case WM_CLOSE:
             DestroyWindow(hwnd);
             return 0;
         case WM_DESTROY:
+            SyncReleaseBgBrush(); // B5: release cached theme brush
             gSyncDialog = nullptr;
             return 0;
     }
@@ -598,11 +753,14 @@ void ShowProfileSyncDialog(MainWindow* win) {
     int rowH = DpiScale(win->hwndFrame, 20);
     int gap = DpiScale(win->hwndFrame, 8);
     int btnH = DpiScale(win->hwndFrame, 28);
+    int statusLineH = DpiScale(win->hwndFrame, 20); // B4: bottom status-line strip
 
     int contentH = pad;            // top pad
     contentH += titleDy + pad;     // title row
     contentH += 10 * (rowH + gap); // 10 data rows
-    contentH += gap / 2 + rowH;    // hint row
+    contentH += gap / 2 + rowH;    // hint row (drive hint)
+    contentH += gap / 2 + rowH;    // hint row (set-folder hint, B7)
+    contentH += statusLineH;       // B4: status line strip
     contentH += gap;               // gap before buttons
     contentH += btnH;              // button row 0 (data-root picker)
     contentH += gap;               // gap between button rows
@@ -640,6 +798,12 @@ void ShowProfileSyncDialog(MainWindow* win) {
     BOOL darkTitle = TRUE;
     DwmSetWindowAttribute(hwnd, 20, &darkTitle, sizeof(darkTitle));
 
+    // B4: seed status line with last migration status (may be empty)
+    TempStr migrationStatus = ProfileDataLastMigrationStatusTemp();
+    if (len(migrationStatus) > 0) {
+        SetStatusLine(&dlg, migrationStatus);
+    }
+
     // place bottom-anchored two rows of 3 buttons inside actual client rect
     RECT rc;
     GetClientRect(hwnd, &rc);
@@ -648,8 +812,9 @@ void ShowProfileSyncDialog(MainWindow* win) {
     int btnW = DpiScale(hwnd, 100);
     int btnH2 = DpiScale(hwnd, 28);
     int g = gap8(hwnd);
+    int availH = realClientH - statusLineH; // B4: keep buttons above status-line strip
     // row 2 (bottom): Export(5), Import(6), Close(4)
-    int by2 = realClientH - pad - btnH2;
+    int by2 = availH - pad - btnH2;
     int x6 = clientW - pad - btnW; // Close
     int x5 = x6 - btnW - g;        // Import
     int x4 = x5 - btnW - g;        // Export
@@ -661,8 +826,8 @@ void ShowProfileSyncDialog(MainWindow* win) {
     // row 0 (top of button area): Set Folder(7) — data root picker
     int by0 = by1 - btnH2 - g;
     int x0 = clientW - pad - btnW; // Set Folder
-    HWND btnSetFolder = CreateWindowW(L"BUTTON", L"Set Folder", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON, x0,
-                                      by0, btnW, btnH2, hwnd, (HMENU)7, GetModuleHandle(nullptr), nullptr);
+    HWND btnSetFolder = CreateWindowW(L"BUTTON", L"Set data folder", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON,
+                                      x0, by0, btnW, btnH2, hwnd, (HMENU)7, GetModuleHandle(nullptr), nullptr);
     HWND btnClose = CreateWindowW(L"BUTTON", L"Close", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON, x6, by2,
                                   btnW, btnH2, hwnd, (HMENU)4, GetModuleHandle(nullptr), nullptr);
     HWND btnImport = CreateWindowW(L"BUTTON", L"Import", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON, x5, by2,
@@ -671,8 +836,8 @@ void ShowProfileSyncDialog(MainWindow* win) {
                                    btnW, btnH2, hwnd, (HMENU)5, GetModuleHandle(nullptr), nullptr);
     HWND btnBackups = CreateWindowW(L"BUTTON", L"Backups", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON, x3, by1,
                                     btnW, btnH2, hwnd, (HMENU)3, GetModuleHandle(nullptr), nullptr);
-    HWND btnFolder = CreateWindowW(L"BUTTON", L"Open Folder", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON, x2,
-                                   by1, btnW, btnH2, hwnd, (HMENU)2, GetModuleHandle(nullptr), nullptr);
+    HWND btnFolder = CreateWindowW(L"BUTTON", L"Open data folder", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON,
+                                   x2, by1, btnW, btnH2, hwnd, (HMENU)2, GetModuleHandle(nullptr), nullptr);
     HWND btnSave = CreateWindowW(L"BUTTON", L"Save Now", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON, x1, by1,
                                  btnW, btnH2, hwnd, (HMENU)1, GetModuleHandle(nullptr), nullptr);
 
@@ -740,7 +905,7 @@ void TestLaunchImportPrompt(MainWindow* owner) {
     int g = DpiScale(phwnd, 4);
     // size each button to its label extent so long labels are not truncated
     WStr lblReplace = WStrL(L"Replace local data");
-    WStr lblMerge = WStrL(L"Merge (newest-wins)");
+    WStr lblMerge = WStrL(L"Merge (keep newer)");
     WStr lblCancel = WStrL(L"Cancel");
     int tr = BtnTextW(phwnd, lblReplace);
     int tm = BtnTextW(phwnd, lblMerge);
@@ -806,6 +971,38 @@ void TestLaunchImportPrompt(MainWindow* owner) {
             break;
         }
     }
+}
+
+// B8: reusable profile-sync API — applies profileDataDir + SaveSettings; no modal dialogs, no gForTesting gate.
+// Returns false for an empty/invalid path.
+bool ProfileSyncSetFolderToPath(MainWindow* win, const char* path) {
+    (void)win;
+    if (!path || path[0] == '\0') {
+        return false;
+    }
+    str::ReplaceWithCopy(&gGlobalPrefs->profileDataDir, Str(path));
+    SaveSettings();
+    logf("[profile] data root set to '%s' (via API)\n", Str(path));
+    return true;
+}
+
+// B8: reusable profile-sync API — exports profile snapshot to destDir; no modal dialogs, no gForTesting gate.
+bool ProfileSyncExportToPath(MainWindow* win, const char* destDir, bool overwrite) {
+    (void)win;
+    if (!destDir || destDir[0] == '\0') {
+        return false;
+    }
+    return ProfileDataExportToDir(destDir, overwrite);
+}
+
+// B8: reusable profile-sync API — imports profile from srcPath (replace or merge); no modal dialogs, no gForTesting
+// gate.
+bool ProfileSyncImportFromPath(MainWindow* win, const char* srcPath, bool replace) {
+    (void)win;
+    if (!srcPath || srcPath[0] == '\0') {
+        return false;
+    }
+    return ProfileDataImportFromJson(srcPath, replace);
 }
 
 // small horizontal gap between buttons

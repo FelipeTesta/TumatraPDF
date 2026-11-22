@@ -58,7 +58,7 @@ NO perDoc/day rows — nothing was adopted\nstats\\: reading 15B | flashcard 0B"
 
     // ===================== WHY THE PORTABLE->INSTALL IMPORT DOES NOTHING =====================
     subgraph cluster_f5 {
-        label="Root cause — ProfImportPortableInstall (ProfileData.cpp:536, F5, s36-br F4-lineage)";
+        label="Root cause — ProfImportPortableInstall (ProfileData.cpp:893, F5, s36-br F4-lineage)";
         color="#f44336";
         style=filled;
         fillcolor="#ffebee";
@@ -104,7 +104,11 @@ FileStates (trim/zoom/readingTimeSec) stay unmirrored", fillcolor="#fff9c4", sty
   study\\<md5>.json        (when FlashcardStudyDir EMPTY:
      default root study\\ — covers BOTH apps)
   Drive conflicted copies  (ProfMergeConflictedCopies adopts
-     tumatraPDF-data_*.json newest-wins/absent)", fillcolor="#c8e6c9", style=filled];
+     tumatraPDF-data_*.json newest-wins/absent)
+   Export: complete snapshot (primary + backup + stats + study),
+      can overwrite existing destination (s69)
+   Merge: keeps larger total per day, newer state per card
+      (no longer wipes local study states / lowers trials)", fillcolor="#c8e6c9", style=filled];
         nosync [label="DOES NOT SYNC — lives ONLY in each app's
 TumatraPDF-settings.txt:
   Sessions / TabGroups / ActiveTabGroup / RestoreSession
@@ -120,7 +124,7 @@ FILE PICKER ONLY -> user must pick portable's json manually;
 no auto-discovery; same no-sessions limitation", fillcolor="#fff9c4", style=filled];
         setfolder [label="Set Folder button (Profile Sync wnd, id=7, s64-R9o):
 FOS_PICKFOLDERS -> profileDataDir -> SaveSettings\nrestart -> F4 ProfEnsureProfileDirAndMigrate
-(copy-only primary+backup migration; existing Drive
+(copy-only primary+backup+stats+study migration; existing Drive
 primary is NOT clobbered if already present)", fillcolor="#bbdefb", style=filled];
 
         syncs -> setfolder [style=dotted];
@@ -169,10 +173,11 @@ primary is NOT clobbered if already present)", fillcolor="#bbdefb", style=filled
     }
 
     // ===================== OLD DOTS =====================
-    stale [label="FLOW/profile-system.dot is STALE:
-shows 'UNIFICATION PLANNED' + 6-button Sync dialog;
-Set Folder (id=7) + <root>\\stats + <root>\\study shipped s64-R9o (v1.0.17);
-this file supersedes that cluster for the portable/installed split\n(s68: gaps cluster refreshed; split still documented here)", shape=note, fillcolor="#ffcdd2", style=filled];
+    stale [label="FLOW/profile-system.dot REFRESHED s69:
+UNIFICATION PLAN replaced by SHIPPED state; Sync dialog = 7 buttons
++ status line; Set Folder + <root>\\stats + <root>\\study shipped s64-R9o (v1.0.17);
+this file documents the portable/installed split (s68)",
+ shape=note, fillcolor="#ffcdd2", style=filled];
 
     // ===================== EDGES =====================
     f5_result -> p_profile [style=dashed, label="still only looks here (never finds)"];

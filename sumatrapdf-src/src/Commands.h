@@ -347,7 +347,8 @@ enum {
     CmdArchPageCrop = 536,
     CmdFlashcardDeleteActive = 537,
     CmdPageHoldToggle = 538,
-    CmdNone = 539,
+    CmdProfileSync = 539,
+    CmdNone = 540,
 
     /* range for file history */
     CmdFileHistoryFirst,

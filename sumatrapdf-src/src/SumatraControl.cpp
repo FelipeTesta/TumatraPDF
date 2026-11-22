@@ -11,6 +11,7 @@
 #include "Flags.h"
 #include "AppTools.h"
 #include "ProfileSyncWnd.h"
+#include "ProfileData.h"
 #include "ProfileBackupWnd.h"
 #include "SumatraTest.h"
 #include "SumatraPDF.h"
@@ -424,6 +425,13 @@ enum class ControlCmd : u16 {
     TestOpenInWindow = 77,
     TestFocusWindow = 78,
     TestRunCommandInWindow = 79,
+    // Manual profile sync test instrumentation (intentional, kept).
+    // Drives profile sync actions via the control pipe.
+    // No automated test uses these hooks yet.
+    TestProfileSetFolder = 80,
+    TestProfileExport = 81,
+    TestProfileImport = 82,
+    TestProfileStatus = 83,
 };
 
 enum class ControlArgType : u16 {
@@ -1270,6 +1278,178 @@ static void ExecuteControlRequest(ControlRequest* req) {
             // Launch asynchronously on the UI thread.
             uitask::Post(MkFunc0(TestLaunchCloudRevert, win), "TestProfileCloudRevert");
             AppendTestResult(req, 0, StrL("OK posted\n"));
+            break;
+        }
+
+        case ControlCmd::TestProfileSetFolder: {
+            i32 exitCode = 0;
+            Str path = StringArg(req, 0);
+            if (!path) {
+                AppendError(req, "TestProfileSetFolder expects string folder path");
+                break;
+            }
+            if (len(gWindows) == 0) {
+                AppendError(req, "TestProfileSetFolder no-window");
+                break;
+            }
+            MainWindow* win = gWindows[0];
+            if (!win) {
+                AppendError(req, "TestProfileSetFolder no-window");
+                break;
+            }
+            bool ok = ProfileSyncSetFolderToPath(win, CStrTemp(path));
+            exitCode = ok ? 1 : 0;
+            if (!ok) {
+                AppendError(req, StrL("ProfileSyncSetFolderToPath failed"));
+            }
+            AppendTestResult(req, exitCode, ok ? StrL("OK\n") : StrL("FAILED\n"));
+            break;
+        }
+
+        case ControlCmd::TestProfileExport: {
+            i32 exitCode = 0;
+            i32 overwrite = 0;
+            Str destDir = StringArg(req, 0);
+            if (!destDir) {
+                AppendError(req, "TestProfileExport expects string destDir and int overwrite");
+                break;
+            }
+            if (!IntArg(req, 1, overwrite)) {
+                AppendError(req, "TestProfileExport expects int overwrite (0/1)");
+                break;
+            }
+            if (len(gWindows) == 0) {
+                AppendError(req, "TestProfileExport no-window");
+                break;
+            }
+            MainWindow* win = gWindows[0];
+            if (!win) {
+                AppendError(req, "TestProfileExport no-window");
+                break;
+            }
+            bool ok = ProfileSyncExportToPath(win, CStrTemp(destDir), overwrite != 0);
+            exitCode = ok ? 1 : 0;
+            if (!ok) {
+                AppendError(req, StrL("ProfileSyncExportToPath failed"));
+            }
+            AppendTestResult(req, exitCode, ok ? StrL("OK\n") : StrL("FAILED\n"));
+            break;
+        }
+
+        case ControlCmd::TestProfileImport: {
+            i32 exitCode = 0;
+            i32 replace = 0;
+            Str srcPath = StringArg(req, 0);
+            if (!srcPath) {
+                AppendError(req, "TestProfileImport expects string srcPath and int replace");
+                break;
+            }
+            if (!IntArg(req, 1, replace)) {
+                AppendError(req, "TestProfileImport expects int replace (0/1)");
+                break;
+            }
+            if (len(gWindows) == 0) {
+                AppendError(req, "TestProfileImport no-window");
+                break;
+            }
+            MainWindow* win = gWindows[0];
+            if (!win) {
+                AppendError(req, "TestProfileImport no-window");
+                break;
+            }
+            bool ok = ProfileSyncImportFromPath(win, CStrTemp(srcPath), replace != 0);
+            exitCode = ok ? 1 : 0;
+            if (!ok) {
+                AppendError(req, StrL("ProfileSyncImportFromPath failed"));
+            }
+            AppendTestResult(req, exitCode, ok ? StrL("OK\n") : StrL("FAILED\n"));
+            break;
+        }
+
+        case ControlCmd::TestProfileStatus: {
+            i32 exitCode = 0;
+            i32 version = 0;
+            i32 books = 0;
+            i32 readingDays = 0;
+            i32 studyDays = 0;
+            i64 lastWriteTs = 0;
+
+            if (len(gWindows) == 0) {
+                AppendError(req, "TestProfileStatus no-window");
+                break;
+            }
+            MainWindow* win = gWindows[0];
+            if (!win) {
+                AppendError(req, "TestProfileStatus no-window");
+                break;
+            }
+
+            // Get profile data root path
+            TempStr rootPathTemp = ProfileDataGetDataRootTemp();
+            Str rootPath = rootPathTemp ? rootPathTemp : StrL("");
+
+            // Get migration status
+            TempStr migrationStatusTemp = ProfileDataLastMigrationStatusTemp();
+            Str migrationStatus = migrationStatusTemp ? migrationStatusTemp : StrL("");
+
+            // Get stats
+            if (!ProfileDataStats(&version, &books, &readingDays, &studyDays, &lastWriteTs)) {
+                version = 0;
+                books = 0;
+                readingDays = 0;
+                studyDays = 0;
+                lastWriteTs = 0;
+            }
+
+            // Build response list: [rootPath, migrationStatus, version, books, readingDays, studyDays, lastWriteTs]
+            // Encode lastWriteTs as utf8 string since protocol has no i64 type
+            str::Builder listBuilder;
+            // List type + count (7 elements)
+            AppendU16(listBuilder, (u16)ControlArgType::List);
+            AppendU16(listBuilder, (u16)7);
+
+            // Element 0: rootPath (utf8 string)
+            AppendU16(listBuilder, (u16)ControlArgType::String);
+            AppendU32(listBuilder, (u32)rootPath.len);
+            listBuilder.Append(rootPath);
+            listBuilder.AppendChar(0);
+
+            // Element 1: migrationStatus (utf8 string)
+            AppendU16(listBuilder, (u16)ControlArgType::String);
+            AppendU32(listBuilder, (u32)migrationStatus.len);
+            listBuilder.Append(migrationStatus);
+            listBuilder.AppendChar(0);
+
+            // Element 2: version (i32)
+            AppendU16(listBuilder, (u16)ControlArgType::Int32);
+            AppendU32(listBuilder, (u32)version);
+
+            // Element 3: books (i32)
+            AppendU16(listBuilder, (u16)ControlArgType::Int32);
+            AppendU32(listBuilder, (u32)books);
+
+            // Element 4: readingDays (i32)
+            AppendU16(listBuilder, (u16)ControlArgType::Int32);
+            AppendU32(listBuilder, (u32)readingDays);
+
+            // Element 5: studyDays (i32)
+            AppendU16(listBuilder, (u16)ControlArgType::Int32);
+            AppendU32(listBuilder, (u32)studyDays);
+
+            // Element 6: lastWriteTs (i64 encoded as utf8 string)
+            char tsBuf[64];
+            int tsLen = snprintf(tsBuf, sizeof(tsBuf), "%lld", (long long)lastWriteTs);
+            AppendU16(listBuilder, (u16)ControlArgType::String);
+            AppendU32(listBuilder, (u32)tsLen);
+            for (int i = 0; i < tsLen; i++) {
+                listBuilder.AppendChar(tsBuf[i]);
+            }
+            listBuilder.AppendChar(0);
+
+            // List end marker
+            AppendU16(listBuilder, (u16)ControlArgType::End);
+
+            AppendTestResult(req, exitCode, ToStrTemp(listBuilder));
             break;
         }
 

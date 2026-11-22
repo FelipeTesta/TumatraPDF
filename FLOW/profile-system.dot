@@ -1,4 +1,5 @@
 digraph ProfileSystem {
+    // Snapshot: 2026-11-21 (s69) — Profile Sync: correct merge, complete migration, honest UI
     rankdir=TB;
     node [shape=box, style=rounded, fontname="Consolas", fontsize=9];
     edge [fontname="Consolas", fontsize=8];
@@ -31,33 +32,34 @@ Profile captures STATS + STUDY STATE only", fillcolor="#f5f5f5", style=filled];
 
     // ===================== LOAD PIPELINE =====================
     subgraph cluster_load {
-        label="Load pipeline (ProfileDataEnsureLoaded ProfileData.cpp:1265)";
+        label="Load pipeline (ProfileDataEnsureLoaded ProfileData.cpp:1799)";
         color="#2196f3";
         style=filled;
         fillcolor="#e3f2fd";
 
         ensure [label="ProfileDataEnsureLoaded (lazy, once)
  sets gProfileThisMachine (GetComputerNameW)", fillcolor="#bbdefb", style=filled];
-        f4 [label="F4: ProfEnsureProfileDirAndMigrate (:1202)
+        f4 [label="F4: ProfEnsureProfileDirAndMigrate (:1706)
  profileDataDir set -> mkdir + copy tumatraPDF-data_*.json
  + backup\\ tree from old app-data dir; source kept;
  skip if target primary exists", fillcolor="#bbdefb", style=filled];
-        f5 [label="F5: ProfImportPortableInstall (:501)
+        f5 [label="F5: ProfImportPortableInstall (:893)
  one-time Portable exe-adjacent import\n when installed profile empty", fillcolor="#bbdefb", style=filled];
         read [label="file::ReadFile(primary) -> ProfBlockInterior", fillcolor="#bbdefb", style=filled];
-        f7 [label="F7: checksum verify (:1284)
-ProfReadChecksumTemp vs ProfComputeChecksumTemp (MD5)
-mismatch -> corrupt path; absent token -> skip (old files)", fillcolor="#fff9c4", style=filled];
-        backup_rec [label="Corrupt: scan 9 backup slots, newest valid\nslot -> primary (:1300)\nnone -> ProfImportLegacy (:476) + dirty+Save", fillcolor="#fff9c4", style=filled];
-        cloud [label="Cloud-revert detect (:1326)
+        f7 [label="checksum verify (:1291)
+ProfReadChecksumTemp (:1552) vs ProfComputeChecksumTemp (:1619) (MD5)
+mismatch -> refuse import with log line; absent checksum (old file)
+-> accepted with log line", fillcolor="#fff9c4", style=filled];
+        backup_rec [label="Corrupt: scan 9 backup slots, newest valid\nslot -> primary (RecoverBackupSlot :2514)\nnone -> ProfImportLegacy + dirty+Save", fillcolor="#fff9c4", style=filled];
+        cloud [label="Cloud-revert detect (:1860)
 newest backup slot lastWriteTs > primary ts
- -> gCloudRevertPending = true (consumed at startup,\n SumatraStartup.cpp:2863; skipped when gForTesting)", fillcolor="#fff9c4", style=filled];
-        parse [label="ProfParseBooks (:374) / ProfParseDaySection (:986)
-/ ProfParseInfoSection (:1023) -> gProfile", fillcolor="#bbdefb", style=filled];
-        reconcile [label="ProfReconcileSidecars (:615) — startup adopt
-of reading-stats.txt / flashcard-stats.txt rows absent
-from profile sections (idempotent; books excluded)", fillcolor="#bbdefb", style=filled];
-        conflicted [label="ProfMergeConflictedCopies (:740) — Drive
+ -> gCloudRevertPending (:80) = true (consumed at startup,\n SumatraStartup.cpp:2866; skipped when gForTesting)", fillcolor="#fff9c4", style=filled];
+        parse [label="ProfParseBooks (:419) / ProfParseDaySection (:1490)
+/ ProfParseInfoSection (:1527) -> gProfile", fillcolor="#bbdefb", style=filled];
+        reconcile [label="ProfReconcileSidecars (:1007) — startup adopt
+of reading-stats.txt / flashcard-stats.txt rows absent from profile sections
+(idempotent; books excluded)", fillcolor="#bbdefb", style=filled];
+        conflicted [label="ProfMergeConflictedCopies (:1130) — Drive
 conflicted copies tumatraPDF-data_*.json:
 adopt absent book keys + (dateKey,machine) day rows;
 copies never deleted/renamed", fillcolor="#bbdefb", style=filled];
@@ -75,20 +77,20 @@ copies never deleted/renamed", fillcolor="#bbdefb", style=filled];
         style=filled;
         fillcolor="#f3e5f5";
 
-        pull [label="ProfPullHistory (:1782)
+        pull [label="ProfPullHistory (:2316)
  gFileHistory snapshot -> perDoc rows (readingSec/fcSec/fcCards)", fillcolor="#e1bee7", style=filled];
-        save [label="ProfileDataSaveNow (:1884)
+        save [label="ProfileDataSaveNow (:2418)
  dirty-gate -> ProfPullHistory -> ProfSaveInner", fillcolor="#e1bee7", style=filled];
-        inner [label="ProfSaveInner (:1792) — ATOMIC: tmp file,
+        inner [label="ProfSaveInner (:2326) — ATOMIC: tmp file,
  MD5(body w/ empty checksum) -> ProfSubstChecksumTemp
  -> MoveFileExW(MOVEFILE_REPLACE_EXISTING), fallback remove+rename
 no .tmp left; optional checksum token after machine", fillcolor="#e1bee7", style=filled];
-        maybe [label="ProfMaybeBackup (:1920)
+        maybe [label="ProfMaybeBackup (:2454)
  slot = (time(nullptr)/8h) % 9; stamp.txt period guard;
  wall-clock derived, survives reboots;
  backup\\NN\\tumatraPDF-data_1.json copied if period stale", fillcolor="#e1bee7", style=filled];
         slots [label="ProfileDataBackupStampTemp / RecoverBackupSlot
-(:1965/:1980) — 5s hold restore in Backups UI;
+(:2499/:2514) — 5s hold restore in Backups UI;
 drops gProfile in-memory state, re-EnsureLoaded, SaveNow", fillcolor="#e1bee7", style=filled];
 
         pull -> save -> inner -> maybe;
@@ -102,8 +104,8 @@ drops gProfile in-memory state, re-EnsureLoaded, SaveNow", fillcolor="#e1bee7", 
         style=filled;
         fillcolor="#fff3e0";
 
-        fc_hook [label="Flashcard.cpp: FlashcardStudySave\n-> ProfileDataUpdateStudyDoc (:735) FULL REPLACE\nFlashcardStudyLoad -> ProfileDataMergeStudyDoc (:1146)\nnewest-wins per state key (lastReviewedAt >=, :1427-1441)\nfirst-contact adopt; FlashcardDeleteAllStudyFiles\n-> ProfileDataClearStudyDocs (:764)", fillcolor="#fff3e0", style=filled];
-        stats [label="ReadingStats.cpp:179 / FlashcardStats.cpp:178,131,208\nProfileDataAddReadingSec / AddFlashcardSec / AddFlashcardCard\n live ticks (dirty-only; clamp [0,86400]; save cadence)", fillcolor="#fff3e0", style=filled];
+        fc_hook [label="Flashcard.cpp: FlashcardStudySave\n-> ProfileDataUpdateStudyDoc (:1936) FULL REPLACE\nFlashcardStudyLoad -> ProfileDataMergeStudyDoc (:1948)\nnewest-wins per state key (lastReviewedAt >=)\nfirst-contact adopt; FlashcardDeleteAllStudyFiles\n-> ProfileDataClearStudyDocs (:1999)", fillcolor="#fff3e0", style=filled];
+        stats [label="ReadingStats.cpp:178 / FlashcardStats.cpp:173,238\nProfileDataAddReadingSec / AddFlashcardSec / AddFlashcardCard\n live ticks (dirty-only; clamp [0,86400]; save cadence)", fillcolor="#fff3e0", style=filled];
         dayflush [label="FlashcardStatsFlush / ReadingStats flush (dirtySec>=60)\n ProfileDataUpsertStudyDay / UpsertReadingDay — replaces THIS machine's row,\n other machines' rows untouched; SaveNow materializes", fillcolor="#fff3e0", style=filled];
         dual [label="kProfDualWriteSidecars (ReadingStats.cpp / FlashcardStats.cpp / Flashcard.cpp)\n= true — sidecar flashcard-stats.txt / reading-stats.txt\n+ per-book *.json STILL written; profile upserts unconditional", fillcolor="#ffcdd2", style=filled];
         pullhook [label="ProfPullHistory reads gFileHistory FileState\n readingTimeSec / flashcardStudyTimeSec / flashcardCardsDone\n (perDoc snapshot; source of P1-migration corruption)", fillcolor="#fff3e0", style=filled];
@@ -121,26 +123,30 @@ drops gProfile in-memory state, re-EnsureLoaded, SaveNow", fillcolor="#e1bee7", 
         style=filled;
         fillcolor="#fce4ec";
 
-        homebtn [label="Home ⟳ Sync button (HomePage.cpp:935, HomeSyncBtnWnd)
+        homebtn [label="Home ⟳ Sync button (HomePage.cpp:2546, HomeSyncBtnWnd)
 next to 'Stats' header; click -> ShowProfileSyncDialog
 (bubble hit-test local->root bridge)", fillcolor="#bbdefb", style=filled];
-        syncwnd [label="Profile Sync window (ProfileSyncWnd.cpp:546)
+        syncwnd [label="Profile Sync window (ProfileSyncWnd.cpp:738)
 class TUMATRA_PROFILE_SYNC; read-only readout:
  dir / file / format v / size / last save / machine /
  counts (books, readingDays, studyDays) / backups +
- Drive hint label\n buttons (6, two rows): Save Now | Open Folder |\n Backups | Export | Import | Close (Esc)", fillcolor="#bbdefb", style=filled];
-        export [label="Export (ProfileDataExportToDir :814)
-copies primary + backup\\ subtree; fails if dest primary exists;
-already-exists confirm -> IFileDialog FOS_PICKFOLDERS\nImport (ProfileDataImportFromJson :852)
-prompt TUMATRA_PROFILE_IMPORT (360x180):\n REPLACE (.pre-import move + copy) or\n MERGE — true newest-wins per item vs adopt-absent\n (file-level lastWriteTs, fallback LastWriteTime) (s40)", fillcolor="#bbdefb", style=filled];
-        backupwnd [label="Profile Backups dialog (ProfileBackupWnd.cpp:195)
+ Drive hint label\n SEVEN buttons (two rows): Set data folder | Save Now |\n Open Folder | Backups | Export | Import | Close (Esc)
+ status line at bottom (last action outcome, seeded with migration result);
+ Set data folder applies on NEXT start\n WM_SETTINGCHANGE / WM_THEMECHANGED: re-resolve theme,\n re-apply dark caption, repaint all children; brush released on destroy", fillcolor="#bbdefb", style=filled];
+        export [label="Export (ProfileDataExportToDir :1206)
+copies PRIMARY + backup\\ + stats\\ + study\\ trees; dest-exists -> confirm overwrite;
+atomic replace via temp + MoveFileExW\nImport (ProfileDataImportFromJson :1280)
+prompt TUMATRA_PROFILE_IMPORT: REPLACE (.pre-import copy + atomic install) or\nMERGE — larger total per day, newer state per card; validates source checksum", fillcolor="#bbdefb", style=filled];
+        backupwnd [label="Profile Backups dialog (ProfileBackupWnd.cpp:307)
 class TUMATRA_PROFILE_BACKUP (420x520); 9 slots x8h;
  stamp per slot; 5s hold Restore (1s orange progress);
-Esc close; DwmSetWindowAttribute dark caption (s40)", fillcolor="#bbdefb", style=filled];
-        cloudwnd [label="Cloud revert modal (ProfileBackupWnd.cpp:347)
+ keyboard: Up/Down/Home/End select slot, SPACE hold-to-restore;
+ failed restore -> message box (not log only); Esc close;
+ DwmSetWindowAttribute dark caption (s40)", fillcolor="#bbdefb", style=filled];
+        cloudwnd [label="Cloud revert modal (ProfileBackupWnd.cpp:364)
 class TUMATRA_CLOUD_REVERT (380x220); primary vs newest-backup\nstamp; Restore (default) / Keep; Esc = Keep;
-called from SumatraStartup.cpp:2863 (skipped if gForTesting)", fillcolor="#bbdefb", style=filled];
-        cmd [label="Commands: CmdProfileBackups = 529 (Commands.h:340)\n dispatch SumatraPDF.cpp:10359; gen-commands palette\n 'Profile: Backups...'; NO menu / shortcut / Home twin\n   for Sync window (Home button only)", fillcolor="#ffcdd2", style=filled];
+called from SumatraStartup.cpp:2866 (skipped if gForTesting)", fillcolor="#bbdefb", style=filled];
+        cmd [label="Commands: CmdProfileBackups (Commands.h:340/690)\n dispatch SumatraPDF.cpp:10473; gen-commands palette\n 'Profile: Backups...'; NO menu / shortcut\n CmdProfileSync (gen-commands.ts:350, Commands.h:357/700)\n dispatch SumatraPDF.cpp:10473; palette 'Profile: Sync...'\n (Home button only)", fillcolor="#ffcdd2", style=filled];
 
         homebtn -> syncwnd;
         syncwnd -> backupwnd [style=dotted];
@@ -150,23 +156,20 @@ called from SumatraStartup.cpp:2863 (skipped if gForTesting)", fillcolor="#bbdef
 
     // ===================== STORAGE PARALLELS / UNIFICATION =====================
     subgraph cluster_parallel {
-        label="Storage parallels (see analysis md §A) — 4 roots, 2 configurable, 0 unified";
+        label="Storage roots (SHIPPED s64-R9o / v1.0.17 — not a plan, current state)";
         color="#607d8b";
         style=filled;
         fillcolor="#eceff1";
 
-        stores [label="(1) profileDataDir -> tumatraPDF-data_1.json [UI: NONE, advanced-set only]
-(2) flashcardStudyDir -> per-book <md5>.json [UI: Flashcard Config window 📂 picker]
-(3) reading-stats.txt + flashcard-stats.txt NEXT TO SETTINGS FILE [UI: NONE]
-(4) settings file itself (SumatraPDF-settings.txt) [UI: n/a]", fillcolor="#ffcdd2", style=filled];
-        unify [label="UNIFICATION PLAN (md §A):
-single data-root setting (profileDataDir) governing
-profile + both sidecars + per-book JSONs;
-ProfileSyncWnd gains 📂 folder picker (like Config);
-sidecars move under profile dir;
-flashcardStudyDir kept only as migration shim", fillcolor="#fff9c4", style=filled];
+        stores [label="(1) profileDataDir -> <root>\\tumatraPDF-data_1.json [UI: Set data folder button]
+(2) flashcardStudyDir -> per-book <md5>.json [legacy override; unset => <root>\\study\\]
+(3) reading-stats.txt + flashcard-stats.txt -> <root>\\stats\\ [UI: NONE]
+(4) settings file itself (SumatraPDF-settings.txt) [UI: n/a — never travels]", fillcolor="#c8e6c9", style=filled];
+        shipped [label="SHIPPED state: one data root (profileDataDir wins, else per-exe app-data dir);
+ sidecars in <root>\\stats\\; per-book study JSONs in <root>\\study\\;
+ flashcardStudyDir kept only as legacy override", fillcolor="#fff9c4", style=filled];
 
-        stores -> unify [style=dotted];
+        stores -> shipped [style=dotted];
     }
 
     // ===================== OPEN GAPS =====================
@@ -183,14 +186,11 @@ slices 1-2 shipped (s36-bs/bt): live stats -> profile;
 Config list merge; remaining: FlashcardStudyListDocs iterate
 profile books; deprecate sidecar writes when stable;
 keep per-machine day rows", fillcolor="#fff9c4", style=filled];
-        s36bf [label="Gap s36-bf — STATUS MISMATCH
-TODO says sidecar day-row reconciliation at startup pending;
-code HAS ProfReconcileSidecars (:615, runs every load) —
-but only adopts ABSENT rows, never updates drifted ones;
-TODO stale or reconcile insufficient — resolve doc vs code", fillcolor="#fff9c4", style=filled];
-        residual [label="s40 residuals: Import prompt not force-launchable
-in -for-testing (ProfileSyncWnd.cpp:364-370); cloud revert
-not deterministically reachable; hold-restore abort kept", shape=note, fillcolor="#ffcdd2", style=filled];
+        s36bf [label="Gap s36-bf — sidecar day-row reconciliation
+code HAS ProfReconcileSidecars (:1007, runs every load) —
+but only adopts ABSENT (dateKey,machine) rows, never updates
+a drifted row. TODO stale vs code insufficient — open", fillcolor="#fff9c4", style=filled];
+        residual [label="s40 residual — profile actions scriptable via control pipe\n(TestProfileSetFolder/Export/Import/Status = 80-83),\nbut UI buttons stay disabled under -for-testing", shape=note, fillcolor="#ffcdd2", style=filled];
 
         p1 -> residual [style=dotted];
     }

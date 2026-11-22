@@ -354,6 +354,7 @@ static SeqStrings gCommandNames =
     "CmdArchPageCrop\0"
     "CmdFlashcardDeleteActive\0"
     "CmdPageHoldToggle\0"
+    "CmdProfileSync\0"
     "CmdNone\0"
     "\0";
 
@@ -696,6 +697,7 @@ static i32 gCommandIds[] = {
     CmdArchPageCrop,
     CmdFlashcardDeleteActive,
     CmdPageHoldToggle,
+    CmdProfileSync,
     CmdNone,
 };
 
@@ -1038,6 +1040,7 @@ SeqStrings gCommandDescriptions =
     "Arch: Page Crop (image-editor bounding box)\0"
     "Flashcard Delete Active Card\0"
     "Toggle Page Hold\0"
+    "Profile: Sync...\0"
     "Do nothing\0"
     "\0";
 // clang-format on

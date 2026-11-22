@@ -79,6 +79,26 @@ static struct {
 static char* gProfileThisMachine = nullptr; // owned, set at first load
 static bool gCloudRevertPending = false;    // newest backup slot is strictly newer than primary
 
+// A6: last F4 migration status string (owned by this module, freed on next set)
+static char* gLastMigrationStatus = nullptr;
+
+// F5: last portable import status string (owned by this module, freed on next set)
+static char* gLastPortableImportStatus = nullptr;
+
+// Frees the previous status string (if any) and stores a copy of 'text'.
+// The returned Str from ProfileDataLastMigrationStatusTemp() is a BORROWED view;
+// callers must NOT free it.
+static void ProfSetLastMigrationStatus(Str text) {
+    ::free(gLastMigrationStatus);
+    gLastMigrationStatus = str::Dup(text).s;
+}
+
+// Frees the previous portable import status string (if any) and stores a copy of 'text'.
+static void ProfSetLastPortableImportStatus(Str text) {
+    ::free(gLastPortableImportStatus);
+    gLastPortableImportStatus = str::Dup(text).s;
+}
+
 static void ProfSaveInner();
 static void ProfMaybeBackup();
 static void ProfPullHistory();
@@ -882,13 +902,16 @@ static void ProfImportLegacy() {
 static void ProfImportPortableInstall() {
     if (gForTesting) {
         logf("[profile] portable import: skipped (-for-testing)\n");
+        ProfSetLastPortableImportStatus(StrL("Portable import skipped (test mode)."));
         return;
     }
     if (IsRunningInPortableMode()) {
+        ProfSetLastPortableImportStatus(StrL("Portable import skipped: this is the portable build."));
         return;
     }
     Str custom = gGlobalPrefs->profileDataDir;
     if (custom && len(custom) > 0) {
+        ProfSetLastPortableImportStatus(StrL("Portable import skipped: a data folder is configured."));
         return; // user chose a custom profile dir — not the default install path
     }
 
@@ -925,6 +948,7 @@ static void ProfImportPortableInstall() {
     bool hasPortableSidecars = (rcText && len(rcText) > 0) || (fcText && len(fcText) > 0);
 
     if (!hasPortablePrimary && !hasPortableBooks && !hasPortableSidecars) {
+        ProfSetLastPortableImportStatus(StrL("Portable import: no portable profile found to import."));
         return; // nothing to adopt
     }
 
@@ -932,6 +956,7 @@ static void ProfImportPortableInstall() {
     TempStr installedPath = ProfileDataPathTemp();
     Str installedJson = file::ReadFile(Str(installedPath));
     if (installedJson && ProfBlockInterior(installedJson)) {
+        ProfSetLastPortableImportStatus(StrL("Portable import skipped: this profile already has data."));
         return; // installed primary already exists — don't clobber
     }
     bool installedHasBooks = false;
@@ -952,6 +977,7 @@ static void ProfImportPortableInstall() {
         }
     }
     if (installedHasBooks) {
+        ProfSetLastPortableImportStatus(StrL("Portable import skipped: this profile already has data."));
         return; // installed already has legacy books — don't clobber
     }
 
@@ -984,6 +1010,8 @@ static void ProfImportPortableInstall() {
 
     logf("[profile] portable import: %d book(s), %d reading day(s), %d study day(s)\n", importedBooks,
          importedReadingDays, importedStudyDays);
+    ProfSetLastPortableImportStatus(fmt("Portable import: adopted %d book(s), %d reading day(s), %d study day(s).",
+                                        importedBooks, importedReadingDays, importedStudyDays));
 }
 
 // Startup reconcile: adopt day keys from the legacy sidecars that are absent
@@ -1188,9 +1216,11 @@ static void ProfMergeConflictedCopies() {
 
 // ---- F7: export / import ----
 
-// Export primary + backup/ subtree to destDir. Create dest recursively.
-// Fail (false) if primary missing or dest primary already exists (caller decides UX).
-bool ProfileDataExportToDir(const char* destDir) {
+// Export primary + backup/ + stats/ + study/ subtrees to destDir. Create dest recursively.
+// overwriteExisting=false (default): refuse when dest primary exists (logs reason).
+// overwriteExisting=true: overwrite dest primary atomically (temp + MoveFileExW REPLACE_EXISTING).
+// Returns true only when the primary was written. Logs counts (json / backup / stats / study).
+bool ProfileDataExportToDir(const char* destDir, bool overwriteExisting) {
     if (!destDir || len(Str(destDir)) == 0) {
         return false;
     }
@@ -1199,26 +1229,62 @@ bool ProfileDataExportToDir(const char* destDir) {
         logf("[profile] export: primary missing, nothing to export\n");
         return false;
     }
-    TempStr destPrimary = path::JoinTemp(Str(destDir), kProfileDataFileName);
-    if (file::Exists(Str(destPrimary))) {
-        logf("[profile] export: dest primary already exists '%s', refusing\n", Str(destPrimary));
-        return false;
-    }
     if (!dir::CreateAll(Str(destDir))) {
         logf("[profile] export: failed to create dest dir '%s'\n", Str(destDir));
         return false;
     }
-    if (!file::Copy(Str(destPrimary), Str(primarySrc), true)) {
-        logf("[profile] export: failed to copy primary to '%s'\n", Str(destPrimary));
-        return false;
+    TempStr destPrimary = path::JoinTemp(Str(destDir), kProfileDataFileName);
+    if (file::Exists(Str(destPrimary))) {
+        if (!overwriteExisting) {
+            logf("[profile] export: dest primary already exists '%s', refusing (overwriteExisting=false)\n",
+                 Str(destPrimary));
+            return false;
+        }
+        // overwriteExisting=true: write to temp + atomic replace (mirroring ProfSaveInner)
+        TempStr tmpPath = str::JoinTemp(Str(destPrimary), StrL(".tmp-export"));
+        if (!file::Copy(Str(tmpPath), Str(primarySrc), false)) {
+            logf("[profile] export: failed to copy primary to temp '%s'\n", Str(tmpPath));
+            return false;
+        }
+        WCHAR* tmpW = CWStrTemp(ToWStrTemp(Str(tmpPath)));
+        WCHAR* dstW = CWStrTemp(ToWStrTemp(Str(destPrimary)));
+        BOOL ok = MoveFileExW(tmpW, dstW, MOVEFILE_REPLACE_EXISTING);
+        if (!ok) {
+            remove(destPrimary.s);
+            ok = rename(tmpPath.s, destPrimary.s) == 0;
+        }
+        if (!ok) {
+            logf("[profile] export: failed to replace dest primary '%s'\n", Str(destPrimary));
+            return false;
+        }
+    } else {
+        // dest primary doesn't exist: simple copy
+        if (!file::Copy(Str(destPrimary), Str(primarySrc), false)) {
+            logf("[profile] export: failed to copy primary to '%s'\n", Str(destPrimary));
+            return false;
+        }
     }
-    TempStr backupSrc = path::JoinTemp(ProfBackupDirTemp(), StrL("")); // backup/ dir
+    // export backup/ subtree (OVERWRITE)
     int copiedJson = 1;
     int copiedBackup = 0;
+    TempStr backupSrc = path::JoinTemp(ProfBackupDirTemp(), StrL("")); // backup/ dir
     if (file::Exists(Str(backupSrc))) {
         copiedBackup = ProfCopyDirTree(Str(backupSrc), path::JoinTemp(Str(destDir), StrL("backup")));
     }
-    logf("[profile] export: %d json file(s), %d backup file(s) -> '%s'\n", copiedJson, copiedBackup, Str(destDir));
+    // export stats/ subtree (OVERWRITE)
+    int copiedStats = 0;
+    TempStr statsSrc = path::JoinTemp(path::GetDirTemp(Str(primarySrc)), StrL("stats"));
+    if (file::Exists(Str(statsSrc))) {
+        copiedStats = ProfCopyDirTree(Str(statsSrc), path::JoinTemp(Str(destDir), StrL("stats")));
+    }
+    // export study/ subtree (OVERWRITE)
+    int copiedStudy = 0;
+    TempStr studySrc = path::JoinTemp(path::GetDirTemp(Str(primarySrc)), StrL("study"));
+    if (file::Exists(Str(studySrc))) {
+        copiedStudy = ProfCopyDirTree(Str(studySrc), path::JoinTemp(Str(destDir), StrL("study")));
+    }
+    logf("[profile] export: %d json, %d backup, %d stats, %d study -> '%s'\n", copiedJson, copiedBackup, copiedStats,
+         copiedStudy, Str(destDir));
     return true;
 }
 
@@ -1237,20 +1303,45 @@ bool ProfileDataImportFromJson(const char* srcJsonPath, bool replace) {
         logf("[profile] import: src unparseable '%s'\n", Str(srcJsonPath));
         return false;
     }
+
+    // A5: validate source checksum before any modification (if present)
+    TempStr storedChecksum = ProfReadChecksumTemp(srcJson);
+    if (len(storedChecksum) > 0) {
+        TempStr expectedChecksum = ProfComputeChecksumTemp(srcJson);
+        if (!expectedChecksum || !str::Eq(Str(storedChecksum), Str(expectedChecksum))) {
+            logf("[profile] import: src checksum mismatch — refusing import '%s'\n", Str(srcJsonPath));
+            return false;
+        }
+    } else {
+        logf("[profile] import: src checksum absent — skipping verify (old-format file)\n");
+    }
+
     TempStr primaryDst = ProfileDataPathTemp();
     TempStr profileDir = path::GetDirTemp(Str(primaryDst));
     if (replace) {
-        // move current primary to .pre-import (overwrite old .pre-import)
+        // A1: move current primary to .pre-import (OVERWRITE old .pre-import if exists)
         TempStr preImport = path::JoinTemp(Str(profileDir), StrL("tumatraPDF-data_1.json.pre-import"));
         if (file::Exists(Str(primaryDst))) {
-            if (!file::Copy(Str(preImport), Str(primaryDst), true)) {
+            if (!file::Copy(Str(preImport), Str(primaryDst), false)) { // dontOverwrite=false -> overwrite
                 logf("[profile] import: failed to pre-import backup '%s'\n", Str(preImport));
                 return false;
             }
         }
-        // copy src → primary (keep source)
-        if (!file::Copy(Str(primaryDst), Str(srcJson), true)) {
-            logf("[profile] import: failed to copy src to primary '%s'\n", Str(primaryDst));
+        // A1: install imported file ATOMICALLY (temp + MoveFileExW REPLACE_EXISTING)
+        TempStr tmpPath = str::JoinTemp(Str(primaryDst), StrL(".tmp-import"));
+        if (!file::Copy(Str(tmpPath), Str(srcJsonPath), false)) {
+            logf("[profile] import: failed to copy src to temp '%s'\n", Str(tmpPath));
+            return false;
+        }
+        WCHAR* tmpW = CWStrTemp(ToWStrTemp(Str(tmpPath)));
+        WCHAR* dstW = CWStrTemp(ToWStrTemp(Str(primaryDst)));
+        BOOL ok = MoveFileExW(tmpW, dstW, MOVEFILE_REPLACE_EXISTING);
+        if (!ok) {
+            remove(primaryDst.s);
+            ok = rename(tmpPath.s, primaryDst.s) == 0;
+        }
+        if (!ok) {
+            logf("[profile] import: failed to replace primary '%s'\n", Str(primaryDst));
             return false;
         }
         // drop in-memory state, reload from primary
@@ -1265,30 +1356,15 @@ bool ProfileDataImportFromJson(const char* srcJsonPath, bool replace) {
         logf("[profile] import: replaced primary from '%s', reloaded\n", Str(srcJsonPath));
         return true;
     }
-    // merge: newest-wins per item.
+    // merge: per-item merge with proper rules.
     // The profile format has NO per-item timestamp (books/day-rows carry none).
-    // Chosen comparison key: the file-level "lastWriteTs" (unix seconds) stored
-    // inside the exported JSON; if absent (old-format file), fall back to the
-    // exported file's LastWriteTime converted to unix seconds.
-    // importWins = importedTs > current profile lastWriteTs.
-    // Per item: absent -> adopt; present && importWins -> replace with import;
-    // present && !importWins -> keep current. Absent items are always adopted
-    // (we don't have them yet) regardless of timestamp; only conflicts use the
-    // timestamp comparison. No fields beyond the format are invented.
-    i64 importedTs = ProfNumField(srcJson, "lastWriteTs", 0);
-    if (importedTs == 0) {
-        FILETIME ft = file::GetModificationTime(Str(srcJsonPath));
-        ULARGE_INTEGER ul{};
-        ul.LowPart = ft.dwLowDateTime;
-        ul.HighPart = ft.dwHighDateTime;
-        // FILETIME = 100-ns intervals since 1601-01-01 -> unix seconds since 1970-01-01
-        importedTs = (i64)(ul.QuadPart / 10000000) - 11644473600LL;
-    }
-    i64 currentTs = gProfile.lastWriteTs;
-    bool importWins = importedTs > currentTs;
+    // Books: merge PER STATE KEY using newest-wins by lastReviewedAt (same as live merge).
+    // Day rows: cumulative totals per (dateKey, machine) -> keep MAX of sec and cards independently.
     int addedBooks = 0;
+    int mergedBooks = 0;
     int addedDayRows = 0;
-    // books
+    int mergedDayRows = 0;
+    // books: merge per study-state key using lastReviewedAt (same as ProfileDataMergeStudyDoc)
     Str booksSec = ProfSectionInterior(srcJson, "books");
     if (booksSec) {
         ProfForEachMember(booksSec, [&](Str rawKey, Str valueTok, Str interior, bool isObj) {
@@ -1297,7 +1373,7 @@ bool ProfileDataImportFromJson(const char* srcJsonPath, bool replace) {
             }
             ProfileBook* b = ProfFindBook(rawKey);
             if (!b) {
-                // absent -> adopt
+                // absent -> adopt fully
                 ProfileBook nb;
                 nb.streamKey = ProfUnescapeKeyDup(rawKey);
                 nb.docName = FlashcardStudyParseJsonStringFieldDup(interior, StrL("docName"));
@@ -1308,22 +1384,78 @@ bool ProfileDataImportFromJson(const char* srcJsonPath, bool replace) {
                 gProfile.dirty = true;
                 return;
             }
-            if (importWins) {
-                // replace existing book with import data (newest wins)
+            // present: merge per state key (newest lastReviewedAt wins)
+            // docName/docPath: prefer imported when non-empty
+            char* importedDocName = FlashcardStudyParseJsonStringFieldDup(interior, StrL("docName"));
+            char* importedDocPath = FlashcardStudyParseJsonStringFieldDup(interior, StrL("docPath"));
+            if (importedDocName && *importedDocName) {
                 ::free(b->docName);
-                ::free(b->docPath);
-                b->docName = FlashcardStudyParseJsonStringFieldDup(interior, StrL("docName"));
-                b->docPath = FlashcardStudyParseJsonStringFieldDup(interior, StrL("docPath"));
-                b->study.states.Clear();
-                FlashcardStudyParseJsonInto(interior, b->study);
-                addedBooks++;
-                gProfile.dirty = true;
-                return;
+                b->docName = importedDocName;
+            } else {
+                ::free(importedDocName);
             }
-            // else: current is newer or equal -> keep current, do nothing
+            if (importedDocPath && *importedDocPath) {
+                ::free(b->docPath);
+                b->docPath = importedDocPath;
+            } else {
+                ::free(importedDocPath);
+            }
+            // parse imported study states into a temporary doc
+            FlashcardStudyDoc importedDoc;
+            FlashcardStudyParseJsonInto(interior, importedDoc);
+            bool hasAnyTimestamps = false;
+            for (int j = 0; j < len(importedDoc.states); j++) {
+                if (importedDoc.states[j].state.lastReviewedAt > 0) {
+                    hasAnyTimestamps = true;
+                    break;
+                }
+            }
+            if (!hasAnyTimestamps) {
+                // imported book carries NO timestamps -> keep local states, adopt only missing ones
+                for (int j = 0; j < len(importedDoc.states); j++) {
+                    const FlashcardStudyDoc::StateEntry& se = importedDoc.states[j];
+                    bool found = false;
+                    for (int k = 0; k < len(b->study.states); k++) {
+                        if (b->study.states[k].key == se.key) {
+                            found = true;
+                            break;
+                        }
+                    }
+                    if (!found) {
+                        b->study.states.Append(se);
+                        mergedBooks++;
+                        gProfile.dirty = true;
+                    }
+                }
+            } else {
+                // merge per state key: newest lastReviewedAt wins (same as live merge)
+                for (int j = 0; j < len(importedDoc.states); j++) {
+                    const FlashcardStudyDoc::StateEntry& se = importedDoc.states[j];
+                    bool merged = false;
+                    for (int k = 0; k < len(b->study.states); k++) {
+                        if (b->study.states[k].key != se.key) {
+                            continue;
+                        }
+                        // newer review wins (equal timestamps -> incoming, keeps parity)
+                        if (se.state.lastReviewedAt >= b->study.states[k].state.lastReviewedAt) {
+                            b->study.states[k].state = se.state;
+                            merged = true;
+                            mergedBooks++;
+                            gProfile.dirty = true;
+                        }
+                        break;
+                    }
+                    if (!merged) {
+                        b->study.states.Append(se);
+                        mergedBooks++;
+                        gProfile.dirty = true;
+                    }
+                }
+            }
+            importedDoc.states.Clear(); // free temp states
         });
     }
-    // day rows: readingStats + fcStats
+    // day rows: readingStats + fcStats (cumulative totals -> MAX on sec and cards independently)
     for (const char* secName : {"readingStats", "fcStats"}) {
         Vec<ProfDayMachine> tempDays;
         ProfParseDaySection(srcJson, secName, tempDays);
@@ -1343,22 +1475,32 @@ bool ProfileDataImportFromJson(const char* srcJsonPath, bool replace) {
                 e.machine = nullptr; // ownership transferred
                 addedDayRows++;
                 gProfile.dirty = true;
-            } else if (importWins) {
-                // replace existing row with import data (newest wins)
-                target[foundIdx].sec = e.sec;
-                target[foundIdx].cards = e.cards;
-                addedDayRows++;
-                gProfile.dirty = true;
+            } else {
+                // present -> MAX on sec and cards independently (cumulative totals never decrease)
+                bool changed = false;
+                if (e.sec > target[foundIdx].sec) {
+                    target[foundIdx].sec = e.sec;
+                    changed = true;
+                }
+                if (e.cards > target[foundIdx].cards) {
+                    target[foundIdx].cards = e.cards;
+                    changed = true;
+                }
+                if (changed) {
+                    mergedDayRows++;
+                    gProfile.dirty = true;
+                }
             }
-            // else: current is newer or equal -> keep current, do nothing
         }
         ProfFreeDays(tempDays);
     }
     if (gProfile.dirty) {
         ProfileDataSaveNow();
     }
-    logf("[profile] import: merge from '%s': +%d book(s), +%d day row(s)\n", Str(srcJsonPath), addedBooks,
-         addedDayRows);
+    logf(
+        "[profile] import: merge from '%s': +%d book(s), ~%d merged book state(s), +%d day row(s), ~%d merged day "
+        "row(s)\n",
+        Str(srcJsonPath), addedBooks, mergedBooks, addedDayRows, mergedDayRows);
     return true;
 }
 
@@ -1540,8 +1682,8 @@ static TempStr ProfSubstChecksumTemp(Str json, Str hex) {
 // ---- F4: profileDataDir setter — ensure dir exists + migrate on dir change ----
 
 // recursively copy every file in srcDir into dstDir (dstDir is created).
-// Never deletes anything in srcDir; files already in dstDir are kept
-// (dontOverwrite). Returns number of files copied.
+// Never deletes anything in srcDir; files already in dstDir are OVERWRITTEN.
+// Returns number of files copied.
 static int ProfCopyDirTree(Str srcDir, TempStr dstDir) {
     dir::CreateAll(Str(dstDir));
     int copied = 0;
@@ -1562,7 +1704,7 @@ static int ProfCopyDirTree(Str srcDir, TempStr dstDir) {
         }
         TempStr srcFile = path::JoinTemp(srcDir, name);
         TempStr dstFile = path::JoinTemp(Str(dstDir), name);
-        if (file::Copy(Str(dstFile), Str(srcFile), true)) {
+        if (file::Copy(Str(dstFile), Str(srcFile), false)) { // dontOverwrite=false -> overwrite
             copied++;
         } else {
             logf("[profile] F4: failed to copy '%s' -> '%s'\n", Str(srcFile), Str(dstFile));
@@ -1574,7 +1716,7 @@ static int ProfCopyDirTree(Str srcDir, TempStr dstDir) {
 
 // ensure the profile dir exists (mkdir + logf when created) and, when
 // profileDataDir points at a folder other than the default app-data dir,
-// migrate the existing profile (+ backup/ subtree) into it on first load.
+// migrate the existing profile (+ backup/ subtree + stats/ + study/) into it on first load.
 // Only migrates when the new dir has no primary profile file
 // (overwrite-vs-use-existing is an explicit deferred UX decision). Never
 // deletes the source. Returns the (ensured) profile file path.
@@ -1587,6 +1729,7 @@ static TempStr ProfEnsureProfileDirAndMigrate() {
         if (newDir && !dir::CreateAll(Str(newDir))) {
             logf("[profile] F4: could not create profile dir '%s'\n", Str(newDir));
         }
+        ProfSetLastMigrationStatus(fmt("Nothing to migrate from %s (same directory)", Str(oldDir)));
         return newPath;
     }
     bool created = !file::Exists(Str(newDir));
@@ -1601,15 +1744,17 @@ static TempStr ProfEnsureProfileDirAndMigrate() {
     TempStr primaryDst = path::JoinTemp(Str(newDir), kProfileDataFileName);
     if (file::Exists(Str(primaryDst))) {
         logf("[profile] F4: new dir already has primary profile, keeping it (no migrate)\n");
+        ProfSetLastMigrationStatus(fmt("Kept existing profile in %s (your old data was not merged)", Str(newDir)));
         return newPath;
     }
     // old dir must hold data to migrate from
     TempStr primarySrc = path::JoinTemp(Str(oldDir), kProfileDataFileName);
     if (!file::Exists(Str(primarySrc))) {
         logf("[profile] F4: no primary profile in old dir '%s', nothing to migrate\n", Str(oldDir));
+        ProfSetLastMigrationStatus(fmt("Nothing to migrate from %s", Str(oldDir)));
         return newPath;
     }
-    // copy every tumatraPDF-data_*.json from oldDir to newDir (incl. conflicted copies)
+    // copy every tumatraPDF-data_*.json from oldDir to newDir (incl. conflicted copies) — OVERWRITE
     int copiedJson = 0;
     TempStr pat = path::JoinTemp(Str(oldDir), StrL("tumatraPDF-data_*.json"));
     WIN32_FIND_DATAW fd{};
@@ -1622,7 +1767,7 @@ static TempStr ProfEnsureProfileDirAndMigrate() {
             TempStr name = ToUtf8Temp(WStr(fd.cFileName));
             TempStr srcFile = path::JoinTemp(Str(oldDir), name);
             TempStr dstFile = path::JoinTemp(Str(newDir), name);
-            if (file::Copy(Str(dstFile), Str(srcFile), true)) {
+            if (file::Copy(Str(dstFile), Str(srcFile), false)) { // dontOverwrite=false -> overwrite
                 copiedJson++;
             } else {
                 logf("[profile] F4: failed to copy '%s' -> '%s'\n", Str(srcFile), Str(dstFile));
@@ -1630,15 +1775,49 @@ static TempStr ProfEnsureProfileDirAndMigrate() {
         } while (FindNextFileW(h, &fd));
         FindClose(h);
     }
-    // copy the backup/ subtree (slot dirs with tumatraPDF-data_1.json + stamps)
+    // copy the backup/ subtree (slot dirs with tumatraPDF-data_1.json + stamps) — OVERWRITE
     int copiedBackup = 0;
     TempStr oldBackup = path::JoinTemp(Str(oldDir), StrL("backup"));
     if (file::Exists(Str(oldBackup))) {
         copiedBackup = ProfCopyDirTree(Str(oldBackup), path::JoinTemp(Str(newDir), StrL("backup")));
     }
-    logf("[profile] F4: migrated profile from '%s' to '%s' (%d json file(s), %d backup file(s); source kept)\n",
-         Str(oldDir), Str(newDir), copiedJson, copiedBackup);
+    // copy the stats/ subtree (reading-stats.txt, flashcard-stats.txt, study-sessions.txt, study-sessions.seeded) —
+    // OVERWRITE
+    int copiedStats = 0;
+    TempStr oldStats = path::JoinTemp(Str(oldDir), StrL("stats"));
+    if (file::Exists(Str(oldStats))) {
+        copiedStats = ProfCopyDirTree(Str(oldStats), path::JoinTemp(Str(newDir), StrL("stats")));
+    }
+    // copy the study/ subtree (per-book <md5>.json + its backup/) — OVERWRITE
+    int copiedStudy = 0;
+    TempStr oldStudy = path::JoinTemp(Str(oldDir), StrL("study"));
+    if (file::Exists(Str(oldStudy))) {
+        copiedStudy = ProfCopyDirTree(Str(oldStudy), path::JoinTemp(Str(newDir), StrL("study")));
+    }
+    logf("[profile] F4: migrated profile from '%s' to '%s' (%d json, %d backup, %d stats, %d study; source kept)\n",
+         Str(oldDir), Str(newDir), copiedJson, copiedBackup, copiedStats, copiedStudy);
+    // A6: record migration status for ProfileDataLastMigrationStatusTemp()
+    ProfSetLastMigrationStatus(
+        fmt("Migrated profile + backups + stats + study from %s to %s", Str(oldDir), Str(newDir)));
     return newPath;
+}
+
+// A6: return human-readable status of the LAST startup data migration (F4 + F5).
+// Safe to call before/after load; never crashes.
+// Returns a BORROWED Str view of the internally owned string;
+// callers must NOT free it. F4 sentence first, then F5 sentence, separated by a space.
+TempStr ProfileDataLastMigrationStatusTemp() {
+    str::Builder sb;
+    if (gLastMigrationStatus) {
+        sb.Append(Str(gLastMigrationStatus));
+    }
+    if (gLastPortableImportStatus) {
+        if (sb.len > 0) {
+            sb.AppendChar(' ');
+        }
+        sb.Append(Str(gLastPortableImportStatus));
+    }
+    return sb.TakeStr();
 }
 
 static void ProfileDataEnsureLoaded() {
