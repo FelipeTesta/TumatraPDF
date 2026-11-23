@@ -149,10 +149,12 @@ static bool MigrateDocumentColorsFollowThemeSetting(Str prefsData) {
 //   old name[23]="InvertColors" holds field[23]=flashcardStudyTimeSec value
 //   old name[24..42]="ContrastEnabled".."FlashcardCardsDone" hold fields 25..44
 //   field[43] flashcardCardsDone value dropped entirely
-// New layout: names blob 44, "FlashcardCardsDone" then "FlashcardStudyTimeSec"
+// New layout (gen3): names blob 44, "FlashcardCardsDone" then "FlashcardStudyTimeSec"
 // at the end (indices 42,43). Remap each FileState entry:
 //   new name[k] <- old name[k+1] value (k=23..41), new FlashcardCardsDone <- 0,
 //   new FlashcardStudyTimeSec <- old "InvertColors" value.
+// Gen4 adds "LastActivityTs" at the end (index 44). For gen3 files, just append
+// LastActivityTs=0. No shifting needed since it's appended.
 // Clamp ints to [-1e9,1e9]; bools/strings/floats copy as-is (already valid).
 // Snapshotting all sources first is required because dest keys overlap source
 // keys (e.g. dest "ContrastEnabled" is also source key for index 1).
@@ -172,7 +174,7 @@ static const char* kMigDst[] = {
 
 static bool MigIsIntKey(const char* key) {
     return str::Eq(key, StrL("ContrastOpacity")) || str::Eq(key, StrL("TrimTop")) || str::Eq(key, StrL("TrimBottom")) ||
-           str::Eq(key, StrL("ArchUnit")) || str::Eq(key, StrL("FlashcardStudyTimeSec"));
+           str::Eq(key, StrL("ArchUnit")) || str::Eq(key, StrL("FlashcardStudyTimeSec")) || str::Eq(key, StrL("LastActivityTs"));
 }
 
 static int MigClampInt(Str v) {
@@ -186,9 +188,10 @@ static int MigClampInt(Str v) {
     return x;
 }
 
-// returns generation (1/2/3, 0 = no FileStates) and, via nEntries, how many
-// FileState entries exist; gen3 has FlashcardStudyTimeSec key -> NO-OP skip;
-// gen2 has FlashcardCardsDone but not FlashcardStudyTimeSec -> migrate;
+// returns generation (1/2/3/4, 0 = no FileStates) and, via nEntries, how many
+// FileState entries exist; gen4 has LastActivityTs key -> NO-OP skip;
+// gen3 has FlashcardStudyTimeSec but not LastActivityTs -> add LastActivityTs=0;
+// gen2 has FlashcardCardsDone but not FlashcardStudyTimeSec -> migrate (gen1/2);
 // gen1 has neither -> migrate with same shift.
 static int MigrateFileStateNames(SquareTreeNode* root, int* nEntries) {
     *nEntries = 0;
@@ -198,6 +201,7 @@ static int MigrateFileStateNames(SquareTreeNode* root, int* nEntries) {
     }
     bool hasStudyTime = false;
     bool hasCardsDone = false;
+    bool hasLastActivity = false;
     int idx = 0;
     while (SquareTreeNode* entry = fileStates->GetChild(StrL(""), &idx)) {
         (*nEntries)++;
@@ -207,13 +211,25 @@ static int MigrateFileStateNames(SquareTreeNode* root, int* nEntries) {
         if (!str::IsNull(entry->GetValue(StrL("FlashcardCardsDone")))) {
             hasCardsDone = true;
         }
+        if (!str::IsNull(entry->GetValue(StrL("LastActivityTs")))) {
+            hasLastActivity = true;
+        }
     }
-    if (hasStudyTime) {
-        return 0; // already current format, nothing to do
+    if (hasLastActivity) {
+        return 0; // already current format (gen4), nothing to do
     }
     if (*nEntries == 0) {
         return 0;
     }
+    // gen3 -> gen4: has FlashcardStudyTimeSec but not LastActivityTs
+    if (hasStudyTime) {
+        idx = 0;
+        while (SquareTreeNode* entry = fileStates->GetChild(StrL(""), &idx)) {
+            entry->SetValue(StrL("LastActivityTs"), StrL("0"));
+        }
+        return 4;
+    }
+    // gen1/2 -> gen3: migrate using the existing shift logic
     int n = (int)(sizeof(kMigSrc) / sizeof(kMigSrc[0]));
     // apply remap per FileState entry (snapshot sources before writing dests)
     idx = 0;
@@ -231,6 +247,9 @@ static int MigrateFileStateNames(SquareTreeNode* root, int* nEntries) {
         }
         // old field 43 flashcardCardsDone value was dropped -> default 0
         entry->SetValue(StrL("FlashcardCardsDone"), StrL("0"));
+        // new field FlashcardStudyTimeSec gets the old InvertColors value (handled by kMigDst)
+        // now add LastActivityTs = 0 for gen4
+        entry->SetValue(StrL("LastActivityTs"), StrL("0"));
     }
     return hasCardsDone ? 2 : 1;
 }

@@ -812,6 +812,7 @@ const fileSettings: Field[] = [
   field("ArchScaleStates", Str, "", "per-page scale states serialized for this document"),
   field("FlashcardCardsDone", Int, 0, "total flashcard cards rated (studied) for this document"),
   field("FlashcardStudyTimeSec", Int, 0, "total seconds of flashcard study for this document"),
+  field("LastActivityTs", Int, 0, "unix timestamp of last reading (auto-scroll) or flashcard study activity for this document"),
 ];
 
 const tabState: Field[] = [

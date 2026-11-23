@@ -1066,6 +1066,10 @@ FileStates [
 
     ; total seconds of flashcard study for this document
     FlashcardStudyTimeSec = 0
+
+    ; unix timestamp of last reading (auto-scroll) or flashcard study activity
+    ; for this document
+    LastActivityTs = 0
   ]
 ]
 
