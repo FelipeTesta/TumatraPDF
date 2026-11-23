@@ -1,3 +1,16 @@
+## 2026-11-23 (s75) — README: app presentation video
+
+### Added
+- `README.md`: app presentation video section (`## 📹 See it in action`) before Credits — clickable thumbnail `https://img.youtube.com/vi/1lx40vES_sk/maxresdefault.jpg` (1280x720, 194272 bytes) linking to `https://youtu.be/1lx40vES_sk` (video title "Tumatra PDF v120 with Flashcards"). GitHub strips raw iframes, so the thumbnail link IS the embed.
+- `README.es.md`: Spanish mirror of the section (`## 📹 Míralo en acción`); video title and URLs kept literal.
+
+### Verified
+- `bun scripts/readme-sync.ts` exits 0 after `bun scripts/readme-sync.ts --update` refreshed the `source-blob` token (README.md changed -> translation invalidated -> token + date refreshed).
+- Thumbnail URL returns HTTP 200 image/jpeg (HEAD request).
+
+### Notes
+- README change is on `main` after the v1.0.21 tag; ships with the next release, visible on GitHub immediately.
+
 ## 2026-11-23 (s74) — Flashcard study=on map + per-rating cost model
 
 ### Added

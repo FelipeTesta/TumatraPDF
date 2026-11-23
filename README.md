@@ -4,6 +4,12 @@
 
 A PDF reader for long sessions and built-in flashcards motors (in development).
 
+## 📹 See it in action
+
+[![TumatraPDF presentation](https://img.youtube.com/vi/1lx40vES_sk/maxresdefault.jpg)](https://youtu.be/1lx40vES_sk)
+
+**▶ Watch the presentation:** [Tumatra PDF v120 with Flashcards](https://youtu.be/1lx40vES_sk) — a walkthrough of the app for long reading sessions and built-in flashcards.
+
 ## Credits
 
 This project is a fork of **SumatraPDF** — a lightweight, fast, open source PDF reader for Windows.

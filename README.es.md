@@ -1,11 +1,17 @@
 [English](README.md) · **Español**
 
 > **Última actualización:** 2026-11-23 · base: [README.md](README.md) `v1.0.20`
-<!-- readme-sync: source-blob=877cc629384fe089f487a70aeb48f0c4e50eba88 version=1.0.20 synced=2026-11-23 -->
+<!-- readme-sync: source-blob=62292a75d266495c6d6319e4cf7c7d8a1dbd10bf version=1.0.21 synced=2026-11-23 -->
 
 # TumatraPDF
 
 Un lector de PDF para sesiones largas y un motor de flashcards integrado (en desarrollo).
+
+## 📹 Míralo en acción
+
+[![Presentación de TumatraPDF](https://img.youtube.com/vi/1lx40vES_sk/maxresdefault.jpg)](https://youtu.be/1lx40vES_sk)
+
+**▶ Ver la presentación:** [Tumatra PDF v120 with Flashcards](https://youtu.be/1lx40vES_sk) — un recorrido por la app para sesiones largas de lectura y las flashcards integradas.
 
 ## Créditos
 
