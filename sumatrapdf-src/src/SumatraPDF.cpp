@@ -5110,6 +5110,62 @@ void CloseCurrentTab(MainWindow* win, bool quitIfLast) {
     }
 }
 
+// Closes all document tabs (non-About, non-Favorites) in the window for the
+// "Unsynced" action. Keeps the window alive with the Home page.
+// Returns the number of document tabs actually closed.
+// If a save prompt is cancelled, stops and returns the count so far.
+static int CloseAllDocumentTabsForUnsync(MainWindow* win) {
+    if (!win) return 0;
+
+    // Collect document tabs first (can't close while iterating)
+    Vec<WindowTab*> docTabs;
+    for (int i = 0; i < win->TabCount(); i++) {
+        WindowTab* t = win->GetTab(i);
+        if (t && !t->IsAboutTab() && !t->IsFavoritesTab()) {
+            docTabs.Append(t);
+        }
+    }
+
+    int closed = 0;
+    for (int i = 0; i < len(docTabs); i++) {
+        WindowTab* tab = docTabs[i];
+        if (!tab) continue;
+
+        // Save prompt — if user cancels, stop closing further tabs
+        if (!MaybeSaveAnnotations(tab)) {
+            logf("[tabs] unsynced: save cancelled for tab %d, stopping\n", i);
+            break;
+        }
+
+        // Pre-remove cleanup (mirrors CloseTab)
+        ResetReadAloudStateForTab(tab);
+        AbortFinding(win, true);
+        HideFindBar(win);
+        HideSelectionToolbar(win);
+        RemoveNotificationsForGroup(win->hwndCanvas, kNotifPageInfo);
+        RemoveNotificationsForGroup(win->hwndCanvas, kNotifAnnotation);
+        RemoveNotificationsForGroup(win->hwndCanvas, kNotifZoomOrView);
+        RemoveNotificationsForTab(tab);
+        RememberRecentlyClosedDocument(tab->filePath);
+
+        bool isLastDocTab = (i == len(docTabs) - 1);
+
+        // Remove the tab from the window (triggers UpdateActiveGroupAutoSave,
+        // which returns early because active group is already empty)
+        RemoveTab(tab);
+        delete tab;
+        closed++;
+
+        // If this was the last document tab, show Home page instead of
+        // letting CloseTab/CloseWindow destroy the window
+        if (isLastDocTab) {
+            CloseDocumentInCurrentTab(win, false, false);
+        }
+    }
+
+    return closed;
+}
+
 bool CanCloseWindow(MainWindow* win) {
     if (!win) {
         return false;
@@ -8622,7 +8678,10 @@ static Annotation* MakeAnnotationsFromSelection(WindowTab* tab, AnnotCreateArgs*
             // Roll back annots created earlier in this call so we do not leave
             // partial multi-page selections as untracked annotations.
             for (Annotation* a : created) {
-                DeleteAnnotation(a);
+                bool delOk = DeleteAnnotation(a);
+                if (!delOk) {
+                    logf("Rollback: DeleteAnnotation failed for annot on page %d\n", a->pageNo);
+                }
             }
             return nullptr;
         }
@@ -12657,11 +12716,15 @@ static HMENU BuildTabGroupMenu(MainWindow* win) {
 void HandleTabGroupMenuCmd(MainWindow* win, int cmdId) {
     logf("[tabs] menu cmd=%d\n", cmdId);
     if (cmdId == kTabGroupMenuUnsynced) {
-        // Clear ONLY this window's group; other windows keep theirs
+        // Clear this window's active group FIRST so auto-sync (UpdateActiveGroupAutoSave
+        // called by RemoveTab) returns early and does NOT rewrite the saved TabGroup
+        // with an empty file list.
         SetWindowActiveTabGroup(win, "");
+        int closed = CloseAllDocumentTabsForUnsync(win);
         SaveSettings();
         RefreshTabGroupButton(win);
-        logf("[tabs] menu activate unsynced (window-only)\n");
+        ToolbarUpdateStateForWindow(win, true);
+        logf("[tabs] menu unsynced: closed %d document tab(s), window kept alive\n", closed);
         return;
     }
     if (cmdId == kTabGroupMenuNewSession) {

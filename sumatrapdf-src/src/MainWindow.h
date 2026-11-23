@@ -691,6 +691,10 @@ struct MainWindow {
         Vec<SelectionOnPage>* ctrlAltAccum = nullptr;
         // true while the current drag is a Ctrl+Alt+drag (rectangle accumulation)
         bool ctrlAltSelecting = false;
+        // true while the current selection is a plain Ctrl+drag rectangle
+        // (explicit flag: text-selection glyphs in dm->textSelection->result
+        // must not make IsRectangularSelection return false for a real rect sel)
+        bool rectSelection = false;
     } selection;
     // --- end selection & touch input state ---
 

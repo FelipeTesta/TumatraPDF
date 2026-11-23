@@ -110,6 +110,7 @@ void DeleteOldSelectionInfo(MainWindow* win, bool alsoTextSel) {
     win->selection.showSelection = false;
     win->selection.selectionMeasure = SizeF();
     win->selection.selectionDragEdge = SelectionDragEdge::None;
+    win->selection.rectSelection = false;
     WindowTab* tab = win->CurrentTab();
     if (!tab) {
         return;
@@ -145,8 +146,10 @@ bool IsRectangularSelection(MainWindow* win) {
     if (!dm || !dm->textSelection) {
         return false;
     }
-    // text selection has glyphs; rectangular (Ctrl+drag) does not
-    return dm->textSelection->result.len == 0;
+    // explicit rectSelection flag wins: a genuine Ctrl+drag selection is
+    // rectangular even if stale text-selection glyphs remain in the model.
+    // A real text selection has rectSelection == false and result.len > 0.
+    return win->selection.rectSelection || dm->textSelection->result.len == 0;
 }
 
 Rect GetRectangularSelectionScreenRect(MainWindow* win) {
@@ -889,6 +892,8 @@ void OnSelectionStart(MainWindow* win, int x, int y, WPARAM key) {
     win->selection.showSelection = true;
     win->selection.selectingByWord = false;
     win->mouseAction = MouseAction::Selecting;
+    // plain Ctrl+drag (not Ctrl+Alt accumulation, not text) is a rectangular selection
+    win->selection.rectSelection = isCtrl && !isShift && !isCtrlAlt;
 
     // Ctrl+drag (or Ctrl+Alt+drag) forces a rectangular selection
     if (!isCtrl || isShift) {
