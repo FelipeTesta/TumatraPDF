@@ -279,6 +279,13 @@ static void SelfUpdateViaBatch(Str newExePath) {
 }
 
 void StartInstallerAutoUpgrade(Str installerPath) {
+    // Defensive: never launch a downloaded file that still carries the
+    // Mark-of-the-Web. The WinINet download (HttpGetToFile) doesn't add the ADS
+    // today, but if it ever does (or the file came from a browser), remove it
+    // before execution. Silent; ignore failures. Deletes the zone of the
+    // downloaded file, not of the running app.
+    file::DeleteZoneIdentifier(installerPath);
+
     bool signed_ = IsPEFileSigned(installerPath);
     if (!signed_) {
         if (IsOurExeInstalled()) {
@@ -505,10 +512,8 @@ static LRESULT CALLBACK UpdateDialogWndProc(HWND hwnd, UINT msg, WPARAM wp, LPAR
         int vgap = DpiScale(hwnd, 12);
 
         // Create buttons first to get their ideal sizes
-        d->btnDontInstall = CreateButton(hwnd, d->btnDontInstallText,
-            MkFunc0(&UpdateDialogOnDontInstall, d), d->isRtl);
-        d->btnInstall = CreateButton(hwnd, d->btnInstallText,
-            MkFunc0(&UpdateDialogOnInstall, d), d->isRtl);
+        d->btnDontInstall = CreateButton(hwnd, d->btnDontInstallText, MkFunc0(&UpdateDialogOnDontInstall, d), d->isRtl);
+        d->btnInstall = CreateButton(hwnd, d->btnInstallText, MkFunc0(&UpdateDialogOnInstall, d), d->isRtl);
         d->btnInstall->isDefault = true;
 
         Size szDont = d->btnDontInstall->GetIdealSize();
@@ -539,20 +544,16 @@ static LRESULT CALLBACK UpdateDialogWndProc(HWND hwnd, UINT msg, WPARAM wp, LPAR
         int clientW = rc.right - rc.left;
 
         // Main instruction static
-        HWND hwndMainInstr = CreateWindowExW(
-            0, WC_STATICW, CWStrTemp(d->mainInstr),
-            WS_CHILD | WS_VISIBLE | SS_LEFT | SS_NOPREFIX,
-            pad, pad, clientW - 2 * pad, mainInstrH,
-            hwnd, nullptr, GetModuleHandle(nullptr), nullptr);
+        HWND hwndMainInstr =
+            CreateWindowExW(0, WC_STATICW, CWStrTemp(d->mainInstr), WS_CHILD | WS_VISIBLE | SS_LEFT | SS_NOPREFIX, pad,
+                            pad, clientW - 2 * pad, mainInstrH, hwnd, nullptr, GetModuleHandle(nullptr), nullptr);
         SetWindowTheme(hwndMainInstr, L"", L"");
         SendMessageW(hwndMainInstr, WM_SETFONT, (WPARAM)font, TRUE);
 
         // Content static
         HWND hwndContent = CreateWindowExW(
-            0, WC_STATICW, CWStrTemp(d->content),
-            WS_CHILD | WS_VISIBLE | SS_LEFT | SS_NOPREFIX,
-            pad, pad + mainInstrH + vgap, clientW - 2 * pad, contentH,
-            hwnd, nullptr, GetModuleHandle(nullptr), nullptr);
+            0, WC_STATICW, CWStrTemp(d->content), WS_CHILD | WS_VISIBLE | SS_LEFT | SS_NOPREFIX, pad,
+            pad + mainInstrH + vgap, clientW - 2 * pad, contentH, hwnd, nullptr, GetModuleHandle(nullptr), nullptr);
         SetWindowTheme(hwndContent, L"", L"");
         SendMessageW(hwndContent, WM_SETFONT, (WPARAM)font, TRUE);
 
@@ -659,10 +660,9 @@ static int ShowUpdateAvailableDialog(UpdateInfo* updateInfo) {
     int x = rw.left + ((rw.right - rw.left) - initW) / 2;
     int y = rw.top + ((rw.bottom - rw.top) - initH) / 2;
 
-    HWND hwnd = CreateWindowExW(
-        WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT, L"TUMATRA_UPDATE_DIALOG", CWStrTemp(dlgData.title),
-        WS_POPUP | WS_CAPTION | WS_SYSMENU, x, y, initW, initH,
-        dlgData.hwndParent, nullptr, GetModuleHandle(nullptr), &dlgData);
+    HWND hwnd = CreateWindowExW(WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT, L"TUMATRA_UPDATE_DIALOG",
+                                CWStrTemp(dlgData.title), WS_POPUP | WS_CAPTION | WS_SYSMENU, x, y, initW, initH,
+                                dlgData.hwndParent, nullptr, GetModuleHandle(nullptr), &dlgData);
 
     if (!hwnd) {
         logf("ShowUpdateAvailableDialog: CreateWindowExW failed\n");
@@ -779,11 +779,10 @@ static void DownloadUpdateAsync(DownloadUpdateAsyncData* data) {
             str::TrimWSInPlace(ev, str::TrimOpt::Both);
             // Pre-release channel uses plain build number (no '.') - log only, don't block
             if (!str::ContainsChar(ev, '.')) {
-                logf("DownloadUpdateAsync: pre-release channel (build %s), file version '%s' - logging only\n",
-                     ev, fv);
+                logf("DownloadUpdateAsync: pre-release channel (build %s), file version '%s' - logging only\n", ev, fv);
             } else if (!str::Eq(fv, ev)) {
-                logf("DownloadUpdateAsync: version mismatch for '%s': file version '%s' expected '%s'\n",
-                     installerPath, fv, ev);
+                logf("DownloadUpdateAsync: version mismatch for '%s': file version '%s' expected '%s'\n", installerPath,
+                     fv, ev);
                 file::Delete(installerPath);
                 ok = false;
             } else {
@@ -793,8 +792,8 @@ static void DownloadUpdateAsync(DownloadUpdateAsyncData* data) {
             str::Free(ev);
         } else {
             // No version info - log and accept (don't block)
-            logf("DownloadUpdateAsync: no VERSIONINFO in '%s', expected '%s' - accepting\n",
-                 installerPath, expectedVer);
+            logf("DownloadUpdateAsync: no VERSIONINFO in '%s', expected '%s' - accepting\n", installerPath,
+                 expectedVer);
         }
     }
     if (ok) {
@@ -1229,5 +1228,3 @@ void UpdateSelfTo(Str dstPath) {
     TempStr args = fmt(R"(-sleep-ms 500 -delete-file "%s")", srcPath);
     CreateProcessHelper(dstPath, args);
 }
-
-

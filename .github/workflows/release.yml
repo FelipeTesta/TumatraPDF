@@ -74,3 +74,20 @@ jobs:
             TumatraPDF-install-win64.exe
           tag_name: ${{ github.ref_name }}
           generate_release_notes: true
+
+      - name: Append SHA-256 checksums to release notes
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $portableHash = (Get-FileHash -Algorithm SHA256 TumatraPDF-portable-win64.exe).Hash
+          $installerHash = (Get-FileHash -Algorithm SHA256 TumatraPDF-install-win64.exe).Hash
+          $checksumSection = "## SHA-256`n`n```" + [environment]::NewLine + $portableHash + "  TumatraPDF-portable-win64.exe" + [environment]::NewLine + $installerHash + "  TumatraPDF-install-win64.exe" + [environment]::NewLine + "```"
+          $currentBody = gh release view ${{ github.ref_name }} --json body -q .body
+          if ($currentBody.Contains("## SHA-256")) {
+            $idx = $currentBody.IndexOf("## SHA-256")
+            $newBody = $currentBody.Substring(0, $idx) + $checksumSection
+          } else {
+            $newBody = $currentBody + [environment]::NewLine + [environment]::NewLine + $checksumSection
+          }
+          gh release edit ${{ github.ref_name }} --notes "$newBody"

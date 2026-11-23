@@ -1,7 +1,7 @@
 [English](README.md) · **Español**
 
 > **Última actualización:** 2026-11-23 · base: [README.md](README.md) `v1.0.20`
-<!-- readme-sync: source-blob=62292a75d266495c6d6319e4cf7c7d8a1dbd10bf version=1.0.21 synced=2026-11-23 -->
+<!-- readme-sync: source-blob=e21a7757a903cc9deb75f2711cdac4c64c58e30e version=1.0.21 synced=2026-11-23 -->
 
 # TumatraPDF
 
@@ -160,6 +160,14 @@ Sincroniza _sesiones_ para abrir rápido varios documentos que usas con frecuenc
 - **Actualización automática en la app:** comprobación diaria del `update.txt` del repositorio; cuando existe una versión más nueva, la app la descarga, la valida y se reemplaza a sí misma (portable) o ejecuta el instalador (instalado). Sin instalador y sin permisos de administrador para la versión portable.
 - **Aislamiento:** instalar TumatraPDF NO toca una instalación existente de SumatraPDF upstream (directorios, claves de registro, nombres de exe y de ajustes separados).
 - **Privacidad:** la única llamada de red que la app hace por su cuenta es el GET de comprobación de actualización a este repositorio. Se eliminó toda la recolección de datos de SumatraPDF upstream (subida de fallos, descarga de símbolos, enlaces de traducción) — los volcados de fallos quedan locales.
+
+### Windows puede preguntar antes de ejecutar
+
+TumatraPDF no está firmado con código, así que la primera vez que Windows ejecuta un archivo descargado de internet puede mostrar una advertencia ("Windows protegió tu PC") y pedir confirmación.
+
+Haz clic en "Más información" -> "Ejecutar de todos modos"; o haz clic derecho en el archivo -> Propiedades -> marca "Desbloquear" al final -> Aplicar; o en PowerShell: `Unblock-File .\TumatraPDF-portable-win64.exe`.
+
+La versión instalada advierte solo una vez (el instalador elimina la marca de descarga); la versión portable deja de advertir después del primer lanzamiento. Si Defender pone el archivo en cuarentena en su lugar, compara su SHA-256 con los hashes publicados en las notas de la versión y abre un issue si difieren.
 
 ## Arquitectura
 

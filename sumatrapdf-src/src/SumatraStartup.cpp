@@ -2138,6 +2138,49 @@ static void InstallSumatraCrashHandler(bool localOnly) {
     InstallCrashHandler(crashDumpPath, crashFilePath, symDir, localOnly);
 }
 
+// Walk path and parents; true if any component equals dir (junction-aware via path::IsSame).
+static bool IsPathUnderDir(Str path, Str dir) {
+    if (!path || !dir) {
+        return false;
+    }
+    TempStr cur = str::DupTemp(path);
+    while (cur) {
+        if (path::IsSame(dir, cur)) {
+            return true;
+        }
+        TempStr parent = path::GetDirTemp(cur);
+        if (!parent || len(parent) == 0 || len(parent) >= len(cur)) {
+            break;
+        }
+        cur = parent;
+    }
+    return false;
+}
+
+// true if the exe lives in a Windows install directory
+// (Program Files, Program Files (x86), or %LocalAppData%\Programs).
+// The installed copy is already unblocked by the installer (Installer.cpp:1018),
+// and Program Files is not writable anyway, so we only self-unblock the
+// portable copy (which keeps its Mark-of-the-Web after a browser download and
+// would trigger SmartScreen on every launch of the unsigned app).
+static bool IsExeInInstallLocation() {
+    TempStr exeDir = GetSelfExeDirTemp();
+    if (!exeDir) {
+        return true; // can't tell -> treat as installed (don't write where we shouldn't)
+    }
+    if (IsPathUnderProgramFiles(exeDir)) {
+        return true;
+    }
+    TempStr localAppData = GetSpecialFolderTemp(CSIDL_LOCAL_APPDATA);
+    if (localAppData) {
+        TempStr localPrograms = path::JoinTemp(localAppData, StrL("Programs"));
+        if (IsPathUnderDir(exeDir, localPrograms)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 int APIENTRY WinMain(_In_ HINSTANCE /*hInstance*/, _In_opt_ HINSTANCE /*hPrevInstance*/, _In_ LPSTR /*lpCmdLine*/,
                      _In_ int /*nCmdShow*/) {
     int exitCode = 1; // by default it's error
@@ -2170,6 +2213,18 @@ int APIENTRY WinMain(_In_ HINSTANCE /*hInstance*/, _In_opt_ HINSTANCE /*hPrevIns
     srand((unsigned int)time(nullptr));
 
     LogCommandLine();
+
+    // Portable apps keep the Mark-of-the-Web from the browser download; since
+    // TumatraPDF is not code-signed, SmartScreen warns on every launch of the
+    // portable copy. Best-effort remove our own Zone.Identifier so the user
+    // doesn't have to tick "Unblock" in Properties on every launch. Same as
+    // ticking "Unblock" in Explorer's Properties dialog. Silent, no UI;
+    // any failure is ignored.
+    if (!IsExeInInstallLocation()) {
+        TempStr exePath = GetSelfExePathTemp();
+        bool ok = file::DeleteZoneIdentifier(exePath);
+        logf("[upd] portable self-unblock: ok=%d path=%s\n", (int)ok, exePath);
+    }
 
     if (gIsAsanBuild) {
         TempStr asanOpts = GetEnvVariableTemp("ASAN_OPTIONS");

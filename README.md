@@ -166,6 +166,14 @@ ___
 - **Isolation:** installing TumatraPDF does NOT touch an existing upstream SumatraPDF install (separate directories, registry keys, exe and settings names).
 - **Privacy:** the only network call the app makes on its own is the update-check GET to this repo. All upstream SumatraPDF data collection (crash upload, symbol download, translation links) was removed — crash dumps stay local.
 
+### Windows may ask before running
+
+TumatraPDF is not code-signed, so the first time Windows runs a file downloaded from the internet it can show a warning ("Windows protected your PC") and ask you to confirm.
+
+Click **"More info" -> "Run anyway"**; or right-click the file -> Properties -> tick **"Unblock"** at the bottom -> Apply; or in PowerShell: `Unblock-File .\TumatraPDF-portable-win64.exe`.
+
+The installed copy warns only once (the installer removes the download mark); the portable stops warning after the first run (startup self-unblock). If Defender quarantines the file instead, compare its SHA-256 with the hashes published in the release notes and open an issue if they differ.
+
 ## Architecture
 
 Based on SumatraPDF:
