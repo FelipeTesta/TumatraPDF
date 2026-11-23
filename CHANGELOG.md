@@ -4,6 +4,15 @@ Per-version changelog for TumatraPDF — new functions + bug fixes, newest first
 Feature details live in [README.md](README.md); full per-session development
 history in [LOG.md](LOG.md).
 
+## v1.0.21 (2026-11-23)
+
+- **No more ghost highlight:** the highlight of a new flashcard — and of a normal text highlight — no longer shows up outside the text you selected. The appearance saved into the PDF was written in the wrong coordinate space, so the marker drifted away from the selection (on multi-line selections it looked inverted). It now lands exactly on the selected text, with the same sharp corners on screen and in the file.
+- **Deleting a card really deletes it:** the Delete button on the flashcard bar now removes the card's highlight AND its study history for good. A failed deletion used to be swallowed silently, and the card came back the next time the flashcard toolbar was opened.
+- **Two installations can share one data folder without eating each other's numbers:** when two copies of the app point at the same folder (a synced cloud folder, for instance), each one's daily totals survive — the sidecar merge no longer lets a stale snapshot erase another instance's day rows, and your own machine's numbers are no longer counted twice in the profile totals.
+- **"Unsynced" closes the books:** the Unsynced action now closes every document tab of the window at once (the Home page and the other special tabs stay), asking you to save each one and stopping if you cancel a save.
+- **Each book remembers when you last used it:** a new per-document timestamp records the last reading (auto-scroll) or study activity, which feeds the "last read" lists.
+- **README in Spanish:** the README now has a Spanish translation (README.es.md) with a one-click switch at the top, and an automated check keeps both files in sync so they cannot drift apart.
+
 ## v1.0.20 (2026-11-21)
 
 - **Page Hold with a visual frame:** the Hold button on the toolbar now remembers exactly where you were reading. While it is on, a thin peru frame marks the area that will come back, and the frame stays anchored to the page as you scroll or zoom. Turning Hold off restores the same view and clears the frame. Hold also pauses auto-scroll while it is active.
