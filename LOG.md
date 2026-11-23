@@ -1,3 +1,30 @@
+## 2026-11-23 (s76) — Flashcard study perf: phase timing + deferred bookkeeping
+
+### Added
+- Per-phase timing of every rating (`[fc][perf] rate: scan=.. stats=.. toolbar=.. sidebarFlag=.. nav=.. rerender=.. total=..` plus cards/states counts) — critical-path only. Deferred work logged on its own line: `[fc][perf] deferred: prune=..ms save=..ms sidebar=..ms tabs=.. total=..ms` — shows what was moved out of the critical path and its real cost.
+- `pendingSaveTabs` vector in `FlashcardState` — remembers the owning tab of each rated card explicitly, avoiding data loss in global sessions (cross-document) and when the user presses Next between ratings. Duplicate consecutive ratings in the same tab are suppressed (one entry per tab per flush cycle).
+- Deferred bookkeeping: prune + per-book JSON/profile save + sidebar rebuild moved out of the critical path into a coalesced block (>= 50 ms) serviced by the existing study timer; explicit flush points (session stop, study toggle off, session timer expiry, tab switch, tab close, app exit) prevent losing pending work.
+- Per-tab prune/save in deferred block: iterates `pendingSaveTabs`, verifies each tab is still in this window, runs prune-before-save per tab. Sidebar stays window-level.
+
+### Changed
+- `HandleFlashcardRate` order: state update + SM-2 + advance + prefetch + navigate + prewarm + stats + toolbar count + repaint happen first; prune -> save -> sidebar follow asynchronously.
+- Nav phase now correctly measures prefetch + navigate + prewarm (previously measured ~0 ms).
+- `FlashcardRunDeferredBookkeeping` now iterates `pendingSaveTabs` instead of deriving the tab from `currentCardIdx - 1` (which was wrong for global sessions and Next-between-ratings).
+- `FlashcardFlushBookkeeping` no longer derives the tab; runs the deferred block directly with remembered tabs.
+- `FlashcardStudyTick` periodic flush calls the new `FlashcardRunDeferredBookkeeping` without a derived tab.
+- Removed all "thinking-out-loud" comments from `HandleFlashcardRate`; replaced with one factual comment.
+
+### Verified
+- Build green (0 errors, 0 warnings).
+- SM-2 content, 60 s per-card cap, owning-tab attribution and prune-before-save order unchanged (read back the diff).
+- Two new log lines per rating: critical-path line + deferred line (when deferred work runs).
+
+### Notes
+- Up to 50 ms of study-state persistence can be lost if the process dies in that window; study-time credit is NOT deferred (it stays synchronous), so the statistics survive.
+- The true keypress->paint latency still needs a probe in `PaintFlashcardMasks` (Canvas.cpp) — out of scope this round.
+- Follow-ups (not implemented): key->state index (no STL: sorted Vec + binary search), async save worker, sidebar incremental update, budget/EWMA split, render-queue priority.
+- Config window study-doc read flush: lives in FlashcardToolbar.cpp (not allowed) — follow-up.
+
 ## 2026-11-23 (s75) — README: app presentation video
 
 ### Added

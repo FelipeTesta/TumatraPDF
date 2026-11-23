@@ -5037,6 +5037,8 @@ void CloseTab(WindowTab* tab, bool quitIfLast) {
     if (!canClose) {
         return;
     }
+    // Flush pending flashcard study saves before the tab is torn down.
+    FlashcardFlushBookkeeping(win);
     // MaybeSaveAnnotations() can show a dialog that pumps messages.
     // During message pumping, the window might be destroyed
     // (e.g., WM_DESTROY from a plugin host). If so, everything
@@ -5209,6 +5211,9 @@ void CloseWindow(MainWindow* win, bool quitIfLast, bool forceClose) {
     if (forceClose) {
         quitIfLast = true;
     }
+
+    // Flush pending flashcard study saves before the window is closed.
+    FlashcardFlushBookkeeping(win);
 
     // when used as an embedded plugin, closing should happen automatically
     // when the parent window is destroyed (cf. WM_DESTROY)

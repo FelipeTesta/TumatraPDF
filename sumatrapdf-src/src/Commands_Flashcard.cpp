@@ -876,7 +876,18 @@ void FlashcardNavigateToCardInCurrentTab(MainWindow* win, int cardIdx) {
     FlashcardNavigateToEntry(win, e, true);
 }
 
+// Forward declarations for deferred bookkeeping (Phase 1).
+static void FlashcardRunDeferredBookkeeping(MainWindow* win);
+void FlashcardFlushBookkeeping(MainWindow* win);
+
 static void HandleFlashcardRate(MainWindow* win, int rating) {
+    u64 tTotal0 = GetTickCount64();
+    u64 t0, t1;
+    int scanMs = 0, pruneMs = 0, saveMs = 0, statsMs = 0, toolbarMs = 0, sidebarMs = 0, navMs = 0, rerenderMs = 0;
+
+    // Keypress->paint instrumentation: record rating start time.
+    win->flashcard.lastRateTick = GetTickCount64();
+
     int curIdx = win->flashcard.currentCardIdx;
     if (curIdx < 0 || curIdx >= len(win->flashcard.studyOrder)) {
         return; // defensive: no valid current card
@@ -887,7 +898,8 @@ static void HandleFlashcardRate(MainWindow* win, int rating) {
     }
     Flashcard& card = e.tab->flashcard.cards[e.cardIdx];
 
-    // Find or create study state for this card in ITS OWN document's doc
+    // Phase 1: scan — state lookup, SM-2 update, state write-back.
+    t0 = GetTickCount64();
     FlashcardStudyState state = {};
     for (int i = 0; i < len(e.tab->flashcard.studyDoc.states); i++) {
         if (e.tab->flashcard.studyDoc.states[i].key == card.key) {
@@ -919,27 +931,40 @@ static void HandleFlashcardRate(MainWindow* win, int rating) {
         entry.state = state;
         e.tab->flashcard.studyDoc.states.Append(entry);
     }
+    t1 = GetTickCount64();
+    scanMs = (int)(t1 - t0);
 
-    // Save to disk — the card's own book's JSON (per-book, keyed by MD5 of path).
-    // Prune first: states of cards whose highlight was deleted must not be
-    // written back (FC-H3-left); a deleted cloze leaves no card behind.
-    if (e.tab->filePath) {
-        int pruned = FlashcardStudyPruneStates(e.tab->flashcard.studyDoc, e.tab->flashcard.cards);
-        if (pruned > 0) {
-            logf("[fc] HandleFlashcardRate - pruned %d state(s) of deleted cards in '%s'\n", pruned,
-                 FlashcardTabLogName(e.tab));
-        }
-        FlashcardStudySave(e.tab->filePath.s, e.tab->flashcard.studyDoc);
+    // Phase 2: prune — deferred. Remember the rated tab (owning tab of the card)
+    // so the flush targets the right document. Suppress duplicates: two quick
+    // ratings in the same tab produce one entry.
+    win->flashcard.dirtyFlags |= MainWindow::kFcDirtyPrune;
+    if (len(win->flashcard.pendingSaveTabs) == 0 ||
+        win->flashcard.pendingSaveTabs[len(win->flashcard.pendingSaveTabs) - 1] != e.tab) {
+        win->flashcard.pendingSaveTabs.Append(e.tab);
     }
-    // count the rated card for the stats (per-document FileState + today's
-    // sidecar bucket — same stores the study-time seconds go to). Credit the
-    // card's OWNING tab (e.tab), not the focused tab — see FlashcardStats.h.
+
+    // Phase 3: save — deferred (same tab list as prune).
+    win->flashcard.dirtyFlags |= MainWindow::kFcDirtySave;
+
+    // Phase 4: stats — synchronous (in-memory, thresholded flush, not per-rating I/O).
+    t0 = GetTickCount64();
     FlashcardStatsAddCard(e.tab);
+    t1 = GetTickCount64();
+    statsMs = (int)(t1 - t0);
+
     logf("[fc] HandleFlashcardRate - rated %d card %d of '%s'\n", rating, e.cardIdx, FlashcardTabLogName(e.tab));
 
+    // Phase 5: toolbar — synchronous (cheap label update).
+    t0 = GetTickCount64();
     FlashcardToolbarUpdateCount(win);
-    // the Lista panel's Due/Status columns changed for this card
-    FlashcardSidebarPopulate(win);
+    t1 = GetTickCount64();
+    toolbarMs = (int)(t1 - t0);
+
+    // Phase 6: sidebar — deferred (set dirty flag).
+    t0 = GetTickCount64();
+    win->flashcard.dirtyFlags |= MainWindow::kFcDirtySidebar;
+    t1 = GetTickCount64();
+    sidebarMs = (int)(t1 - t0);
 
     // Advance to next card: it arrives masked (front / pre-reveal state) and
     // vertically centered in the viewport (switching tabs when the next card
@@ -951,26 +976,127 @@ static void HandleFlashcardRate(MainWindow* win, int rating) {
     win->flashcard.studyTimeSec = 0.0f;
     win->flashcard.lastStudyTick = 0;
     win->flashcard.currentCardIdx++;
+    bool sessionEnded = false;
     if (win->flashcard.currentCardIdx >= len(win->flashcard.studyOrder)) {
         win->flashcard.studyMode = false;
         win->flashcard.currentCardIdx = -1;
         FlashcardStudyTimerStop(win);
+        sessionEnded = true;
         logf("[fc] HandleFlashcardRate - study session ended (all %d cards rated)\n", len(win->flashcard.studyOrder));
     } else {
         logf("[fc] HandleFlashcardRate - advancing to card %d/%d\n", win->flashcard.currentCardIdx + 1,
              len(win->flashcard.studyOrder));
+        // Phase 7: nav — prefetch + navigate + prewarm (synchronous, critical path).
+        t0 = GetTickCount64();
         // prefetch the upcoming cards BEFORE navigating (page-parse only) so
         // the jump itself is instant
         FlashcardPrefetchUpcoming(win, win->flashcard.currentCardIdx, FlashcardPrewarmBudget(win));
         FlashcardNavigateToEntry(win, win->flashcard.studyOrder[win->flashcard.currentCardIdx], true);
         FlashcardPrewarmEnqueue(win, win->flashcard.currentCardIdx);
+        t1 = GetTickCount64();
+        navMs = (int)(t1 - t0);
     }
+
+    // Phase 8: rerender — synchronous.
+    t0 = GetTickCount64();
     MainWindowRerender(win);
+    t1 = GetTickCount64();
+    rerenderMs = (int)(t1 - t0);
+
+    // Total time.
+    int totalMs = (int)(GetTickCount64() - tTotal0);
+
+    // Log the per-phase timing (critical path only; deferred work logged separately).
+    logf(
+        "[fc][perf] rate: scan=%dms stats=%dms toolbar=%dms sidebarFlag=%dms nav=%dms rerender=%dms "
+        "total=%dms cards=%d states=%d\n",
+        scanMs, statsMs, toolbarMs, sidebarMs, navMs, rerenderMs, totalMs, len(e.tab->flashcard.cards),
+        len(e.tab->flashcard.studyDoc.states));
+
+    // If session ended, flush deferred work immediately.
+    if (sessionEnded) {
+        FlashcardFlushBookkeeping(win);
+    }
+}
+
+// Run the deferred bookkeeping (prune -> save -> sidebar) for all tabs that
+// have pending work. Logs its own timing line.
+// Safe to call with no pending work (no-op). Handles tabs that no longer exist.
+static void FlashcardRunDeferredBookkeeping(MainWindow* win) {
+    if (!win || (win->flashcard.dirtyFlags == 0) || len(win->flashcard.pendingSaveTabs) == 0) {
+        return;
+    }
+    u64 tDeferred0 = GetTickCount64();
+    int totalPruneMs = 0, totalSaveMs = 0, sidebarMs = 0;
+    int nTabs = 0;
+
+    // Prune + Save: iterate remembered tabs, verify each is still in this window.
+    for (int i = 0; i < len(win->flashcard.pendingSaveTabs); i++) {
+        WindowTab* tab = win->flashcard.pendingSaveTabs[i];
+        if (!tab || !tab->filePath) {
+            continue;
+        }
+        // Verify the tab is still valid (exists in this window's tab list).
+        bool tabValid = false;
+        auto tabs = win->Tabs();
+        for (WindowTab* t : tabs) {
+            if (t == tab) {
+                tabValid = true;
+                break;
+            }
+        }
+        if (!tabValid) {
+            continue;
+        }
+        nTabs++;
+        u64 t0 = GetTickCount64();
+        if (win->flashcard.dirtyFlags & MainWindow::kFcDirtyPrune) {
+            int pruned = FlashcardStudyPruneStates(tab->flashcard.studyDoc, tab->flashcard.cards);
+            if (pruned > 0) {
+                logf("[fc] DeferredPrune - pruned %d state(s) of deleted cards in '%s'\n", pruned,
+                     FlashcardTabLogName(tab));
+            }
+        }
+        u64 t1 = GetTickCount64();
+        totalPruneMs += (int)(t1 - t0);
+        t0 = GetTickCount64();
+        if (win->flashcard.dirtyFlags & MainWindow::kFcDirtySave) {
+            FlashcardStudySave(tab->filePath.s, tab->flashcard.studyDoc);
+        }
+        t1 = GetTickCount64();
+        totalSaveMs += (int)(t1 - t0);
+    }
+
+    // Sidebar: always repopulate if dirty (window-level, not tab-specific).
+    u64 tSidebar0 = GetTickCount64();
+    if (win->flashcard.dirtyFlags & MainWindow::kFcDirtySidebar) {
+        FlashcardSidebarPopulate(win);
+    }
+    u64 tSidebar1 = GetTickCount64();
+    sidebarMs = (int)(tSidebar1 - tSidebar0);
+
+    int totalDeferredMs = (int)(GetTickCount64() - tDeferred0);
+    logf("[fc][perf] deferred: prune=%dms save=%dms sidebar=%dms tabs=%d total=%dms\n", totalPruneMs, totalSaveMs,
+         sidebarMs, nTabs, totalDeferredMs);
+
+    win->flashcard.pendingSaveTabs.Reset();
+    win->flashcard.dirtyFlags = 0;
+    win->flashcard.lastBookkeepingTick = GetTickCount64();
+}
+
+// Public flush: runs deferred work immediately and clears flags.
+// Idempotent: calling twice with no new ratings does nothing.
+void FlashcardFlushBookkeeping(MainWindow* win) {
+    if (!win || win->flashcard.dirtyFlags == 0) {
+        return;
+    }
+    FlashcardRunDeferredBookkeeping(win);
 }
 
 // Stop the active study session (queue, index, modes) — per-tab caches
 // (cards/states/filter) are kept: they belong to the documents.
 void FlashcardStopSession(MainWindow* win) {
+    FlashcardFlushBookkeeping(win);
     FlashcardPrewarmInvalidate();
     FlashcardPrewarmShutdown();
     win->flashcard.studyMode = false;
@@ -986,7 +1112,8 @@ void FlashcardStopSession(MainWindow* win) {
 // lazy-load the new tab's cards if flashcard mode is on (fixes masks from the
 // previous book being painted over the new document) and refresh count/list.
 void FlashcardOnTabChanged(MainWindow* win) {
-    FlashcardPrewarmInvalidate(); // tab switch / doc reload: drop stale warm jobs
+    FlashcardFlushBookkeeping(win); // flush pending saves from the previous tab
+    FlashcardPrewarmInvalidate();   // tab switch / doc reload: drop stale warm jobs
     // Clear Lista-selected active card on tab switch (spec: cleared on tab change)
     win->flashcard.activeListCardIdx = -1;
     win->flashcard.activeListCardTab = nullptr;
@@ -1169,6 +1296,7 @@ bool HandleCommandFlashcard(MainWindow* win, int cmd) {
                 FlashcardStudyTimerStart(win);
             } else {
                 logf("[fc] CmdFlashcardStudy - study OFF\n");
+                FlashcardFlushBookkeeping(win);
                 FlashcardPrewarmInvalidate();
                 FlashcardPrewarmShutdown();
                 FlashcardStudyTimerStop(win);
@@ -1532,6 +1660,7 @@ void FlashcardStudyTick(MainWindow* win, HWND hwnd) {
             logf("[fc] StudyTick - session timer expired (%u min), ending study session\n",
                  win->flashcard.studyTimerMinutes);
             // End the session (same as the Study toggle OFF path)
+            FlashcardFlushBookkeeping(win);
             FlashcardPrewarmInvalidate();
             FlashcardPrewarmShutdown();
             win->flashcard.studyMode = false;
@@ -1596,6 +1725,14 @@ void FlashcardStudyTick(MainWindow* win, HWND hwnd) {
     // self-deduping via prewarmFilledForIdx ---
     if (win->flashcard.currentCardIdx != win->flashcard.prewarmFilledForIdx) {
         FlashcardPrewarmEnqueue(win, win->flashcard.currentCardIdx);
+    }
+    // --- 4. Deferred bookkeeping (Phase 1): coalesced prune/save/sidebar.
+    // Runs at most every 50 ms while a study session is active.
+    if (win->flashcard.dirtyFlags != 0) {
+        u64 nowMs = GetTickCount64();
+        if (nowMs - win->flashcard.lastBookkeepingTick >= 50) {
+            FlashcardRunDeferredBookkeeping(win);
+        }
     }
 }
 

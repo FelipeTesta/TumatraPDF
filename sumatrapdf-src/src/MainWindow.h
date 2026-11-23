@@ -550,6 +550,17 @@ struct MainWindow {
         // 0 wherever studyTimeSec is reset so a stale base never credits a gap.
         u64 lastStudyTick = 0;
         static constexpr float maxPerCardSec = 60.0f;
+        // Keypress->paint instrumentation: timestamp when a rating starts.
+        // Set at entry to HandleFlashcardRate; a future Canvas.cpp probe
+        // (out of scope this round) can read it to measure true keypress->paint.
+        u64 lastRateTick = 0;
+        // Deferred bookkeeping (Phase 1): dirty flags + coalesce tick.
+        // Flags: kFcDirtyPrune=1, kFcDirtySave=2, kFcDirtySidebar=4.
+        u32 dirtyFlags = 0;
+        u64 lastBookkeepingTick = 0;
+        // Tabs that have pending prune/save work (owned tab of each rated card).
+        // Duplicates are suppressed: two quick ratings in the same tab produce one entry.
+        Vec<WindowTab*> pendingSaveTabs;
         // Session timer (like autoscroll's): user-configured minutes that
         // limit the study SESSION duration. Independent from the per-card
         // stats cap above.
@@ -592,6 +603,11 @@ struct MainWindow {
         WindowTab* activeListCardTab = nullptr;
     } flashcard;
     // --- end flashcard state ---
+
+    // Flashcard deferred bookkeeping flag bits (Phase 1).
+    constexpr static u32 kFcDirtyPrune = 1;
+    constexpr static u32 kFcDirtySave = 2;
+    constexpr static u32 kFcDirtySidebar = 4;
 
     // --- edit tools state ---
     // "Edit" mode (toolbar toggle like Arch Tools / Flashcards). When on,
@@ -953,6 +969,8 @@ struct MainWindow {
     void ArchRestoreMeasurementsForTab(WindowTab* tab);
     void ArchClearMeasurementsForPath(Str path);
 };
+// Flashcard bookkeeping flush (called from tab close / app exit / tab switch).
+void FlashcardFlushBookkeeping(MainWindow* win);
 
 void SetWebviewsHiddenForHomeOverlay(MainWindow* win);
 
