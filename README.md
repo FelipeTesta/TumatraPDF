@@ -1,10 +1,8 @@
+**English** · [Español](README.es.md)
+
 # TumatraPDF
 
-PDF reader based on [SumatraPDF](https://github.com/sumatrapdfreader/sumatrapdf), an open source project (GPLv3) developed by [Krzysztof Kowalczyk](https://github.com/kjk) and contributors.
-
-## Goal
-
-Create an enhanced version of SumatraPDF with additional features focused on reading books and long documents, while maintaining compatibility with upstream updates.
+A PDF reader for long sessions and built-in flashcards motors (in development).
 
 ## Credits
 
@@ -12,49 +10,116 @@ This project is a fork of **SumatraPDF** — a lightweight, fast, open source PD
 
 - **Original repository:** [github.com/sumatrapdfreader/sumatrapdf](https://github.com/sumatrapdfreader/sumatrapdf)
 - **Main author:** [Krzysztof Kowalczyk (kjk)](https://github.com/kjk)
-- **License:** [GNU General Public License v3.0](https://github.com/sumatrapdfreader/sumatrapdf/blob/master/COPYING)
-- **Official site:** [sumatrapdfreader.org](https://www.sumatrapdfreader.org)
 - **Base version used:** Pre-release `3.7.20958`
 
-We thank Krzysztof and all contributors for the excellent work on SumatraPDF.
-
-## 🆕 TumatraPDF Exclusive Features
+## 🆕 Features
 
 The features below were developed on top of SumatraPDF and **do not exist in the original version**. They follow the same project philosophy — native C/C++ code, Win32 interface, no external dependencies.
 
 > **Note for Krzysztof Kowalczyk** (creator of SumatraPDF): these features were implemented as **direct patches in `sumatrapdf-src/src/`** — the upstream code is preserved in `sumatrapdf-src/`. The `src/features/` and `src/hooks/` directories **do not exist**. Feel free to incorporate any of them into the official SumatraPDF.
 
 ---
+### READING
 
-### Reading experience
-
+#### EYE STRESS / Bright controls
+Bright and contrast controls for long sessions reading on screens.
+* `Invert`: This was already present in original app. Just added a on/off button.
+* `Contrast` `+` `-`: **New feature**:
+	* **PDF**: adds an adjustable black filter over all pages
+	* **Markdown**: change letter-colors to darker tones
+___
 #### AutoScroll with timer & ETA
+- `[] Timer` `Autoscroll` `+` `-` Continuous speed adjustable auto-scroll with a timer.
+	- `F9 key`: start/stop
+	- `F7 (speed down) / F8 (speed up) key` quick adjustments
+- `ETA` estimated time to finish the book based on current speed
+- `Ctrl:hold` quick pauses → resume when `Ctrl:release`
+- `[x]` 5m `Timer`: Insert the time you want your reading session to last
 
-- Continuous auto-scroll with F9 start/stop and F7/F8 speed (round steps), plus a session timer that auto-stops after N minutes.
-- ETA to finish the book shown in the toolbar; scroll speed remembered per document, so a book reopens at its last speed.
-- Pauses when you click the page or lose focus; works on PDF and Markdown.
+> `Autoscroll:on` feeds _profile data_ with your reading time, reflecting on `Home`/`Graphs`.
+> Last speed used persists for each document.
+> Works on PDF and Markdown.
 
-#### Scan Mode & Two Columns
+Also works together with other tools: `Two Columns:on` `Trim:on` `Invert` `Contrast` etc.
+___
+#### Two Columns
+Quick split two column documents for single column continuous reading.
+* `Two Column`: Divide each page in two virtual Left/Right pages and stack them in vertical order so you don't have to scroll horizontaly
 
-- Read two-column books one column at a time (Scan Mode) or as stacked narrow columns (Two Columns), maximizing screen space.
-- Margins and inter-column gap adjustable in pixels; a quick toggle shows the full page, then returns to crop view without losing position.
-- Bookmarks and links land on the **left column** of the target page; both modes remembered per document, new files start off.
+Also works together with other tools: `Autoscroll:on` `Trim:on` `Invert` `Contrast` etc.
 
-#### Trim (top/bottom margin elimination)
-
-- Cut top and bottom margins from rendered pages to fit more content on screen.
-- Draggable red lines per page (context-aware: shows neighbor pages' lines too); applied on first layout so there is no flicker.
+> When `Autoscroll:on`
+* `Shift key:hold`: Quick stops _autoscroll_ and render page original layout so you can read full page graphs or tables in between the columns (very common layout in educational books)
+- `Ctrl:hold` quick pauses → resume when `Ctrl:release`
+___
+#### Trim
+* `Trim` Quick remove empty spaces in begining and ending of pages, optimizing reading when `Autoscroll` `Two Columns` buttons active
+* `Trim Config`: Draw draggable _Red Lines_ for quick adjustment of page limits.
 - Remembered per document; new files start untrimmed.
 
-#### Markdown full-width reading
+Also works together with other tools: `Two Columns:on` `Autoscroll:on` `Invert` `Contrast` etc.
+___
+#### Hold
 
-- Markdown opens full-width with word-wrap that reflows on resize; auto-scroll and contrast work in WebView2 mode.
+- `Hold`: Quick stores your reading position so you can go to another session of the book and quickly return for where you stopped
+___
+### FLASHCARDS
+Anki style cards made inside PDF documents.
+#### Creating
+Quickly create cards (cloze style) inside PDFs. Renders highlight mask over the PDF text/region.
+- `Text Selection`→`Flashcard floating button ('s' key)`: Turn text selections into cards (cloze style)
+- `Ctrl:hold`+`Click draw rectangle`→ `s key`: Turn rectangle into card (image oclusion style)
+- `Alt key`: allows multiple text/rectangle selections → `s key` → single card with the group
+- `Ctrl`+`Click` flashcard highlight: opens _flashcards list_
+___
+#### flashcards toolbar
+Secundary toolbar allows you to study the cards inside this PDF. SM-2 spaced repetition algorithm.
+- `Study`: Start rendering masks and evaluating process. Rate cards with keyboard `1-4` numbers.
+- `1`: Again | `2`: Hard | `3`: Good | `4`: Easy
+	- Evaluating cards change review time for next sessions.
+	- Search about `spaced repetition` and `Anki` is recomendable.
+- `Delete`: Deletes active _card_
+- `Order`: modify order of _revised_ and _new_ cards
+- `List`: Cards inside this document
+- `Filter`: Review cards from a specific region, chapter (bookmarks) of one document OR to study between multiple documents opened in the same **session** 
+- `Import`:
+	- Convert normal highlights to flashcards (duplicate them so the original formating is kept)
+	- Import cards from **same document** edited from another person. You can split the card making work with your study friends then import their cards into a single shared file.
+- `Session`: Shows last documents with cards in you recently studied
 
-#### Page Hold
+> Flashcards use normal highlights mechanism so any card save inside a document stays as a normal PDF and can be open normally in any other software
+> You can 'see' the regions marked as flashcards in other PDF software but you will only be able to study it inside `Tumatra PDF`
 
-- Remembers the reading position; draws a peru frame of the area it will return to; pauses auto-scroll; works in PDF and in Markdown tabs.
+Study history are stored inside a `Profile Data` folder you can change in `Profile Sync`. You can also root it in a cloud sync folder such as _Google Drive_ and feed it between multiple PCs (only windows for now - multiplatform is a future goal).
+___
+### Tabs & sessions ⭕🟢
 
-### Page tools
+#### SESSIONS
+Sync _sessions_ for quick open multiple documents commonly used for different study sessions. Restore any group on startup or on demand; groups auto-sync as tabs are added, removed, or closed.
+- `⭕`: Not synced session. Any book open here will not be recovered if you close the window.
+- `🟢`: Synced session. Books in this session will be remembered when you reopen the session.
+- `New Session`: Create a new synced session to recover your common files and store reading and flashcard study time inside this session.
+- `Click ⭕/🟢`→ Open dropdown list → `Right click`:
+	- `Open in new window`: Open new window with all synced books
+	- `Rename`
+	- `Delete`
+- `Ctrl+N` starts an unsynced window.
+- `Alt+Click` on tabs to close documents - `[x]` button was removed
+___
+### Stats & profile
+
+#### Reading stats
+
+- Reading with `autoscroll` track per document and per day, shown on a Home dashboard.
+- Most-read ranking, Today/Total totals, 365-day heatmap, and annual graph; master total survives renaming or moving a book.
+___
+#### Profile memory & sync
+
+- All reading time, flashcard data, and per-book state in a single `tumatraPDF-data_1.json` that can be exported, imported, and synced (e.g. via Google Drive).
+- Home "🔁 Sync" button opens the Profile Sync window; 9 rolling local backups; `profileDataDir` setting points at a synced folder; portable→install import.
+- Profile Sync: Set data folder (one root for profile + backups + stats + study), correct merge (keeps the larger daily total and the newer per-card state), honest UI with a status line and keyboard-navigable Backups.
+___
+### Editing
 
 #### Image editing (right-click on an image)
 
@@ -70,100 +135,34 @@ The features below were developed on top of SumatraPDF and **do not exist in the
 
 - Draw a rectangle over the page to capture it at the document's DPI and copy it to the clipboard.
 - Works on the page the drag started on; auto-exits after capture; Esc cancels.
-
-#### Contrast filter & dark mode
-
-- Semi-transparent black overlay (Ctrl+Shift+C) for comfortable reading; opacity 0–100%, remembered per document.
-- Dark theme (default) plus page-color invert (Shift+I); both survive document reload.
-
 #### Arch Tools (scale & measure)
 
 - For architecture PDFs: draw a line, enter its real length, then measure x/y/length in real-world units.
 - Radius (3-click arc) and Ref Line (full-page guide line); erase individual lines with E.
 - Conflict gates keep Arch Tools, Flashcards, AutoScroll, Scan Mode, and Trim from overlapping.
-
-### Bookmarks & flashcards
-
 #### Editable bookmarks sidebar
 
 - Add bookmarks for the current page; right-click to Rename, Delete, or Update; drag to reorder and indent with a white guide line.
 - Changes persist into the PDF on save and survive reopen.
+___
+### Update
 
-#### Flashcards (cloze SRS)
-
-- Turn text selections into cloze cards — a gray highlight mask over the PDF's own text, nothing duplicated.
-- SM-2 spaced repetition per book; rate 1–4 on reveal; Alt+drag and cross-page selections make one grouped card.
-- Study timer, per-day stats, Order/Filter/List windows, cross-document sessions, export/import, and local backups.
-- Ctrl+click on a flashcard highlight selects it in the List panel and scrolls the list to it.
-- Ctrl+drag = one sharp rectangle + one flashcard; Ctrl+Alt+drag = several rectangles in one grouped flashcard.
-
-### Tabs & sessions
-
-#### Tab groups (named sessions)
-
-- Save the open documents of a window as a named group; restore any group on startup or on demand; groups auto-sync as tabs are added, removed, or closed.
-- Dropdown lists groups with Open here / Open in new window / Rename / Delete / New session; Ctrl+N starts an unsynced window.
-
-#### Tab drag guide line
-
-- A white vertical line shows the drop position while dragging a tab; dropping reorders tabs in place.
-
-#### Interface defaults
-
-- Sidebar starts hidden on every document open (enable via the bookmarks button, F9/F12, or the View menu).
-- Bare digit keys type into edit fields; only Ctrl+digit zoom presets remain global shortcuts.
-- Toolbar wraps to a second row on narrow windows instead of cutting off buttons.
-
-### Stats & profile
-
-#### Reading stats
-
-- Time spent reading with auto-scroll tracked per document and per day, shown on a Home dashboard band.
-- Most-read ranking, Today/Total totals, 365-day heatmap, and annual graph; master total survives renaming or moving a book.
-
-#### Profile memory & sync
-
-- All reading time, flashcard data, and per-book state in a single `tumatraPDF-data_1.json` that can be exported, imported, and synced (e.g. via Google Drive).
-- Home "🔁 Sync" button opens the Profile Sync window; 9 rolling local backups; `profileDataDir` setting points at a synced folder; portable→install import.
-- Profile Sync: Set data folder (one root for profile + backups + stats + study), correct merge (keeps the larger daily total and the newer per-card state), honest UI with a status line and keyboard-navigable Backups.
-
-### Update & identity
-
-#### Own update system
+#### AUTO update system
 
 - The app checks its own GitHub Releases (`update.txt`) daily instead of upstream SumatraPDF checks; downloads, validates (MZ header + size), and self-replaces (portable) or runs the installer (installed).
 - Fully isolated from upstream SumatraPDF: own directory, registry keys, settings file, and exe name.
 
-#### Own visual identity
-
-- `TumatraPDF.exe`, "TumatraPDF" window title, `TumatraPDF-settings.txt`, inverted-color logos, and own registry keys — installs side-by-side with SumatraPDF.
-
-#### Repair Document File
-
-- Right-click a damaged PDF → "Repair Document File": engine-corrected in-place save that clears structural errors without touching page content; the original is left untouched on failure.
-
 ---
-
-## Modularity Strategy
-
-The fork uses **direct patches in `sumatrapdf-src/src/`** — not a separate `src/features/` or `src/hooks/` tree. Those directories do not exist.
-
-- Upstream code in `sumatrapdf-src/` is the baseline; patches applied directly (~810 insertions across 34 files plus new modules such as AutoScroll, ContrastOverlay, TrimConfigDialog, Flashcard, ReadingStats, ProfileData).
-- `MERGE.md` documents the upstream update process (fork point ~912ecf2, Aug 2026).
-- Informativos (`README.md`, `LOG.md`, `TODO.md`, `BUILD.md`, `MERGE.md`, `FLOW/*.dot`): English + caveman-compressed, always.
-
 ## Download + Update System
 
 - **Releases:** built by GitHub Actions from `v*` tags — grab `TumatraPDF-portable-win64.exe` (just run) or `TumatraPDF-install-win64.exe` (installer) from [Releases](https://github.com/FelipeTesta/TumatraPDF/releases)
 - **In-app auto-update:** daily check of the repo's `update.txt`; when a newer version exists, the app downloads it, validates it, and self-replaces (portable) or runs the installer (installed). No installer, no admin needed for portable.
 - **Isolation:** installing TumatraPDF does NOT touch an existing upstream SumatraPDF install (separate directories, registry keys, exe and settings names).
 - **Privacy:** the only network call the app makes on its own is the update-check GET to this repo. All upstream SumatraPDF data collection (crash upload, symbol download, translation links) was removed — crash dumps stay local.
-- Upstream merge tracking documented in `MERGE.md` (manual process).
 
 ## Architecture
 
 Based on SumatraPDF:
-
 - **Language:** C, C++
 - **Build:** Premake5 → Visual Studio 2022
 - **UI:** Native Win32 API
@@ -172,4 +171,4 @@ Based on SumatraPDF:
 
 ## Status
 
-🟢 Core features complete. History + fixes: see [CHANGELOG.md](CHANGELOG.md) and [LOG.md](LOG.md).
+History + fixes: see [CHANGELOG.md](CHANGELOG.md) and [LOG.md](LOG.md).

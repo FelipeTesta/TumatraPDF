@@ -5,6 +5,10 @@
 3. User manual-test items = items only the user can validate.
 4. Housekeeping (2026-10-20, s36-ae; re-triaged s36-at, s36-cu/cv): all `[x]` blocks archived — details live in LOG per session entry; this file lists open work only.
 
+## Release gate (before every version tag)
+
+- [ ] `README.es.md` re-synced with `README.md`: `bun scripts/readme-sync.ts` exits 0; new/renamed features translated, tool names left in English, `Última actualización` line + `<!-- readme-sync -->` token refreshed with `--update`.
+
 ## USER validation queue
 
 Items ONLY the user can verify live (real book / real build). Flat list; details in LOG per session.

@@ -1,3 +1,58 @@
+## 2026-11-23 (s73) — Shared-root stats merge, LastActivityTs, Unsynced action
+
+### Fixed
+- Shared-root stats merge: two instances pointing at same cloud root erased each other's daily rows. Sidecar merge now takes MAX per `dateKey` (`ReadingStatsMergeOnDiskMax`) instead of overwriting, and stale on-disk snapshot can no longer erase another instance's day rows.
+- Profile merge double-count: own machine profile row added to live local numbers, counting same reading twice. Own-machine rows now combine with MAX (never sum) while other machines' rows are summed (`ProfileDataReadingDaySec`, `ProfileDataReadingTotalSec`, `ProfileDataStudyDaySec`, `ProfileDataStudyDayCards`; helpers `ProfOwnMachineDaySec` / `ProfOwnMachineDayCards`).
+- `ProfSaveInner` now returns `bool` so save failures are not swallowed.
+
+### Added
+- Per-document `LastActivityTs` (unix timestamp of last reading/study activity) — new FileState field, generated from `cmd/gen-settings.ts`; FileState format goes gen3 -> gen4 with migration that appends `LastActivityTs=0` to existing entries (`AppSettings.cpp` `MigrateFileStateNames`).
+- `Unsynced` action: `CloseAllDocumentTabsForUnsync` (SumatraPDF.cpp) closes every document tab of window (keeps Home/About/Favorites), prompting to save each one and stopping early if save cancelled.
+- `MainWindow::rectSelection` — explicit flag for plain Ctrl+drag rectangle, so glyphs in `dm->textSelection->result` can no longer make `IsRectangularSelection` return false for genuine rectangular selection.
+
+### Verified
+- Build green: 0 errors, 0 warnings (TumatraPDF.exe 22.007.296 bytes, ProductVersion 1.0.20, deployed to `Compiled/TumatraPDF-debug.exe`).
+- Generated settings in sync: `Settings.h` carries `lastActivityTs` as field 45 of `gFileStateFields` and name blob ends with `LastActivityTs`.
+
+### Notes
+- Runtime/visual validation of Unsynced action and shared-root merge pending user manual test.
+- `README.es.md` translation + `scripts/readme-sync.ts` guard land in same commit (s71 work).
+
+## 2026-11-23 (s72) — Fix ghost highlight appearance stream + flashcard refresh after delete
+
+### Fixed
+- Highlight appearance stream (AP) authored in app space while `/Rect` was in PDF user space; `pdf_annot_transform` then computed a vertical offset of ~page height, so the saved/derived mask landed on the wrong region (reported as a "ghost" highlight, "inverted" for multi-line selections). AP now uses `/Matrix = inv_page_ctm`, `/BBox` = app-space union and `/Rect` written directly with `pdf_dict_put_rect` (no `pdf_set_annot_rect`, which would double-apply the inverse and re-arm MuPDF's resynthesis).
+- `SetSharpHighlightAppearance` (Annotation.cpp) installs a sharp rectangular Form XObject (no curves) after `pdf_update_annot`, so MuPDF no longer replaces it with the rounded-caps default AP.
+- AP fill colour: annotations without `/C` now use MuPDF's default highlight yellow (1 1 0) instead of a hardcoded gray; 1-component /C is replicated to gray, 4-component /C uses the `k` operator.
+- Flashcard deletion now refreshes the UI: `DeleteAnnotation` returns `bool` (failures no longer swallowed), one shared `FlashcardRefreshAfterDelete` reloads cards from the document, repopulates the List panel, clears the stale active-list selection and updates the toolbar count — used by both the List and Study delete paths.
+
+### Verified
+- Build green (0 errors, 0 warnings; out\dbg64\TumatraPDF.exe 22007296 bytes, ProductVersion 1.0.20).
+- Geometry checked against vendored MuPDF source: `pdf_run_xobject` applies the form `/Matrix` (pdf-op-run.c:2484) and `pdf_annot_transform` (pdf-annot.c:233-244) yields sx=sy=1, x=y=0 when transform(BBox, Matrix) == /Rect.
+
+### Notes
+- Runtime/visual validation of the fix pending user manual test.
+- `gGlobalPrefs->activeTabGroup` untouched.
+
+## 2026-11-23 (s71) — Spanish README + translation drift guard
+
+### Added
+- `README.es.md` — full neutral-Spanish translation of `README.md` (no voseo/regionalisms). Tool + feature names kept literal (`Autoscroll`, `Trim`, `Hold`, `Study`, `List`, `Filter`, `Import`, `Session`, `Profile Sync`, `Arch Tools`, `Edit mode`, `Capture tool`): app UI has no Spanish localization, so only prose/instructions translated.
+- Language switcher line on both READMEs (`**English** · [Español](README.es.md)`), first line — GitHub landing always opens the English file, switch is one click.
+- `scripts/readme-sync.ts` — drift check: compares `git hash-object --path README.md` against the `<!-- readme-sync: source-blob=... -->` token in `README.es.md`; exit 1 on drift, `--update` rewrites token + version + date. Content-addressed (no git history, no version parsing) → no false positives when a release only touches CHANGELOG.
+- `.github/workflows/readme-sync.yml` — runs the check on PRs and on pushes touching either README (also fires on `v*` tag pushes; path filters are ignored for tags).
+
+### Changed
+- `README.md`: 4 missing blank lines before `## Credits`, `## 🆕 Features`, `## Architecture`, `## Status` (headings glued to previous paragraph break some renderers).
+- `.github/workflows/release.yml`: non-blocking `Check Spanish README sync` step after `setup-bun` (warning only, never blocks a release build).
+- `AGENTS.md` §13: `README.es.md` exempt from English rule (user-facing mirror); tool names never translated; sync procedure documented.
+- `TODO.md`: new `## Release gate` section — re-sync translation before every version tag.
+
+### Notes
+- `README.es.md` carries `> **Última actualización:** <date> · base: README.md v<version>` so a reader sees staleness immediately.
+- User still editing `README.md`: current token pins blob `877cc629`; next README edit makes CI red until an agent translates the delta and runs `bun scripts/readme-sync.ts --update`.
+- Verified: check passes in sync, fails on drift, `--update` restores green (temp-repo test).
+
 ## 2026-11-21 (s70) — Page Hold frame, rectangular flashcards, release 1.0.20
 
 ### Added

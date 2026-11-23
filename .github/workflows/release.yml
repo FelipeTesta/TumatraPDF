@@ -16,6 +16,12 @@ jobs:
 
       - uses: oven-sh/setup-bun@v2
 
+      # Non-blocking: red release log line when README.es.md lags behind README.md.
+      # Fix before tagging: update the translation + bun scripts/readme-sync.ts --update
+      - name: Check Spanish README sync
+        continue-on-error: true
+        run: bun scripts/readme-sync.ts
+
       - uses: microsoft/setup-msbuild@v2
 
       # NASM required by ext/libjpeg-turbo and ext/dav1d SIMD .asm custom build steps

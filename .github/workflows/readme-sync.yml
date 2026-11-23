@@ -1,0 +1,23 @@
+name: README translation sync
+
+on:
+  push:
+    branches: ["main", "master"]
+    paths:
+      - "README.md"
+      - "README.es.md"
+    tags: ["v*"]
+  pull_request:
+    paths:
+      - "README.md"
+      - "README.es.md"
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - name: Check README.es.md is up to date
+        run: bun scripts/readme-sync.ts

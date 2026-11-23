@@ -300,6 +300,9 @@ All project informativos (`README.md`, `LOG.md`, `TODO.md`, `BUILD.md`, `MERGE.m
 - Keep `FASE` (not PHASE) as phase identifier — matches LOG.md history.
 - `FLOW/*.dot` = process maps only. Never hand-maintain code-architecture `.dot` — use tree-sitter (§0b).
 - Deprecated informativos live in `TEMP/` (gitignored): `FLASHCARD_IMPLEMENTATION_PLAN.md`, `docs/TumatraPDF2/PLAN.md` (TumatraPDF2 discontinued), `sumatrapdf-src/LOG.md`, `sumatrapdf-src/readme.md`, `diff_sumatra.txt` — reference only, never extend.
+- `README.es.md` = Spanish translation of `README.md` (user-facing, NOT caveman; neutral Spanish, no voseo). Exempt from the English rule — it mirrors the English text.
+  - Tool/feature names NEVER translated (`Autoscroll`, `Trim`, `Hold`, `Study`, `List`, `Filter`, `Import`, `Session`, `Profile Sync`, `Arch Tools`, `Edit mode`, `Capture tool`, ...): the app UI has no Spanish localization. Translate only prose/instructions.
+  - Every `README.md` edit invalidates the translation. Sync check: `bun scripts/readme-sync.ts` (exit 1 = drift); after updating the translation run `bun scripts/readme-sync.ts --update` to refresh the `<!-- readme-sync: source-blob=... -->` token + date line. CI: `.github/workflows/readme-sync.yml`. Pre-release: item in `TODO.md` § Release gate.
 
 # 14. Lemma memory lifecycle (MANDATORY)
 
