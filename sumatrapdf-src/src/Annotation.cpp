@@ -359,7 +359,149 @@ void SetQuadPointsAsRect(Annotation* annot, const Vec<RectF>& rects) {
             logf("SetQuadPointsAsRect(): mupdf calls failed\n");
         }
     }
+    SetSharpHighlightAppearance(annot, rects);
     MarkNotificationAsModified(e, annot);
+}
+
+// Install a sharp rectangular appearance stream for a Highlight annotation.
+// Draws each quad rect as a plain filled rectangle (no curves), using the
+// annotation's current colour and opacity. Replaces MuPDF's default
+// marker-pen appearance (rounded ends) with one matching the app's on-screen
+// mask (Canvas.cpp: gs.FillRectangle per quad).
+//
+// Builds a Form XObject by hand using ONLY exported MuPDF DLL symbols:
+//   pdf_new_dict, pdf_new_name, pdf_new_real, pdf_new_array, pdf_dict_put,
+//   pdf_dict_puts, pdf_dict_put_rect, pdf_dict_get, pdf_dict_gets,
+//   pdf_dict_put_drop, pdf_drop_obj, pdf_new_xobject,
+//   pdf_annot_color, pdf_annot_opacity, pdf_annot_page, pdf_page_transform,
+//   pdf_annot_obj, fz_new_buffer, fz_new_output_with_buffer,
+//   fz_write_printf, fz_close_output, fz_drop_output, fz_union_rect,
+//   fz_invert_matrix.
+// Does NOT call pdf_update_annot after installing the appearance (that would
+// regenerate MuPDF's rounded-caps appearance). The caller (SetQuadPointsAsRect)
+// already called pdf_update_annot for quad points/color/opacity.
+// CRITICAL: The form's /Matrix = inv_page_ctm and /BBox = app-space union;
+// annotation /Rect = transform(app-space union, inv_page_ctm) via pdf_dict_put_rect
+// (NOT pdf_set_annot_rect, which would apply inv_page_ctm again and dirty the annot).
+void SetSharpHighlightAppearance(Annotation* annot, const Vec<RectF>& rects) {
+    if (!AnnotationIsLive(annot) || annot->type != AnnotationType::Highlight) {
+        return;
+    }
+    EngineMupdf* e = annot->engine;
+    auto* a = annot->pdfannot;
+    auto* ctx = e->Ctx();
+    auto* doc = e->pdfdoc;
+    ScopedRecursiveMutex cs(&e->docLock);
+
+    int n = len(rects);
+    if (n == 0) {
+        return;
+    }
+
+    // Compute union of all rects in APP space (y-down, cropbox origin)
+    fz_rect bbox_app = ToFzRect(rects[0]);
+    for (int i = 1; i < n; i++) {
+        bbox_app = fz_union_rect(bbox_app, ToFzRect(rects[i]));
+    }
+
+    // Get page transform and its inverse: PDF user space <- APP space
+    pdf_page* page = pdf_annot_page(ctx, a);
+    fz_matrix page_ctm;
+    pdf_page_transform(ctx, page, nullptr, &page_ctm);
+    fz_matrix inv = fz_invert_matrix(page_ctm);
+
+    // Annotation /Rect in PDF user space = transform(app-space union, inv)
+    fz_rect bbox_pdf = fz_transform_rect(bbox_app, inv);
+
+    fz_var(a); // for fz_catch
+    fz_try(ctx) {
+        // Read current colour (n components) and opacity from the annotation
+        // Default to Acrobat/MuPDF highlight yellow (1 1 0) when /C is absent.
+        float color[4] = {1.0f, 1.0f, 0.0f, 1.0f}; // default yellow
+        int nColor = 0;
+        float opacity = 0.1f;
+        pdf_annot_color(ctx, a, &nColor, color);
+        opacity = pdf_annot_opacity(ctx, a);
+
+        // Normalise component count:
+        // nColor == 0: no /C -> keep yellow default
+        // nColor == 1: grayscale -> replicate to RGB
+        // nColor == 3: RGB -> use as-is
+        // nColor == 4: CMYK -> must use 'k' operator with 4 components
+        if (nColor == 1) {
+            color[1] = color[2] = color[0];
+            nColor = 3;
+        } else if (nColor == 4) {
+            // keep all 4 components for 'k' operator
+        } else if (nColor == 3) {
+            // use as-is
+        } else {
+            // nColor == 0 or unexpected -> use yellow default (already set)
+            nColor = 3;
+        }
+
+        // --- Build resources dict with ExtGState /H (Multiply, CA=opacity) ---
+        pdf_obj* res = pdf_new_dict(ctx, doc, 4);
+        pdf_obj* extgstate = pdf_new_dict(ctx, doc, 4);
+        pdf_obj* hstate = pdf_new_dict(ctx, doc, 4);
+        pdf_dict_puts(ctx, hstate, "Type", pdf_new_name(ctx, "ExtGState"));
+        pdf_dict_puts(ctx, hstate, "BM", pdf_new_name(ctx, "Multiply"));
+        pdf_dict_put(ctx, hstate, pdf_new_name(ctx, "CA"), pdf_new_real(ctx, opacity));
+        pdf_dict_put(ctx, hstate, pdf_new_name(ctx, "ca"), pdf_new_real(ctx, opacity));
+        pdf_dict_put(ctx, extgstate, pdf_new_name(ctx, "H"), hstate);
+        pdf_dict_put(ctx, res, pdf_new_name(ctx, "ExtGState"), extgstate);
+
+        // --- Build content stream in an fz_buffer via fz_output ---
+        // Stream: q /H gs 1 1 0 rg  x0 y0 m x1 y0 l x1 y1 l x0 y1 l f  ... Q
+        // Content coordinates are in APP space; the form's /Matrix (inv) maps them to PDF user space.
+        // Use 'k' operator (4 components) for CMYK, 'rg' (3 components) otherwise.
+        fz_buffer* buf = fz_new_buffer(ctx, 512);
+        fz_output* out = fz_new_output_with_buffer(ctx, buf);
+        if (nColor == 4) {
+            fz_write_printf(ctx, out, "q\n/H gs\n%.3f %.3f %.3f %.3f k\n", color[0], color[1], color[2], color[3]);
+        } else {
+            fz_write_printf(ctx, out, "q\n/H gs\n%.3f %.3f %.3f rg\n", color[0], color[1], color[2]);
+        }
+        for (int i = 0; i < n; i++) {
+            fz_rect r = ToFzRect(rects[i]);
+            fz_write_printf(ctx, out, "%.3f %.3f m\n%.3f %.3f l\n%.3f %.3f l\n%.3f %.3f l\nf\n", r.x0, r.y0, r.x1, r.y0,
+                            r.x1, r.y1, r.x0, r.y1);
+        }
+        fz_write_printf(ctx, out, "Q\n");
+        fz_close_output(ctx, out);
+        fz_drop_output(ctx, out);
+
+        // --- Create Form XObject: /BBox = app-space union, /Matrix = inv_page_ctm ---
+        pdf_obj* xobj = pdf_new_xobject(ctx, doc, bbox_app, inv, res, buf);
+        fz_drop_buffer(ctx, buf);
+        pdf_drop_obj(ctx, res); // xobj keeps its own ref to resources
+
+        // --- Install as annotation's Normal ("N") appearance ---
+        // Get or create /AP dict on the annotation
+        pdf_obj* annot_obj = pdf_annot_obj(ctx, a);
+        pdf_obj* ap = pdf_dict_get(ctx, annot_obj, pdf_new_name(ctx, "AP"));
+        if (!ap) {
+            ap = pdf_new_dict(ctx, doc, 2);
+            pdf_dict_put(ctx, annot_obj, pdf_new_name(ctx, "AP"), ap);
+        }
+        // Put XObject under /N (normal appearance)
+        pdf_dict_put(ctx, ap, pdf_new_name(ctx, "N"), xobj);
+        pdf_drop_obj(ctx, xobj); // ap keeps a ref
+
+        // --- Set annotation /Rect to PDF-user-space union via pdf_dict_put_rect ---
+        // This does NOT call pdf_dirty_annot / pdf_annot_request_resynthesis,
+        // so MuPDF will NOT regenerate its default rounded-caps appearance.
+        pdf_dict_put_rect(ctx, annot_obj, PDF_NAME(Rect), bbox_pdf);
+
+        // IMPORTANT: Do NOT call pdf_update_annot(ctx, a) here.
+        // The caller (SetQuadPointsAsRect) already called it for quad points/color/opacity.
+        // Calling it again would make MuPDF regenerate the rounded-caps appearance.
+        // Also do NOT call pdf_set_annot_rect (it dirties the annot and triggers resynthesis).
+    }
+    fz_catch(ctx) {
+        fz_report_error(ctx);
+        logf("SetSharpHighlightAppearance(): mupdf calls failed\n");
+    }
 }
 
 // Regenerate appearance streams for the whole page after a form mutation.
@@ -721,16 +863,16 @@ bool SetContents(Annotation* annot, Str sv) {
     return true;
 }
 
-void DeleteAnnotation(Annotation* annot) {
+bool DeleteAnnotation(Annotation* annot) {
     ReportIf(!annot);
     if (!annot) {
-        return;
+        return false;
     }
     // Caller must have DetachAnnotationFromUI (or have no UI holders).
     EngineMupdf* e = annot->engine;
     if (!e) {
         delete annot;
-        return;
+        return true;
     }
     auto* a = annot->pdfannot;
     if (!a) {
@@ -739,14 +881,14 @@ void DeleteAnnotation(Annotation* annot) {
             MarkNotificationAsModified(e, annot, AnnotationChange::Remove);
         }
         delete annot;
-        return;
+        return true;
     }
     if (!IsAnnotationInEngine(e, annot)) {
         logf("DeleteAnnotation: annotation not found in engine, skipping\n");
         // Still free the wrapper so callers do not leak a detached Annotation*.
         annot->pdfannot = nullptr;
         delete annot;
-        return;
+        return true;
     }
     bool failed = false;
     {
@@ -764,12 +906,13 @@ void DeleteAnnotation(Annotation* annot) {
     }
     if (failed) {
         logf("failed to delete annotation on page %d\n", annot->pageNo);
-        return;
+        return false;
     }
     annot->pdfannot = nullptr;
     // Remove from pageInfo->annotations (must happen while annot is still valid).
     MarkNotificationAsModified(e, annot, AnnotationChange::Remove);
     delete annot;
+    return true;
 }
 
 // -1 if not exist

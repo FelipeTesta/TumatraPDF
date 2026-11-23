@@ -198,6 +198,31 @@ static void FlashcardActiveListClearIfTab(MainWindow* win, WindowTab* tab) {
     }
 }
 
+// Shared refresh after a flashcard annotation is deleted by ANY path.
+// Reloads cards from document, repopulates List panel, clears active selection if it pointed to the deleted tab.
+static void FlashcardRefreshAfterDelete(MainWindow* win, WindowTab* tab) {
+    if (!win || !tab) return;
+    DisplayModel* dm = tab->AsFixed();
+    if (!dm) return;
+    EngineBase* engine = dm->GetEngine();
+    if (!engine) return;
+
+    // Reload cards from document
+    tab->flashcard.cards = FlashcardLoadFromDocument(AsEngineMupdf(engine));
+    tab->flashcard.cardsLoaded = true;
+
+    // Clear active list selection if it points to this tab
+    FlashcardActiveListClearIfTab(win, tab);
+
+    // Repopulate List panel if visible
+    if (win->uiState.fcListVisible) {
+        FlashcardSidebarPopulate(win);
+    }
+
+    // Update toolbar count
+    FlashcardToolbarUpdateCount(win);
+}
+
 // Index of a tab inside win->tabs, -1 when the tab is no longer in this
 // window (closed, or dragged out to another window — global sessions only
 // count tabs that live in THIS window)
@@ -283,7 +308,7 @@ static void CollectTabCards(MainWindow* win, WindowTab* tab, i64 now, Vec<Flashc
 }
 
 // Helper: delete all flashcard annotations belonging to a card (primary page + extraPages)
-// Returns true on success, false if the engine doesn't support annotations
+// Returns true on success, false if the engine doesn't support annotations or any delete failed
 static bool FlashcardDeleteCardAnnotations(WindowTab* tab, Flashcard& card) {
     DisplayModel* dm = tab->AsFixed();
     if (!dm) {
@@ -322,10 +347,14 @@ static bool FlashcardDeleteCardAnnotations(WindowTab* tab, Flashcard& card) {
     }
     logf("[fc] FlashcardDeleteCardAnnotations - removing %d annotation(s) of card ('%s')\n", len(toDelete),
          FlashcardTabLogName(tab));
+    bool allOk = true;
     for (Annotation* a : toDelete) {
-        DeleteAnnotationAndUpdateUI(tab, a);
+        bool ok = DeleteAnnotationAndUpdateUI(tab, a);
+        if (!ok) {
+            allOk = false;
+        }
     }
-    return true;
+    return allOk;
 }
 
 static void BuildFilteredStudyOrder(MainWindow* win) {
@@ -1237,13 +1266,9 @@ bool HandleCommandFlashcard(MainWindow* win, int cmd) {
                 logf("[fc] CmdFlashcardDeleteActive - deleting from Lista (cardIdx=%d)\n", targetCardIdx);
                 Flashcard& card = targetTab->flashcard.cards[targetCardIdx];
                 FlashcardDeleteCardAnnotations(targetTab, card);
-                // reload cards
+                // Shared refresh: reload cards, repopulate Lista, clear active selection
                 FlashcardPrewarmInvalidate();
-                EngineBase* engine = targetTab->AsFixed() ? targetTab->AsFixed()->GetEngine() : nullptr;
-                if (engine) {
-                    targetTab->flashcard.cards = FlashcardLoadFromDocument(AsEngineMupdf(engine));
-                    targetTab->flashcard.cardsLoaded = true;
-                }
+                FlashcardRefreshAfterDelete(win, targetTab);
                 // SM-2 prune + persist (same as study path) — AFTER reload so deleted card's key is absent
                 if (targetTab->filePath) {
                     int pruned = FlashcardStudyPruneStates(targetTab->flashcard.studyDoc, targetTab->flashcard.cards);
@@ -1253,12 +1278,6 @@ bool HandleCommandFlashcard(MainWindow* win, int cmd) {
                     }
                     FlashcardStudySave(targetTab->filePath.s, targetTab->flashcard.studyDoc);
                 }
-                // clear list-active state (card is gone)
-                win->flashcard.activeListCardIdx = -1;
-                win->flashcard.activeListCardTab = nullptr;
-                // update UI
-                FlashcardToolbarUpdateCount(win);
-                FlashcardSidebarPopulate(win);
                 FlashcardToolbarUpdateState(win);
                 MainWindowRerender(win);
                 return true;
@@ -1322,11 +1341,9 @@ bool HandleCommandFlashcard(MainWindow* win, int cmd) {
                 DeleteAnnotationAndUpdateUI(e.tab, a);
             }
 
-            // reload the cards vec so the deleted card is gone everywhere;
-            // warm-render jobs are stale after the mutation
+            // Shared refresh: reload cards, repopulate Lista, clear active selection
             FlashcardPrewarmInvalidate();
-            e.tab->flashcard.cards = FlashcardLoadFromDocument(AsEngineMupdf(engine));
-            e.tab->flashcard.cardsLoaded = true;
+            FlashcardRefreshAfterDelete(win, e.tab);
 
             // prune SM-2 states of cards that no longer exist (the deleted
             // card's key is gone from the reloaded vec) and persist, like the

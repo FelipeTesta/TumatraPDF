@@ -97,6 +97,7 @@ RectF GetBounds(Annotation*);
 RectF GetRect(Annotation*);
 void SetRect(Annotation*, RectF);
 void SetQuadPointsAsRect(Annotation*, const Vec<RectF>&);
+void SetSharpHighlightAppearance(Annotation*, const Vec<RectF>&);
 
 Str Author(Annotation*);
 time_t ModificationDate(Annotation*);
@@ -158,7 +159,7 @@ bool ToggleFormButton(Annotation*);
 
 bool AnnotationIsLive(Annotation*);
 
-void DeleteAnnotation(Annotation*);
+bool DeleteAnnotation(Annotation*);
 bool AnnotationCanBeMoved(AnnotationType);
 bool AnnotationCanBeResized(AnnotationType);
 bool AnnotationSupportsColor(AnnotationType);

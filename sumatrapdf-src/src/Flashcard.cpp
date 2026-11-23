@@ -290,8 +290,6 @@ Annotation* FlashcardCreateHighlightAnnot(EngineBase* engine, int pageNo, Vec<Re
         logf("[fc] CreateHighlightAnnot - ERROR: EngineMupdfCreateAnnotation failed (page %d)\n", pageNo);
         return nullptr;
     }
-    SetQuadPointsAsRect(annot, rects);
-    annot->bounds = GetBounds(annot);
     EngineMupdf* epdf = AsEngineMupdf(engine);
     if (!epdf) {
         return annot;
@@ -315,6 +313,8 @@ Annotation* FlashcardCreateHighlightAnnot(EngineBase* engine, int pageNo, Vec<Re
     fz_catch(ctx) {
         fz_report_error(ctx);
     }
+    SetQuadPointsAsRect(annot, rects);
+    annot->bounds = GetBounds(annot);
     return annot;
 }
 

@@ -235,11 +235,11 @@ void InvalidateEditAnnotationsOnEngineChange(WindowTab* tab) {
     RebuildAnnotationsListBox(ew);
 }
 
-void DeleteAnnotationAndUpdateUI(WindowTab* tab, Annotation* annot) {
+bool DeleteAnnotationAndUpdateUI(WindowTab* tab, Annotation* annot) {
     if (!annot) {
         // the listbox selection can be stale (see DeleteSelectedAnnotation), and
         // FindAnnotationOnSamePage() below dereferences annot
-        return;
+        return false;
     }
     EditAnnotationsWindow* ew = tab->editAnnotsWindow;
     Annotation* selectNext = nullptr;
@@ -253,12 +253,16 @@ void DeleteAnnotationAndUpdateUI(WindowTab* tab, Annotation* annot) {
 
     // Clear all UI holders before DeleteAnnotation frees the wrapper.
     DetachAnnotationFromUI(annot);
-    DeleteAnnotation(annot);
+    bool ok = DeleteAnnotation(annot);
+    if (!ok) {
+        logf("DeleteAnnotationAndUpdateUI: DeleteAnnotation failed for annot on page %d\n", annot->pageNo);
+    }
     if (ew != nullptr) {
         // can be null if called from Menu.cpp and annotations window is not visible
         UpdateAnnotationsList(ew);
     }
     SetSelectedAnnotation(tab, selectNext);
+    return ok;
 }
 
 static void DeleteSelectedAnnotation(EditAnnotationsWindow* ew) {
