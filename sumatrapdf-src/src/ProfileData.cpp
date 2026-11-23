@@ -99,7 +99,7 @@ static void ProfSetLastPortableImportStatus(Str text) {
     gLastPortableImportStatus = str::Dup(text).s;
 }
 
-static void ProfSaveInner();
+static bool ProfSaveInner();
 static void ProfMaybeBackup();
 static void ProfPullHistory();
 static void ProfileDataEnsureLoaded();
@@ -2103,36 +2103,95 @@ void ProfileDataUpsertStudyDay(int dateKey, int sec, int cards) {
     ProfUpsertDay(gProfile.studyDaily, dateKey, sec, cards);
 }
 
-// merged = live local module + profile rows of OTHER machines (rows carrying
-// this machine's name are skipped: the live module owns this machine's numbers)
+// merged = live local module + profile rows of ALL machines (this machine's
+// profile row is combined with MAX, never sum; other machines' rows are summed).
+// Helper: own-machine profile row value for a given dateKey
+static int ProfOwnMachineDaySec(const Vec<ProfDayMachine>& v, int dateKey) {
+    for (int i = 0; i < len(v); i++) {
+        if (v[i].dateKey == dateKey && ProfIsThisMachine(Str(v[i].machine))) {
+            return v[i].sec;
+        }
+    }
+    return 0;
+}
+
+static int ProfOwnMachineDayCards(const Vec<ProfDayMachine>& v, int dateKey) {
+    for (int i = 0; i < len(v); i++) {
+        if (v[i].dateKey == dateKey && ProfIsThisMachine(Str(v[i].machine))) {
+            return v[i].cards;
+        }
+    }
+    return 0;
+}
+
+// merged = live local module + profile rows of ALL machines (this machine's
+// profile row is combined with MAX, never sum; other machines' rows are summed).
 int ProfileDataReadingDaySec(int dateKey) {
     ProfileDataEnsureLoaded();
-    return ReadingStatsGetDaySec(dateKey) + ProfSumDay(gProfile.readingDaily, dateKey, false);
+    int live = ReadingStatsGetDaySec(dateKey);
+    int ownProfile = ProfOwnMachineDaySec(gProfile.readingDaily, dateKey);
+    int otherProfile = ProfSumDay(gProfile.readingDaily, dateKey, false);
+    return (live > ownProfile ? live : ownProfile) + otherProfile;
 }
 
 int ProfileDataReadingTotalSec() {
     ProfileDataEnsureLoaded();
-    return ReadingStatsGetTotalSec() + ProfSumAll(gProfile.readingDaily, false);
+    int live = ReadingStatsGetTotalSec();
+    int ownProfile = 0;
+    for (int i = 0; i < len(gProfile.readingDaily); i++) {
+        if (ProfIsThisMachine(Str(gProfile.readingDaily[i].machine))) {
+            ownProfile += gProfile.readingDaily[i].sec;
+        }
+    }
+    int otherProfile = ProfSumAll(gProfile.readingDaily, false);
+    // For total: sum of MAX(live day, ownProfile day) + other machines' days
+    // Since we don't have per-day breakdown of live total, approximate with MAX(live, ownProfile) + other
+    // But the precise way: live total is sum of live days; ownProfile total is sum of own profile days.
+    // We want sum over days of MAX(liveDay, ownProfileDay) + otherDays.
+    // Without per-day live breakdown, use MAX(live, ownProfile) + other as a safe lower bound.
+    return (live > ownProfile ? live : ownProfile) + otherProfile;
 }
 
 int ProfileDataStudyDaySec(int dateKey) {
     ProfileDataEnsureLoaded();
-    return FlashcardStatsGetDaySec(dateKey) + ProfSumDay(gProfile.studyDaily, dateKey, false);
+    int live = FlashcardStatsGetDaySec(dateKey);
+    int ownProfile = ProfOwnMachineDaySec(gProfile.studyDaily, dateKey);
+    int otherProfile = ProfSumDay(gProfile.studyDaily, dateKey, false);
+    return (live > ownProfile ? live : ownProfile) + otherProfile;
 }
 
 int ProfileDataStudyDayCards(int dateKey) {
     ProfileDataEnsureLoaded();
-    return FlashcardStatsGetDayCards(dateKey) + ProfSumDay(gProfile.studyDaily, dateKey, true);
+    int live = FlashcardStatsGetDayCards(dateKey);
+    int ownProfile = ProfOwnMachineDayCards(gProfile.studyDaily, dateKey);
+    int otherProfile = ProfSumDay(gProfile.studyDaily, dateKey, true);
+    return (live > ownProfile ? live : ownProfile) + otherProfile;
 }
 
 int ProfileDataStudyTotalSec() {
     ProfileDataEnsureLoaded();
-    return FlashcardStatsGetTotalSec() + ProfSumAll(gProfile.studyDaily, false);
+    int live = FlashcardStatsGetTotalSec();
+    int ownProfile = 0;
+    for (int i = 0; i < len(gProfile.studyDaily); i++) {
+        if (ProfIsThisMachine(Str(gProfile.studyDaily[i].machine))) {
+            ownProfile += gProfile.studyDaily[i].sec;
+        }
+    }
+    int otherProfile = ProfSumAll(gProfile.studyDaily, false);
+    return (live > ownProfile ? live : ownProfile) + otherProfile;
 }
 
 int ProfileDataStudyTotalCards() {
     ProfileDataEnsureLoaded();
-    return FlashcardStatsGetTotalCards() + ProfSumAll(gProfile.studyDaily, true);
+    int live = FlashcardStatsGetTotalCards();
+    int ownProfile = 0;
+    for (int i = 0; i < len(gProfile.studyDaily); i++) {
+        if (ProfIsThisMachine(Str(gProfile.studyDaily[i].machine))) {
+            ownProfile += gProfile.studyDaily[i].cards;
+        }
+    }
+    int otherProfile = ProfSumAll(gProfile.studyDaily, true);
+    return (live > ownProfile ? live : ownProfile) + otherProfile;
 }
 
 // ---- save (atomic; mirrors FlashcardStudySave) ----
@@ -2347,18 +2406,94 @@ static void ProfPullHistory() {
     }
 }
 
-static void ProfSaveInner() {
+// Merge on-disk profile day rows (readingStats + fcStats) into in-memory
+// gProfile.readingDaily / studyDaily taking MAX per (dateKey, machine).
+// Called before each save so a stale snapshot cannot erase another instance's day rows.
+// If the file cannot be read/parsed, skips the merge (does not fail the save).
+static void ProfMergeOnDiskDayRows() {
+    TempStr path = ProfileDataPathTemp();
+    if (!file::Exists(Str(path))) {
+        return;
+    }
+    Str json = file::ReadFile(Str(path));
+    if (!json || !ProfBlockInterior(json)) {
+        return;
+    }
+    // readingStats
+    Vec<ProfDayMachine> tempReading;
+    ProfParseDaySection(json, "readingStats", tempReading);
+    for (int i = 0; i < len(tempReading); i++) {
+        ProfDayMachine& e = tempReading[i];
+        int foundIdx = -1;
+        for (int j = 0; j < len(gProfile.readingDaily); j++) {
+            if (gProfile.readingDaily[j].dateKey == e.dateKey &&
+                str::EqI(Str(gProfile.readingDaily[j].machine), Str(e.machine))) {
+                foundIdx = j;
+                break;
+            }
+        }
+        if (foundIdx < 0) {
+            gProfile.readingDaily.Append(e);
+            e.machine = nullptr; // ownership transferred
+            gProfile.dirty = true;
+        } else {
+            if (e.sec > gProfile.readingDaily[foundIdx].sec) {
+                gProfile.readingDaily[foundIdx].sec = e.sec;
+                gProfile.dirty = true;
+            }
+        }
+    }
+    ProfFreeDays(tempReading);
+
+    // fcStats
+    Vec<ProfDayMachine> tempStudy;
+    ProfParseDaySection(json, "fcStats", tempStudy);
+    for (int i = 0; i < len(tempStudy); i++) {
+        ProfDayMachine& e = tempStudy[i];
+        int foundIdx = -1;
+        for (int j = 0; j < len(gProfile.studyDaily); j++) {
+            if (gProfile.studyDaily[j].dateKey == e.dateKey &&
+                str::EqI(Str(gProfile.studyDaily[j].machine), Str(e.machine))) {
+                foundIdx = j;
+                break;
+            }
+        }
+        if (foundIdx < 0) {
+            gProfile.studyDaily.Append(e);
+            e.machine = nullptr; // ownership transferred
+            gProfile.dirty = true;
+        } else {
+            if (e.sec > gProfile.studyDaily[foundIdx].sec) {
+                gProfile.studyDaily[foundIdx].sec = e.sec;
+                gProfile.dirty = true;
+            }
+            if (e.cards > gProfile.studyDaily[foundIdx].cards) {
+                gProfile.studyDaily[foundIdx].cards = e.cards;
+                gProfile.dirty = true;
+            }
+        }
+    }
+    ProfFreeDays(tempStudy);
+}
+
+// Returns true on success, false on failure (logs details).
+// On failure, caller must NOT clear gProfile.dirty so the next save retries.
+static bool ProfSaveInner() {
     TempStr path = ProfileDataPathTemp();
     TempStr dir = path::GetDirTemp(Str(path));
     if (dir) {
         dir::CreateAll(Str(dir));
     }
 
+    // merge on-disk day rows (MAX per dateKey+machine) so a stale snapshot
+    // cannot erase another instance's day rows
+    ProfMergeOnDiskDayRows();
+
     TempStr tmpPath = str::JoinTemp(Str(path), StrL(".tmp"));
     FILE* f = _wfopen(CWStrTemp(ToWStrTemp(Str(tmpPath))), L"wb");
     if (!f) {
         logf("[profile] save ERROR: failed to open '%s'\n", Str(tmpPath));
-        return;
+        return false;
     }
 
     fprintf(f, "{\n");
@@ -2417,7 +2552,10 @@ static void ProfSaveInner() {
         if (hexChecksum) {
             TempStr withChecksum = ProfSubstChecksumTemp(fileContent, hexChecksum);
             if (withChecksum) {
-                file::WriteFile(Str(tmpPath), Str(withChecksum));
+                if (!file::WriteFile(Str(tmpPath), Str(withChecksum))) {
+                    logf("[profile] save ERROR: failed to write checksum to '%s'\n", Str(tmpPath));
+                    return false;
+                }
             }
         }
     }
@@ -2433,10 +2571,11 @@ static void ProfSaveInner() {
     }
     if (!ok) {
         logf("[profile] save ERROR: failed to replace '%s'\n", Str(path));
-        return;
+        return false;
     }
     logf("[profile] saved %d book(s), %d reading day(s), %d study day(s)\n", len(gProfile.books),
          len(gProfile.readingDaily), len(gProfile.studyDaily));
+    return true;
 }
 
 void ProfileDataSaveNow() {
@@ -2445,7 +2584,10 @@ void ProfileDataSaveNow() {
         return;
     }
     ProfPullHistory();
-    ProfSaveInner();
+    if (!ProfSaveInner()) {
+        // do NOT clear dirty; next save will retry
+        return;
+    }
     ProfMaybeBackup();
     gProfile.dirty = false;
 }

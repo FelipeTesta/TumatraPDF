@@ -136,6 +136,71 @@ static void ReadingStatsLoadIfNeeded() {
     }
 }
 
+// Merge on-disk sidecar into in-memory daily vector (MAX on sec per dateKey).
+// Called before each flush so a stale snapshot cannot erase another instance's day rows.
+// If the file cannot be read, falls back to in-memory list only.
+static void ReadingStatsMergeOnDiskMax() {
+    TempStr p = ReadingStatsPathTemp();
+    if (!file::Exists(p)) {
+        p = ReadingStatsLegacyPathTemp();
+        if (!file::Exists(p)) {
+            return;
+        }
+    }
+    Str d = file::ReadFile(p);
+    if (!d) {
+        return;
+    }
+    StrVec lines;
+    Split(&lines, d, StrL("\n"), true);
+    for (Str line : lines) {
+        char buf[64]{};
+        int lenCopy = std::min(len(line), (int)(dimof(buf) - 1));
+        memcpy(buf, line.s, (size_t)lenCopy);
+        char* p1 = nullptr;
+        long dateKeyL = strtol(buf, &p1, 10);
+        long secL = 0;
+        int n = 0;
+        if (p1 != buf) {
+            n = 1;
+            char* p2 = p1;
+            secL = strtol(p2, &p2, 10);
+            if (p2 != p1) {
+                n = 2;
+            }
+        }
+        if (n == 2 && dateKeyL > 19000101 && secL >= 0) {
+            int dateKey = (int)dateKeyL;
+            int sec = (int)secL;
+            // merge: MAX per dateKey
+            bool found = false;
+            for (int i = 0; i < len(gReadingStats.daily); i++) {
+                if (gReadingStats.daily[i].dateKey == dateKey) {
+                    if (sec > gReadingStats.daily[i].sec) {
+                        gReadingStats.daily[i].sec = sec;
+                    }
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                DailyEntry e{dateKey, sec};
+                gReadingStats.daily.Append(e);
+            }
+        }
+    }
+    // re-sort
+    for (int i = 1; i < len(gReadingStats.daily); i++) {
+        DailyEntry e = gReadingStats.daily[i];
+        int j = i - 1;
+        while (j >= 0 && gReadingStats.daily[j].dateKey > e.dateKey) {
+            gReadingStats.daily[j + 1] = gReadingStats.daily[j];
+            j--;
+        }
+        gReadingStats.daily[j + 1] = e;
+    }
+}
+
 static void ReadingStatsAddDaily(float sec) {
     ReadingStatsLoadIfNeeded();
     int key = DateKeyToday();
@@ -175,6 +240,7 @@ void ReadingStatsAddSeconds(MainWindow* win, float sec) {
         FileState* fs = gFileHistory.FindByPath(tab->filePath);
         if (fs) {
             fs->readingTimeSec += whole;
+            fs->lastActivityTs = (int)time(nullptr);
             ProfileDataAddReadingSec(tab->filePath.s, whole);
         }
     }
@@ -210,20 +276,32 @@ void ReadingStatsFlush(bool force) {
         return;
     }
     ReadingStatsLoadIfNeeded();
+    // merge on-disk sidecar (MAX per dateKey) so a stale snapshot cannot erase
+    // another instance's day rows
+    ReadingStatsMergeOnDiskMax();
     str::Builder sb;
     for (int i = 0; i < len(gReadingStats.daily); i++) {
         DailyEntry& e = gReadingStats.daily[i];
         sb.Append(fmt("%d %d\r\n", e.dateKey, e.sec));
     }
     Str data = sb.TakeStr();
+    bool ok = true;
     if (kProfDualWriteSidecars) {
         TempStr root = ProfileDataGetDataRootTemp();
         TempStr statsDir = path::JoinTemp(root, StrL("stats"));
         dir::CreateAll(Str(statsDir));
-        file::WriteFile(ReadingStatsPathTemp(), data);
+        ok = file::WriteFile(ReadingStatsPathTemp(), data);
+        if (!ok) {
+            logfa("[stats] reading sidecar write FAILED: '%s'\n", Str(ReadingStatsPathTemp()));
+        }
     }
     str::Free(data);
-    gReadingStats.dirtySec = 0;
+    if (!ok) {
+        // do NOT clear dirtySec; next flush will retry the sidecar write
+        // but CONTINUE to profile upsert so the day reaches the second copy
+    } else {
+        gReadingStats.dirtySec = 0;
+    }
     // stream the day rows into the profile store too (own-machine rows); the
     // profile save flushes AFTER, in the same cadence
     for (int i = 0; i < len(gReadingStats.daily); i++) {

@@ -1499,7 +1499,6 @@ void HomeStatsWnd::Paint(VirtWndPaintCtx& ctx) {
         // build the ranked list
         Vec<FileState*> all;
         gFileHistory.GetRecentlyOpenedOrder(all);
-        // insertion sort desc by the active time field (Vec has no iterators)
 
         // Session entries for statsTab == 2 mode
         Vec<SessionStatEntry> sessionEntries;
@@ -1525,25 +1524,46 @@ void HomeStatsWnd::Paint(VirtWndPaintCtx& ctx) {
             ranked[j + 1] = e;
         }
 
-        // pin the last studied document: walk the MRU order (newest first) and
-        // take the first entry that actually has stats, then move it to the top
+        // pinned row = most recent reading/study activity (autoscroll or study);
+        // fallback = MRU-first book with stats.
         FileState* pinnedFs = nullptr;
         if (statsTab != 2) {
-            for (int i = 0; i < len(all); i++) {
-                int at = -1;
-                for (int j = 0; j < len(ranked); j++) {
-                    if (ranked[j] == all[i]) {
-                        at = j;
+            // first, try to find the ranked book with the largest lastActivityTs > 0
+            int bestIdx = -1;
+            int bestTs = 0;
+            for (int i = 0; i < len(ranked); i++) {
+                int ts = ranked[i]->lastActivityTs;
+                if (ts > bestTs) {
+                    bestTs = ts;
+                    bestIdx = i;
+                }
+            }
+            if (bestIdx >= 0) {
+                // move the most recently active book to the top
+                pinnedFs = ranked[bestIdx];
+                for (int j = bestIdx; j > 0; j--) {
+                    ranked[j] = ranked[j - 1];
+                }
+                ranked[0] = pinnedFs;
+            } else {
+                // no book has a timestamp (all zero = pre-field data):
+                // fall back to original behaviour — MRU-first book that has stats
+                for (int i = 0; i < len(all); i++) {
+                    int at = -1;
+                    for (int j = 0; j < len(ranked); j++) {
+                        if (ranked[j] == all[i]) {
+                            at = j;
+                            break;
+                        }
+                    }
+                    if (at >= 0) {
+                        pinnedFs = ranked[at];
+                        for (int j = at; j > 0; j--) {
+                            ranked[j] = ranked[j - 1];
+                        }
+                        ranked[0] = pinnedFs;
                         break;
                     }
-                }
-                if (at >= 0) {
-                    pinnedFs = ranked[at];
-                    for (int j = at; j > 0; j--) {
-                        ranked[j] = ranked[j - 1];
-                    }
-                    ranked[0] = pinnedFs;
-                    break;
                 }
             }
         }

@@ -147,6 +147,81 @@ static void FlashcardStatsLoadIfNeeded() {
     }
 }
 
+// Merge on-disk sidecar into in-memory daily vector (MAX on sec and cards per dateKey).
+// Called before each flush so a stale snapshot cannot erase another instance's day rows.
+// If the file cannot be read, falls back to in-memory list only.
+static void FlashcardStatsMergeOnDiskMax() {
+    TempStr p = FlashcardStatsPathTemp();
+    if (!file::Exists(p)) {
+        p = FlashcardStatsLegacyPathTemp();
+        if (!file::Exists(p)) {
+            return;
+        }
+    }
+    Str d = file::ReadFile(p);
+    if (!d) {
+        return;
+    }
+    StrVec lines;
+    Split(&lines, d, StrL("\n"), true);
+    for (Str line : lines) {
+        char buf[64]{};
+        int lenCopy = std::min(len(line), (int)(dimof(buf) - 1));
+        memcpy(buf, line.s, (size_t)lenCopy);
+        char* p1 = nullptr;
+        long dateKeyL = strtol(buf, &p1, 10);
+        long secL = 0;
+        long cardsL = 0;
+        int n = 0;
+        if (p1 != buf) {
+            n = 1;
+            char* p2 = p1;
+            secL = strtol(p2, &p2, 10);
+            if (p2 != p1) {
+                n = 2;
+                char* p3 = p2;
+                cardsL = strtol(p3, &p3, 10);
+                if (p3 != p2) {
+                    n = 3;
+                }
+            }
+        }
+        if (n >= 2 && dateKeyL > 19000101 && secL >= 0) {
+            int dateKey = (int)dateKeyL;
+            int sec = (int)secL;
+            int cards = (n == 3) ? (int)cardsL : 0;
+            // merge: MAX per dateKey for both sec and cards
+            bool found = false;
+            for (int i = 0; i < len(gFlashcardStats.daily); i++) {
+                if (gFlashcardStats.daily[i].dateKey == dateKey) {
+                    if (sec > gFlashcardStats.daily[i].sec) {
+                        gFlashcardStats.daily[i].sec = sec;
+                    }
+                    if (cards > gFlashcardStats.daily[i].cards) {
+                        gFlashcardStats.daily[i].cards = cards;
+                    }
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                DailyEntry e{dateKey, sec, cards};
+                gFlashcardStats.daily.Append(e);
+            }
+        }
+    }
+    // re-sort
+    for (int i = 1; i < len(gFlashcardStats.daily); i++) {
+        DailyEntry e = gFlashcardStats.daily[i];
+        int j = i - 1;
+        while (j >= 0 && gFlashcardStats.daily[j].dateKey > e.dateKey) {
+            gFlashcardStats.daily[j + 1] = gFlashcardStats.daily[j];
+            j--;
+        }
+        gFlashcardStats.daily[j + 1] = e;
+    }
+}
+
 static void FlashcardStatsAddDaily(float sec) {
     FlashcardStatsLoadIfNeeded();
     int key = DateKeyToday();
@@ -235,6 +310,7 @@ void FlashcardStatsAddSeconds(MainWindow* win, WindowTab* tab, float sec) {
         FileState* fs = gFileHistory.FindByPath(tab->filePath);
         if (fs) {
             fs->flashcardStudyTimeSec += whole;
+            fs->lastActivityTs = (int)time(nullptr);
             ProfileDataAddFlashcardSec(tab->filePath.s, whole);
         }
     }
@@ -251,21 +327,33 @@ void FlashcardStatsFlush(bool force) {
         return;
     }
     FlashcardStatsLoadIfNeeded();
+    // merge on-disk sidecar (MAX per dateKey for sec and cards) so a stale
+    // snapshot cannot erase another instance's day rows
+    FlashcardStatsMergeOnDiskMax();
     str::Builder sb;
     for (int i = 0; i < len(gFlashcardStats.daily); i++) {
         DailyEntry& e = gFlashcardStats.daily[i];
         sb.Append(fmt("%d %d %d\r\n", e.dateKey, e.sec, e.cards));
     }
     Str data = sb.TakeStr();
+    bool ok = true;
     if (kProfDualWriteSidecars) {
         TempStr root = ProfileDataGetDataRootTemp();
         TempStr statsDir = path::JoinTemp(root, StrL("stats"));
         dir::CreateAll(Str(statsDir));
-        file::WriteFile(FlashcardStatsPathTemp(), data);
+        ok = file::WriteFile(FlashcardStatsPathTemp(), data);
+        if (!ok) {
+            logfa("[stats] flashcard sidecar write FAILED: '%s'\n", Str(FlashcardStatsPathTemp()));
+        }
     }
     str::Free(data);
-    gFlashcardStats.dirtySec = 0;
-    gFlashcardStats.dirtyCards = 0;
+    if (!ok) {
+        // do NOT clear dirtySec/dirtyCards; next flush will retry the sidecar write
+        // but CONTINUE to profile upsert so the day reaches the second copy
+    } else {
+        gFlashcardStats.dirtySec = 0;
+        gFlashcardStats.dirtyCards = 0;
+    }
     // stream the day rows into the profile store too (own-machine rows)
     for (int i = 0; i < len(gFlashcardStats.daily); i++) {
         ProfileDataUpsertStudyDay(gFlashcardStats.daily[i].dateKey, gFlashcardStats.daily[i].sec,
