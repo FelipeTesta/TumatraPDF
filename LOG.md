@@ -1,3 +1,22 @@
+## 2026-11-23 (s77) — Windows 11 compatibility: SmartScreen warning, self-unblock, release checksums
+
+### Added
+- `README.md` + `README.es.md`: "Windows may ask before running" subsection (unsigned build + Mark of the Web + SmartScreen; More info -> Run anyway / Properties -> Unblock / `Unblock-File`; installed warns once, portable from the second launch).
+- `SECURITY.md`: "Windows warnings and unsigned builds" section (unsigned builds, public source, SHA-256 in the release notes, what to do on a Defender quarantine).
+- release.yml: CI step appends the SHA-256 of both assets to the release notes (append, never replace; `gh release edit` with the GITHUB_TOKEN; step cannot fail the release).
+
+### Changed
+- Startup: the portable removes the Zone.Identifier of its own executable (best-effort, user-writable locations only, silent) -> SmartScreen stops warning on every launch.
+- Update flow: the downloaded installer has its Mark of the Web removed before it is launched (defensive; the download path does not add it today).
+
+### Verified
+- Published v1.0.21 assets are `NotSigned` (Get-AuthenticodeSignature) -> the warning is expected for an unsigned build, not a malware verdict.
+- The app makes exactly one network request of its own (the update check against raw.githubusercontent.com); no crash upload, no analytics.
+
+### Notes
+- Signing the binaries with a code-signing certificate would remove the SmartScreen warning entirely; that needs a certificate decision (and its cost) — not done.
+- Runtime/visual validation of the startup self-unblock pending user manual test.
+
 ## 2026-11-23 (s75) — README: app presentation video
 
 ### Added
@@ -106,12 +125,18 @@
 - Language switcher line on both READMEs (`**English** · [Español](README.es.md)`), first line — GitHub landing always opens the English file, switch is one click.
 - `scripts/readme-sync.ts` — drift check: compares `git hash-object --path README.md` against the `<!-- readme-sync: source-blob=... -->` token in `README.es.md`; exit 1 on drift, `--update` rewrites token + version + date. Content-addressed (no git history, no version parsing) → no false positives when a release only touches CHANGELOG.
 - `.github/workflows/readme-sync.yml` — runs the check on PRs and on pushes touching either README (also fires on `v*` tag pushes; path filters are ignored for tags).
+- `scripts/flow-sync.ts` — FLOW map integrity check: extracts file refs + camel-case symbols from every `FLOW/*.dot` (FLOW/DEBUG excluded) and verifies they still exist in `src/`, vendored `mupdf/`+`ext/`, and the `cmd/gen-*.ts` generators (setting/command/flag names live there). Ratchet: `FLOW/.sync-baseline.json` records pre-existing debt (79 refs / 22 maps) so only NEW staleness fails; `--baseline` refuses to grow an entry. `FLOW/.sync-allow.txt` for intentional external names (Win32/WebView2/tools). Modes: `--baseline`, `--stamp` (`// dot-sync: verified=... refs=<hash>` review stamp over the referenced code), `--strip-lines`.
+- `.github/workflows/flow-sync.yml` — runs the check when `FLOW/**`, `sumatrapdf-src/src/**` or the generators change.
+- `FLOW/REPAIR-PLAN.md` — prioritized repair queue (P0 core maps → P3 low churn) + failure-class catalog + self-contained brief for external review (no source code needed).
 
 ### Changed
 - `README.md`: 4 missing blank lines before `## Credits`, `## 🆕 Features`, `## Architecture`, `## Status` (headings glued to previous paragraph break some renderers).
 - `.github/workflows/release.yml`: non-blocking `Check Spanish README sync` step after `setup-bun` (warning only, never blocks a release build).
 - `AGENTS.md` §13: `README.es.md` exempt from English rule (user-facing mirror); tool names never translated; sync procedure documented.
 - `TODO.md`: new `## Release gate` section — re-sync translation before every version tag.
+- `FLOW/*.dot` (31 maps): `--strip-lines` removed 444 `Foo.cpp:338` references — line numbers rot within weeks, the symbol name identifies the code. 35 maps got a `// dot-sync: verified=2026-11-23 refs=<hash>` review stamp.
+- Casing drift fixed in maps (names that never matched the code): `MarginTrimEnabled` -> `marginTrimEnabled`, `ViewportCropV2Enabled` -> `viewportCropV2Enabled` (2 maps), `TocBoxSubclassId` -> `tocBoxSubclassId`.
+- `AGENTS.md` §13 + `TODO.md`: FLOW check rules and repair tracking documented.
 
 ### Notes
 - `README.es.md` carries `> **Última actualización:** <date> · base: README.md v<version>` so a reader sees staleness immediately.
