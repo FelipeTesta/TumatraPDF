@@ -1,3 +1,55 @@
+## 2026-11-23 (s74) — Flashcard study=on map + per-rating cost model
+
+### Added
+- `FLOW/flashcard.dot` — updated: per-rating cost model cluster (A.1..A.13 with file:line + O()), perf hypotheses ranked (H1..H7 with evidence + how to confirm), improvement options ranked (O1..O7 with 5 fields each), measurement instrumentation (existing + proposed probes with exact log format + location), stale nodes corrected (prewarmer=implemented, tick=wall-clock+owning-tab, persist=full JSON rewrite, sidebar=O(cards x states)).
+- `FLOW/DEBUG/flashcard-study-perf.dot` — new debug map: complete call graph of one card transition (HandleFlashcardRate -> all callees -> canvas/render), data structures with sizes/complexities, lock/thread topology (UI thread + prewarmer worker + gFcWarmLock + docLock), cache layers (fz page cache, gRenderCache tiles, PageText cache, studyDoc mem/disk), hypotheses with measure lines, improvement options with 5 fields, legend.
+- `FLOW/annotation-edit-flow.dot` — updated node `fc_prefetch` (line 55): added current callers, off-by-one bug, async prewarmer details.
+- `FLOW/render-pipeline.dot` — updated node `flashcard_feat` (line 143): per-transition paint path, viewport culling, GDI+ hoist, TC2 routing, cost breakdown.
+- NEW FINDINGS (C-F1..C-F9) added to both maps as `cluster_newfindings`:
+  - C-F1: Lista visibility gate (FlashcardSidebar.cpp:657-659) — HWND check only, full populate runs on EVERY rating even when panel hidden.
+  - C-F2: PageText cache lifetime (FlashcardSidebar.cpp:676-712) — local to one Populate call, P extractions per rating, never reused.
+  - C-F3: Paint cost (Canvas.cpp:4109-4251) — iterates ALL cards, converts EVERY rect, then culls -> O(cards x quads) per paint; existing log at :4246.
+  - C-F4: Render queue LIFO priority inversion (RenderCache.cpp:863-872) — pops from TAIL, no priority, speculative tiles can beat visible.
+  - C-F5: Vicious circle — same FlashcardPrewarmBudget() gates sync prefetch (:964) and async prewarm (:614); ewma>400ms or tier cap=0 disables BOTH when they'd help most.
+  - C-F6: Two file writes per rating (Flashcard.cpp:697-763 + ProfileDataUpdateStudyDoc :771 -> ProfReplaceBookByKey -> ProfCopyStates -> ProfileDataSaveNow).
+  - C-F7: Stats do NOT write per rating (FlashcardStats.cpp:243-322) — flush at thresholds (>=20 cards, >=60 sec).
+  - C-F8: Study tick does NOT invalidate canvas (Commands_Flashcard.cpp:1522+) — only credits time, repaints only on session expiry (:1545).
+  - C-F9: Repo constraint — NO STL (base/: Str, Vec, StrVec only); unordered_map does not exist; key->index must be repo-native.
+- DISCARD CHANGES cluster (`cluster_discard`) added to both maps with data fate analysis:
+  - FlashcardEnsureTabCards (Commands_Flashcard.cpp:168-190) loads from LIVE document + JSON; log mismatch = orphans.
+  - FlashcardKey (Flashcard.cpp:32-44) keys by POSITION (pageNo + bounds quantized x100), not annotation object; same rect resurrects state, pixels off = new key = progress lost.
+  - FlashcardStudyPruneStates (Flashcard.cpp:662-690) called ONLY on rating/delete, never on load -> orphans survive indefinitely.
+  - Study time/cards counters NOT reverted (FileState, daily sidecar, ProfileData) -> history shows time for never-saved cards.
+  - FlashcardStudyListDocs (Flashcard.cpp:1399) reports from STUDY STATES, not document -> Config window shows phantom count.
+  - Options P1..P5: prune at load, warn on unsaved+active session, pending area for unsaved cards, no credit for unsaved cards, show both counts in Config.
+- PERF WORK PLAN node (`plan`) added to both maps with ordered phases P0..P8 from external model validation.
+
+### Changed
+- Corrected stale claims in `flashcard.dot`: prewarmer node now shows IMPLEMENTED (s64-R9p) with tier cap, budget, worker, epoch, dead drain loop; timer tick node now shows GetTickCount64 wall-clock with 1.5s guard crediting owning tab `studyOrder[curIdx].tab`; persist node now states per-rating cost (full JSON rewrite + tmp + MoveFileExW on UI thread, folder NOT in Defender exclusion); lista node now states per-populate cost (O(cards x states) + page-text extraction + 2 LB messages/row).
+- C-CORR-1: Prefetch is NOT off-by-one. `currentCardIdx++` at :953 precedes `FlashcardPrefetchUpcoming` at :964 — fromIdx IS the NEW card; prefetch warms the new card + count-1 following. REMOVED all "OFF-BY-ONE BUG" labels from both maps (fc_prefetch node, prefetch_up node) and replaced with accurate statement.
+- C-CORR-2: Prefetch never warms 4-5 cards. Count = `FlashcardPrewarmBudget(win)` = `min(round(150/ewma), tierCap)` where `FlashcardPrewarmTierCap` (:453-473) returns 0 (<=2 cores or <4 GB RAM), 1 (<=4 cores or <8 GB) or 2 (otherwise) — MAXIMUM is 2. Corrected all "4-5 cards" references (including PA3 node) to "at most 2 (tier cap)".
+
+### Verified
+- All file:line references traced in source (Commands_Flashcard.cpp, Flashcard.cpp, FlashcardSidebar.cpp, FlashcardStats.cpp, Canvas.cpp, RenderCache.cpp, ProfileData.cpp).
+- Graphviz syntax valid (balanced quotes, defined endpoints, no stray backslashes).
+
+### Fixed
+- Corrected stale claim: prefetch off-by-one -> intentional (currentCardIdx++ at :953 precedes call at :964; fromIdx = NEW card).
+- Corrected stale claim: prefetch warms 4-5 cards -> at most 2 (tier cap from FlashcardPrewarmTierCap :453-473).
+- Corrected stale claim: tier cap 0 disables all prefetch -> verified: budget=0 disables BOTH sync prefetch and async prewarm (C-F5).
+- Corrected stale claim: one file write per rating -> TWO writes (per-book JSON + ProfileDataUpdateStudyDoc deep copy + ProfileDataSaveNow).
+- Corrected stale claim: stats write per rating -> NO per-rating I/O (flush at >=20 cards / >=60 sec thresholds).
+- Corrected stale claim: study tick repaints canvas -> tick does NOT invalidate canvas (only repaints on session timer expiry at :1545).
+
+### Notes
+- Production code NOT changed in this round — analysis + maps only.
+- Three dominant per-rating costs identified: (1) FlashcardStudyPruneStates O(states x cards) Flashcard.cpp:662-690, (2) FlashcardStudySave full JSON rewrite + tmp + MoveFileExW Flashcard.cpp:697-763, (3) FlashcardSidebarPopulate O(cards x states) + text + LB msgs FlashcardSidebar.cpp:657-718 (when Lista open).
+- FlashcardPrewarmInvalidate drain loop dead: Flashcard.cpp:550 condition false immediately — no actual wait.
+- Stale claims corrected: prewarmer implemented (not planned), tick uses wall-clock GetTickCount64 (not tick count), credits owning tab (not focused tab).
+- Improvement options (O1..O7) await user review after external model analysis.
+- External models' claims validated line by line: 12 confirmed / 3 refuted / 2 partial.
+- Graphviz validation: both .dot files pass `dot -Tcanon` (exit 0) and `dot -Tsvg` (exit 0).
+
 ## 2026-11-23 (s73) — Shared-root stats merge, LastActivityTs, Unsynced action
 
 ### Fixed
@@ -31,7 +83,7 @@
 - Geometry checked against vendored MuPDF source: `pdf_run_xobject` applies the form `/Matrix` (pdf-op-run.c:2484) and `pdf_annot_transform` (pdf-annot.c:233-244) yields sx=sy=1, x=y=0 when transform(BBox, Matrix) == /Rect.
 
 ### Notes
-- Runtime/visual validation of the fix pending user manual test.
+- User validated ghost-highlight fix manually 2026-11-23 with `Compiled/TumatraPDF-debug.exe` — working.
 - `gGlobalPrefs->activeTabGroup` untouched.
 
 ## 2026-11-23 (s71) — Spanish README + translation drift guard

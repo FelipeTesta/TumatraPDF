@@ -13,7 +13,7 @@ digraph Flashcard {
     rate [label="Rate 1-4 (keys 1..4 + numpad)\nSM-2 update, easeFactor capped [1.3, 2.5]\nrating==1 (Again): reinsert into current queue (relearn)\nadvance: next card MASKED + centered", fillcolor="#e1bee7", style=filled];
     next [label="Next (CmdFlashcardNext toolbar btn)\nskip WITHOUT reveal/rate (no SM-2, no save)\narrives masked + centered; grayed when no next", fillcolor="#e1bee7", style=filled];
     back [label="Back (CmdFlashcardBack)\nprevious card arrives REVEALED (post-reveal)\nscroll position KEPT (no auto-center)", fillcolor="#fff9c4", style=filled];
-    persist [label="FlashcardStudySave\nJSON per doc; reload restores counts", fillcolor="#c8e6c9", style=filled];
+    persist [label="FlashcardStudySave (Commands_Flashcard.cpp:932)\nfull JSON rewrite + tmp file + MoveFileExW\nO(states) I/O on UI thread per rating\nfolder = FlashcardStudyDir() (app-data\\study by default)\nNOT inside user's Defender exclusion", fillcolor="#c8e6c9", style=filled];
 
     create -> load -> filter -> study -> reveal -> rate -> persist;
     rate -> study [style=dashed, label="next card"];
@@ -22,7 +22,7 @@ digraph Flashcard {
 
     clean [label="CONFIG WINDOW (toolbar Config btn -> CmdFlashcardConfig, s24;\nrenamed from Clean History)\n'Configuracoes' 560x440, class TUMATRA_FLASHCARD_CONFIG, themed (dark ok)\n(1) study-history FOLDER row: EDIT + folder button (IFileDialog\nFOS_PICKFOLDERS); change persists flashcardStudyDir + SaveSettings +\nreloads list; Drive folder = backup; MIGRATES existing JSONs via\nFlashcardStudyMigrateFiles (MOVEFILE_COPY_ALLOWED cross-volume;\ntarget keeps its files); empty = app-data\n(2) history list (owner-drawn, ~10 rows + scroll): |PDF|cartoes|due|\nultima revisao| from FlashcardStudyListDocs (sorted by lastReview desc;\nJSON now stores docName, escaped; legacy files show md5 name)\n(3) 'Limpar livro selecionado' 2s orange -> deletes SELECTED row's JSON\n(md5-matched tabs reset in-memory studyDoc + session + count + sidebar)\n(4) 'Limpar TODOS os livros' 5s red -> DeleteAll + reset EVERY tab\n(+ SidebarPopulate refresh hook) — actions run INSIDE the window,\nlist reloads, window stays open; X/Esc closes;\n(s27) sync dots before name: green=linked (docPath + file::Exists),\nred=PDF moved/renamed, grey=legacy file; 'Re-check' btn re-validates\n(study JSONs persist docPath; EN captions; adopt re-saves docPath);\n(s30) toolbar btn renamed Settings; column-header strip aligned\nwith the rows; Import moved OUT to its own toolbar window"];
     persist -> clean [style=dashed, label="reset"];
-    lista [label="LISTA PANEL (Lista btn -> CmdFlashcardLista, s23)\ndocked RIGHT panel (AI-chat pattern; own width + splitter;\ncanvas shrinks via RelayoutFrame; toggle/label-close hides)\nowner-drawn listbox 4 cols: Flashcard (masked text via\nExtractPageText at populate - NOTHING stored in the PDF) |\nPag | Due (countdown AT DRAW TIME: 0min/Nmin/Nh/Nd/'—') |\nStatus colored: new=blue due=orange learn=purple ok=green\n(rows: FcListRow{cardIdx,pageNo,rating,interval,nextReviewAt})\nclick row -> FlashcardNavigateToCardInCurrentTab\nrefresh after rate + clean-current (FlashcardSidebarPopulate)", fillcolor="#e1bee7", style=filled];
+    lista [label="LISTA PANEL (Lista btn -> CmdFlashcardLista, s23)\ndocked RIGHT panel (AI-chat pattern; own width + splitter;\ncanvas shrinks via RelayoutFrame; toggle/label-close hides)\nowner-drawn listbox 4 cols: Flashcard (masked text via\nExtractPageText at populate - NOTHING stored in the PDF) |\nPag | Due (countdown AT DRAW TIME: 0min/Nmin/Nh/Nd/'—') |\nStatus colored: new=blue due=orange learn=purple ok=green\n(rows: FcListRow{cardIdx,pageNo,rating,interval,nextReviewAt})\nclick row -> FlashcardNavigateToCardInCurrentTab\nrefresh after rate + clean-current (FlashcardSidebarPopulate)\nCOST per populate (FlashcardSidebar.cpp:657-718): O(cards x states)\nlinear scan + page text extraction + 2 LB messages/row", fillcolor="#e1bee7", style=filled];
     pertab -> lista [style=dotted, label="current tab's cards"];
     stats [label="STUDY-TIME STATS (FlashcardStats.cpp; commits 80de1ac 2026-10-25 + 62b11fc 2026-10-26)
 flashcard-stats.txt next to SETTINGS file, 'YYYYMMDD <sec> <cards>'
@@ -32,13 +32,12 @@ YYYYMMDD bucket = GetLocalTime (FlashcardStats.cpp:44) - DST-sensitive
 flush: dirtySec>=60s / dirtyCards>=20 / session end / toggle-off
 empty sidecar -> first card of day creates DailyEntry{0,card} (s36-az fix)
 lenient parse (strtol, n>=2), keep-sorted insertion", fillcolor="#c8e6c9", style=filled];
-    ticks [label="TIMER TICK (Commands_Flashcard.cpp:852 FlashcardStudyTick)
+    ticks [label="TIMER TICK (Commands_Flashcard.cpp:1522 FlashcardStudyTick)
 kFlashcardStudyTimerID=16 (Canvas.h:45) dispatch Canvas.cpp:6672
-SetTimer(hwndCanvas, ID, USER_TIMER_MINIMUM) -> ~1ms wall ticks
-STATS: +0.01f/tick while studyMode && !revealMode,
-  per-card cap 60s (maxPerCardSec, MainWindow.h:529), tick count NOT
-  wall-clock (stalls/sleep skew) - CREDITS CURRENT TAB,
-  NOT studyOrder[curIdx].tab (misattribution bug, md §a)
+SetTimer(hwndCanvas, ID, USER_TIMER_MINIMUM) -> ~15.6ms wall ticks
+STATS: GetTickCount64 delta, 1.5s guard, credits owning tab
+  studyOrder[curIdx].tab (NOT focused tab) - wall-clock accurate
+  per-card cap 60s (maxPerCardSec, MainWindow.h:529)
 SESSION TIMER: wall-clock GetTickCount64 vs studyTimerStartTick
   (autoscroll pattern); expiry -> studyMode off + beep + done overlay", fillcolor="#e1bee7", style=filled];
     sesstrix [label="SESSION TIMER TRIO (in fc secondary toolbar)
@@ -46,11 +45,11 @@ MainWindow.h FlashcardState: studyTimerCheck (hwndStudyTimerCheck)
 + label + edit (CmdFlashcardStudyTimerEdit=528, :389-412)
 studyTimerMinutesSetting (default 30) -> studyTimerMinutes>0 = armed
 progress line overlay (FlashcardTimerUIOverlayProc,
-  Commands_Flashcard.cpp:915-971; silver RGB(192,192,192) line - theme bug md §B)
+  Commands_Flashcard.cpp:915-971; ThemeWindowTextColor - theme-ok)
 'Timer done' ∴ overlay (kFlashcardTimerDoneOverlay, 3s, theme-ok)
 shown only while study session runs; fullscreen bottom (windowed = above taskbar)", fillcolor="#e1bee7", style=filled];
     cardsrated [label="CARDS RATED (62b11fc)
-HandleFlashcardRate -> FlashcardStatsAddCard (Commands_Flashcard.cpp:479)
+HandleFlashcardRate -> FlashcardStatsAddCard (Commands_Flashcard.cpp:937)
 per-doc FileState.flashcardCardsDone += 1 + today's sidecar bucket
 ALL-TIME totals = FlashcardStatsGetTotalSec/Cards (sum of daily buckets,
 independent of doc path - survives rename/delete)
@@ -73,7 +72,7 @@ Home on => fc/arch secondary toolbars HIDDEN, restored on home-off (s36-ax)", fi
 s36-ar (877213c): mask paint viewport culling + GDI+ hoist
 s36-aq: page filter follows USER-VISIBLE page numbers
 s36-am: loader restored only first card -> fixed (FlashcardStudyPruneStates
-  at Commands_Flashcard.cpp:470 prunes orphan states)
+  at Commands_Flashcard.cpp:927 prunes orphan states)
 s36-al: active card rect in peru/orange (Peru/orange fill)
 s36-az (dab2dfe): study-scroll strip gate removed (masks doc-anchored)
 c4c70ea: save-reload preserves fork state (invert/contrast/trim/crop/timer)
@@ -89,26 +88,60 @@ dab2dfe/aa09dcf/0b2b0c0: profile F3s3/F4/F5 + F6 sync window + F7 + F8 s1/s2", s
     ticks -> perftweak [style=dotted];
     subgraph cluster_preload {
         label="Preload / cache (study=on)";
-        pa3 [label="PA3 PREFETCH (existing)\nFlashcardPrefetchUpcoming Commands_Flashcard.cpp:303\n(GetFzPageInfo loadQuick=true, next 4-5 + extraPages)\nFlashcardPrefetchRenderUpcoming :260 (next 2, gRenderCache)\n[fc][perf] logs: navigate cached=%d (:392) / prefetch idx %dms (:329)\nsync UI-thread; NOT adaptive", fillcolor="#fff9c4", style=filled];
-        prewarm [label="ADAPTIVE PREWARMER (PLANNED - not implemented, s64)\newma(cardSwitchMs) at [fc][perf] navigate; N=clamp(150/ewma, 0, tierCap 0|1|2)\nN=0 when ewma>400ms / gConserveMemory / memFree<15%\ncaps: <=2 warm docs, <=4 fz jobs, BELOW_NORMAL thread, droppable\nworker: locked GetFzPageInfo(loadQuick) only, never raw fz\nepoch counter bumped on LoadDocumentFinish/crop/trim/viewportCropV2/tab-close/filter/annot\ntiles same-dm near-target only (cross-doc tiles dropped RenderCache.cpp:626 PageVisibleNearby)\nphases: P1 instrument+N in {0,1} | P2 cross-tab tiles | P3 lazy-tab warm (opt-in, default OFF)", fillcolor="#ffcdd2", style=filled];
+        pa3 [label="PA3 PREFETCH (existing)\nFlashcardPrefetchUpcoming Commands_Flashcard.cpp:738\n(GetFzPageInfo loadQuick=true, next N + extraPages)\nFlashcardPrefetchRenderUpcoming :695 (next 2, gRenderCache)\nN = FlashcardPrewarmBudget() = min(round(150/ewma), tierCap 0|1|2)\nMAXIMUM 2 cards (tier cap) — old comment 'next 4-5' is stale\n[fc][perf] logs: navigate cached=%d (:835) / prefetch idx %dms (:764)\nsync UI-thread; NOT adaptive", fillcolor="#fff9c4", style=filled];
+        prewarm [label="ADAPTIVE PREWARMER (IMPLEMENTED s64-R9p)\newma(cardSwitchMs) at [fc][perf] navigate (Commands_Flashcard.cpp:854-865)\nN = clamp(150 / max(1, ewma), 0, tierCap 0|1|2)\nFlashcardPrewarmBudget (:475-495): 0 if ewma>400ms OR\n  memLoad>=85% OR availPhys<512MB; tierCap from cores+RAM\ncaps: <=2 warm docs, <=4 fz jobs, BELOW_NORMAL thread, droppable\nworker (FlashcardPrewarmWorker :497-534): locked GetFzPageInfo(loadQuick)\n  only, never raw fz; optional tile request if PageVisibleNearby\nepoch counter bumped on LoadDocumentFinish/crop/trim/viewportCropV2/tab-close/filter/annot\nFlashcardPrewarmInvalidate (:536-556): bumps epoch, drops queue,\n  drain loop DEAD (condition false immediately — no actual wait)\ntiles same-dm near-target only (RenderCache.cpp:626 PageVisibleNearby)\nphases: P1 instrument+N in {0,1} | P2 cross-tab tiles | P3 lazy-tab warm (opt-in, default OFF)", fillcolor="#c8e6c9", style=filled];
         pa3 -> prewarm [style=dashed, label="evolves"];
     }
     perftweak -> pa3 [style=dotted];
     pending [label="REMAINING: bookmark-mirror live check on user's real books;\nimage-occlusion IO-1..IO-4\n(decisions IO-D1/D2/D3 pending);\nuser live tests: filter/global-session/Lista visual", shape=note, fillcolor="#ffcdd2", style=filled];
     clean -> pending [style=dotted];
 
+    // ===================== NEW FINDINGS (C-F1..C-F9) =====================
+    subgraph cluster_newfindings {
+        label="NEW FINDINGS (C-F1..C-F9, verified in code)";
+        color="#9c27b0";
+        style=dashed;
+        penwidth=2.0;
+
+        c_f1 [label="C-F1 Lista visibility gate\nFlashcardSidebar.cpp:657-659\n!hwndListaBox || !hwndListaView — only checks HWND existence\nHWNDs destroyed ONLY on flashcard mode OFF (:581)\nFlashcardSidebarToggle (:604) merely toggles fcListVisible\nFULL populate (all cards + page-text extraction) runs on\nEVERY rating even when panel is HIDDEN — cheap visibility win", fillcolor="#ffe0b2", style=filled];
+        c_f2 [label="C-F2 text cache lifetime\nFlashcardSidebar.cpp:676-712\nPageText pt/ptPage cache is LOCAL to one Populate call\n-> P text extractions per rating, NEVER reused between ratings\npt/ptPage freed at end (FreePageText :712)", fillcolor="#ffe0b2", style=filled];
+        c_f3 [label="C-F3 paint cost\nCanvas.cpp:4109-4251 PaintFlashcardMasks\niterates ALL cards of tab, converts EVERY rect\n(PhysicalToVirtualForRect :4180, CvtToScreen :4190)\nonly THEN culls against viewport (:4194)\n-> O(cards x quads) per paint; paints on scroll + tile completion\nNOT only on transition; existing log at :4246\n'[fc] paint: %d cards, %d rects drawn, %.3f ms/paint avg'", fillcolor="#ffe0b2", style=filled];
+        c_f4 [label="C-F4 render queue is LIFO -> priority inversion\nRenderCache.cpp:863-872 pops from TAIL (LIFO)\nNO priority distinction: speculative prewarm tile (queued AFTER\nNavigate) can be served BEFORE visible card's tile\nvisible page request should outrank speculative one", fillcolor="#ffe0b2", style=filled];
+        c_f5 [label="C-F5 vicious circle: same budget gates sync + async\nFlashcardPrewarmBudget() used at :964 (prefetch) AND :614 (prewarm)\nwhen ewma>400ms OR tier cap=0 -> budget=0 -> BOTH disabled\nexactly when they would help most; next navigation pays cold cost\nkeeping ewma high", fillcolor="#ffe0b2", style=filled];
+        c_f6 [label="C-F6 two file writes per rating, not one\nFlashcardStudySave Flashcard.cpp:697-763 writes per-book JSON\n(tmp + MoveFileExW) AND then ProfileDataUpdateStudyDoc (:771)\n-> ProfReplaceBookByKey -> ProfCopyStates (deep copy :1926-1932)\n-> ProfileDataSaveNow() (:1960-1968) = second file write", fillcolor="#ffe0b2", style=filled];
+        c_f7 [label="C-F7 stats do NOT write per rating\nFlashcardStatsAddCard / FlashcardStatsAddSeconds\nFlashcardStats.cpp:243-322 keep counters in memory\nflush at thresholds (>=20 cards, >=60 seconds)\nNO per-rating I/O", fillcolor="#ffe0b2", style=filled];
+        c_f8 [label="C-F8 study tick does NOT invalidate canvas\nFlashcardStudyTick Commands_Flashcard.cpp:1522+\nonly credits study seconds (wall clock), checks session timer\npumps prewarm (:1598); repaints ONLY when session timer expires (:1545)\n15.6ms period is NOT a repaint problem", fillcolor="#ffe0b2", style=filled];
+        c_f9 [label="C-F9 repo constraint: NO STL\nsumatrapdf-src/src/base/: Str, Vec, StrVec only\nunordered_map does NOT exist\nany key->index index must be repo-native:\nsorted Vec + binary search, or small open-addressing table in base/", fillcolor="#ffe0b2", style=filled];
+
+        c_f1 -> c_f2 -> c_f3 -> c_f4 -> c_f5 -> c_f6 -> c_f7 -> c_f8 -> c_f9;
+    }
+
+    // ===================== DISCARD CHANGES (data fate) =====================
+    subgraph cluster_discard {
+        label="UNSAVED DOCUMENT -> DISCARD CHANGES (data fate)";
+        color="#f44336";
+        style=dashed;
+        penwidth=2.0;
+
+        discard_load [label="FlashcardEnsureTabCards (Commands_Flashcard.cpp:168-190)\nloads cards from LIVE document (FlashcardLoadFromDocument :181)\nstudy states from JSON (FlashcardStudyLoad :184)\none per tab (cardsLoaded guard :176)\nlog at :186: 'loaded %d cards, %d study states'\nmismatch = orphans", fillcolor="#ffcdd2", style=filled];
+        discard_key [label="FlashcardKey (Flashcard.cpp:32-44)\nFNV-1a over (pageNo + bounds quantized x100)\nstudy state keyed by POSITION, not annotation object\nrecreating SAME rect on SAME page RESURRECTS old state\nrecreating a few pixels off -> NEW key = progress LOST\nold state stays orphaned", fillcolor="#ffcdd2", style=filled];
+        discard_prune [label="FlashcardStudyPruneStates (Flashcard.cpp:662-690)\ncalled ONLY on rating (:926) and delete paths (:1273, :1351)\nNEVER on load -> zero cards = no rating = no prune\norphan survives indefinitely (rewritten by every save)", fillcolor="#ffcdd2", style=filled];
+        discard_stats [label="study TIME and cards-rated counters NOT reverted\nlive in per-doc FileState (flashcardStudyTimeSec,\nflashcardCardsDone), daily sidecar, ProfileData\nhistory shows time for cards never in saved file", fillcolor="#ffcdd2", style=filled];
+        discard_config [label="FlashcardStudyListDocs (Flashcard.cpp:1399)\nreports cards=%d from STUDY STATES, not from document\nConfig window shows phantom card count", fillcolor="#ffcdd2", style=filled];
+        discard_opts [label="Options (what changes / where / expected gain / risk / breaks):\nP1 prune orphan states at load (depends on key index) -> JSON self-heals\nP2 warn when study session active + doc has unsaved annotation changes\nP3 keep studied-but-unsaved cards' state in pending area until save\nP4 do not credit daily stats/sidecar/profile for cards not in saved file\n  (or mark them provisional)\nP5 show BOTH counts (states vs cards present in document) in Config window", fillcolor="#c8e6c9", style=filled];
+
+        discard_load -> discard_key -> discard_prune -> discard_stats -> discard_config -> discard_opts;
+    }
+
+    // ===================== PERF WORK PLAN =====================
+    plan [label="PERF WORK PLAN (ordered, from horizontal validation of 2 external models)\nP0 instrument the phases (prune/save-json/save-profile/stats/sidebar/prefetch/navigate/total) + keypress->paint, P50/P95/P99, because dominant cost depends on deck size\nP1 split the critical path from the bookkeeping (defer save/stats/sidebar/prewarm-enqueue by a coalesced 30-50 ms timer, flush on session end / tab switch / WM_CLOSE / WM_ENDSESSION and before the Config window reads)\nP2 key->state index (repo-native, no STL) + prune only on load / when the card set changes\nP3 async coalesced save for BOTH targets (book JSON and profile)\nP4 sidebar: visibility gate, persistent per-page text cache, update only the changed row, owner-data virtual list\nP5 budget/EWMA: separate the cheap page-info prefetch from the ewma>400 rule, measure the EWMA over the WHOLE transition, tier cap 0 should disable only the tile prewarm, delete the dead drain loop in FlashcardPrewarmInvalidate (:549-552, the condition (int)(GetTickCount() - deadline) < 0 is false as soon as the deadline passes)\nP6 render-queue priority (visible > speculative)\nP7 paint: index cards by page, cull FIRST with the visible range RecalcVisibleParts already computes, convert only visible cards\nP8 the unsaved/discard scenario\nNOTE: DO NOT 'fix' the prefetch start index — warming the new card is intentional (C-CORR-1)", shape=note, fillcolor="#e8f5e9", style="filled,dashed"];
+
+    dead -> plan [style=dotted];
+    discard_opts -> plan [style=dotted];
+    c_f9 -> plan [style=dotted];
+
     dead [label="Dead code to prune:\nhwndCardCount, studyModeType: PRUNED (no longer exist — grep clean)\nhistory: STILL EXISTS (study-history JSONs + flashcard-stats.txt sidecar; FlashcardStats.cpp)\n-- s68 fixes --\nper-card cap clamps credited seconds (maxPerCardSec 60s; Commands_Flashcard.cpp:1555-1559 'credit = room')\nCmdFlashcardNext resets per-card time base (studyTimeSec=0, lastStudyTick=0; Commands_Flashcard.cpp:1200-1201)\npending study seconds flushed on settings save (FlashcardStatsFlush(false); AppSettings.cpp:822)\n(TODO Flashcard Step 7 — history remains open)", shape=note, fillcolor="#ffcdd2", style=filled];
     filter -> dead [style=dotted];
-
-    ui [label="UI: FlashcardToolbar (Study/Reveal/Back/Next/Order/List/Filter/Import/Session/Settings\n+ counter btn idx 0 (scope-aware: global = sum over tabs);\nNext grayed w/o next;\nOrder opens Study Order options dialog;\nFilter opens Filter window (checked while filter active);\nList (renamed s27, ex Lista) opens docked panel (checked while open);\nImport opens the Import window (s30-C);\nSession opens the Study Session window (s30-D);\nSettings opens the Settings window (s24, renamed s30);\nALL flashcard windows theme-aware (dark mode)", shape=box, fillcolor="#e3f2fd", style=filled];
-    importdlg [label="IMPORT WINDOW (toolbar Import btn -> CmdFlashcardImport=512, s30-C)\n'Import Flashcards' 560x360, class TUMATRA_FLASHCARD_IMPORT\n|Document|Cards| table: row1 = current doc + len(cards),\nrow2 = picked source (FcPickPdfFile inside window) + its count;\n'New cards: N (+ imported N so far)' = DRY-RUN diff via\nFlashcardImportDiffCount (dedupe page+bounds 1pt, no creation);\n[Import new cards to this document] -> FlashcardImportFromPdf\ncreates flashcard-tagged DIFFERENT highlights only (history NOT\nimported) -> cards reload + count/state/sidebar/rerender + re-diff;\nsupersedes old Settings 'Import from PDF...'", fillcolor="#fff9c4", style=filled];
-    sessiondlg [label="SESSION WINDOW (toolbar Session btn -> CmdFlashcardSession=513, s30-D)\n'Study Session' 640x520, class TUMATRA_FLASHCARD_SESSION\nsearch EDIT on top (EN_CHANGE filter, str::ContainsI on docName||fileName);\nmulti-select owner-drawn list |PDF|cards|due|last reviewed|tags--|\n(checkbox rows blue-when-checked + sync dots s27;\ndata = FlashcardStudyListDocs + docPath + syncStatus);\n[Open Session] -> SessionOpenSelected: CreateProcessW same exe +\nquoted selected docPaths = NEW app window with all selected books\n(works with Filter / global-session cross-doc study);\ntags data model TBD (em dash for now)", fillcolor="#fff9c4", style=filled];
-    ui -> importdlg [style=dotted];
-    ui -> sessiondlg [style=dotted];
-    study -> ui [style=dotted];
-
-    pertab [label="PER-TAB STATE (s22 foundation): WindowTab::flashcard\n= FlashcardTabState{cards, studyDoc, filterExpr,\nfilterEnabled, cardsLoaded(lazy)}\nFlashcardOnTabChanged hook in LoadModelIntoTab\n(ensures new tab's cards; fixes cross-tab mask bleed)", fillcolor="#c8e6c9", style=filled];
-    load -> pertab [style=dotted];
 
     verifynote [label="(verify) unverified-this-session claims:
 CmdFlashcardImport=512 / CmdFlashcardSession=513 (confirmed in Commands.h)
@@ -125,4 +158,89 @@ none of these were re-read in code - trust prior sessions", shape=note, fillcolo
     lista -> ctrlclick [style=dotted, label="Ctrl+click selects+scrolls"];
     create -> rectsel [style=dotted, label="Ctrl+drag / Ctrl+Alt+drag"];
     rectsel -> planned [style=dotted, label="Group/Ungroup/Duplicate/Ranking"];
+
+    // ===================== PER-RATING COST MODEL (study=on) =====================
+    subgraph cluster_costmodel {
+        label="PER-RATING COST MODEL (study=on) — Commands_Flashcard.cpp:879-969";
+        color="#f44336";
+        style=dashed;
+        penwidth=2.0;
+
+        cost1 [label="A.1 linear scan studyDoc.states to find card's SM-2 state\nCommands_Flashcard.cpp:892-897\nO(states) — page-independent", fillcolor="#ffcdd2", style=filled];
+        cost2 [label="A.2 FlashcardSm2Update (:898)\nO(1) — page-independent", fillcolor="#fff9c4", style=filled];
+        cost3 [label="A.3 rating==1 relearn: append to studyOrder +\nFlashcardPrewarmInvalidate() (:902-905)\nO(1) queue append + epoch bump — page-independent", fillcolor="#fff9c4", style=filled];
+        cost4 [label="A.4 second linear scan studyDoc.states to write state back\nCommands_Flashcard.cpp:909-921\nO(states) — page-independent", fillcolor="#ffcdd2", style=filled];
+        cost5 [label="A.5 FlashcardStudyPruneStates (:927) -> Flashcard.cpp:662-690\nfor EVERY state: linear scan ALL cards\nO(states x cards) — DOMINANT for large books\npage-independent, runs on UI thread, on EVERY rating", fillcolor="#ffcdd2", style=filled];
+        cost6 [label="A.6 FlashcardStudySave (:932) -> Flashcard.cpp:697-763\nserialize ALL states to JSON, write .tmp, MoveFileExW\nO(states) I/O on UI thread, folder = study-history (app-data)\nNOT in user's Defender exclusion — AV latency possible\npage-independent, runs on EVERY rating", fillcolor="#ffcdd2", style=filled];
+        cost7 [label="A.7 FlashcardStatsAddCard (:937) -> FlashcardStats.cpp\nper-doc FileState + today's sidecar + ProfileData upsert\nO(1) amortized but disk flush on thresholds — page-independent", fillcolor="#fff9c4", style=filled];
+        cost8 [label="A.8 FlashcardToolbarUpdateCount (:940)\nO(1) — page-independent", fillcolor="#fff9c4", style=filled];
+        cost9 [label="A.9 FlashcardSidebarPopulate (:942) -> FlashcardSidebar.cpp:657-718\nearly-return if Lista not open (:658)\nwhen open: for EVERY card, linear scan studyDoc.states\nO(cards x states) + page text extraction (per-page cache)\n+ 2 listbox msgs/row (LB_ADDSTRING + LB_SETITEMDATA)\npage-independent (text extraction per page, cached)", fillcolor="#ffcdd2", style=filled];
+        cost10a [label="A.10a FlashcardPrefetchUpcoming (:964) -> :738-768\nloop starts at i = fromIdx (NEW card, since currentCardIdx++ at :953)\nintentional: currentCardIdx++ precedes the call (:953 vs :964),\nso fromIdx is the NEW card; the prefetch warms the new card\n+ count-1 following. page-dependent (page parse cost)", fillcolor="#fff9c4", style=filled];
+        cost10b [label="A.10b FlashcardPrefetchRenderUpcoming (:695-730)\nstarts at fromIdx+1 — requests tile for next card's page\nskipped if gRenderCache->Exists(...) (:719)\npage-dependent (render cost)", fillcolor="#fff9c4", style=filled];
+        cost11 [label="A.11 FlashcardNavigateToEntry (:965) -> wrapper :854-865\nEWMA update (0.7/0.3, clamped 2000ms); inner :806-852\noptional TabsSelect (global session), PhysicalToVirtualForRect,\ngRenderCache->Exists probe (logged), CvtToScreen + ScrollYBy\npage-dependent (scroll cost)", fillcolor="#e1bee7", style=filled];
+        cost12 [label="A.12 FlashcardPrewarmEnqueue (:966) -> :599-685\nidle gate (reveal/mouseAction), budget calc, queue up to 4 jobs\npage-dependent (warm pages for upcoming cards)", fillcolor="#e1bee7", style=filled];
+        cost13 [label="A.13 MainWindowRerender (:968)\ntriggers WM_PAINT -> PaintFlashcardMasks (Canvas.cpp:4109)\nviewport culling + GDI+ hoist (s36-ar)\npage-dependent (paint cost)", fillcolor="#e1bee7", style=filled];
+
+        cost1 -> cost2 -> cost3 -> cost4 -> cost5 -> cost6 -> cost7 -> cost8 -> cost9 -> cost10a -> cost10b -> cost11 -> cost12 -> cost13;
+    }
+
+    // ===================== PERF HYPOTHESES (ranked) =====================
+    subgraph cluster_hypotheses {
+        label="PERF HYPOTHESES (ranked by evidence)";
+        color="#ff9800";
+        style=dashed;
+        penwidth=2.0;
+
+        h1 [label="H1. FlashcardStudyPruneStates O(states x cards) per rating\nFlashcard.cpp:662-690\nEvidence: nested loops over ALL states x ALL cards on EVERY rating;\nlog shows 'pruned %d state(s)' — runs every time\nConfirm: add QPC around prune, log ms; correlate with card count", fillcolor="#ffcdd2", style=filled];
+        h2 [label="H2. FlashcardStudySave full JSON rewrite + tmp + MoveFileExW\nFlashcard.cpp:697-763\nEvidence: synchronous fopen/fprintf/rename on UI thread per rating;\nstudy-history folder (app-data) NOT in user's Defender exclusion\nConfirm: ProcMon filter CreateFile/WriteFile on study dir; QPC log", fillcolor="#ffcdd2", style=filled];
+        h3 [label="H3. FlashcardSidebarPopulate O(cards x states) + text + LB msgs\nFlashcardSidebar.cpp:657-718 (only when Lista open)\nEvidence: linear scan states per card (:687-694), ExtractPageText,\n2 SendMessageW per row — runs on EVERY rating\nConfirm: close Lista panel -> measure transition time; add QPC log", fillcolor="#ffcdd2", style=filled];
+        h4 [label="H4. FlashcardPrefetchUpcoming/RenderUpcoming off-by-one\nCommands_Flashcard.cpp:747 (fromIdx) and :701 (fromIdx+1)\nEvidence: loops start at CURRENT index, not next; re-parses current\npage, may request tile for visible page (cached check at :719)\nConfirm: log 'prefetch idx=' shows current card index; fix = fromIdx+1", fillcolor="#fff9c4", style=filled];
+        h5 [label="H5. FlashcardPrewarmInvalidate drain loop dead\nFlashcard.cpp:550 — condition (int)(GetTickCount() - deadline) < 0\nis FALSE immediately (deadline in future) -> loop body never runs\nEvidence: comment claims 50ms cap, code does not wait at all;\nstale in-flight jobs may hold docLock/CPU during next card\nConfirm: add log inside loop; never fires in current code", fillcolor="#fff9c4", style=filled];
+        h6 [label="H6. EWMA blind to dominant costs (prune/save/sidebar)\nCommands_Flashcard.cpp:854-865 measures only navigate inner\nEvidence: cardSwitchMsEwma fed from FlashcardNavigateToEntryInner ONLY\n(scroll + tab switch); prune/save/sidebar NOT included\n-> budget over-estimates transition speed; adaptive prewarmer\nthinks transition is faster than it really is\nConfirm: wrap entire HandleFlashcardRate in QPC; compare ewma", fillcolor="#fff9c4", style=filled];
+        h7 [label="H7. Tier cap = 0 on weak machines (<=2 cores or <4GB RAM)\nFlashcard.cpp:464-465 -> cap=0 -> FlashcardPrewarmBudget returns 0\nEvidence: log '[fc][perf] prewarm skipped: n=0' (:616);\nprewarmer silently does nothing on low-end machines\nConfirm: run on 2-core VM; observe zero prewarm activity", fillcolor="#fff9c4", style=filled];
+
+        h1 -> h2 -> h3 -> h4 -> h5 -> h6 -> h7;
+    }
+
+    // ===================== IMPROVEMENT OPTIONS (ranked) =====================
+    subgraph cluster_improvements {
+        label="IMPROVEMENT OPTIONS (ranked, for external review)";
+        color="#4caf50";
+        style=dashed;
+        penwidth=2.0;
+
+        o1 [label="O1. Replace O(states x cards) prune with hash set / amortize\nFlashcard.cpp:662-690\nChange: build unordered_set of alive card keys once per session\n  or prune only when card count changed (dirty flag)\nGain: eliminate nested loop on EVERY rating\nRisk: memory for hash set; must invalidate on card add/delete\nBreaks: nothing if done correctly — prune is internal cleanup", fillcolor="#c8e6c9", style=filled];
+        o2 [label="O2. Debounce/coalesce FlashcardStudySave\nFlashcard.cpp:697-763\nChange: write at most every N ms / on session end / on idle;\n  keep in-memory state authoritative; coalesce multiple ratings\nGain: eliminate per-rating disk I/O + AV latency\nRisk: data loss on crash (mitigate: flush on session end + timer)\nBreaks: Config window expects file to reflect latest state (adopt)\n  -> need in-memory authoritative + periodic flush", fillcolor="#c8e6c9", style=filled];
+        o3 [label="O3. Make FlashcardSidebarPopulate incremental\nFlashcardSidebar.cpp:657-718\nChange: update only changed row (LB_DELETESTRING + LB_INSERTSTRING);\n  cache extracted page text per page (already has pt/ptPage cache)\nGain: O(1) per rating instead of O(cards x states) + n LB msgs\nRisk: listbox API quirks; selection/scroll preservation\nBreaks: nothing if row data structure unchanged", fillcolor="#c8e6c9", style=filled];
+        o4 [label="O4. Fix prefetch off-by-one + skip visible page tile\nCommands_Flashcard.cpp:747, :701\nChange: start loops at fromIdx + 1; in RenderUpcoming skip if\n  vPage == current vPage (already visible)\nGain: avoid redundant page parse + tile request for current page\nRisk: none — pure optimization\nBreaks: nothing", fillcolor="#c8e6c9", style=filled];
+        o5 [label="O5. Measure WHOLE transition for EWMA (not just navigate)\nCommands_Flashcard.cpp:854-865\nChange: wrap HandleFlashcardRate (or full transition) in QPC;\n  feed that dt to ewma instead of navigate-only dt\nGain: adaptive prewarmer reacts to REAL cost (prune+save+sidebar)\nRisk: ewma signal becomes noisier; may need different smoothing\nBreaks: prewarm budget calibration (N=150/ewma) may need retune", fillcolor="#fff9c4", style=filled];
+        o6 [label="O6. Fix or remove dead drain loop in FlashcardPrewarmInvalidate\nFlashcard.cpp:536-556\nChange: either fix condition to actually wait (e.g. while(active>0\n  && GetTickCount()<deadline) Sleep(1)); or remove loop entirely\n  and accept async drain (jobs self-filter by epoch)\nGain: prevent stale in-flight jobs from contending on docLock/CPU\nRisk: if fixed, 50ms UI-block risk (s64-R9r); if removed, epoch\n  filter already protects — jobs drop themselves\nBreaks: nothing if epoch check in worker is solid (:506)", fillcolor="#fff9c4", style=filled];
+        o7 [label="O7. Move per-rating disk work off UI thread\nFlashcard.cpp:697-763 (save) + FlashcardStats.cpp (sidecar)\nChange: worker thread + coalesced flush queue; UI posts 'dirty'\n  events, worker batches writes; keep in-memory state authoritative\nGain: UI thread never blocks on I/O; study feels instant\nRisk: complex state sync; crash safety; Config window reads file\nBreaks: Config window 'Re-check' / list expects up-to-date files\n  -> need read-path that merges in-memory + on-disk", fillcolor="#fff9c4", style=filled];
+
+        o1 -> o2 -> o3 -> o4 -> o5 -> o6 -> o7;
+    }
+
+    // ===================== MEASUREMENT INSTRUMENTATION =====================
+    subgraph cluster_instrumentation {
+        label="MEASUREMENT INSTRUMENTATION (existing + proposed)";
+        color="#607d8b";
+        style=dashed;
+        penwidth=2.0;
+
+        existing [label="EXISTING [fc][perf] PROBES (all in Commands_Flashcard.cpp):\n- navigate: card=.. cached=%d (:835-836)\n- prefetch idx=.. %dms (:764)\n- prefetch-render idx=.. (:726)\n- prewarm epoch=%d n=%d ewma=..ms (:622)\n- prewarm skipped: ... (:603/:608/:616)\n- prewarm invalidate epoch=%d dropped=%d (:554)", fillcolor="#e1bee7", style=filled];
+
+        proposed [label="PROPOSED NEW PROBES (exact log format + location):\n1. [fc][perf] prune states=%d cards=%d %dms\n   at Flashcard.cpp:689 (after prune loop) — QPC around 662-690\n2. [fc][perf] study-save states=%d %dms\n   at Flashcard.cpp:765 (after MoveFileExW) — QPC around 697-763\n3. [fc][perf] sidebar-populate cards=%d states=%d %dms\n   at FlashcardSidebar.cpp:717 (end of populate) — QPC around 657-718\n4. [fc][perf] transition-total %dms (rate->rerender)\n   at Commands_Flashcard.cpp:968 (after MainWindowRerender) — QPC wraps 879-968\n5. [fc][perf] ewma-input navigate-only=%dms whole=%dms\n   at Commands_Flashcard.cpp:864 (ewma update) — log both values\n6. [fc][perf] prewarm-drain waited=%dms active=%d\n   at Flashcard.cpp:552 (inside drain loop, if fixed) — measure actual wait", fillcolor="#fff9c4", style=filled];
+
+        existing -> proposed [style=dashed];
+    }
+
+    ui [label="UI: FlashcardToolbar (Study/Reveal/Back/Next/Order/List/Filter/Import/Session/Settings\n+ counter btn idx 0 (scope-aware: global = sum over tabs);\nNext grayed w/o next;\nOrder opens Study Order options dialog;\nFilter opens Filter window (checked while filter active);\nList (renamed s27, ex Lista) opens docked panel (checked while open);\nImport opens the Import window (s30-C);\nSession opens the Study Session window (s30-D);\nSettings opens the Settings window (s24, renamed s30);\nALL flashcard windows theme-aware (dark mode)", shape=box, fillcolor="#e3f2fd", style=filled];
+    importdlg [label="IMPORT WINDOW (toolbar Import btn -> CmdFlashcardImport=512, s30-C)\n'Import Flashcards' 560x360, class TUMATRA_FLASHCARD_IMPORT\n|Document|Cards| table: row1 = current doc + len(cards),\nrow2 = picked source (FcPickPdfFile inside window) + its count;\n'New cards: N (+ imported N so far)' = DRY-RUN diff via\nFlashcardImportDiffCount (dedupe page+bounds 1pt, no creation);\n[Import new cards to this document] -> FlashcardImportFromPdf\ncreates flashcard-tagged DIFFERENT highlights only (history NOT\nimported) -> cards reload + count/state/sidebar/rerender + re-diff;\nsupersedes old Settings 'Import from PDF...'", fillcolor="#fff9c4", style=filled];
+    sessiondlg [label="SESSION WINDOW (toolbar Session btn -> CmdFlashcardSession=513, s30-D)\n'Study Session' 640x520, class TUMATRA_FLASHCARD_SESSION\nsearch EDIT on top (EN_CHANGE filter, str::ContainsI on docName||fileName);\nmulti-select owner-drawn list |PDF|cards|due|last reviewed|tags--|\n(checkbox rows blue-when-checked + sync dots s27;\ndata = FlashcardStudyListDocs + docPath + syncStatus);\n[Open Session] -> SessionOpenSelected: CreateProcessW same exe +\nquoted selected docPaths = NEW app window with all selected books\n(works with Filter / global-session cross-doc study);\ntags data model TBD (em dash for now)", fillcolor="#fff9c4", style=filled];
+    ui -> importdlg [style=dotted];
+    ui -> sessiondlg [style=dotted];
+    study -> ui [style=dotted];
+
+    pertab [label="PER-TAB STATE (s22 foundation): WindowTab::flashcard\n= FlashcardTabState{cards, studyDoc, filterExpr,\nfilterEnabled, cardsLoaded(lazy)}\nFlashcardOnTabChanged hook in LoadModelIntoTab\n(ensures new tab's cards; fixes cross-tab mask bleed)", fillcolor="#c8e6c9", style=filled];
+    load -> pertab [style=dotted];
 }
