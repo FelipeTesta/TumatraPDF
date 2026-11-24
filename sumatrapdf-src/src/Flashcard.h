@@ -140,6 +140,12 @@ int FlashcardStateFindIdx(const Vec<FlashcardStudyDoc::StateEntry>& states, u64 
 // Load flashcard study state from external JSON file
 FlashcardStudyDoc FlashcardStudyLoad(const char* filePath);
 
+// Verify the study states vector is sorted by key (ascending) and has no
+// duplicate keys. Debug builds only (compiled out in release via gIsDebugBuild).
+// On violation: logs an unmistakable error line with the offending keys and
+// caller location. Returns true if sorted, false if violated.
+bool FlashcardStudyVerifySorted(const Vec<FlashcardStudyDoc::StateEntry>& states, const char* where);
+
 // Manual RESYNC: re-point an existing study JSON (old md5 file) at a new PDF
 // path (book renamed on disk). Returns false when the JSON can't be read.
 bool FlashcardStudyResync(const char* jsonPath, const char* newPdfPath);

@@ -4,6 +4,7 @@
 #include "base/Base.h"
 #include "base/Crypto.h"
 #include "base/File.h"
+#include "SumatraConfig.h"
 
 extern "C" {
 #include <mupdf/pdf.h>
@@ -723,6 +724,33 @@ static void FlashcardStudySortStates(Vec<FlashcardStudyDoc::StateEntry>& states)
     }
 }
 
+// Verify the study states vector is sorted by key (ascending) and has no
+// duplicate keys. O(S), no allocations. Debug builds only (gIsDebugBuild).
+// On violation: logs an unmistakable error line with the offending keys and
+// caller location. Returns true if sorted, false if violated.
+bool FlashcardStudyVerifySorted(const Vec<FlashcardStudyDoc::StateEntry>& states, const char* where) {
+    if (!gIsDebugBuild) {
+        return true; // no-op in release
+    }
+    int n = len(states);
+    Str whereStr = Str(where);
+    for (int i = 1; i < n; i++) {
+        u64 prevKey = states[i - 1].key;
+        u64 curKey = states[i].key;
+        if (curKey < prevKey) {
+            logf("[fc] ERROR: study states NOT sorted (key=%llu after %llu) at %s [%s:%d]\n",
+                 (unsigned long long)curKey, (unsigned long long)prevKey, whereStr, Str(__FILE__), __LINE__);
+            return false;
+        }
+        if (curKey == prevKey) {
+            logf("[fc] ERROR: study states DUPLICATE key=%llu at %s [%s:%d]\n",
+                 (unsigned long long)curKey, whereStr, Str(__FILE__), __LINE__);
+            return false;
+        }
+    }
+    return true;
+}
+
 // Drop study states whose card no longer exists in the document. A card dies
 // when its highlight annotation is deleted, but its SM-2 entry stayed in the
 // JSON forever: every save wrote it back and the Config window counted states
@@ -780,6 +808,8 @@ int FlashcardStudyPruneStates(FlashcardStudyDoc& doc, const Vec<Flashcard>& card
     if (removed > 0) {
         doc.states.len = kept;
     }
+    // Verify the sorted invariant is preserved after prune (debug only)
+    FlashcardStudyVerifySorted(doc.states, "FlashcardStudyPruneStates");
     return removed;
 }
 
@@ -1240,6 +1270,7 @@ void FlashcardStudyParseJsonInto(Str json, FlashcardStudyDoc& doc) {
     ParseJsonObject(json, &doc.states);
     // Ensure sorted-by-key invariant for binary search.
     FlashcardStudySortStates(doc.states);
+    FlashcardStudyVerifySorted(doc.states, "FlashcardStudyParseJsonInto");
 }
 
 FlashcardStudyDoc FlashcardStudyLoad(const char* filePath) {
@@ -1283,6 +1314,7 @@ FlashcardStudyDoc FlashcardStudyLoad(const char* filePath) {
             ProfileDataGetStudyDoc(filePath, doc);
             // Profile states are NOT sorted; enforce the invariant before return.
             FlashcardStudySortStates(doc.states);
+            FlashcardStudyVerifySorted(doc.states, "FlashcardStudyLoad:profile-only");
             logf("[fc] FlashcardStudyLoad - profile-only adopt: %d entries\n", len(doc.states));
             return doc;
         }
@@ -1296,6 +1328,7 @@ FlashcardStudyDoc FlashcardStudyLoad(const char* filePath) {
     // Ensure states are sorted by key for binary search lookups.
     // The JSON object order is not guaranteed; we sort in-place after load.
     FlashcardStudySortStates(doc.states);
+    FlashcardStudyVerifySorted(doc.states, "FlashcardStudyLoad:file");
 
     logf("[fc] FlashcardStudyLoad - loaded %d entries\n", len(doc.states));
     return doc;
