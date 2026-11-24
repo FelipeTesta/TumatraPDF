@@ -2377,7 +2377,7 @@ int APIENTRY WinMain(_In_ HINSTANCE /*hInstance*/, _In_opt_ HINSTANCE /*hPrevIns
 
     if (flags.upgradeFrom) {
         logf(" flags.upgradeFrom: '%s'\n", flags.upgradeFrom);
-        StartInstallerAutoUpgrade(flags.upgradeFrom);
+        StartInstallerAutoUpgrade(flags.upgradeFrom, false);
         fastExit = true;
         goto Exit;
     }

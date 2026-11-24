@@ -1,3 +1,37 @@
+## 2026-11-23 (s78) — Auto-update setting + silent install and restart
+
+### Added
+- `AutoUpdate` advanced setting (default ON) in `cmd/gen-settings.ts`, `src/Settings.h`, `docs/md/Advanced-options-settings.md`.
+- Silent auto-install path in `src/UpdateCheck.cpp`: when `AutoUpdate=ON` and an automatic daily check finds an update, the app downloads it and installs silently with `-silent -fast-install` flags, then restarts — no dialog shown.
+- Unsaved-work guard: `AnyOpenDocumentHasUnsavedChanges()` checks all open tabs via `EngineHasUnsavedAnnotations` (EngineCreate.cpp:353) -> `EngineMupdfHasUnsavedAnnotations` (EngineMupdf.cpp:7951); if any doc has unsaved annotations/outline/page-geometry edits, falls back to the confirmation dialog.
+
+### Changed
+- `StartInstallerAutoUpgrade()` now takes `silent` param; for installed unsigned builds it runs `"installer.exe -install -silent -fast-install"`; for portable it uses existing `SelfUpdateViaBatch` (already silent + self-restart).
+- Automatic check path (`NotifyUserOfUpdate`) now installs silently when `gGlobalPrefs->autoUpdate && updateCheckType==Automatic` and no unsaved changes; otherwise shows themed dialog (existing behavior).
+- Pre-release "Download and update" notification still uses `gUpdateAutoInstall` (non-silent).
+- Moved "You're not expected to change those manually" comment in `cmd/gen-settings.ts` to after `AutoUpdate` so the setting appears in the Advanced Settings dialog (was hidden by blanket `internalRest` flag).
+
+### Fixed
+- Silent installed-app path now includes `-fast-install` so installer auto-starts install, relaunches app, and exits without showing any window (Installer.cpp:1543-1546, 1997, 1721).
+
+### Verified
+- `bun cmd/gen-code.ts` regenerates `src/Settings.h` with `bool autoUpdate` (line 1083) and names blob entry `AutoUpdate` (line 2010); FieldInfo has 3 elements (no `internal=true`), so setting appears in Advanced Settings dialog.
+- `docs/md/Advanced-options-settings.md` contains `AutoUpdate = true` (line 1149).
+- Silent installed-app command line: before `installer.exe -install -silent` -> after `installer.exe -install -silent -fast-install` (UpdateCheck.cpp:304-307).
+- No-window verification: with `-silent -fast-install`, installer creates no HWND (Installer.cpp:2367-2370 runs `InstallerThread` directly), install starts automatically (Installer.cpp:1997), no "Install" button (Installer.cpp:1721), on success `StartSumatra()` + `ExitProcess(0)` (Installer.cpp:1543-1546).
+- UAC caveat: per-machine install under Program Files triggers UAC prompt (Installer.cpp:2337-2348 `requiresSilentElevation = silent || fastInstall || runInstallNow`); this is a Windows requirement, not a bug.
+- Failure-path behaviour: silent install failure returns error code from `RunInstaller()`; installer logs failure to `%TEMP%\sumatra-install-log.txt`; app has already exited (no notification possible) — minimal acceptable behaviour documented.
+- Automatic vs user-initiated distinction survives async download: `updateCheckType` threaded through `DownloadUpdateAsyncData` (UpdateCheck.cpp:756, 760, 772, 1129) -> `NotifyUserOfUpdate`; user-initiated checks still show themed dialog (never silent install); `gUpdateAutoInstall` pre-release path unchanged (non-silent, UpdateCheck.cpp:408-418).
+- Setting default-true proof: FieldInfo value=`true` (Settings.h:1986), deserialization uses `field.value != 0` (SettingsUtil.cpp:322) -> missing key deserializes to `true`.
+- Setting UI surface: Advanced Settings dialog only (Settings > Advanced); not in main Options dialog.
+- Build: 0 errors, 83 s, ProductVersion 1.0.21.
+
+### Notes
+- Portable self-update (`SelfUpdateViaBatch`) already restarts the app — no change needed there.
+- The `-silent` flag is parsed in `Flags.cpp` and propagated in `Installer.cpp` (lines 1293-1294, 2205, 2287, 2339) for UAC elevation and installer UI suppression.
+- 50 ms caveat: unsaved-work check iterates all tabs; negligible overhead.
+- Migration: new global-prefs key appended at end of struct + names blob; deserialization fills default `true` automatically — no manual migration step needed.
+
 ## 2026-11-23 (s77) — Windows 11 compatibility: SmartScreen warning, self-unblock, release checksums
 
 ### Added

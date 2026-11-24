@@ -1078,6 +1078,9 @@ struct GlobalPrefs {
     // name of the tab group session this window auto-syncs to (empty =
     // unsynced)
     Str activeTabGroup;
+    // if true, install a downloaded update silently and restart the app
+    // (no installer window)
+    bool autoUpdate;
 };
 // for parsing themes
 struct Themes {
@@ -1964,27 +1967,29 @@ static const FieldInfo gGlobalPrefsFields[] = {
     {(size_t)-1, SettingType::Comment, 0},
     {offsetof(GlobalPrefs, customScreenDPI), SettingType::Int, 0},
     {(size_t)-1, SettingType::Comment, 0},
-    {(size_t)-1, SettingType::Comment, (intptr_t)"You're not expected to change those manually", true},
-    {offsetof(GlobalPrefs, defaultPasswords), SettingType::StringArray, 0, true},
-    {offsetof(GlobalPrefs, uiLanguage), SettingType::String, 0, true},
-    {offsetof(GlobalPrefs, versionToSkip), SettingType::String, 0, true},
-    {offsetof(GlobalPrefs, windowState), SettingType::Int, 1, true},
-    {offsetof(GlobalPrefs, windowPos), SettingType::Compact, (intptr_t)&gRectInfo, true},
-    {offsetof(GlobalPrefs, searchUIWindowPos), SettingType::Compact, (intptr_t)&gRect_1_Info, true},
-    {offsetof(GlobalPrefs, fileStates), SettingType::Array, (intptr_t)&gFileStateInfo, true},
-    {offsetof(GlobalPrefs, sessionData), SettingType::Array, (intptr_t)&gSessionDataInfo, true},
-    {offsetof(GlobalPrefs, reopenOnce), SettingType::StringArray, 0, true},
-    {offsetof(GlobalPrefs, timeOfLastUpdateCheck), SettingType::Compact, (intptr_t)&gFILETIMEInfo, true},
-    {offsetof(GlobalPrefs, openCountWeek), SettingType::Int, 0, true},
-    {offsetof(GlobalPrefs, propWinPos), SettingType::Compact, (intptr_t)&gPointInfo, true},
+    {offsetof(GlobalPrefs, defaultPasswords), SettingType::StringArray, 0},
+    {offsetof(GlobalPrefs, uiLanguage), SettingType::String, 0},
+    {offsetof(GlobalPrefs, versionToSkip), SettingType::String, 0},
+    {offsetof(GlobalPrefs, windowState), SettingType::Int, 1},
+    {offsetof(GlobalPrefs, windowPos), SettingType::Compact, (intptr_t)&gRectInfo},
+    {offsetof(GlobalPrefs, searchUIWindowPos), SettingType::Compact, (intptr_t)&gRect_1_Info},
+    {offsetof(GlobalPrefs, fileStates), SettingType::Array, (intptr_t)&gFileStateInfo},
+    {offsetof(GlobalPrefs, sessionData), SettingType::Array, (intptr_t)&gSessionDataInfo},
+    {offsetof(GlobalPrefs, reopenOnce), SettingType::StringArray, 0},
+    {offsetof(GlobalPrefs, timeOfLastUpdateCheck), SettingType::Compact, (intptr_t)&gFILETIMEInfo},
+    {offsetof(GlobalPrefs, openCountWeek), SettingType::Int, 0},
+    {offsetof(GlobalPrefs, propWinPos), SettingType::Compact, (intptr_t)&gPointInfo},
     {offsetof(GlobalPrefs, checkForUpdates), SettingType::Bool, true, true},
-    {(size_t)-1, SettingType::Comment, 0, true},
-    {(size_t)-1, SettingType::Comment, (intptr_t)"Settings below are not recognized by the current version", true},
-    {offsetof(GlobalPrefs, activeTabGroup), SettingType::String, (intptr_t)"", true},
+    {(size_t)-1, SettingType::Comment, 0},
+    {(size_t)-1, SettingType::Comment, (intptr_t)"Settings below are not recognized by the current version"},
+    {offsetof(GlobalPrefs, activeTabGroup), SettingType::String, (intptr_t)""},
+    {offsetof(GlobalPrefs, autoUpdate), SettingType::Bool, true},
+    {(size_t)-1, SettingType::Comment, 0},
+    {(size_t)-1, SettingType::Comment, (intptr_t)"You're not expected to change those manually", true},
 };
 static const StructInfo gGlobalPrefsInfo = {
     sizeof(GlobalPrefs),
-    151,
+    153,
     gGlobalPrefsFields,
     "\0\0FlashcardStudyDir\0FlashcardPreloadSessionBooks\0ShowScanModeButton\0ProfileDataDir\0DefaultDisplayMode\0Defau"
     "ltZoom\0DisableJavaScript\0AllowExternalImages\0EnableTeXEnhancements\0EscToExit\0FullPathInTitle\0InverseSearchCm"
@@ -2001,9 +2006,9 @@ static const StructInfo gGlobalPrefsInfo = {
     "evels\0ZoomIncrement\0\0ViewportCrop\0Trim\0FlashcardSettings\0\0FixedPageUI\0\0EBookUI\0\0ComicBookUI\0\0ImageUI"
     "\0\0ChmUI\0\0MarkdownUI\0\0HtmlUI\0\0ClaudeCode\0\0GrokBuild\0\0CodexBuild\0\0AntiGravity\0\0AIChatSidebarDx\0\0Tr"
     "anslateToLang\0TranslateFromLang\0TranslateEngine\0\0Annotations\0\0ExternalViewers\0\0ForwardSearch\0\0PrinterDef"
-    "aults\0\0Fullscreen\0\0SelectionHandlers\0\0Shortcuts\0\0Themes\0\0TabGroups\0\0CustomScreenDPI\0\0\0DefaultPasswo"
-    "rds\0UiLanguage\0VersionToSkip\0WindowState\0WindowPos\0SearchUIWindowPos\0FileStates\0SessionData\0ReopenOnce\0Ti"
-    "meOfLastUpdateCheck\0OpenCountWeek\0PropWinPos\0CheckForUpdates\0\0\0ActiveTabGroup",
+    "aults\0\0Fullscreen\0\0SelectionHandlers\0\0Shortcuts\0\0Themes\0\0TabGroups\0\0CustomScreenDPI\0\0DefaultPassword"
+    "s\0UiLanguage\0VersionToSkip\0WindowState\0WindowPos\0SearchUIWindowPos\0FileStates\0SessionData\0ReopenOnce\0Time"
+    "OfLastUpdateCheck\0OpenCountWeek\0PropWinPos\0CheckForUpdates\0\0\0ActiveTabGroup\0AutoUpdate\0\0",
     "\0\0LEGACY override: directory where flashcard study history JSONs are stored (per-book files, MD5-named). Empty "
     "(recommended) = <ProfileDataDir>\\study. Set only to keep per-book files in a separate (e.g. cloud-synced) "
     "folder; the profile store already syncs the same states. Changing it migrates the files\0if true, flashcard "
@@ -2108,17 +2113,18 @@ static const StructInfo gGlobalPrefsInfo = {
     "selection is active. See [docs for more "
     "information](https://www.sumatrapdfreader.org/docs/Customize-search-translation-services)\0\0custom keyboard "
     "shortcuts\0\0color themes\0\0saved groups of tabs\0\0actual resolution of the main screen in DPI, used to show "
-    "documents at their physical size; if 0 or negative, the resolution reported by Windows is used\0\0You're not "
-    "expected to change those manually\0a whitespace separated list of passwords to try when opening a password "
-    "protected document (passwords containing spaces must be quoted)\0[ISO code](langs.html) of the current UI "
-    "language\0SumatraPDF won't offer to update to this version again\0default state of the window. 1 is normal, 2 is "
-    "maximized, 3 is fullscreen, 4 is minimized\0default position (x, y) and size (width, height) of the "
-    "window\0position/size of the floating find window (see SearchUIFloating)\0information about opened files (in most "
-    "recently used order)\0state of the last session, usage depends on RestoreSession\0data required for reloading "
-    "documents after an auto-update\0data required to determine when SumatraPDF last checked for updates\0value "
-    "required to determine recency for the OpenCount value in FileStates\0position of the document properties "
-    "window\0if true, check once a day whether an update is available\0\0Settings below are not recognized by the "
-    "current version\0name of the tab group session this window auto-syncs to (empty = unsynced)",
+    "documents at their physical size; if 0 or negative, the resolution reported by Windows is used\0\0a whitespace "
+    "separated list of passwords to try when opening a password protected document (passwords containing spaces must "
+    "be quoted)\0[ISO code](langs.html) of the current UI language\0SumatraPDF won't offer to update to this version "
+    "again\0default state of the window. 1 is normal, 2 is maximized, 3 is fullscreen, 4 is minimized\0default "
+    "position (x, y) and size (width, height) of the window\0position/size of the floating find window (see "
+    "SearchUIFloating)\0information about opened files (in most recently used order)\0state of the last session, usage "
+    "depends on RestoreSession\0data required for reloading documents after an auto-update\0data required to determine "
+    "when SumatraPDF last checked for updates\0value required to determine recency for the OpenCount value in "
+    "FileStates\0position of the document properties window\0if true, check once a day whether an update is "
+    "available\0\0Settings below are not recognized by the current version\0name of the tab group session this window "
+    "auto-syncs to (empty = unsynced)\0if true, install a downloaded update silently and restart the app (no installer "
+    "window)\0\0You're not expected to change those manually",
     false};
 static const FieldInfo gTheme_1_Fields[] = {
     {offsetof(Theme, name), SettingType::String, (intptr_t)""},

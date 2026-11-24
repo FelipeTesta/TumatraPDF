@@ -1143,6 +1143,10 @@ CheckForUpdates = true
 
 ; name of the tab group session this window auto-syncs to (empty = unsynced)
 ActiveTabGroup = 
+
+; if true, install a downloaded update silently and restart the app (no
+; installer window)
+AutoUpdate = true
 ```
 
 ## Syntax for color values

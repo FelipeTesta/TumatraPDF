@@ -30,6 +30,13 @@
 #include "UpdateCheck.h"
 #include "Theme.h"
 #include "base/Dpi.h"
+#include "base/GuessFileType.h"
+#include "WindowTab.h"
+#include "DocProperties.h"
+#include "DocController.h"
+#include "EngineBase.h"
+#include "DisplayModel.h"
+#include "EngineAll.h"
 
 static Kind kNotifUpdateCheckInProgress = StrL("notifUpdateCheckInProgress").s;
 
@@ -278,7 +285,7 @@ static void SelfUpdateViaBatch(Str newExePath) {
     logf("SelfUpdateViaBatch: ok=%d bat '%s'\n", (int)(h != nullptr), batPath);
 }
 
-void StartInstallerAutoUpgrade(Str installerPath) {
+void StartInstallerAutoUpgrade(Str installerPath, bool silent) {
     // Defensive: never launch a downloaded file that still carries the
     // Mark-of-the-Web. The WinINet download (HttpGetToFile) doesn't add the ADS
     // today, but if it ever does (or the file came from a browser), remove it
@@ -293,13 +300,21 @@ void StartInstallerAutoUpgrade(Str installerPath) {
             // asset (Installer64 in update.txt); the -install flag flips it into
             // installer mode regardless of its temp file name, it reuses the
             // install dir remembered in the registry and replaces files in place.
-            logf("StartInstallerAutoUpgrade: unsigned update for installed exe, running installer\n");
+            // For silent auto-update, also pass -fast-install so the installer
+            // auto-starts the install, relaunches the app, and exits without
+            // showing any window.
+            logf("StartInstallerAutoUpgrade: unsigned update for installed exe, running installer (silent=%d)\n", (int)silent);
             str::Builder cmd;
             cmd.Append(" -install");
+            if (silent) {
+                cmd.Append(" -silent");
+                cmd.Append(" -fast-install");
+            }
             CreateProcessHelper(installerPath, ToStr(cmd));
             return;
         }
         // TumatraPDF: unsigned portable exe — self-replace via helper batch
+        // (already silent and self-restarting)
         logf("StartInstallerAutoUpgrade: unsigned portable update, self-replacing via batch\n");
         SelfUpdateViaBatch(installerPath);
         return;
@@ -312,10 +327,12 @@ void StartInstallerAutoUpgrade(Str installerPath) {
         } else {
             cmd.Append(" -install");
         }
+        if (silent) cmd.Append(" -silent");
     } else {
         // we're asking to over-write over ourselves, so also wait 2 secs to allow
         // our process to exit
         cmd.Append(fmt(R"( -sleep-ms 2000 -exit-when-done -update-self-to "%s")", GetSelfExePathTemp()));
+        if (silent) cmd.Append(" -silent");
     }
     logf("StartInstallerAutoUpgrade: installer cmd: '%s'\n", ToStr(cmd));
     CreateProcessHelper(installerPath, ToStr(cmd));
@@ -372,21 +389,56 @@ static TempStr GetFileProductVersionTemp(Str path) {
 // Forward declaration
 static int ShowUpdateAvailableDialog(UpdateInfo* updateInfo);
 
-static void NotifyUserOfUpdate(UpdateInfo* updateInfo) {
+// Check if any open document has unsaved annotations/outline/page geometry changes
+static bool AnyOpenDocumentHasUnsavedChanges() {
+    for (MainWindow* win : gWindows) {
+        for (WindowTab* tab : win->Tabs()) {
+            if (!tab->filePath) continue; // skip home/about tabs
+            DisplayModel* dm = tab->AsFixed();
+            if (!dm) continue;
+            EngineBase* engine = dm->GetEngine();
+            if (engine && EngineHasUnsavedAnnotations(engine)) {
+                logf("AnyOpenDocumentHasUnsavedChanges: tab '%s' has unsaved changes\n", tab->filePath);
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+static void NotifyUserOfUpdate(UpdateInfo* updateInfo, UpdateCheck updateCheckType) {
     auto installerPathAuto = updateInfo->installerPath;
+
     // auto-install path: the user already opted in via the "Download and update"
-    // link, so skip the confirmation dialog and just install (issue: pre-release
-    // one-click update)
+    // link (pre-release one-click update)
     if (gUpdateAutoInstall) {
         gUpdateAutoInstall = false;
         SaveSettings(); // persist timeOfLastUpdateCheck
         if (installerPathAuto && file::Exists(installerPathAuto)) {
-            StartInstallerAutoUpgrade(installerPathAuto);
+            StartInstallerAutoUpgrade(installerPathAuto, false);
             ExitAfterStartingUpdater();
         } else {
             logf("NotifyUserOfUpdate: auto-install requested but installer not downloaded\n");
         }
         return;
+    }
+
+    // TumatraPDF auto-update: if AutoUpdate is ON and this was an AUTOMATIC check,
+    // install silently WITHOUT showing the dialog, UNLESS there are unsaved changes.
+    if (gGlobalPrefs->autoUpdate && updateCheckType == UpdateCheck::Automatic) {
+        logf("NotifyUserOfUpdate: AutoUpdate=ON, automatic check -> silent install\n");
+        SaveSettings(); // persist timeOfLastUpdateCheck
+        if (AnyOpenDocumentHasUnsavedChanges()) {
+            logf("NotifyUserOfUpdate: unsaved changes detected -> falling back to dialog\n");
+            // fall through to show dialog
+        } else if (installerPathAuto && file::Exists(installerPathAuto)) {
+            StartInstallerAutoUpgrade(installerPathAuto, true);
+            ExitAfterStartingUpdater();
+            return;
+        } else {
+            logf("NotifyUserOfUpdate: auto-update requested but installer not downloaded\n");
+            return;
+        }
     }
 
     int buttonId = ShowUpdateAvailableDialog(updateInfo);
@@ -409,7 +461,7 @@ static void NotifyUserOfUpdate(UpdateInfo* updateInfo) {
         return;
     }
 
-    StartInstallerAutoUpgrade(installerPath);
+    StartInstallerAutoUpgrade(installerPath, false);
     ExitAfterStartingUpdater();
 }
 
@@ -705,6 +757,7 @@ struct DownloadUpdateAsyncData {
     HWND hwndForNotif = nullptr;
     UpdateInfo* updateInfo = nullptr;
     HttpProgress httpProgress = {};
+    UpdateCheck updateCheckType = UpdateCheck::Automatic;
 
     DownloadUpdateAsyncData() = default;
     ~DownloadUpdateAsyncData() { delete updateInfo; }
@@ -713,9 +766,10 @@ struct DownloadUpdateAsyncData {
 static void DownloadUpdateFinish(DownloadUpdateAsyncData* data) {
     auto* hwndForNotif = data->hwndForNotif;
     auto* updateInfo = data->updateInfo;
+    auto updateCheckType = data->updateCheckType;
     data->updateInfo = nullptr;
     RemoveNotificationsForGroup(hwndForNotif, kNotifUpdateCheckInProgress);
-    NotifyUserOfUpdate(updateInfo);
+    NotifyUserOfUpdate(updateInfo, updateCheckType);
     delete updateInfo;
     gUpdateCheckInProgress = false;
     delete data;
@@ -864,6 +918,7 @@ void DownloadAndInstallPendingUpdate(MainWindow* win) {
     auto* fnData = new DownloadUpdateAsyncData;
     fnData->hwndForNotif = hwndForNotif;
     fnData->updateInfo = updateInfo;
+    fnData->updateCheckType = UpdateCheck::UserInitiated;
     auto fn = MkFunc0<DownloadUpdateAsyncData>(DownloadUpdateAsync, fnData);
     RunAsync(fn, "DownloadUpdateAsync");
 }
@@ -1048,7 +1103,7 @@ static DWORD MaybeStartUpdateDownload(HWND hwndParent, HttpRsp* rsp, UpdateCheck
         // currently for release builds we don't set this and redirecto to a website instead
         logf("ShowAutoUpdateDialog: didn't find download url. Auto update data:\n%s\n", ToStr(*data));
         RemoveNotificationsForGroup(win->hwndCanvas, kNotifUpdateCheckInProgress);
-        NotifyUserOfUpdate(updateInfo);
+        NotifyUserOfUpdate(updateInfo, updateCheckType);
         delete updateInfo;
         return 0;
     }
@@ -1077,6 +1132,7 @@ static DWORD MaybeStartUpdateDownload(HWND hwndParent, HttpRsp* rsp, UpdateCheck
     auto* fnData = new DownloadUpdateAsyncData;
     fnData->hwndForNotif = hwndForNotif;
     fnData->updateInfo = updateInfo;
+    fnData->updateCheckType = updateCheckType;
     auto fn = MkFunc0<DownloadUpdateAsyncData>(DownloadUpdateAsync, fnData);
     RunAsync(fn, "DownloadUpdateAsync");
     return 0;

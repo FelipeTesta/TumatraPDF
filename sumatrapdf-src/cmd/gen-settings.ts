@@ -1429,7 +1429,6 @@ const globalPrefs: Field[] = [
   ).ver("2.5"),
   emptyLine(),
 
-  comment("You're not expected to change those manually"),
   compactArray("DefaultPasswords", Str, null, "passwords to try when opening a password protected document")
     .ver("2.4")
     .doc(
@@ -1489,6 +1488,9 @@ const globalPrefs: Field[] = [
   emptyLine(),
   comment("Settings below are not recognized by the current version"),
   field("ActiveTabGroup", Str, "", "name of the tab group session this window auto-syncs to (empty = unsynced)"),
+  field("AutoUpdate", Bool, true, "if true, install a downloaded update silently and restart the app (no installer window)"),
+  emptyLine(),
+  comment("You're not expected to change those manually"),
 ];
 
 const globalPrefsStruct = struct("GlobalPrefs", globalPrefs, "Preferences are persisted in SumatraPDF-settings.txt");
