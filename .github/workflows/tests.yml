@@ -48,7 +48,7 @@ jobs:
       - name: Fail on fixture pollution (log marker check, belt-and-braces)
         if: always()
         run: |
-          if (Test-Path "$env:RUNNER_TEMP\fixture-guard.log" -and (Select-String -Path "$env:RUNNER_TEMP\fixture-guard.log" -Pattern 'FIXTURE-GUARD-POLLUTION' -Quiet)) {
+          if ((Test-Path "$env:RUNNER_TEMP\fixture-guard.log") -and (Select-String -Path "$env:RUNNER_TEMP\fixture-guard.log" -Pattern 'FIXTURE-GUARD-POLLUTION' -Quiet)) {
             echo "::error::Fixture pollution detected — FIXTURE-GUARD-POLLUTION marker found in log"
             exit 1
           }
