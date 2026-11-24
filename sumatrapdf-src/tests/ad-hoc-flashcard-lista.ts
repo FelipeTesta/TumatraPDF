@@ -20,7 +20,7 @@ import {
   WM_KEYDOWN,
   packCoords,
 } from "./winapi";
-import { cmdId, tmpPath, EXE } from "./util";
+import { cmdId, tmpPath, EXE, copyFixtureToTmp, trackedFileFingerprint, assertTrackedFileUnchanged } from "./util";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
@@ -112,12 +112,14 @@ async function createTwoCards(frame: number): Promise<number> {
 }
 
 export async function testit(): Promise<void> {
+  const fixtureRel = "ext/a-zlib/zlib.3.pdf";
+  const before = trackedFileFingerprint(fixtureRel);
   const logPath = findLogPath();
   if (logPath) {
     logStartOffset = fs.statSync(logPath).size;
   }
 
-  const pdf = process.argv[2] || path.resolve("ext", "a-zlib", "zlib.3.pdf");
+  const pdf = copyFixtureToTmp(fixtureRel);
   const proc = launchSumatra(["-for-testing", "-page", "3", pdf]);
   const frame = await waitForFrame(proc.pid);
   await sleep(3500);
@@ -200,6 +202,7 @@ export async function testit(): Promise<void> {
     throw new Error(`${failures.length} check(s) failed:\n- ${failures.join("\n- ")}`);
   }
   console.log("ALL CHECKS PASSED");
+  assertTrackedFileUnchanged(fixtureRel, before);
 }
 
 if (import.meta.main) {

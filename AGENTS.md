@@ -196,6 +196,9 @@ TumatraPDF/                   # repo root
 - Scratch files → `tests/tmp/` (gitignored) or `os.tmpdir()`
 - Binary fixtures from source → commit source alongside (with regeneration instructions)
 - Bug repro files → `C:\Users\kjk\OneDrive\!sumatra\bugs\bug-<no>*`
+- A test NEVER opens a tracked repo file for writing: copy it into `sumatrapdf-src/tests/tmp/` first (`copyFixtureToTmp` in `tests/util.ts`)
+- A test that creates annotations MUST copy the fixture and MUST NOT depend on a graceful quit (the modal "save changes?" prompt blocks the message loop) — drive the app through the control pipe and kill the process
+- The fixture guard (`bun scripts/test-fixture-guard.ts -- <cmd>`) must pass; a tracked file modified by the test suite FAILS the build
 
 # 6b. Debug tooling inventory
 

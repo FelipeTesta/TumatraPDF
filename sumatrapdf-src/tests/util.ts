@@ -3,9 +3,15 @@
 // Each tests/issue-<n>.ts exports `async function testit()` that runs the test
 // and THROWS on failure (returns normally on success). It does NOT build the app
 // or call process.exit -- that's the runner's job, so tests compose in all.ts.
+//
+// RULE: a test must NEVER open a tracked repo file for writing. Copy it first
+// with copyFixtureToTmp() into tests/tmp/ (gitignored). A test that creates
+// annotations MUST copy the fixture and MUST NOT depend on a graceful quit
+// (the modal "save changes?" prompt blocks the message loop) — drive the app
+// through the control pipe and kill the process.
 
-import { mkdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync, readFileSync, copyFileSync, statSync } from "node:fs";
+import { join, basename } from "node:path";
 
 export const ROOT = join(import.meta.dir, "..");
 // build.ts produces TumatraPDF.exe (the old SumatraPDF.exe in out\dbg64 is a
@@ -188,4 +194,58 @@ export async function runStandalone(testit: () => void | Promise<void>, name?: s
     process.exit(1);
   }
   process.exit(0);
+}
+
+// Counter for unique fixture copy names
+let fixtureCopyCounter = 0;
+
+// Copies a tracked fixture (path relative to sumatrapdf-src/, e.g.
+// "ext/a-zlib/zlib.3.pdf") into tests/tmp/ under a unique name
+// (timestamp + counter + sanitised basename) and returns the ABSOLUTE
+// path of the copy. The copy is a real byte copy (fs.copyFileSync) so
+// the test can modify it freely.
+export function copyFixtureToTmp(fixtureRelPath: string, name?: string): string {
+  const src = join(ROOT, fixtureRelPath);
+  if (!name) {
+    const ts = Date.now().toString(36);
+    const c = (fixtureCopyCounter++).toString(36);
+    const base = basename(fixtureRelPath).replace(/[^a-zA-Z0-9._-]/g, "_");
+    name = `${ts}-${c}-${base}`;
+  }
+  const dest = tmpPath(name);
+  copyFileSync(src, dest);
+  return dest;
+}
+
+// Returns a fingerprint (size + mtimeMs) of a tracked file relative to
+// sumatrapdf-src/, or null if the file doesn't exist.
+export function trackedFileFingerprint(relPathFromSrc: string): { size: number; mtimeMs: number } | null {
+  const p = join(ROOT, relPathFromSrc);
+  try {
+    const s = statSync(p);
+    return { size: s.size, mtimeMs: s.mtimeMs };
+  } catch {
+    return null;
+  }
+}
+
+// Asserts that a tracked file (relative to sumatrapdf-src/) has not
+// changed since `before` was captured. THROWS with a clear message
+// (path + before/after) when the tracked file changed.
+export function assertTrackedFileUnchanged(
+  relPathFromSrc: string,
+  before: { size: number; mtimeMs: number } | null,
+): void {
+  const after = trackedFileFingerprint(relPathFromSrc);
+  if (!before && !after) return; // both missing = unchanged
+  if (!before || !after) {
+    throw new Error(
+      `Fixture pollution: ${relPathFromSrc} existence changed (before=${before ? "exists" : "missing"}, after=${after ? "exists" : "missing"})`,
+    );
+  }
+  if (before.size !== after.size || before.mtimeMs !== after.mtimeMs) {
+    throw new Error(
+      `Fixture pollution: ${relPathFromSrc} modified (before: size=${before.size}, mtime=${before.mtimeMs}; after: size=${after.size}, mtime=${after.mtimeMs})`,
+    );
+  }
 }

@@ -7,12 +7,14 @@
 // mask over both pages can be checked by eye.
 import { launchSumatra, waitForFrame, findCanvas, sendCommand } from "./win-automation";
 import { captureWindowToPng, sleep, postMessage, WM_KEYDOWN, getWindowTextFull, getClientRect } from "./winapi";
-import { cmdId, tmpPath, EXE } from "./util";
+import { cmdId, tmpPath, EXE, copyFixtureToTmp, trackedFileFingerprint, assertTrackedFileUnchanged } from "./util";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
 export async function testit(): Promise<void> {
-  const pdf = process.argv[2] || path.resolve("ext", "a-zlib", "zlib.3.pdf");
+  const fixtureRel = "ext/a-zlib/zlib.3.pdf";
+  const before = trackedFileFingerprint(fixtureRel);
+  const pdf = copyFixtureToTmp(fixtureRel);
   const exeDir = path.dirname(EXE);
   const proc = launchSumatra(["-for-testing", "-page", "1", pdf]);
   const frame = await waitForFrame(proc.pid);
@@ -110,6 +112,7 @@ export async function testit(): Promise<void> {
     throw new Error(`FAIL: cross-page cloze should be ONE card, loader found ${found}`);
   }
   console.log("PASS: cross-page cloze grouped into 1 card");
+  assertTrackedFileUnchanged(fixtureRel, before);
 }
 
 if (import.meta.main) {

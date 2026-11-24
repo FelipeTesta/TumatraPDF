@@ -38,7 +38,7 @@ import {
   VK_RETURN,
   packCoords,
 } from "./winapi";
-import { cmdId, tmpPath, EXE } from "./util";
+import { cmdId, tmpPath, EXE, copyFixtureToTmp, trackedFileFingerprint, assertTrackedFileUnchanged } from "./util";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
@@ -156,9 +156,10 @@ async function createTwoCards(frame: number): Promise<number> {
 }
 
 export async function testit(): Promise<void> {
-  const src = path.resolve("ext", "a-zlib", "zlib.3.pdf");
-  const copy = tmpPath("fc-crossdoc-copy.pdf");
-  fs.copyFileSync(src, copy);
+  const fixtureRel = "ext/a-zlib/zlib.3.pdf";
+  const before = trackedFileFingerprint(fixtureRel);
+  const src = copyFixtureToTmp(fixtureRel, "fc-crossdoc-src.pdf");
+  const copy = copyFixtureToTmp(fixtureRel, "fc-crossdoc-copy.pdf");
   const logP = findLogPath();
   if (logP && fs.existsSync(logP)) {
     logStartOffset = fs.statSync(logP).size; // assert only on THIS run
@@ -170,19 +171,19 @@ export async function testit(): Promise<void> {
   console.log("frame title:", getWindowTextFull(frame));
 
   // ---- create 2 cards in EACH document (runtime annotations, no save)
-  if (!(await gotoTabByTitle(frame, "zlib.3.pdf"))) {
+  if (!(await gotoTabByTitle(frame, "fc-crossdoc-src"))) {
     proc.kill();
-    throw new Error("could not reach the zlib tab");
+    throw new Error("could not reach the src tab");
   }
   const n0 = await createTwoCards(frame);
-  console.log("cards created in zlib tab:", n0);
+  console.log("cards created in src tab:", n0);
   if (!(await gotoTabByTitle(frame, "fc-crossdoc-copy"))) {
     proc.kill();
     throw new Error("could not reach the copy tab");
   }
   const n1 = await createTwoCards(frame);
   console.log("cards created in copy tab:", n1);
-  await gotoTabByTitle(frame, "zlib.3.pdf");
+  await gotoTabByTitle(frame, "fc-crossdoc-src");
 
   // flashcard mode ON + study ON on the zlib tab -> queue = its 2 new cards
   sendCommand(frame, cmdId("CmdFlashcardToggle"));
@@ -314,7 +315,7 @@ export async function testit(): Promise<void> {
     "[fc] BuildFilteredStudyOrder - 2 cards (scope=current-doc, tabsUsed=1,",
     "[fc] Filter - dialog opened",
     "[fc] Filter - applied expr '-1-99999;' (enabled=1)",
-    "[fc] CollectTabCards - 'zlib.3.pdf': 0 cards pass (of 2)",
+    "[fc] CollectTabCards - 'fc-crossdoc-src.pdf': 0 cards pass (of 2)",
     "[fc] BuildFilteredStudyOrder - 0 cards (scope=current-doc, tabsUsed=1,",
     "[fc] Filter - toggle -> OFF (expr kept: '-1-99999;')",
     "[fc] Filter - CLEARED (hold 2s confirmed), re-enabled",
@@ -344,12 +345,13 @@ export async function testit(): Promise<void> {
     missing.push("frame title switched to the copy tab");
   }
   if (n0 < 2 || n1 < 2) {
-    missing.push(`card creation incomplete (zlib=${n0}, copy=${n1})`);
+    missing.push(`card creation incomplete (src=${n0}, copy=${n1})`);
   }
   if (missing.length > 0) {
     throw new Error("missing expected [fc] log lines:\n- " + missing.join("\n- "));
   }
   console.log("ALL FILTER + CROSS-DOC ASSERTIONS PASSED");
+  assertTrackedFileUnchanged(fixtureRel, before);
 }
 
 if (import.meta.main) {

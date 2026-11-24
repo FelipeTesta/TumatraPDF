@@ -1,0 +1,54 @@
+name: Tests
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - "sumatrapdf-src/src/**"
+      - "sumatrapdf-src/tests/**"
+      - "sumatrapdf-src/cmd/**"
+      - "scripts/**"
+      - ".github/workflows/tests.yml"
+  pull_request:
+    branches: [main, master]
+    paths:
+      - "sumatrapdf-src/src/**"
+      - "sumatrapdf-src/tests/**"
+      - "sumatrapdf-src/cmd/**"
+      - "scripts/**"
+      - ".github/workflows/tests.yml"
+  workflow_dispatch:
+
+jobs:
+  unit-tests:
+    name: Unit Tests (with fixture guard)
+    runs-on: windows-2022
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Run unit tests through fixture guard (non-blocking on test failures)
+        id: guard
+        continue-on-error: true
+        working-directory: sumatrapdf-src
+        run: |
+          bun ../scripts/test-fixture-guard.ts --sentinel "${{ runner.temp }}/fixture-guard.polluted" --log "${{ runner.temp }}/fixture-guard.log" -- bun cmd/run-unit-tests.ts -dbg
+
+      - name: Fail on fixture pollution (sentinel file check)
+        if: always()
+        run: |
+          if (Test-Path "$env:RUNNER_TEMP\fixture-guard.polluted") {
+            echo "::error::Fixture pollution detected — tracked files were modified by the test suite (sentinel file present)"
+            exit 1
+          }
+
+      - name: Fail on fixture pollution (log marker check, belt-and-braces)
+        if: always()
+        run: |
+          if (Test-Path "$env:RUNNER_TEMP\fixture-guard.log" -and (Select-String -Path "$env:RUNNER_TEMP\fixture-guard.log" -Pattern 'FIXTURE-GUARD-POLLUTION' -Quiet)) {
+            echo "::error::Fixture pollution detected — FIXTURE-GUARD-POLLUTION marker found in log"
+            exit 1
+          }
