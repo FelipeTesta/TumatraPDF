@@ -1,4 +1,4 @@
-// dot-sync: verified=2026-11-23 refs=9c48c9010d21
+// dot-sync: verified=2026-11-24 refs=dbdbcf85fe24
 digraph CommandSystem {
     rankdir=TB;
     node [shape=box, style=rounded, fontname="Consolas", fontsize=9];

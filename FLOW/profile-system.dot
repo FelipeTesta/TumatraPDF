@@ -1,4 +1,4 @@
-// dot-sync: verified=2026-11-23 refs=4c84637d9895
+// dot-sync: verified=2026-11-24 refs=d784279ffd45
 digraph ProfileSystem {
     // Snapshot: 2026-11-21 (s69) — Profile Sync: correct merge, complete migration, honest UI
     rankdir=TB;

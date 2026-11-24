@@ -1,4 +1,4 @@
-// dot-sync: verified=2026-11-23 refs=af50efd556fe
+// dot-sync: verified=2026-11-24 refs=058ede4c7789
 digraph TumatraPDF {
     rankdir=TB;
     node [shape=box, style=rounded];

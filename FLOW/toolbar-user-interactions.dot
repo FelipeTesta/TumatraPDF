@@ -1,4 +1,4 @@
-// dot-sync: verified=2026-11-23 refs=dbff517e7663
+// dot-sync: verified=2026-11-24 refs=a8c33e0087f1
 digraph ToolbarUserInteractions {
     rankdir=TB;
     node [shape=box, style=rounded, fontname="Consolas", fontsize=10];

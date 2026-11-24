@@ -1,4 +1,4 @@
-// dot-sync: verified=2026-11-23 refs=da39a3ee5e6b
+// dot-sync: verified=2026-11-24 refs=da39a3ee5e6b
 // Toolbar White/No Buttons - Cause Tree & Analysis Map
 // TumatraPDF - Debug Flow: all potential causes, discarded items, and current status
 digraph ToolbarWhiteNoButtons {

@@ -1,4 +1,4 @@
-// dot-sync: verified=2026-11-23 refs=417b6eef6df7
+// dot-sync: verified=2026-11-24 refs=55469f6a154c
 digraph TrimContrast {
     rankdir=TB;
     node [shape=box, style=rounded];

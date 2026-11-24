@@ -1,4 +1,4 @@
-// dot-sync: verified=2026-11-23 refs=7ff2ca1935e6
+// dot-sync: verified=2026-11-24 refs=7ff2ca1935e6
 digraph ToolbarPerToolbarState {
     rankdir=TB;
     node [shape=box, style=rounded, fontname="Consolas", fontsize=10];

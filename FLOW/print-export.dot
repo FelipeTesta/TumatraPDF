@@ -1,4 +1,4 @@
-// dot-sync: verified=2026-11-23 refs=e17ccc75d87a
+// dot-sync: verified=2026-11-24 refs=e17ccc75d87a
 digraph PrintExport {
     rankdir=TB;
     node [shape=box, style=rounded, fontname="Consolas", fontsize=9];

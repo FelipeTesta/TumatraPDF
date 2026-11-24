@@ -1,4 +1,4 @@
-// dot-sync: verified=2026-11-23 refs=7973b4120364
+// dot-sync: verified=2026-11-24 refs=a7e96d3866d6
 digraph RenderPipeline {
     rankdir=TB;
     node [shape=box, style=rounded, fontname="Consolas", fontsize=9];

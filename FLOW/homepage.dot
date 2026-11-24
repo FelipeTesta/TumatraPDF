@@ -1,4 +1,4 @@
-// dot-sync: verified=2026-11-23 refs=e95eecc62eab
+// dot-sync: verified=2026-11-24 refs=56f3c1ca0637
 digraph HomePage {
     // NOTE (s63, 2026-11-13): this file maps the LEGACY pre-VirtWnd HOME (tiles).
     // Current paint path: see cluster_s63 near the end (OnPaintAbout → DrawHomePage).

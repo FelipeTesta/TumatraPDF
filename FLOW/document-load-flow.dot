@@ -1,4 +1,4 @@
-// dot-sync: verified=2026-11-23 refs=a57027bf1643
+// dot-sync: verified=2026-11-24 refs=2e9cada05f4b
 digraph DocumentLoadFlow {
     rankdir=TB;
     node [shape=box, style=rounded, fontname="Consolas", fontsize=9];

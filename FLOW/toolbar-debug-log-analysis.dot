@@ -1,4 +1,4 @@
-// dot-sync: verified=2026-11-23 refs=31d895b0df1d
+// dot-sync: verified=2026-11-24 refs=31d895b0df1d
 digraph ToolbarDebugLogAnalysis {
     rankdir=TB;
     node [shape=box, style=rounded, fontname="Consolas", fontsize=10];

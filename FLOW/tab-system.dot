@@ -1,4 +1,4 @@
-// dot-sync: verified=2026-11-23 refs=e3d24b5e3dfe
+// dot-sync: verified=2026-11-24 refs=a3968c6095e3
 digraph TabSystem {
     rankdir=TB;
     node [shape=box, style=rounded, fontname="Consolas", fontsize=9];

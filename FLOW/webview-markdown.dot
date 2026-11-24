@@ -1,4 +1,4 @@
-// dot-sync: verified=2026-11-23 refs=4ac5bc1f49e5
+// dot-sync: verified=2026-11-24 refs=e3c14502d6e0
 digraph WebViewMarkdown {
     rankdir=TB;
     node [shape=box, style=rounded, fontname="Consolas", fontsize=9];
