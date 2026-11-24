@@ -253,7 +253,7 @@ static bool ShouldCheckForUpdate(UpdateCheck updateCheckType) {
 // TumatraPDF release builds are unsigned portable exes: overwrite the running exe via a
 // detached cmd batch that waits for this process to exit, moves the new exe in place
 // and relaunches it, then deletes itself.
-static void SelfUpdateViaBatch(Str newExePath) {
+static bool SelfUpdateViaBatch(Str newExePath) {
     TempStr selfExe = GetSelfExePathTemp();
     TempStr batPath = GetTempFilePathTemp(StrL("tumatrapdf-update"));
     batPath = str::JoinTemp(batPath, StrL(".bat"));
@@ -275,7 +275,7 @@ static void SelfUpdateViaBatch(Str newExePath) {
     bool ok = file::WriteFile(batPath, content);
     if (!ok) {
         logf("SelfUpdateViaBatch: failed to write '%s'\n", batPath);
-        return;
+        return false;
     }
     TempStr cmd = fmt("\"cmd.exe\" /c \"%s\"", batPath);
     HANDLE h = LaunchProcessInDir(cmd, Str(), CREATE_NO_WINDOW | DETACHED_PROCESS);
@@ -283,9 +283,13 @@ static void SelfUpdateViaBatch(Str newExePath) {
         CloseHandle(h);
     }
     logf("SelfUpdateViaBatch: ok=%d bat '%s'\n", (int)(h != nullptr), batPath);
+    return h != nullptr;
 }
 
-void StartInstallerAutoUpgrade(Str installerPath, bool silent) {
+// Returns true if the updater process was launched. Callers that then exit the
+// app must check the return value: a failed launch means the update never
+// happens, and the user must not be left with a silent no-op.
+bool StartInstallerAutoUpgrade(Str installerPath, bool silent) {
     // Defensive: never launch a downloaded file that still carries the
     // Mark-of-the-Web. The WinINet download (HttpGetToFile) doesn't add the ADS
     // today, but if it ever does (or the file came from a browser), remove it
@@ -303,21 +307,21 @@ void StartInstallerAutoUpgrade(Str installerPath, bool silent) {
             // For silent auto-update, also pass -fast-install so the installer
             // auto-starts the install, relaunches the app, and exits without
             // showing any window.
-            logf("StartInstallerAutoUpgrade: unsigned update for installed exe, running installer (silent=%d)\n", (int)silent);
+            logf("StartInstallerAutoUpgrade: unsigned update for installed exe, running installer (silent=%d)\n",
+                 (int)silent);
             str::Builder cmd;
             cmd.Append(" -install");
             if (silent) {
                 cmd.Append(" -silent");
                 cmd.Append(" -fast-install");
             }
-            CreateProcessHelper(installerPath, ToStr(cmd));
-            return;
+            return CreateProcessHelper(installerPath, ToStr(cmd));
         }
         // TumatraPDF: unsigned portable exe — self-replace via helper batch
         // (already silent and self-restarting)
         logf("StartInstallerAutoUpgrade: unsigned portable update, self-replacing via batch\n");
-        SelfUpdateViaBatch(installerPath);
-        return;
+        bool ok = SelfUpdateViaBatch(installerPath);
+        return ok;
     }
     str::Builder cmd;
     if (IsOurExeInstalled()) {
@@ -335,7 +339,7 @@ void StartInstallerAutoUpgrade(Str installerPath, bool silent) {
         if (silent) cmd.Append(" -silent");
     }
     logf("StartInstallerAutoUpgrade: installer cmd: '%s'\n", ToStr(cmd));
-    CreateProcessHelper(installerPath, ToStr(cmd));
+    return CreateProcessHelper(installerPath, ToStr(cmd));
 }
 
 static void ExitAfterStartingUpdater() {
@@ -415,8 +419,11 @@ static void NotifyUserOfUpdate(UpdateInfo* updateInfo, UpdateCheck updateCheckTy
         gUpdateAutoInstall = false;
         SaveSettings(); // persist timeOfLastUpdateCheck
         if (installerPathAuto && file::Exists(installerPathAuto)) {
-            StartInstallerAutoUpgrade(installerPathAuto, false);
-            ExitAfterStartingUpdater();
+            if (StartInstallerAutoUpgrade(installerPathAuto, false)) {
+                ExitAfterStartingUpdater();
+            } else {
+                logf("NotifyUserOfUpdate: auto-install launch failed for '%s'\n", installerPathAuto);
+            }
         } else {
             logf("NotifyUserOfUpdate: auto-install requested but installer not downloaded\n");
         }
@@ -424,7 +431,11 @@ static void NotifyUserOfUpdate(UpdateInfo* updateInfo, UpdateCheck updateCheckTy
     }
 
     // TumatraPDF auto-update: if AutoUpdate is ON and this was an AUTOMATIC check,
-    // install silently WITHOUT showing the dialog, UNLESS there are unsaved changes.
+    // install silently WITHOUT showing the dialog, UNLESS there are unsaved changes
+    // or the silent install cannot proceed (installer not downloaded, or the
+    // updater process failed to launch). In those cases we fall through to the
+    // confirm dialog so the user is NOT left with a silent no-op and a vanished
+    // "accept update" button.
     if (gGlobalPrefs->autoUpdate && updateCheckType == UpdateCheck::Automatic) {
         logf("NotifyUserOfUpdate: AutoUpdate=ON, automatic check -> silent install\n");
         SaveSettings(); // persist timeOfLastUpdateCheck
@@ -432,12 +443,17 @@ static void NotifyUserOfUpdate(UpdateInfo* updateInfo, UpdateCheck updateCheckTy
             logf("NotifyUserOfUpdate: unsaved changes detected -> falling back to dialog\n");
             // fall through to show dialog
         } else if (installerPathAuto && file::Exists(installerPathAuto)) {
-            StartInstallerAutoUpgrade(installerPathAuto, true);
-            ExitAfterStartingUpdater();
-            return;
+            if (StartInstallerAutoUpgrade(installerPathAuto, true)) {
+                ExitAfterStartingUpdater();
+                return;
+            }
+            // silent launch failed: fall through to dialog so the user sees the
+            // confirm button and learns the install did not start silently.
+            logf("NotifyUserOfUpdate: silent install launch failed -> falling back to dialog\n");
         } else {
-            logf("NotifyUserOfUpdate: auto-update requested but installer not downloaded\n");
-            return;
+            // installer not downloaded yet: fall through to dialog so the user
+            // sees the confirm button instead of a silent no-op.
+            logf("NotifyUserOfUpdate: auto-update requested but installer not downloaded -> falling back to dialog\n");
         }
     }
 
@@ -461,7 +477,10 @@ static void NotifyUserOfUpdate(UpdateInfo* updateInfo, UpdateCheck updateCheckTy
         return;
     }
 
-    StartInstallerAutoUpgrade(installerPath, false);
+    if (!StartInstallerAutoUpgrade(installerPath, false)) {
+        logf("NotifyUserOfUpdate: failed to launch installer '%s'\n", installerPath);
+        return; // do not exit: the user must not be stranded without the app
+    }
     ExitAfterStartingUpdater();
 }
 

@@ -8,5 +8,6 @@ enum class UpdateCheck {
 
 void StartAsyncUpdateCheck(MainWindow* win, UpdateCheck updateCheckType);
 void DownloadAndInstallPendingUpdate(MainWindow* win);
-void StartInstallerAutoUpgrade(Str installerPath, bool silent);
+// returns true if the updater process was launched
+bool StartInstallerAutoUpgrade(Str installerPath, bool silent);
 void UpdateSelfTo(Str dstPath);
