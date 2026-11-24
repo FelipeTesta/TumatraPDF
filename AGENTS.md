@@ -304,9 +304,28 @@ All project informativos (`README.md`, `LOG.md`, `TODO.md`, `BUILD.md`, `MERGE.m
   - Tool/feature names NEVER translated (`Autoscroll`, `Trim`, `Hold`, `Study`, `List`, `Filter`, `Import`, `Session`, `Profile Sync`, `Arch Tools`, `Edit mode`, `Capture tool`, ...): the app UI has no Spanish localization. Translate only prose/instructions.
   - Every `README.md` edit invalidates the translation. Sync check: `bun scripts/readme-sync.ts` (exit 1 = drift); after updating the translation run `bun scripts/readme-sync.ts --update` to refresh the `<!-- readme-sync: source-blob=... -->` token + date line. CI: `.github/workflows/readme-sync.yml`. Pre-release: item in `TODO.md` § Release gate.
 
+# 13b. Agent handoff contract (mandatory)
+
+R1 acceptance table (mandatory). Brief enumerates acceptance criteria as numbered list. Report contains ONE ROW PER CRITERION: `criterion | how verified (command, or file:line read) | result | evidence`. Criterion with no row = NOT done — say so explicitly. No prose substitute for table.
+
+R2 second question (mandatory, each new invariant/state field/flag/cache). List EVERY writer and EVERY reader of that state; state for each whether it preserves the invariant. Table: `path (file:line) | preserves invariant? yes/no | fix if no`. Catches happy-path-only invariant (defect: happy path sorted vector, early-return path did not → binary search missed states, duplicate key in JSON).
+
+R3 "verified" = a command. Verification claim quotes command + output, or exact file:line + decisive code. Prose ("verified", "works", "it should") is not verification. Unchecked → explicit `NOT VERIFIED` block: what, why, what needed.
+
+R4 Lemma is the handoff channel. Before reporting, agent writes ONE Lemma memory fragment (project `tumatrapdf`) containing: claim, evidence (file:line + decisive snippet), checks performed with output, R2 table, acceptance table, NOT VERIFIED list. Report then contains fragment id + at most 8 lines. Architect reads FRAGMENT not transcript — fragment self-contained; writing it IS part of verification. Format `## Title\n### Context\n...\n### Content\n...`, bullets, 30-2000 chars, ENGLISH. `memory_add({fragment})` → `{success:true,id:"<id>"}`; `guide_distill({memory_id:"<id>", guide:"verifying subagent work", category:"dev-tool"})` (param `memory_id` singular, not `source_memory_ids`; creates guide if missing); verify `guide_get({guide:"verifying subagent work"})` count>=1. §14 line added pointing to R4 — fragment IS the handoff.
+
+R5 check fails before fix. For every fix that can fail, agent produces a check that FAILS on old code and PASSES on new (test, script, or deliberate break reverted after, FAIL output pasted). "Compiles" is not that check. If impossible → NOT VERIFIED block + manual procedure user runs.
+
+R6 cost claims checked, not assumed. Complexity/performance claim checked against implementing code, exact numbers quoted ("O(C log C)" false for insertion sort). If wrong, fix claim in code comment AND commit message AND LOG entry (LOG entry states real complexity).
+
+R7 architect verifies a sample. Architect personally verifies, in artifact (never report), every claim about: (a) data loss/corruption, (b) versions/migrations, (c) rarely executed path, (d) cost/complexity claim. Agent marks these in acceptance table.
+
+Repo specifics: `FLOW/*.dot` + `scripts/flow-sync.ts`; `tests/` conventions (`cmdId()` not hardcoded ids); `bun cmd/gen-code.ts` for generated files; English+caveman doc text (§13).
+
 # 14. Lemma memory lifecycle (MANDATORY)
 
 - Every new session: lemma `session_start({task_type, technologies, initial_approach})` FIRST → loads relevant guides + preloaded memories
+- Handoff: fragment IS the handoff — write ONE Lemma fragment before reporting per §13b R4; report contains fragment id + at most 8 lines; architect reads fragment not transcript.
 - Before act: `memory_read`, query = keywords in English
 - After finish: `memory_add` fragment `## Title\n### Context\n...\n### Content\n...`, 30-2000 chars, ENGLISH + `session_end({outcome, final_approach, lessons})`
 - Never ask permission to save. Store fragments in ENGLISH for searchability.
