@@ -84,6 +84,7 @@ export enum ControlCommand {
   TestProfileImport = 82,
   TestProfileStatus = 83,
   TestCommandEnabled = 84,
+  TestHomePinnedBook = 85,
   TestWindowStats = 76,
   TestOpenInWindow = 77,
   TestFocusWindow = 78,

@@ -433,6 +433,7 @@ enum class ControlCmd : u16 {
     TestProfileImport = 82,
     TestProfileStatus = 83,
     TestCommandEnabled = 84,
+    TestHomePinnedBook = 85,
 };
 
 enum class ControlArgType : u16 {
@@ -1045,6 +1046,13 @@ static void ExecuteControlRequest(ControlRequest* req) {
         case ControlCmd::TestHomeListRows: {
             int exitCode = 0;
             Str res = HomeListRowsResultTemp(&exitCode);
+            AppendTestResult(req, exitCode, res);
+            break;
+        }
+
+        case ControlCmd::TestHomePinnedBook: {
+            int exitCode = 0;
+            Str res = HomePinnedBookResultTemp(&exitCode);
             AppendTestResult(req, exitCode, res);
             break;
         }
