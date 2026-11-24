@@ -541,7 +541,7 @@ static DWORD WINAPI FlashcardPrewarmWorker(void*) {
         }
         if (job.wantTile && job.dm && gRenderCache) {
             if (job.epoch == gFcWarmEpoch && !job.dm->pauseRendering && job.dm->ValidPageNo(job.vPage)) {
-                gRenderCache->RequestRendering(job.dm, job.vPage);
+                gRenderCache->RequestRenderingSpeculative(job.dm, job.vPage, TilePosition(), true, nullptr);
             }
         }
         InterlockedDecrement(&gFcWarmActive);
@@ -735,9 +735,9 @@ static void FlashcardPrefetchRenderUpcoming(MainWindow* win, int fromIdx) {
         if (gRenderCache->IsRenderQueueFull()) {
             break;
         }
-        gRenderCache->RequestRendering(dm, vPage);
-        logf("[fc][perf] prefetch-render idx=%d card=%d page=%d (virtual %d) zoom=%.2f -> requested\n", i, e.cardIdx,
-             card.pageNo, vPage, zoom);
+        gRenderCache->RequestRenderingSpeculative(dm, vPage, TilePosition(), true, nullptr);
+        logf("[fc][perf] prefetch-render idx=%d card=%d page=%d (virtual %d) zoom=%.2f -> requested (speculative)\n", i,
+             e.cardIdx, card.pageNo, vPage, zoom);
         done++;
     }
 }
@@ -954,6 +954,11 @@ static void HandleFlashcardRate(MainWindow* win, int rating) {
 
     logf("[fc] HandleFlashcardRate - rated %d card %d of '%s'\n", rating, e.cardIdx, FlashcardTabLogName(e.tab));
 
+    // Track the rated card for incremental sidebar update.
+    // The card is at curIdx in studyOrder (before advance).
+    win->flashcard.listaIncrementalCardIdx = curIdx;
+    win->flashcard.listaIncrementalCardTab = e.tab;
+
     // Phase 5: toolbar — synchronous (cheap label update).
     t0 = GetTickCount64();
     FlashcardToolbarUpdateCount(win);
@@ -1082,10 +1087,22 @@ static void FlashcardRunDeferredBookkeeping(MainWindow* win) {
         totalSaveMs += (int)(t1 - t0);
     }
 
-    // Sidebar: always repopulate if dirty (window-level, not tab-specific).
+    // Sidebar: try incremental update first; fall back to full rebuild if preconditions fail.
     u64 tSidebar0 = GetTickCount64();
     if (win->flashcard.dirtyFlags & MainWindow::kFcDirtySidebar) {
-        FlashcardSidebarPopulate(win);
+        bool incrementalDone = false;
+        // Only attempt incremental if we have a valid tracked card
+        if (win->flashcard.listaIncrementalCardIdx >= 0 && win->flashcard.listaIncrementalCardTab) {
+            incrementalDone = FlashcardSidebarUpdateIncremental(win, win->flashcard.listaIncrementalCardIdx,
+                                                                win->flashcard.listaIncrementalCardTab);
+        }
+        if (!incrementalDone) {
+            logf("[fc][perf] sidebar: falling back to full rebuild\n");
+            FlashcardSidebarPopulate(win);
+        }
+        // Clear the incremental tracking after use (whether incremental or full rebuild)
+        win->flashcard.listaIncrementalCardIdx = -1;
+        win->flashcard.listaIncrementalCardTab = nullptr;
     }
     u64 tSidebar1 = GetTickCount64();
     sidebarMs = (int)(tSidebar1 - tSidebar0);
@@ -1523,8 +1540,11 @@ bool HandleCommandFlashcard(MainWindow* win, int cmd) {
             }
 
             FlashcardToolbarUpdateCount(win);
-            // the Lista panel's rows changed (card gone, indices shifted)
-            FlashcardSidebarPopulate(win);
+            // the Lista panel's rows changed (card gone, indices shifted) -
+            // use deferred path with dirty flag; full rebuild on flush.
+            win->flashcard.dirtyFlags |= MainWindow::kFcDirtySidebar;
+            // Deletion shifts all subsequent indices: mark as full rebuild needed
+            // by not setting listaIncrementalCardIdx (stays -1).
 
             // same tail as HandleFlashcardRate: reset reveal/study time and
             // advance to the entry now at curIdx, or end the session

@@ -110,6 +110,12 @@ struct PageRenderRequest {
     // called when rendering finishes (success or failure)
     // if null, render cache handles caching directly (legacy path)
     Func1<PageRenderRequest*> renderFinishedCb;
+
+    // Speculative requests (prefetch/prewarm) have lower priority than visible
+    // requests (paint path). When the queue is full, speculative requests are
+    // evicted first. GetNextRequest serves visible requests before speculative.
+    // Default is false (visible) so existing callers keep their priority.
+    bool speculative = false;
 };
 
 constexpr int kMaxRenderThreads = 32;
@@ -226,9 +232,14 @@ struct RenderCache {
     int GetRenderDelay(DisplayModel* dm, int pageNo, TilePosition tile);
     void RequestRendering(DisplayModel* dm, int pageNo, TilePosition tile, bool clearQueueForPage = true,
                           const PredictiveChain* chain = nullptr);
+    void RequestRenderingSpeculative(DisplayModel* dm, int pageNo, TilePosition tile, bool clearQueueForPage = true,
+                                     const PredictiveChain* chain = nullptr);
+    void RequestRenderingInternal(DisplayModel* dm, int pageNo, TilePosition tile, bool clearQueueForPage,
+                                  const PredictiveChain* chain, bool speculative);
     void RequestPredictiveRendering(DisplayModel* dm, int originPageNo, const int* pages, int nPages);
     bool Render(DisplayModel* dm, int pageNo, int rotation, float zoom, TilePosition* tile, RectF* pageRect,
-                const Func1<PageRenderRequest*>& renderFinishedCb, const PredictiveChain* chain = nullptr);
+                const Func1<PageRenderRequest*>& renderFinishedCb, const PredictiveChain* chain = nullptr,
+                bool speculative = false);
     void ClearQueueForDisplayModel(DisplayModel* dm, int pageNo = kInvalidPageNo, TilePosition* tile = nullptr);
     void AbortCurrentRequest(int threadIdx);
 

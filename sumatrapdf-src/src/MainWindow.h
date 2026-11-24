@@ -604,6 +604,12 @@ struct MainWindow {
         // (Peru outline on canvas). Cleared on tab switch, Lista close, cards reload.
         int activeListCardIdx = -1;
         WindowTab* activeListCardTab = nullptr;
+        // Incremental sidebar update: index in studyOrder of the card whose state
+        // changed (rating). -1 = no pending incremental update (full rebuild needed).
+        // Set by HandleFlashcardRate / CmdFlashcardDeleteActive, consumed and
+        // cleared by FlashcardRunDeferredBookkeeping when it flushes kFcDirtySidebar.
+        int listaIncrementalCardIdx = -1;
+        WindowTab* listaIncrementalCardTab = nullptr;
     } flashcard;
     // --- end flashcard state ---
 

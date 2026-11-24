@@ -212,6 +212,102 @@
 - External models' claims validated line by line: 12 confirmed / 3 refuted / 2 partial.
 - Graphviz validation: both .dot files pass `dot -Tcanon` (exit 0) and `dot -Tsvg` (exit 0).
 
+## 2026-11-24 (s77 cont.) — Flashcard study perf: render-queue priority + incremental sidebar update
+
+### Added (PART A — Render Queue Priority)
+- `PageRenderRequest::speculative` field (RenderCache.h:96) — bool flag default false (visible). Existing callers keep visible priority by default.
+- `RenderCache::RequestRenderingInternal` (RenderCache.cpp:629) — unified implementation with `speculative` parameter.
+- `RenderCache::RequestRenderingSpeculative` (RenderCache.h:235, RenderCache.cpp:624) — public API for speculative callers (flashcard prewarm/prefetch).
+- `GetNextRequest` priority logic (RenderCache.cpp:863-880) — scans from tail for first NON-speculative request; if none, takes speculative tail. Logs `[fc][perf] renderq: serving visible over %d speculative` when a visible request jumps ahead.
+- Queue-full eviction rule (RenderCache.cpp:802-812) — evicts a SPECULATIVE request if any exists (first speculative from head); only if all are visible, drops oldest (legacy behavior). Logs `[fc][perf] renderq: queue full, evicted idx=%d (speculative=%d)`.
+- Duplicate-request rule (RenderCache.cpp:670-707) — if existing is visible and incoming speculative, keep visible at its priority (no move to tail, no flag overwrite). If existing speculative, incoming visible overwrites flag to visible. If both same class, move to tail (newest wins).
+- Queue-state logging (RenderCache.cpp:819-824) — logs `[fc][perf] renderq: queued spec=%d vis=%d (pageNo=%d spec=%d)` on each enqueue (cheap, only on state change).
+- Two speculative call sites marked (Commands_Flashcard.cpp:544, 738):
+  - Prewarm worker tile request (`FlashcardPrewarmWorker` → `RequestRenderingSpeculative`)
+  - Prefetch render upcoming (`FlashcardPrefetchRenderUpcoming` → `RequestRenderingSpeculative`)
+
+### Added (PART B — Incremental Lista Sidebar)
+- `FlashcardState::listaIncrementalCardIdx` / `listaIncrementalCardTab` (MainWindow.h:609-610) — tracks which card's state changed (rating), set by `HandleFlashcardRate` at curIdx before advance, cleared on deferred flush.
+- `FlashcardSidebarUpdateIncremental` (FlashcardSidebar.h:17, FlashcardSidebar.cpp:732-812) — updates ONE row in owner-drawn listbox (`LBS_OWNERDRAWFIXED`) without `LB_RESETCONTENT` or text re-extraction. Updates `listaRows[rowIdx]` (rating/interval/nextReviewAt) from study state, invalidates only that row's rect via `InvalidateRect`.
+- Incremental preconditions (checked in order, bail to full rebuild if any fails):
+  1. Panel exists + visible (`hwndListaView` + `uiState.fcListVisible`)
+  2. Rated card's tab == current tab (Lista only shows current tab)
+  3. studyOrderIdx valid + maps to card in current tab
+  4. `listaRows` count == listbox item count (no structural add/remove)
+  5. Listbox item data at rowIdx matches cardIdx (index alignment)
+- Static label (masked text) NOT re-extracted on incremental update — the label string lives in the listbox item and is unchanged when only Due/Status change. PageText cache used only in full rebuild (`FlashcardSidebarPopulate`).
+- Fallback to `FlashcardSidebarPopulate` when preconditions fail (logs `[fc][perf] sidebar: incremental skipped (reason)` + `[fc][perf] sidebar: falling back to full rebuild`).
+- Deferred flush integration (Commands_Flashcard.cpp:1092-1103) — attempts incremental first via tracked `listaIncrementalCardIdx/Tab`; clears tracking after use (whether incremental or full).
+
+### Changed
+- `HandleFlashcardRate` (Commands_Flashcard.cpp:963-967) — sets `listaIncrementalCardIdx = curIdx`, `listaIncrementalCardTab = e.tab` before marking `kFcDirtySidebar`.
+- `CmdFlashcardDeleteActive` (Commands_Flashcard.cpp:1531-1534) — marks `kFcDirtySidebar` without setting incremental tracker (deletion shifts indices → full rebuild required).
+- `FlashcardRunDeferredBookkeeping` (Commands_Flashcard.cpp:1090-1103) — calls `FlashcardSidebarUpdateIncremental` with tracked indices; falls back to full populate on failure.
+
+### Verified
+- Build green (0 errors, 0 warnings, clang-formatted).
+- `MAX_PAGE_REQUESTS` (8) never exceeded: eviction shifts + decrements `requestCount`; duplicate handling swaps in place without growing array.
+- `ReportIf(requestCount > MAX_PAGE_REQUESTS)` not fired (verified by inspection of all modification sites).
+- Incremental path preserves `LB_SETITEMDATA` mapping: rowIdx → cardIdx unchanged; owner-draw reads fresh `listaRows[rowIdx]` at paint time (Due countdown computed at draw).
+- Both paths produce identical per-row state: incremental writes `rating/interval/nextReviewAt` to same `listaRows` slot that full rebuild would write; item data and count unchanged.
+
+### Notes
+- Rate-limit logging: queue-state logs only on enqueue (state change), not per-frame. Serve-visible log only when visible jumps speculative.
+- Incremental update avoids page text extraction entirely — critical for perf (page text extraction was O(P) per card per rating).
+- Deletion uses full rebuild (indices shift); can optimize later if needed.
+
+### Fixed
+- **P1 data-loss bug**: `FlashcardStudyLoad` early-return path (profile-only adopt at :1276) returned WITHOUT sorting → binary search missed states → SM-2 progress lost + duplicate keys written. FIX: `FlashcardStudySortStates(doc.states)` now called on ALL return paths (file, legacy fallback, adopt-by-name, profile-only).
+- **Duplicate-key rule**: `FlashcardStudySortStates` (VecSort + dedup) keeps the entry with the newest `lastReviewedAt`; older duplicate dropped silently. Applied at load, parse, and prune.
+- **Profile side comment**: `ProfileData.cpp:2008` — profile states stored in insertion order (never binary-searched); invariant enforced at consumer (`FlashcardStudyLoad`), not in profile.
+
+### Added
+- `FlashcardU64Cmp` / `FlashcardStudyStateKeyCmp` — file-scope comparators for `VecSort` (repo-native qsort).
+- `FlashcardStudySortStates` now uses `VecSort` (O(N log N)) + adjacent dedup by `lastReviewedAt` desc for equal keys.
+- `FlashcardStudyPruneStates` card-keys sort uses `VecSort` (O(C log C)) instead of insertion sort (O(C^2)).
+- `FlashcardStudyParseJsonInto` ensures sorted invariant after parse (covers Config recover-backup, import, resync paths).
+- `Commands_Flashcard.cpp:289` linear scan → `FlashcardStateFindIdx` binary search.
+
+### Producer audit (every `tab->flashcard.studyDoc = ...` assignment):
+| Producer | File:line | Sorted? | Fix |
+|---|---|---|---|
+| `FlashcardStudyLoad` (file/legacy/adopt) | Flashcard.cpp:1277 | ✓ | sort on all returns |
+| `FlashcardStudyLoad` (profile-only) | Flashcard.cpp:1276 | ✓ | sort added |
+| `FlashcardStudyParseJsonInto` | Flashcard.cpp:1202 | ✓ | sort after parse |
+| `FlashcardStudyRecoverBackup` → `FlashcardStudyLoad` | FlashcardToolbar.cpp:1152 | ✓ | via FlashcardStudyLoad |
+| `ProfileDataGetStudyDoc` → `FlashcardStudyLoad` | Flashcard.cpp:1276 | ✓ | sort in caller |
+| `FlashcardStudyLoad` (adopt-by-name) | Flashcard.cpp:1277 | ✓ | sort after merge |
+
+### True complexity (corrected):
+- State lookup: O(S) → O(log S)
+- State insert (rate): O(S) append → O(S) shift (search O(log S))
+- **Prune: O(S × C) → O(C log C + S)** (VecSort + merge pass)
+- Sidebar: O(C × S) → O(C log S)
+- Toolbar count: O(C × S) → O(C log S)
+
+### Binary-search edge-case table (FlashcardStateFindIdx):
+| Input | Expected result |
+|---|---|
+| empty vec | -1, insert=0 |
+| single element (match) | 0 |
+| single element (miss, key < element) | -1, insert=0 |
+| single element (miss, key > element) | -1, insert=1 |
+| key smaller than all | -1, insert=0 |
+| key larger than all | -1, insert=len |
+| key in middle (found) | index |
+| key in middle (miss) | -1, insert=position |
+
+### Verified
+- Build green (0 errors, 0 warnings).
+- JSON format unchanged (keys written in sorted order; object order irrelevant).
+- `FlashcardStudyPruneStates` returns dropped count; states remain sorted after merge pass.
+- All producers sorted; profile side never binary-searched (comment added at ProfileData.cpp:2008).
+- FlashcardPrewarmInvalidate drain loop dead: Flashcard.cpp:550 condition false immediately — no actual wait.
+- Stale claims corrected: prewarmer implemented (not planned), tick uses wall-clock GetTickCount64 (not tick count), credits owning tab (not focused tab).
+- Improvement options (O1..O7) await user review after external model analysis.
+- External models' claims validated line by line: 12 confirmed / 3 refuted / 2 partial.
+- Graphviz validation: both .dot files pass `dot -Tcanon` (exit 0) and `dot -Tsvg` (exit 0).
+
 ## 2026-11-23 (s73) — Shared-root stats merge, LastActivityTs, Unsynced action
 
 ### Fixed
