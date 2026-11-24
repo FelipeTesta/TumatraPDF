@@ -146,6 +146,12 @@ bool IsRectangularSelection(MainWindow* win) {
     if (!dm || !dm->textSelection) {
         return false;
     }
+    // Ctrl+Alt rectangle accumulation is NOT a single rectangular selection
+    // (it is multiple separate rectangles). Return false so the per-rect
+    // paint path is used instead of the union path.
+    if (win->selection.ctrlAltAccum && len(*win->selection.ctrlAltAccum) > 0) {
+        return false;
+    }
     // explicit rectSelection flag wins: a genuine Ctrl+drag selection is
     // rectangular even if stale text-selection glyphs remain in the model.
     // A real text selection has rectSelection == false and result.len > 0.
@@ -471,6 +477,12 @@ void PaintSelection(MainWindow* win, HDC hdc) {
     Vec<Rect> rects;
     bool paintingAccum = false;
     bool isRectSel = false;
+    // isAccum is true when the rectangles being painted come from the
+    // Ctrl+Alt rectangle accumulation (multiple separate rectangles, not a
+    // single union rect). This is true both when painting directly from
+    // ctrlAltAccum (paintingAccum) AND when painting from selectionOnPage that
+    // was rebuilt from the accumulation after a drag completes.
+    bool isAccum = win->selection.ctrlAltAccum && len(*win->selection.ctrlAltAccum) > 0;
 
     if (win->mouseAction == MouseAction::Selecting) {
         // during rectangle selection
@@ -537,7 +549,7 @@ void PaintSelection(MainWindow* win, HDC hdc) {
         }
 
         // When painting the accumulation, it's a rectangular selection (sharp borders)
-        if (paintingAccum) {
+        if (paintingAccum || isAccum) {
             win->selection.showSelection = true;
         }
     }
@@ -550,7 +562,9 @@ void PaintSelection(MainWindow* win, HDC hdc) {
     if (alpha == 0) {
         alpha = kSelectionDefaultAlpha;
     }
-    bool forceSharpBorder = isRectSel || paintingAccum;
+    // Accumulated rectangles (Ctrl+Alt drag) are individual rectangles that
+    // should have sharp borders, not the soft text-selection border.
+    bool forceSharpBorder = isRectSel || isAccum;
     PaintTransparentRectangles(hdc, win->canvasRc, rects, parsedCol->col, alpha, 2, /*drawBorder*/ true,
                                forceSharpBorder);
     PaintTouchSelHandles(win, hdc);
