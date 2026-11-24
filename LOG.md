@@ -1,3 +1,34 @@
+## 2026-11-23 (s80) — Flashcard study perf: save worker, flush ordering, hermetic invariant test
+
+### Added
+- Async per-book study JSON write: worker thread `FlashcardSaveWorker` (`THREAD_PRIORITY_BELOW_NORMAL`) following prewarm pattern. UI thread resolves path, snapshots states vec, enqueues under `gFcSaveLock`; coalescing per path keeps newest snapshot. PROFILE write stays on UI thread: `gProfile` (ProfileData.cpp) has no locking (no CRITICAL_SECTION/mutex in that file) — mutated and written directly.
+- `TestFlashcardFlush` control command (id 88) to force bookkeeping flush.
+- `FlashcardStudyVerifySorted` runtime gate (debug builds only) at 4 boundaries of sorted-state invariant (load, parse, prune, insert).
+- Hermetic E2E `tests/ad-hoc-fc-invariant-hermetic.ts`: copies fixture into `tests/tmp/`, kills app instead of graceful quit, asserts study JSON on disk (one entry per rated key, rating/interval match, keys ascending, no dupes) plus fixture unchanged.
+
+### Fixed
+- Close tab losing pending SM-2 state: `CloseTab` flushed AFTER save prompt; declining save dropped it (study state lives in per-book JSON, not PDF). Save-only flush (no prune) runs BEFORE `MaybeSaveAnnotations`; full flush (prune+save+sidebar) only after tab may close; same split in `CloseAllDocumentTabsForUnsync` and `CloseWindow`. Prune must not run when save declined (deleted-but-restored card would lose state).
+- Sorted-by-key invariant broken on load path: `FlashcardStudyLoad` sorted at end but EARLY RETURN for profile-only adopt (history exists only in profile store — cross-machine sync case) -> unsorted doc -> binary search missed states -> SM-2 progress looked "new" and duplicate key could be written into JSON. Every producer now sorts.
+- Async write wrote EMPTY `docName`/`docPath` (commit comment claimed unneeded — false): Config window lists books by name, moved/renamed sync markers read path, `FlashcardStudyAdoptByName` matches by base name so moved book's history could never be adopted. Snapshot now carries both (resolved on UI thread) and ONE shared writer `FlashcardStudyWriteJsonToFile` serves sync and async path so format cannot drift.
+- Worker exit path broken: join enqueued empty sentinel job (worker wrote it as `fopen(".tmp")`, stray file) and never set stop flag -> worker never exited, join ALWAYS timed out after 3 s. Join now sets stop flag under lock, signals, worker drains queue before breaking.
+- "will retry on next flush" log was false: UI cleared `kFcDirtySave` right after enqueueing, failed write dropped silently. Worker now retries up to 3 times with 100 ms backoff and logs final give-up.
+- String ownership: job path released with `::free`; `str::Dup(Str)` released with `str::Free`.
+
+### Changed
+- Render queue priority: `PageRenderRequest::speculative` (default false = visible). `GetNextRequest` serves visible request before speculative one (queue LIFO, prewarm tile could be served before tile of card on screen); full queue evicts speculative entry first.
+- Lista panel updates ONE row on rating (`FlashcardSidebarUpdateIncremental`) instead of rebuilding list; falls back to full rebuild (logged) when row cannot be identified.
+- Per-page text cache for list labels lives one populate only; incremental update does not extract text.
+
+### Verified
+- Keypress->paint probe measures exactly one paint per rating (arm/consume): old gate used counter reset inside unrelated paint-cost log branch, fired every 240th paint, never saw first paint after rating. Probe also uses `PhysicalToVirtualForRect` (Navigate helper) — `PhysicalToVirtualPage` picks wrong page for card in RIGHT column under Two Columns v2.
+- Sync prefetch has own count (floor 1, max tier cap) so no longer collapses to 0 with prewarm budget — budget 0 when nav EWMA > 400 ms or tier cap 0, used to gate BOTH sync prefetch and async prewarm (mechanism disabled itself exactly when needed). EWMA now measures critical path.
+- Dead drain loop in `FlashcardPrewarmInvalidate` removed (condition false as soon as deadline passed); epoch filter already discards stale jobs.
+- Complexity claims checked vs code: state lookup O(log S) (sorted vec + binary search), prune O(C log C + S) (merge pass over sorted card keys, repo `VecSort`), sidebar and toolbar count O(C log S) per card.
+
+### Notes
+- Branch not merged into main: user validates card-to-card jump with `[fc][perf] rate: ...` / `[fc][perf] paint: keypress->paint=...` logs first.
+- Sync `FlashcardStudySave` still used by delete and adopt/rename paths (they write synchronously).
+
 ## 2026-11-23 (s77) — Windows 11 compatibility: SmartScreen warning, self-unblock, release checksums
 
 ### Added
