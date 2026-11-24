@@ -127,8 +127,19 @@ int FlashcardImportFromPdf(EngineMupdf* dstEngine, Vec<Flashcard>& existing, con
 // Returns -1 when the source can't be opened.
 int FlashcardImportDiffCount(Vec<Flashcard>& existing, const char* srcPath, int* srcCountOut);
 
-// Save flashcard study state to external JSON file
+// Save flashcard study state to external JSON file (synchronous, used for
+// adopt/resync/load paths where the caller needs to wait for the write)
 void FlashcardStudySave(const char* filePath, const FlashcardStudyDoc& doc);
+
+// Save flashcard study state to external JSON file asynchronously (worker thread).
+// The caller provides a snapshot of the states (copied from studyDoc.states) and
+// the resolved file path. The profile write (ProfileDataUpdateStudyDoc) is NOT
+// included — the caller must do that separately on the UI thread.
+void FlashcardStudySaveAsync(const Vec<FlashcardStudyDoc::StateEntry>& states, const char* resolvedPath, int version);
+
+// Join the save worker at app exit with a bounded timeout (3s).
+// Returns true if the worker stopped cleanly, false on timeout.
+bool FlashcardSaveWorkerJoin();
 
 // Drop study states whose card no longer exists in the document
 int FlashcardStudyPruneStates(FlashcardStudyDoc& doc, const Vec<Flashcard>& cards);
@@ -159,6 +170,10 @@ void FlashcardSm2Update(FlashcardStudyState& state, int rating);
 
 // Get the JSON file path for a document's flashcard study state
 TempStr FlashcardStudyPath(const char* filePath);
+
+// Rolling local backups of the study dir (1d / 3d / 7d slots).
+// Cheap stamp guard inside — called after each successful save.
+void FlashcardStudyMaybeBackup();
 
 // Directory where the study-history JSONs live: the flashcardSettings.studyDir
 // setting when set (e.g. a cloud-synced folder for backup), else the per-exe

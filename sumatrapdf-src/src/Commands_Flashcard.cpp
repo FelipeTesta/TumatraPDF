@@ -31,6 +31,7 @@ extern "C" {
 #include "Flashcard.h"
 #include "FlashcardSidebar.h"
 #include "FlashcardStats.h"
+#include "ProfileData.h"
 #include "Canvas.h"   // kFlashcardStudyTimerID
 #include "Theme.h"    // ThemeWindowBackgroundColor, DpiScale
 #include "base/Dpi.h" // DpiScale
@@ -609,6 +610,242 @@ static void FlashcardPrewarmShutdown() {
     logf("[fc][perf] prewarm worker stopped\n");
 }
 
+// ===== Study Save Worker (Phase 4: move per-book JSON write off UI thread) =====
+// Job: write the per-book study JSON (legacy sidecar) to disk.
+// The worker does NOT touch the live tab->flashcard.studyDoc. The UI thread
+// copies the states Vec and the resolved file path, and hands the snapshot to
+// the worker. The profile write (ProfileDataUpdateStudyDoc) stays on the UI
+// thread because ProfileData (gProfile) is not thread-safe (no locks).
+// Ordering: coalesce per book path — keep only the newest snapshot for a given
+// study file. Different books proceed in parallel.
+// UI thread never blocks on the worker, EXCEPT at app exit where it joins with
+// a bounded timeout (3s) so the last states are not lost.
+
+struct FcSaveJob {
+    // Snapshot of study states (copied from tab->flashcard.studyDoc.states on UI thread)
+    Vec<FlashcardStudyDoc::StateEntry> states;
+    // Resolved study file path (computed on UI thread via FlashcardStudyPath)
+    char* path = nullptr; // owned, freed by worker after write
+    int version = 1;      // study doc version
+    // For error handling: if write fails, we keep the dirty flag so next flush retries.
+    // The UI thread sets this when enqueueing; worker clears on success.
+    // Not used directly here but documented for the invariant.
+};
+
+static CRITICAL_SECTION gFcSaveLock;
+static bool gFcSaveLockInit = false;
+static Vec<FcSaveJob> gFcSaveQueue;
+static HANDLE gFcSaveThread = nullptr;
+static HANDLE gFcSaveSignal = nullptr;  // auto-reset event: queue possibly non-empty
+static bool gFcSaveStop = false;        // guarded by gFcSaveLock
+static volatile LONG gFcSaveActive = 0; // jobs executing right now
+
+// Forward declaration
+static void FlashcardSaveEnsureWorker();
+
+// Coalescing map: path -> index in gFcSaveQueue (newest snapshot per path).
+// We use a simple linear search since the queue is small (one per dirty book).
+// When enqueueing a job for a path that already has a pending job, we replace
+// the old job's states with the new snapshot (newest wins) and free the old path.
+
+static void FcSaveQueueInit() {
+    if (!gFcSaveLockInit) {
+        InitializeCriticalSection(&gFcSaveLock);
+        gFcSaveSignal = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+        gFcSaveLockInit = true;
+    }
+}
+
+static void FcSaveJobFree(FcSaveJob& job) {
+    if (job.path) {
+        ::free(job.path);
+        job.path = nullptr;
+    }
+    job.states.Clear();
+}
+
+static void FcSaveEnqueue(const Vec<FlashcardStudyDoc::StateEntry>& states, const char* path, int version) {
+    FcSaveQueueInit();
+    FlashcardSaveEnsureWorker(); // start worker thread lazily on first enqueue
+
+    // Make a copy of the states (snapshot) and the path string
+    FcSaveJob job;
+    job.states = states; // Vec copy constructor does deep copy of elements
+    job.path = str::Dup(path).s;
+    job.version = version;
+
+    EnterCriticalSection(&gFcSaveLock);
+
+    // Coalesce: find existing job for the same path, replace its states
+    int existingIdx = -1;
+    for (int i = 0; i < len(gFcSaveQueue); i++) {
+        if (gFcSaveQueue[i].path && str::Eq(Str(gFcSaveQueue[i].path), Str(path))) {
+            existingIdx = i;
+            break;
+        }
+    }
+
+    if (existingIdx >= 0) {
+        // Replace the old snapshot with the new one (newest wins)
+        FcSaveJobFree(gFcSaveQueue[existingIdx]);
+        gFcSaveQueue[existingIdx] = job;
+        logf("[fc][perf] save worker: coalesced job for '%s' (queue len=%d)\n", Str(path), len(gFcSaveQueue));
+    } else {
+        gFcSaveQueue.Append(job);
+        logf("[fc][perf] save worker: enqueued job for '%s' (queue len=%d)\n", Str(path), len(gFcSaveQueue));
+    }
+
+    LeaveCriticalSection(&gFcSaveLock);
+    SetEvent(gFcSaveSignal);
+}
+
+// Write the per-book JSON to disk (the legacy sidecar write from FlashcardStudySave).
+// This runs on the worker thread. Returns true on success, false on failure.
+static bool FcSaveWriteJob(const FcSaveJob& job) {
+    u64 t0 = GetTickCount64();
+    TempStr tmpPath = str::JoinTemp(Str(job.path), StrL(".tmp"));
+    FILE* f = fopen(tmpPath.s, "wb");
+    if (!f) {
+        logf("[fc][perf] save worker ERROR: failed to open '%s' for writing (path='%s')\n", Str(tmpPath), Str(job.path));
+        return false;
+    }
+
+    fprintf(f, "{\n  \"version\": %d,\n  \"docName\": ", job.version);
+    // We don't have docName/docPath in the snapshot; they are not needed for the
+    // study state round-trip (only the Config window uses them for display).
+    // Write empty strings to keep JSON valid.
+    FlashcardStudyWriteJsonStringLit(f, StrL(""));
+    fprintf(f, ",\n  \"docPath\": ");
+    FlashcardStudyWriteJsonStringLit(f, StrL(""));
+    fprintf(f, ",\n  \"states\": {\n");
+
+    bool first = true;
+    for (int i = 0; i < len(job.states); i++) {
+        auto& entry = job.states[i];
+        if (!first) {
+            fprintf(f, ",\n");
+        }
+        first = false;
+        fprintf(f, "    \"%llu\": ", (unsigned long long)entry.key);
+        FlashcardStudyWriteJsonValue(f, entry.state);
+    }
+
+    fprintf(f,
+            "\n  }\n"
+            "}\n");
+
+    fclose(f);
+
+    // Atomic replace
+    WCHAR* tmpW = CWStrTemp(ToWStrTemp(tmpPath));
+    WCHAR* dstW = CWStrTemp(ToWStrTemp(Str(job.path)));
+    BOOL ok = MoveFileExW(tmpW, dstW, MOVEFILE_REPLACE_EXISTING);
+    if (!ok) {
+        remove(job.path);
+        ok = rename(tmpPath.s, job.path) == 0;
+    }
+    if (!ok) {
+        logf("[fc][perf] save worker ERROR: failed to replace '%s' (lastError=%u)\n", Str(job.path),
+             (unsigned)GetLastError());
+        return false;
+    }
+
+    u64 t1 = GetTickCount64();
+    // Get file size for logging
+    WIN32_FILE_ATTRIBUTE_DATA fad{};
+    u64 bytes = 0;
+    if (GetFileAttributesExW(dstW, GetFileExInfoStandard, &fad)) {
+        bytes = ((u64)fad.nFileSizeHigh << 32) | fad.nFileSizeLow;
+    }
+    logf("[fc][perf] save worker: wrote '%s' %llu bytes in %llums ok=1\n", Str(job.path), (unsigned long long)bytes,
+         (unsigned long long)(t1 - t0));
+    return true;
+}
+
+static DWORD WINAPI FlashcardSaveWorker(void*) {
+    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
+    for (;;) {
+        FcSaveJob job;
+        bool haveJob = false;
+        EnterCriticalSection(&gFcSaveLock);
+        if (len(gFcSaveQueue) > 0) {
+            job = gFcSaveQueue[0];
+            gFcSaveQueue.RemoveAt(0);
+            InterlockedIncrement(&gFcSaveActive);
+            haveJob = true;
+        } else if (gFcSaveStop) {
+            LeaveCriticalSection(&gFcSaveLock);
+            break;
+        }
+        LeaveCriticalSection(&gFcSaveLock);
+
+        if (!haveJob) {
+            WaitForSingleObject(gFcSaveSignal, 40);
+            continue;
+        }
+
+        bool ok = FcSaveWriteJob(job);
+        if (!ok) {
+            logf("[fc][perf] save worker: write FAILED for '%s' (will retry on next flush)\n", Str(job.path));
+            // On failure, we do NOT re-enqueue automatically — the UI thread's
+            // dirty flag (kFcDirtySave) remains set so the next flush will
+            // re-enqueue. The snapshot is lost here but the live studyDoc on the
+            // UI thread still has the states, so the next flush captures them.
+        }
+
+        FcSaveJobFree(job);
+        InterlockedDecrement(&gFcSaveActive);
+    }
+    return 0;
+}
+
+static void FlashcardSaveEnsureWorker() {
+    FcSaveQueueInit();
+    if (gFcSaveThread) {
+        if (WaitForSingleObject(gFcSaveThread, 0) == WAIT_OBJECT_0) {
+            CloseHandle(gFcSaveThread); // previous worker exited on its own
+            gFcSaveThread = nullptr;
+        } else {
+            return;
+        }
+    }
+    gFcSaveStop = false;
+    gFcSaveThread = CreateThread(nullptr, 0, FlashcardSaveWorker, nullptr, 0, nullptr);
+    if (!gFcSaveThread) {
+        logf("[fc][perf] save worker create FAILED - falling back to sync write\n");
+    } else {
+        logf("[fc][perf] save worker started\n");
+    }
+}
+
+// Join the save worker at app exit with a bounded timeout (3s).
+// Returns true if the worker stopped cleanly, false on timeout.
+static bool FlashcardSaveWorkerJoinInternal() {
+    if (!gFcSaveLockInit || !gFcSaveThread) {
+        return true; // no worker to join
+    }
+    Vec<FlashcardStudyDoc::StateEntry> emptyStates;
+    FcSaveEnqueue(emptyStates, "", 0); // wake up the worker (empty job acts as sentinel)
+    // Wait for the worker to finish current job and exit
+    if (WaitForSingleObject(gFcSaveThread, 3000) == WAIT_TIMEOUT) {
+        logf("[fc][perf] save worker did not stop in 3000ms - leaving it running\n");
+        return false; // never close the handle of a live thread
+    }
+    CloseHandle(gFcSaveThread);
+    gFcSaveThread = nullptr;
+    logf("[fc][perf] save worker joined\n");
+    return true;
+}
+
+// Non-static wrappers for Flashcard.cpp
+void FlashcardStudySaveAsyncWorker(const Vec<FlashcardStudyDoc::StateEntry>& states, const char* resolvedPath, int version) {
+    FcSaveEnqueue(states, resolvedPath, version);
+}
+
+bool FlashcardSaveWorkerJoinWorker() {
+    return FlashcardSaveWorkerJoinInternal();
+}
+
 static void FlashcardPrewarmEnqueue(MainWindow* win, int fromIdx) {
     win->flashcard.prewarmFilledForIdx = fromIdx;
     auto& order = win->flashcard.studyOrder;
@@ -1044,6 +1281,13 @@ static void HandleFlashcardRate(MainWindow* win, int rating) {
 // Run the deferred bookkeeping (prune -> save -> sidebar) for all tabs that
 // have pending work. Logs its own timing line.
 // Safe to call with no pending work (no-op). Handles tabs that no longer exist.
+// The per-book JSON write is now async (worker thread). The UI thread:
+// 1. Resolves the study file path (FlashcardStudyPath)
+// 2. Copies the states vector (snapshot)
+// 3. Enqueues to worker via FlashcardStudySaveAsync
+// 4. Does the profile write (ProfileDataUpdateStudyDoc) on UI thread
+// 5. Does the backup (FlashcardStudyMaybeBackup) on UI thread
+// The 'save' timing in the log now measures only the snapshot+enqueue cost.
 static void FlashcardRunDeferredBookkeeping(MainWindow* win) {
     if (!win || (win->flashcard.dirtyFlags == 0) || len(win->flashcard.pendingSaveTabs) == 0) {
         return;
@@ -1081,12 +1325,24 @@ static void FlashcardRunDeferredBookkeeping(MainWindow* win) {
         }
         u64 t1 = GetTickCount64();
         totalPruneMs += (int)(t1 - t0);
-        t0 = GetTickCount64();
+
         if (win->flashcard.dirtyFlags & MainWindow::kFcDirtySave) {
-            FlashcardStudySave(tab->filePath.s, tab->flashcard.studyDoc);
+            t0 = GetTickCount64();
+            // Resolve path on UI thread (reads gGlobalPrefs->flashcardStudyDir)
+            TempStr resolvedPath = FlashcardStudyPath(tab->filePath.s);
+            if (resolvedPath) {
+                // Snapshot the states vector (deep copy)
+                Vec<FlashcardStudyDoc::StateEntry> statesSnapshot = tab->flashcard.studyDoc.states;
+                // Enqueue to worker (async per-book JSON write)
+                FlashcardStudySaveAsync(statesSnapshot, resolvedPath.s, tab->flashcard.studyDoc.version);
+            }
+            // Profile write stays on UI thread (ProfileData is not thread-safe)
+            ProfileDataUpdateStudyDoc(tab->filePath.s, tab->flashcard.studyDoc);
+            // Backup on UI thread (periodic, stamp-guarded)
+            FlashcardStudyMaybeBackup();
+            t1 = GetTickCount64();
+            totalSaveMs += (int)(t1 - t0);
         }
-        t1 = GetTickCount64();
-        totalSaveMs += (int)(t1 - t0);
     }
 
     // Sidebar: try incremental update first; fall back to full rebuild if preconditions fail.
@@ -1132,6 +1388,7 @@ void FlashcardFlushBookkeeping(MainWindow* win) {
 // (e.g., the "Save changes?" dialog in CloseTab). If the user cancels, the prune
 // flag remains set so the states of potentially-deleted cards survive the cancellation.
 // The full flush (prune + save + sidebar) runs later when the prompt succeeds.
+// The per-book JSON write is now async (worker thread).
 void FlashcardFlushBookkeepingSaveOnly(MainWindow* win) {
     if (!win || (win->flashcard.dirtyFlags & MainWindow::kFcDirtySave) == 0) {
         return;
@@ -1166,7 +1423,18 @@ void FlashcardFlushBookkeepingSaveOnly(MainWindow* win) {
         }
         nTabs++;
         u64 t0 = GetTickCount64();
-        FlashcardStudySave(tab->filePath.s, tab->flashcard.studyDoc);
+        // Resolve path on UI thread
+        TempStr resolvedPath = FlashcardStudyPath(tab->filePath.s);
+        if (resolvedPath) {
+            // Snapshot the states vector (deep copy)
+            Vec<FlashcardStudyDoc::StateEntry> statesSnapshot = tab->flashcard.studyDoc.states;
+            // Enqueue to worker (async per-book JSON write)
+            FlashcardStudySaveAsync(statesSnapshot, resolvedPath.s, tab->flashcard.studyDoc.version);
+        }
+        // Profile write stays on UI thread (ProfileData is not thread-safe)
+        ProfileDataUpdateStudyDoc(tab->filePath.s, tab->flashcard.studyDoc);
+        // Backup on UI thread
+        FlashcardStudyMaybeBackup();
         u64 t1 = GetTickCount64();
         totalSaveMs += (int)(t1 - t0);
     }

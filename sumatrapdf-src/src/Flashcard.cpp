@@ -25,6 +25,7 @@ extern "C" {
 #include "AppTools.h"
 #include "ProfileData.h"
 #include "Flashcard.h"
+#include "Commands_Flashcard.h"
 
 // Stable card key: FNV-1a hash of page + quantized bounds. MuPDF can renumber
 // annotation objects on save (pdf_to_num is not stable), so we key study state
@@ -624,7 +625,7 @@ static void FlashcardStudyBackupRefreshSlot(Str dir, Str slotDir) {
     }
 }
 
-static void FlashcardStudyMaybeBackup() {
+void FlashcardStudyMaybeBackup() {
     TempStr dir = FlashcardStudyDir();
     i64 now = (i64)time(nullptr) * 1000;
     for (auto& s : kFcBackupSlots) {
@@ -743,8 +744,8 @@ bool FlashcardStudyVerifySorted(const Vec<FlashcardStudyDoc::StateEntry>& states
             return false;
         }
         if (curKey == prevKey) {
-            logf("[fc] ERROR: study states DUPLICATE key=%llu at %s [%s:%d]\n",
-                 (unsigned long long)curKey, whereStr, Str(__FILE__), __LINE__);
+            logf("[fc] ERROR: study states DUPLICATE key=%llu at %s [%s:%d]\n", (unsigned long long)curKey, whereStr,
+                 Str(__FILE__), __LINE__);
             return false;
         }
     }
@@ -817,7 +818,8 @@ int FlashcardStudyPruneStates(FlashcardStudyDoc& doc, const Vec<Flashcard>& card
 // still stream the fresh states into the single-file profile store (unconditional)
 static bool kProfDualWriteSidecars = true;
 
-// Save flashcard study state to external JSON file
+// Save flashcard study state to external JSON file (synchronous, used for
+// adopt/resync/load paths where the caller needs to wait for the write)
 void FlashcardStudySave(const char* filePath, const FlashcardStudyDoc& doc) {
     logf("[fc] FlashcardStudySave - saving to %s\n", Str(filePath));
     if (!filePath) {
@@ -893,6 +895,22 @@ void FlashcardStudySave(const char* filePath, const FlashcardStudyDoc& doc) {
 
     // stream the fresh states into the single-file profile store too
     ProfileDataUpdateStudyDoc(filePath, doc);
+}
+
+// Save flashcard study state to external JSON file asynchronously (worker thread).
+// The caller provides a snapshot of the states (copied from studyDoc.states) and
+// the resolved file path. The profile write (ProfileDataUpdateStudyDoc) is NOT
+// included — the caller must do that separately on the UI thread.
+// The backup (FlashcardStudyMaybeBackup) is also NOT included — caller must call it.
+void FlashcardStudySaveAsync(const Vec<FlashcardStudyDoc::StateEntry>& states, const char* resolvedPath, int version) {
+    // Enqueue to worker thread (implemented in Commands_Flashcard.cpp)
+    FlashcardStudySaveAsyncWorker(states, resolvedPath, version);
+}
+
+// Join the save worker at app exit with a bounded timeout (3s).
+// Returns true if the worker stopped cleanly, false on timeout.
+bool FlashcardSaveWorkerJoin() {
+    return FlashcardSaveWorkerJoinWorker();
 }
 
 // Delete every study-history JSON in the study dir — the review histories

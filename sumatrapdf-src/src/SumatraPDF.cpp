@@ -5350,6 +5350,11 @@ void CloseWindow(MainWindow* win, bool quitIfLast, bool forceClose) {
         int nWindows = len(gWindows);
         logf("Calling PostQuitMessage() in CloseWindow() because closing lastWindow, nWindows: %d\n", nWindows);
         ReportDebugIf(nWindows != 0);
+
+        // Join the flashcard study save worker (bounded timeout 3s) so pending
+        // async writes complete before process exit.
+        FlashcardSaveWorkerJoin();
+
         PostQuitMessage(0);
     }
 }
