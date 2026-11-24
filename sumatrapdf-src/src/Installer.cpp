@@ -2367,6 +2367,16 @@ int RunInstaller() {
     if (gCli->silent) {
         gInstallStarted = true;
         InstallerThread(&gCliNew);
+        if (!gInstallFailed && gCliNew.fastInstall) {
+            // Mirror OnInstallationFinished fast-install relaunch: start the
+            // installed app and exit. The installer process ends naturally
+            // after RunInstaller returns (ExitProcess at SumatraStartup.cpp:2426).
+            StartSumatra();
+        } else if (gInstallFailed) {
+            // Silent failure must not vanish without explanation. Show the same
+            // TaskDialog the window path uses (works with NULL parent).
+            ShowInstallationFailedUi(nullptr);
+        }
         ret = gInstallFailed ? 1 : 0;
     } else {
         log("Before CreateInstallerWindow()\n");
