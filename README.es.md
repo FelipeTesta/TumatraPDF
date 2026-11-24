@@ -1,7 +1,7 @@
 [English](README.md) · **Español**
 
 > **Última actualización:** 2026-11-23 · base: [README.md](README.md) `v1.0.20`
-<!-- readme-sync: source-blob=0c615791fcc7f03daa75c7a45b356f3269460262 version=1.0.21 synced=2026-11-24 -->
+<!-- readme-sync: source-blob=4e1ea2445c9fccac84ac11bbc0dbe65abfb19471 version=1.0.21 synced=2026-11-24 -->
 
 # TumatraPDF
 
@@ -167,7 +167,7 @@ TumatraPDF no está firmado con código, así que la primera vez que Windows eje
 
 Haz clic en "Más información" -> "Ejecutar de todos modos"; o haz clic derecho en el archivo -> Propiedades -> marca "Desbloquear" al final -> Aplicar; o en PowerShell: `Unblock-File .\TumatraPDF-portable-win64.exe`.
 
-La versión instalada advierte solo una vez (el instalador elimina la marca de descarga al instalar). La versión portable conserva la marca de descarga — eliminamos el auto-desbloqueo al inicio porque es una solución ineficaz para SmartScreen en un binario sin firmar Y un detonante clásico de falsos positivos en antivirus. Desbloquea una vez ("Más información -> Ejecutar de todos modos" / Propiedades -> Desbloquear) y Windows recordará la aprobación para ese archivo.
+El instalador descargado lleva la marca de la Web (advierte una vez al ejecutarlo); la app que instala se extrae localmente desde el payload embebido y nunca lleva la marca, así que la app instalada no advierte. El portable es el archivo descargado — conserva la marca y hay que desbloquearlo una vez ("Más información -> Ejecutar de todos modos" / Propiedades -> Desbloquear); eliminamos el auto-desbloqueo al inicio porque es una solución ineficaz para SmartScreen en un binario sin firmar Y un detonante clásico de falsos positivos en antivirus. Windows recuerda la aprobación para ese archivo.
 
 ### Falsos positivos de antivirus en compilaciones sin firmar
 

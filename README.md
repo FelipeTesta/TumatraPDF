@@ -172,7 +172,7 @@ TumatraPDF is not code-signed, so the first time Windows runs a file downloaded 
 
 Click **"More info" -> "Run anyway"**; or right-click the file -> Properties -> tick **"Unblock"** at the bottom -> Apply; or in PowerShell: `Unblock-File .\TumatraPDF-portable-win64.exe`.
 
-The installed copy warns only once (the installer removes the download mark at install time). The portable keeps the download mark — we removed the startup self-unblock because it is an ineffective SmartScreen workaround for an unsigned binary AND a classic AV false-positive trigger. Unblock once ("More info -> Run anyway" / Properties -> Unblock) and Windows remembers the approval for that file.
+The downloaded installer carries the Mark of the Web (warns once when you launch it); the app it installs is extracted locally from the embedded payload and never carries the mark, so the installed app does not warn. The portable is the downloaded file itself — it keeps the mark and must be unblocked once ("More info -> Run anyway" / Properties -> Unblock); we removed the startup self-unblock because it is an ineffective SmartScreen workaround for an unsigned binary AND a classic AV false-positive trigger. Windows remembers the approval for that file.
 
 ### Antivirus false positives on unsigned builds
 
