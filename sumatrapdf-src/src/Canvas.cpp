@@ -4248,6 +4248,45 @@ static void PaintFlashcardMasks(MainWindow* win, DisplayModel* dm, HDC hdc) {
         fcPaintTicks = 0;
         fcPaintCount = 0;
     }
+
+    // Keypress->paint probe (arm/consume). Measures elapsed time from the rating
+    // keypress (win->flashcard.lastRateTick set in HandleFlashcardRate /
+    // CmdFlashcardDeleteActive, with win->flashcard.rateProbePending = true)
+    // to the FIRST paint where the ACTIVE card's page is rendered from a
+    // CACHED tile (i.e. the user sees the new card without waiting for a
+    // first-touch render). The probe is armed by the rating paths and consumed
+    // exactly once here: when rateProbePending is true, we measure, log, and
+    // clear the flag. This guarantees ONE measurement per rating. The
+    // deltaMs <= 5000 cap is a sanity guard; if exceeded we still clear the
+    // flag (an armed probe that never fires is worse than none) and log an
+    // outlier marker. Uses PhysicalToVirtualForRect (same as Navigate path) so
+    // the probe measures the correct virtual page under Two Columns v2 (right
+    // column cards route through the rect). The cached check uses
+    // gRenderCache->Exists at the current zoom/rotation (same convention as
+    // FlashcardNavigateToEntryInner).
+    if (win->flashcard.rateProbePending && win->flashcard.lastRateTick != 0 &&
+        win->flashcard.studyMode && cards && studyCardIdx >= 0 &&
+        studyCardIdx < len(*cards) && gRenderCache) {
+        u64 nowMs = GetTickCount64();
+        u64 deltaMs = nowMs - win->flashcard.lastRateTick;
+        const Flashcard& activeCard = (*cards)[studyCardIdx];
+        RectF vr;
+        int vPage = dm->PhysicalToVirtualForRect(activeCard.pageNo, activeCard.bounds, &vr);
+        if (dm->ValidPageNo(vPage)) {
+            float zoom = dm->GetZoomReal(vPage);
+            if (zoom > 0) {
+                bool cached = gRenderCache->Exists(dm, vPage, dm->GetRotation(), zoom);
+                if (deltaMs <= 5000) {
+                    logf("[fc][perf] paint: keypress->paint=%dms card=%d page=%d cached=%d\n",
+                         (int)deltaMs, studyCardIdx, activeCard.pageNo, (int)cached);
+                } else {
+                    logf("[fc][perf] paint: keypress->paint=OUTLIER(%dms) card=%d page=%d cached=%d\n",
+                         (int)deltaMs, studyCardIdx, activeCard.pageNo, (int)cached);
+                }
+            }
+        }
+        win->flashcard.rateProbePending = false; // consume: exactly one measurement per rating
+    }
 }
 
 NO_INLINE static void PaintCurrentEditAnnotationMark(WindowTab* tab, HDC hdc, DisplayModel* dm) {

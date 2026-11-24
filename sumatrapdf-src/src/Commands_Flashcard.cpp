@@ -494,6 +494,23 @@ static int FlashcardPrewarmBudget(MainWindow* win) {
     return n;
 }
 
+// TASK 2(a): Sync page-info prefetch gets its own count that does NOT
+// collapse to 0 when ewma>400 or tier cap=0. The page-info parse is cheap
+// (sub-ms when cached, a few ms cold) and MUST warm at least the NEW card
+// (which Navigate is about to use). Returns 1..tierCap (max 2). The tile
+// prewarm continues to use FlashcardPrewarmBudget (can be 0).
+// Rationale for floor=1 on weak machines (cap=0): GetFzPageInfo(loadQuick=true)
+// is sub-ms when cached, a few ms for first-touch parse -> acceptable overhead
+// even on <=2 cores / <4 GB RAM. The floor breaks the vicious circle where
+// zero prefetch -> cold parse -> slow nav -> low EWMA -> zero prefetch.
+static int FlashcardPrefetchCount(MainWindow* win) {
+    int cap = FlashcardPrewarmTierCap();
+    if (cap <= 0) {
+        return 1; // weak machine: still warm the immediate next card (floor=1)
+    }
+    return cap; // 1 or 2 — never more than the tile tier cap
+}
+
 static DWORD WINAPI FlashcardPrewarmWorker(void*) {
     SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
     for (;;) {
@@ -542,14 +559,11 @@ void FlashcardPrewarmInvalidate() {
     int dropped = len(gFcWarmQueue);
     gFcWarmQueue.Reset();
     LeaveCriticalSection(&gFcWarmLock);
-    // Wait for in-flight jobs to drain — but NEVER longer than ~50 ms with a
-    // real deadline. Sleep(1) inherits the default 15.6ms timer granularity
-    // (this process does not raise it), so a large iteration count here can
-    // freeze the UI for seconds and trip Windows AppHangB1 (s64-R9r).
-    DWORD deadline = GetTickCount() + 50;
-    while (gFcWarmActive > 0 && (int)(GetTickCount() - deadline) < 0) {
-        Sleep(1);
-    }
+    // The epoch filter in the worker already discards stale jobs (epoch
+    // mismatch). No wait for in-flight jobs — the old drain loop was dead
+    // (condition false immediately because deadline = now+50, so
+    // (int)(GetTickCount() - deadline) < 0 is never true). Removing it
+    // avoids a potential UI freeze from Sleep(1) timer granularity.
     if (dropped > 0) {
         logf("[fc][perf] prewarm invalidate epoch=%d dropped=%d\n", (int)gFcWarmEpoch, dropped);
     }
@@ -781,7 +795,7 @@ void FlashcardApplyStudyOrder(MainWindow* win) {
             win->flashcard.currentCardIdx = 0;
             win->flashcard.studyTimeSec = 0.0f;
             win->flashcard.lastStudyTick = 0;
-            FlashcardPrefetchUpcoming(win, 0, FlashcardPrewarmBudget(win));
+            FlashcardPrefetchUpcoming(win, 0, FlashcardPrefetchCount(win));
             FlashcardPrewarmEnqueue(win, 0);
             FlashcardNavigateToEntry(win, win->flashcard.studyOrder[0], true);
         } else {
@@ -852,16 +866,7 @@ static void FlashcardNavigateToEntryInner(MainWindow* win, const FlashcardQueueE
 }
 
 static void FlashcardNavigateToEntry(MainWindow* win, const FlashcardQueueEntry& e, bool centerVertically) {
-    u64 t0 = GetTickCount64();
     FlashcardNavigateToEntryInner(win, e, centerVertically);
-    double dt = (double)(GetTickCount64() - t0);
-    if (dt < 0.0) {
-        dt = 0.0;
-    }
-    if (dt > 2000.0) {
-        dt = 2000.0;
-    }
-    win->flashcard.cardSwitchMsEwma = 0.7 * win->flashcard.cardSwitchMsEwma + 0.3 * dt;
 }
 
 // public wrapper for the Lista panel: navigate the CURRENT tab to one of its
@@ -885,8 +890,9 @@ static void HandleFlashcardRate(MainWindow* win, int rating) {
     u64 t0, t1;
     int scanMs = 0, pruneMs = 0, saveMs = 0, statsMs = 0, toolbarMs = 0, sidebarMs = 0, navMs = 0, rerenderMs = 0;
 
-    // Keypress->paint instrumentation: record rating start time.
+    // Keypress->paint instrumentation: record rating start time and arm probe.
     win->flashcard.lastRateTick = GetTickCount64();
+    win->flashcard.rateProbePending = true;
 
     int curIdx = win->flashcard.currentCardIdx;
     if (curIdx < 0 || curIdx >= len(win->flashcard.studyOrder)) {
@@ -990,7 +996,7 @@ static void HandleFlashcardRate(MainWindow* win, int rating) {
         t0 = GetTickCount64();
         // prefetch the upcoming cards BEFORE navigating (page-parse only) so
         // the jump itself is instant
-        FlashcardPrefetchUpcoming(win, win->flashcard.currentCardIdx, FlashcardPrewarmBudget(win));
+        FlashcardPrefetchUpcoming(win, win->flashcard.currentCardIdx, FlashcardPrefetchCount(win));
         FlashcardNavigateToEntry(win, win->flashcard.studyOrder[win->flashcard.currentCardIdx], true);
         FlashcardPrewarmEnqueue(win, win->flashcard.currentCardIdx);
         t1 = GetTickCount64();
@@ -1012,6 +1018,21 @@ static void HandleFlashcardRate(MainWindow* win, int rating) {
         "total=%dms cards=%d states=%d\n",
         scanMs, statsMs, toolbarMs, sidebarMs, navMs, rerenderMs, totalMs, len(e.tab->flashcard.cards),
         len(e.tab->flashcard.studyDoc.states));
+
+    // TASK 2(c): EWMA now measures the CRITICAL path duration (totalMs from the
+    // rate: log) instead of just the navigation inner time. This makes the
+    // adaptive budget react to the real user-visible cost. Keep the 0.7/0.3
+    // smoothing and the 2000 ms clamp.
+    // No pathological feedback loop: EWMA feeds FlashcardPrewarmBudget (tile
+    // prewarm gate only). The page-info PREFETCH has its own floor (count >= 1
+    // via FlashcardPrefetchCount) and runs SYNCHRONOUSLY before Navigate, so it
+    // is EWMA-independent. The tile prewarm only affects tile blit time, not
+    // page parse. Bounded by: prefetch floor + 2000 ms clamp + tier cap (max 2).
+    double ewmaDt = (double)totalMs;
+    if (ewmaDt > 2000.0) {
+        ewmaDt = 2000.0;
+    }
+    win->flashcard.cardSwitchMsEwma = 0.7 * win->flashcard.cardSwitchMsEwma + 0.3 * ewmaDt;
 
     // If session ended, flush deferred work immediately.
     if (sessionEnded) {
@@ -1289,7 +1310,7 @@ bool HandleCommandFlashcard(MainWindow* win, int cmd) {
                 // Navigate to first card: masked (front state), vertically centered
                 if (len(win->flashcard.studyOrder) > 0) {
                     win->flashcard.currentCardIdx = 0;
-                    FlashcardPrefetchUpcoming(win, 0, FlashcardPrewarmBudget(win));
+                    FlashcardPrefetchUpcoming(win, 0, FlashcardPrefetchCount(win));
                     FlashcardPrewarmEnqueue(win, 0);
                     FlashcardNavigateToEntry(win, win->flashcard.studyOrder[0], true);
                 }
@@ -1525,9 +1546,18 @@ bool HandleCommandFlashcard(MainWindow* win, int cmd) {
             } else {
                 logf("[fc] CmdFlashcardDeleteActive - advancing to card %d/%d\n", win->flashcard.currentCardIdx + 1,
                      len(win->flashcard.studyOrder));
-                FlashcardPrefetchUpcoming(win, win->flashcard.currentCardIdx, FlashcardPrewarmBudget(win));
+                // Arm keypress->paint probe for this advance (same as rating path).
+                win->flashcard.lastRateTick = GetTickCount64();
+                win->flashcard.rateProbePending = true;
+                u64 tDel0 = GetTickCount64();
+                FlashcardPrefetchUpcoming(win, win->flashcard.currentCardIdx, FlashcardPrefetchCount(win));
                 FlashcardNavigateToEntry(win, win->flashcard.studyOrder[win->flashcard.currentCardIdx], true);
                 FlashcardPrewarmEnqueue(win, win->flashcard.currentCardIdx);
+                double delDt = (double)(GetTickCount64() - tDel0);
+                if (delDt > 2000.0) {
+                    delDt = 2000.0;
+                }
+                win->flashcard.cardSwitchMsEwma = 0.7 * win->flashcard.cardSwitchMsEwma + 0.3 * delDt;
             }
             FlashcardToolbarUpdateState(win);
             MainWindowRerender(win);

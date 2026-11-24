@@ -551,9 +551,12 @@ struct MainWindow {
         u64 lastStudyTick = 0;
         static constexpr float maxPerCardSec = 60.0f;
         // Keypress->paint instrumentation: timestamp when a rating starts.
-        // Set at entry to HandleFlashcardRate; a future Canvas.cpp probe
-        // (out of scope this round) can read it to measure true keypress->paint.
+        // Set at entry to HandleFlashcardRate and CmdFlashcardDeleteActive;
+        // a Canvas.cpp probe (arm/consume) reads it exactly once per rating.
         u64 lastRateTick = 0;
+        // Arm/consume flag: set to true when a rating starts; the Canvas.cpp
+        // probe measures exactly once when this is true, then clears it.
+        bool rateProbePending = false;
         // Deferred bookkeeping (Phase 1): dirty flags + coalesce tick.
         // Flags: kFcDirtyPrune=1, kFcDirtySave=2, kFcDirtySidebar=4.
         u32 dirtyFlags = 0;

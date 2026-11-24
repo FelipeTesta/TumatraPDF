@@ -24,6 +24,8 @@
 - `pendingSaveTabs` vector in `FlashcardState` — remembers the owning tab of each rated card explicitly, avoiding data loss in global sessions (cross-document) and when the user presses Next between ratings. Duplicate consecutive ratings in the same tab are suppressed (one entry per tab per flush cycle).
 - Deferred bookkeeping: prune + per-book JSON/profile save + sidebar rebuild moved out of the critical path into a coalesced block (>= 50 ms) serviced by the existing study timer; explicit flush points (session stop, study toggle off, session timer expiry, tab switch, tab close, app exit) prevent losing pending work.
 - Per-tab prune/save in deferred block: iterates `pendingSaveTabs`, verifies each tab is still in this window, runs prune-before-save per tab. Sidebar stays window-level.
+- Keypress->paint probe in `PaintFlashcardMasks` (Canvas.cpp:4252-4281): arm/consume contract — `rateProbePending` armed in `HandleFlashcardRate` and `CmdFlashcardDeleteActive`; probe fires ONCE on the first paint after a rating where the active card's page is served from a cached tile (using `PhysicalToVirtualForRect` for correct Two Columns v2 column). Logs `[fc][perf] paint: keypress->paint=%dms card=%d page=%d cached=%d` or `OUTLIER` if delta > 5000 ms; flag consumed immediately.
+- `FlashcardPrefetchCount(win)` (Commands_Flashcard.cpp:497-507): sync page-info prefetch gets its own count (1..tierCap, max 2) that never collapses to 0 — independent of EWMA/memory pressure. The tile prewarm still uses `FlashcardPrewarmBudget` (can be 0).
 
 ### Changed
 - `HandleFlashcardRate` order: state update + SM-2 + advance + prefetch + navigate + prewarm + stats + toolbar count + repaint happen first; prune -> save -> sidebar follow asynchronously.
@@ -32,16 +34,25 @@
 - `FlashcardFlushBookkeeping` no longer derives the tab; runs the deferred block directly with remembered tabs.
 - `FlashcardStudyTick` periodic flush calls the new `FlashcardRunDeferredBookkeeping` without a derived tab.
 - Removed all "thinking-out-loud" comments from `HandleFlashcardRate`; replaced with one factual comment.
+- Sync prefetch calls (4 sites: FlashcardApplyStudyOrder, HandleFlashcardRate, CmdFlashcardStudy ON, CmdFlashcardDeleteActive) now use `FlashcardPrefetchCount` instead of `FlashcardPrewarmBudget` — at least the immediate next card is always warmed.
+- EWMA (`cardSwitchMsEwma`) now measures the CRITICAL path duration (`totalMs` from the rate: log) instead of just `FlashcardNavigateToEntryInner` time. Updated in `HandleFlashcardRate` (Commands_Flashcard.cpp:1027-1032) and `CmdFlashcardDeleteActive` (Commands_Flashcard.cpp:1548-1552). Smoothing 0.7/0.3 and 2000 ms clamp preserved.
+
+### Fixed
+- Dead drain loop in `FlashcardPrewarmInvalidate` (Commands_Flashcard.cpp:549-556) removed — the condition `(int)(GetTickCount() - deadline) < 0` was false immediately (deadline = now+50). The epoch filter already discards stale jobs; no wait needed. Comment corrected to match actual behavior.
 
 ### Verified
 - Build green (0 errors, 0 warnings).
 - SM-2 content, 60 s per-card cap, owning-tab attribution and prune-before-save order unchanged (read back the diff).
 - Two new log lines per rating: critical-path line + deferred line (when deferred work runs).
+- Keypress->paint probe logs when cached tile paints the new card.
+- Prefetch floor ensures at least 1 card parsed before navigation even on weak machines.
+- EWMA now reacts to real user-visible cost.
 
 ### Notes
 - Up to 50 ms of study-state persistence can be lost if the process dies in that window; study-time credit is NOT deferred (it stays synchronous), so the statistics survive.
-- The true keypress->paint latency still needs a probe in `PaintFlashcardMasks` (Canvas.cpp) — out of scope this round.
-- Follow-ups (not implemented): key->state index (no STL: sorted Vec + binary search), async save worker, sidebar incremental update, budget/EWMA split, render-queue priority.
+- The true keypress->paint latency probe is now IMPLEMENTED (was out of scope previous round).
+- Budget split: sync prefetch floor=1..tierCap, async tile prewarm still gated by `FlashcardPrewarmBudget` (can be 0).
+- Follow-ups (not implemented): key->state index (no STL: sorted Vec + binary search), async save worker, sidebar incremental update, render-queue priority.
 - Config window study-doc read flush: lives in FlashcardToolbar.cpp (not allowed) — follow-up.
 
 ## 2026-11-23 (s75) — README: app presentation video
