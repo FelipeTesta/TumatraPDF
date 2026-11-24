@@ -1012,10 +1012,6 @@ static bool CopySelfToDir(Str destDir) {
     for (int attempt = 1; attempt <= 4; attempt++) {
         logf("  attempt %d/4\n", attempt);
         if (tryDirectCopy() || tryTempCopyRename()) {
-            // strip zone identifier (if exists) to avoid windows
-            // complaining when launching the file
-            // https://github.com/sumatrapdfreader/sumatrapdf/issues/1782
-            file::DeleteZoneIdentifier(dstPath);
             logf("  copied '%s' to '%s'\n", exePath, dstPath);
             return true;
         }

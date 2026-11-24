@@ -250,52 +250,15 @@ static bool ShouldCheckForUpdate(UpdateCheck updateCheckType) {
     return checkUpdate;
 }
 
-// TumatraPDF release builds are unsigned portable exes: overwrite the running exe via a
-// detached cmd batch that waits for this process to exit, moves the new exe in place
-// and relaunches it, then deletes itself.
-static bool SelfUpdateViaBatch(Str newExePath) {
-    TempStr selfExe = GetSelfExePathTemp();
-    TempStr batPath = GetTempFilePathTemp(StrL("tumatrapdf-update"));
-    batPath = str::JoinTemp(batPath, StrL(".bat"));
-    DWORD pid = GetCurrentProcessId();
-    Str content =
-        fmt("@echo off\r\n"
-            "setlocal\r\n"
-            "set tries=0\r\n"
-            ":wait\r\n"
-            "ping 127.0.0.1 -n 2 >NUL\r\n"
-            "tasklist /FI \"PID eq %d\" 2>NUL | findstr /R /C:\" %d \" >NUL\r\n"
-            "if not errorlevel 1 goto wait\r\n"
-            "move /Y \"%s\" \"%s\" >NUL 2>&1\r\n"
-            "if errorlevel 1 (set /a tries+=1)&(if %%tries%% LSS 120 (goto wait) else (goto fail))\r\n"
-            "start \"\" /D \"%s\" \"%s\"\r\n"
-            ":fail\r\n"
-            "del \"%%~f0\"\r\n",
-            pid, pid, newExePath, selfExe, path::GetDirTemp(selfExe), selfExe);
-    bool ok = file::WriteFile(batPath, content);
-    if (!ok) {
-        logf("SelfUpdateViaBatch: failed to write '%s'\n", batPath);
-        return false;
-    }
-    TempStr cmd = fmt("\"cmd.exe\" /c \"%s\"", batPath);
-    HANDLE h = LaunchProcessInDir(cmd, Str(), CREATE_NO_WINDOW | DETACHED_PROCESS);
-    if (h) {
-        CloseHandle(h);
-    }
-    logf("SelfUpdateViaBatch: ok=%d bat '%s'\n", (int)(h != nullptr), batPath);
-    return h != nullptr;
-}
-
 // Returns true if the updater process was launched. Callers that then exit the
 // app must check the return value: a failed launch means the update never
 // happens, and the user must not be left with a silent no-op.
 bool StartInstallerAutoUpgrade(Str installerPath, bool silent) {
-    // Defensive: never launch a downloaded file that still carries the
-    // Mark-of-the-Web. The WinINet download (HttpGetToFile) doesn't add the ADS
-    // today, but if it ever does (or the file came from a browser), remove it
-    // before execution. Silent; ignore failures. Deletes the zone of the
-    // downloaded file, not of the running app.
-    file::DeleteZoneIdentifier(installerPath);
+    // Read-only check: log whether the downloaded file carries a download mark.
+    // We no longer delete the Zone.Identifier (Mark-of-the-Web bypass is
+    // ineffective for SmartScreen on unsigned binaries and triggers AV heuristics).
+    int zoneId = file::GetZoneIdentifier(installerPath);
+    logf("[upd] installer zone id: %d path=%s\n", zoneId, installerPath);
 
     bool signed_ = IsPEFileSigned(installerPath);
     if (!signed_) {
@@ -317,11 +280,16 @@ bool StartInstallerAutoUpgrade(Str installerPath, bool silent) {
             }
             return CreateProcessHelper(installerPath, ToStr(cmd));
         }
-        // TumatraPDF: unsigned portable exe — self-replace via helper batch
-        // (already silent and self-restarting)
-        logf("StartInstallerAutoUpgrade: unsigned portable update, self-replacing via batch\n");
-        bool ok = SelfUpdateViaBatch(installerPath);
-        return ok;
+        // TumatraPDF: unsigned portable exe — self-replace by launching the
+        // downloaded exe (same bytes) with -update-self-to, same as signed path.
+        // No cmd.exe, no .bat, no tasklist — the downloaded exe in portable mode
+        // waits for parent to exit, overwrites in place, relaunches, and exits.
+        logf("StartInstallerAutoUpgrade: unsigned portable update, self-replacing via direct exe\n");
+        str::Builder cmd;
+        cmd.Append(fmt(R"( -sleep-ms 2000 -exit-when-done -update-self-to "%s")", GetSelfExePathTemp()));
+        if (silent) cmd.Append(" -silent");
+        logf("StartInstallerAutoUpgrade: installer cmd: '%s'\n", ToStr(cmd));
+        return CreateProcessHelper(installerPath, ToStr(cmd));
     }
     str::Builder cmd;
     if (IsOurExeInstalled()) {

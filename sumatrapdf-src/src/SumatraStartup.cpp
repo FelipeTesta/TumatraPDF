@@ -2214,16 +2214,14 @@ int APIENTRY WinMain(_In_ HINSTANCE /*hInstance*/, _In_opt_ HINSTANCE /*hPrevIns
 
     LogCommandLine();
 
-    // Portable apps keep the Mark-of-the-Web from the browser download; since
-    // TumatraPDF is not code-signed, SmartScreen warns on every launch of the
-    // portable copy. Best-effort remove our own Zone.Identifier so the user
-    // doesn't have to tick "Unblock" in Properties on every launch. Same as
-    // ticking "Unblock" in Explorer's Properties dialog. Silent, no UI;
-    // any failure is ignored.
+    // Portable apps keep the Mark-of-the-Web from the browser download.
+    // Read-only check: log whether this exe carries a download mark.
+    // We no longer delete the Zone.Identifier (Mark-of-the-Web bypass is
+    // ineffective for SmartScreen on unsigned binaries and triggers AV heuristics).
     if (!IsExeInInstallLocation()) {
         TempStr exePath = GetSelfExePathTemp();
-        bool ok = file::DeleteZoneIdentifier(exePath);
-        logf("[upd] portable self-unblock: ok=%d path=%s\n", (int)ok, exePath);
+        int zoneId = file::GetZoneIdentifier(exePath);
+        logf("[upd] portable zone id: %d path=%s\n", zoneId, exePath);
     }
 
     if (gIsAsanBuild) {
