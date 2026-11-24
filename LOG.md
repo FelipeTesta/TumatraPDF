@@ -1,3 +1,29 @@
+## 2026-11-23 (s79) — Ctrl+Alt rectangle accumulation + test fixture guard
+
+### Fixed
+- Ctrl+Alt+drag painted ONE union rectangle instead of the accumulated rectangles: `PaintSelection` (Selection.cpp) took the union branch (`GetRectangularSelectionScreenRect` -> `bounds.Union(r)`) whenever `IsRectangularSelection(win)` was true, and that predicate is true for a rectangle selection (no text glyphs -> `textSelection->result.len == 0`). The code comment already described the intended behaviour ("for accumulation, keep the per-page rects") — the code did the opposite.
+- `IsRectangularSelection()` now returns false while a Ctrl+Alt accumulation is active -> the per-rect paint path is used and the phantom move/resize handles and the resize cursor disappear (they used the same union). An explicit `isAccum` flag keeps the accumulated rectangles painted with sharp borders (after the drag the live selection is rebuilt from the accumulation, so `paintingAccum` alone was false). Plain Ctrl+drag unchanged.
+- The flashcard itself was already correct (N rects -> N quads via `CmdFlashcardAdd` -> `FlashcardCreateHighlightAnnot` -> `SetQuadPointsAsRect`); only the on-screen overlay and the handles were wrong.
+- The guard's CI check steps were broken twice and both are fixed: the guard step invoked `bun scripts/test-fixture-guard.ts` with `working-directory: sumatrapdf-src` while the script lives at the repo root (bun failed, `continue-on-error` swallowed it, no sentinel, the job passed silently) -> now `../scripts/test-fixture-guard.ts`; the check steps were bash (`[ -f`, `grep -q`) on a windows-2022 runner whose default shell is pwsh -> now PowerShell (`Test-Path` / `Select-String` on `$env:RUNNER_TEMP`).
+
+### Added
+- `sumatrapdf-src/tests/util.ts`: `copyFixtureToTmp()` (copies a tracked fixture into `tests/tmp/`), `trackedFileFingerprint()`, `assertTrackedFileUnchanged()`.
+- `scripts/test-fixture-guard.ts`: runs a command, snapshots the tracked state before/after (status AND the `git diff HEAD` text, so a further edit to an already-modified file is caught), exits 1 with the `FIXTURE-GUARD-POLLUTION` marker plus optional `--sentinel`/`--log`; `--self-test` runs 5 cases (5 passed).
+- `.github/workflows/tests.yml`: runs the unit suite through the guard on windows-2022; two `if: always()` steps fail the job on real pollution only.
+- `AGENTS.md` §6: three rules — a test never opens a tracked repo file for writing; an annotation-creating test copies the fixture and never depends on a graceful quit (the modal "save changes?" prompt blocks the message loop); the fixture guard must pass.
+
+### Changed
+- 5 tests that create annotations now copy the fixture (`ad-hoc-flashcard-{cloze,crosspage,filter,list,multiselect}.ts`); the read-only tests were left alone.
+
+### Verified
+- The first CI run of the guard (run 45382257747) FAILED, and the cause was NOT pollution: the log-marker check step had `-and` inside the `Test-Path` argument list, which PowerShell parses as a parameter ("A parameter cannot be found that matches parameter name 'and'"). The guard step itself passed (script path fix works, the suite ran through the guard) and the sentinel check passed (no pollution in the unit suite). The check now wraps each cmdlet call in its own parentheses; verified by running the EXACT step body under pwsh: clean -> exit 0 (silent), polluted -> `::error::` + exit 1, log-without-marker -> exit 0.
+- Root cause of the class: a test that modifies a document can write into the repo — the flashcard E2E opened the tracked fixture `sumatrapdf-src/ext/a-zlib/zlib.3.pdf` in place and the save prompt wrote the test card into it (28222 -> 34803 bytes, `/Subtype/Highlight` + `TumatraPDF-Flashcard`). The tracked file was restored (the polluted copy is kept in `git stash@{0}`); no study data had leaked (the study dir was empty).
+
+### Notes
+- The Ctrl+Alt fix has NO automated fail-then-pass check (a real Ctrl+Alt drag cannot be synthesised through the control pipe) — pending the user's visual validation.
+- 48+ test references pointed at tracked `ext/` paths; only the 5 annotation-creating tests were migrated in this round, the read-only ones are safe by construction.
+- Lesson recorded: verifying the pieces of an expression is not verifying the expression — run the exact string the runner executes, in the runner's shell.
+
 ## 2026-11-23 (s78) — Auto-update setting + silent install and restart
 
 ### Added
