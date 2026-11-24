@@ -1,11 +1,12 @@
+// dot-sync: verified=2026-11-23 refs=82c55bf8346a
 // ===================== TAB SESSION SYSTEM =====================
 // Snapshot 2026-11-21 per-window active group s67/s68. Red dashed = sync gaps found by audit;
 // s46 fix applied : RemoveTab now syncs (pre-sync covers programmatic close),
 // drag/keyboard reorder sync, pinned keyboard lock, boot re-save. ACTIVE GROUP IS PER WINDOW.
 // Session re-sync now happens at the RemoveTab choke point:
-//   Tabs.cpp RemoveTab -> UpdateActiveGroupAutoSave(win);  (Tabs.cpp:194)
+//   Tabs.cpp RemoveTab -> UpdateActiveGroupAutoSave(win);  (Tabs.cpp)
 // Remaining red = direct SetSelected bypass
-// (SumatraPDF.cpp:3970, hard-banned file) + #8 missing-file-at-restore
+// (SumatraPDF.cpp, hard-banned file) + #8 missing-file-at-restore
 // pending design decision. Line numbers drift with edits — re-verify
 // before trusting.
 digraph TabSessionSystem {
@@ -16,24 +17,24 @@ digraph TabSessionSystem {
     TabsCtrlBar [label="TabsCtrl bar\n(wingui/TabsCtrl.cpp)", shape=cylinder];
     TabsMgmt [label="Tabs.cpp mgmt\n(AddTabToWindow/RemoveTab/CloseAllTabs/MoveTab)"];
     SumatraPDF [label="SumatraPDF.cpp\n(CloseTab:4950 / CloseWindow:5079 / SaveSettings)"];
-    TabGroups [label="gGlobalPrefs->tabGroups\n(Settings.h:1025)", shape=database];
+    TabGroups [label="gGlobalPrefs->tabGroups\n(Settings.h)", shape=database];
     ActiveGroup [label="MainWindow::activeTabGroup\n(per-window live state)\ngGlobalPrefs->activeTabGroup\n(persistence mirror only)", shape=note];
     SettingsFile [label="TumatraPDF-settings.txt\n(on disk)", shape=database];
     Window [label="MainWindow / Win->Tabs()\n(WindowTab per-doc state)"];
-    Restore [label="Startup restore\n(SumatraStartup.cpp:2677)"];
+    Restore [label="Startup restore\n(SumatraStartup.cpp)"];
     User -> TabsCtrlBar [label="open doc / click tab"];
-    TabsCtrlBar -> TabsMgmt [label="AddTabToWindow (Tabs.cpp:760)"];
+    TabsCtrlBar -> TabsMgmt [label="AddTabToWindow (Tabs.cpp)"];
     TabsMgmt -> SumatraPDF [label="LoadDocumentFinish (3311)"];
     TabsMgmt -> TabGroups [label="UpdateActiveGroupAutoSave (806) syncs tabFiles"];
-    TabGroups -> SettingsFile [label="SaveSettings (AppSettings.cpp:797)"];
+    TabGroups -> SettingsFile [label="SaveSettings (AppSettings.cpp)"];
     TabsMgmt -> Window [label="win->Tabs() += tab"];
-    TabsCtrlBar -> TabsMgmt [label="Alt+click / middle-click\nCloseTab (TabsCtrl.cpp:555)"];
+    TabsCtrlBar -> TabsMgmt [label="Alt+click / middle-click\nCloseTab (TabsCtrl.cpp)"];
     TabsMgmt -> SumatraPDF [label="MainWindowTabClosed (616)\n→ CloseTab (SumatraPDF:4950)"];
     TabsMgmt -> TabGroups [label="UpdateActiveGroupAutoSave (628)"];
     SumatraPDF -> SettingsFile [label="SaveSettings (5035)"];
     SumatraPDF -> TabsMgmt [label="Ctrl+W / menu Close\nCloseTab (4950) → RemoveTab (155)"];
     TabsMgmt -> SumatraPDF [label="SaveSettings (5035)"];
-    TabsMgmt -> TabGroups [label="programmatic close (Ctrl+W / palette / Favorites / folder)\n→ RemoveTab choke point → UpdateActiveGroupAutoSave re-sync (s68)\n(Tabs.cpp:194 UpdateActiveGroupAutoSave(win))", color=green];
+    TabsMgmt -> TabGroups [label="programmatic close (Ctrl+W / palette / Favorites / folder)\n→ RemoveTab choke point → UpdateActiveGroupAutoSave re-sync (s68)\n(Tabs.cpp UpdateActiveGroupAutoSave(win))", color=green];
     SumatraPDF -> TabGroups [label="tabFiles re-synced at RemoveTab choke point (s46 FIXED)", color=green, style=dashed];
     SumatraPDF -> SettingsFile [label="group re-synced before save (s46 FIXED)", color=green];
     TabsCtrlBar -> TabsMgmt [label="last tab Alt+click / mid-click"];
@@ -44,10 +45,10 @@ digraph TabSessionSystem {
     SumatraPDF -> SumatraPDF [label="CloseTab (4950) tabCount==1 → CloseWindow (4996) — pre-sync via SyncActiveGroupToEmpty (s45 FIXED)", color=green];
     SumatraPDF -> TabGroups [label="SyncActiveGroupToEmpty (600) — last-tab clears tabFiles→0 (s45 FIXED)", color=green, style=dashed];
     SumatraPDF -> SettingsFile [label="SaveSettings (5173) persists EMPTY group — last-tab pre-sync (s45 FIXED)", color=green];
-    TabsCtrlBar -> TabsCtrlBar [label="drag reorder\nUpdateAfterDrag (505) → UpdateActiveGroupAutoSave(win) (TabsCtrl.cpp:532) (FIXED)", color=green, style=dashed];
-    TabsCtrlBar -> TabGroups [label="order re-synced after drag reorder (TabsCtrl.cpp:532) (FIXED)", color=green, style=dashed];
-    TabsMgmt -> TabsMgmt [label="MoveTab/SwapTabs (892) → UpdateActiveGroupAutoSave(win) (Tabs.cpp:956) (FIXED)", color=green, style=dashed];
-    TabsMgmt -> TabGroups [label="order re-synced after MoveTab/SwapTabs (Tabs.cpp:956) (FIXED)", color=green, style=dashed];
+    TabsCtrlBar -> TabsCtrlBar [label="drag reorder\nUpdateAfterDrag (505) → UpdateActiveGroupAutoSave(win) (TabsCtrl.cpp) (FIXED)", color=green, style=dashed];
+    TabsCtrlBar -> TabGroups [label="order re-synced after drag reorder (TabsCtrl.cpp) (FIXED)", color=green, style=dashed];
+    TabsMgmt -> TabsMgmt [label="MoveTab/SwapTabs (892) → UpdateActiveGroupAutoSave(win) (Tabs.cpp) (FIXED)", color=green, style=dashed];
+    TabsMgmt -> TabGroups [label="order re-synced after MoveTab/SwapTabs (Tabs.cpp) (FIXED)", color=green, style=dashed];
     TabsCtrlBar -> TabsMgmt [label="drag out to new window\nMainWindowTabMigration (645)"];
     TabsMgmt -> ActiveGroup [label="new window unsynced; original keeps group"];
     User -> SumatraPDF [label="Ctrl+N"];

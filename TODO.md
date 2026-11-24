@@ -9,6 +9,10 @@
 
 - [ ] `README.es.md` re-synced with `README.md`: `bun scripts/readme-sync.ts` exits 0; new/renamed features translated, tool names left in English, `Última actualización` line + `<!-- readme-sync -->` token refreshed with `--update`.
 
+## FLOW map repair (79 dangling refs / 22 maps — ratchet enforced)
+
+- [ ] Pay down the queue in [FLOW/REPAIR-PLAN.md](FLOW/REPAIR-PLAN.md) P0 → P3. Per map: fix refs, `bun scripts/flow-sync.ts --stamp`, then `--baseline` (must shrink; script refuses to grow).
+
 ## USER validation queue
 
 Items ONLY the user can verify live (real book / real build). Flat list; details in LOG per session.

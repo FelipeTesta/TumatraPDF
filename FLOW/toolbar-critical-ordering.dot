@@ -1,3 +1,4 @@
+// dot-sync: verified=2026-11-23 refs=baa9c8592478
 digraph ToolbarCriticalOrdering {
     rankdir=TB;
     node [shape=box, style=rounded, fontname="Consolas", fontsize=10];
@@ -72,13 +73,13 @@ digraph ToolbarCriticalOrdering {
         color="#607d8b";
         
         // Arch Tools
-        arch_box [label="Arch Tools (CreateToolbar2)\nToolbar.cpp:2963\n1. Create rebar + subclass ReBarWndProc\n2. RB_SETBARINFO + RB_SETBKCOLOR\n3. Create toolbar\n4. SetWindowTheme(hwndToolbar, L\"\", L\"\") ← BEFORE buttons\n5. TbAddButtons (iBitmap=TbIcon::Text)\n6. TbSetBitmapSize + TbSetButtonSize\n7. TbGetItemRect\n8. ShowWindow(hwndToolbar, SW_SHOW)\n9. RB_INSERTBAND\n10. SetWindowPos(rebar, frameWidth)\n11. SetWindowLongPtr(WndProcToolbar) ← AFTER buttons\n12. ShowWindow(hwndReBar, SW_HIDE) initially", fillcolor="#bbdefb", style=filled];
+        arch_box [label="Arch Tools (CreateToolbar2)\nToolbar.cpp\n1. Create rebar + subclass ReBarWndProc\n2. RB_SETBARINFO + RB_SETBKCOLOR\n3. Create toolbar\n4. SetWindowTheme(hwndToolbar, L\"\", L\"\") ← BEFORE buttons\n5. TbAddButtons (iBitmap=TbIcon::Text)\n6. TbSetBitmapSize + TbSetButtonSize\n7. TbGetItemRect\n8. ShowWindow(hwndToolbar, SW_SHOW)\n9. RB_INSERTBAND\n10. SetWindowPos(rebar, frameWidth)\n11. SetWindowLongPtr(WndProcToolbar) ← AFTER buttons\n12. ShowWindow(hwndReBar, SW_HIDE) initially", fillcolor="#bbdefb", style=filled];
         
         // Flashcard
         fc_box [label="Flashcard (FlashcardToolbarCreate)\nFlashcardToolbar.cpp\n1. ToolbarSetupSecondaryRebar(hwndRebar)\n   (subclass + RB_SETBARINFO + bkcolor + darkmode)\n2. Create toolbar\n3. SetWindowTheme(hwndToolbar, L\"\", L\"\") ← BEFORE buttons\n4. TbAddButtons (iBitmap=TbIcon::Text)\n5. TbSetBitmapSize + TbSetButtonSize\n6. TbGetItemRect\n7. ShowWindow(hwndToolbar, SW_SHOW)\n8. RB_INSERTBAND\n9. SetWindowPos(rebar, frameWidth)\n10. ToolbarSubclassSecondaryToolbar(win, hwnd) ← AFTER buttons\n11. ShowWindow(hwndRebar, SW_HIDE) initially", fillcolor="#fff9c4", style=filled];
         
         // Edit
-        edit_box [label="Edit (EditToolbarCreate)\nCommands_Edit.cpp:74\n1. ToolbarSetupSecondaryRebar(hwndRebar)\n   (subclass + RB_SETBARINFO + bkcolor + darkmode)\n2. Create toolbar\n3. SetWindowTheme(hwndToolbar, L\"\", L\"\") ← BEFORE buttons\n4. TbAddButtons (iBitmap=TbIcon::Text, 4 btns)\n5. TbSetBitmapSize + TbSetButtonSize\n6. TbGetItemRect\n7. ShowWindow(hwndToolbar, SW_SHOW)\n8. RB_INSERTBAND (cxMinChild=rc.dx, cyMinChild=rc.dy+2*rc.y)\n9. SetWindowPos(rebar, frameWidth)\n10. ToolbarSubclassSecondaryToolbar(win, hwnd) ← AFTER buttons\n11. ShowWindow(hwndRebar, SW_SHOW)", fillcolor="#e1bee7", style=filled];
+        edit_box [label="Edit (EditToolbarCreate)\nCommands_Edit.cpp\n1. ToolbarSetupSecondaryRebar(hwndRebar)\n   (subclass + RB_SETBARINFO + bkcolor + darkmode)\n2. Create toolbar\n3. SetWindowTheme(hwndToolbar, L\"\", L\"\") ← BEFORE buttons\n4. TbAddButtons (iBitmap=TbIcon::Text, 4 btns)\n5. TbSetBitmapSize + TbSetButtonSize\n6. TbGetItemRect\n7. ShowWindow(hwndToolbar, SW_SHOW)\n8. RB_INSERTBAND (cxMinChild=rc.dx, cyMinChild=rc.dy+2*rc.y)\n9. SetWindowPos(rebar, frameWidth)\n10. ToolbarSubclassSecondaryToolbar(win, hwnd) ← AFTER buttons\n11. ShowWindow(hwndRebar, SW_SHOW)", fillcolor="#e1bee7", style=filled];
         
         arch_box -> fc_box [style=dashed, label="same pattern"];
         fc_box -> edit_box [style=dashed, label="same pattern"];
@@ -112,7 +113,7 @@ digraph ToolbarCriticalOrdering {
         label="hideSecondaryToolbars Flag (s36-ax feature)";
         color="#e91e63";
         
-        hide_def [label="hideSecondaryToolbars =\nwin->showHomeOverlay ||\nIsCurrentDocMarkdown(win)\nSumatraPDF.cpp:6381", fillcolor="#ffcdd2", style=filled];
+        hide_def [label="hideSecondaryToolbars =\nwin->showHomeOverlay ||\nIsCurrentDocMarkdown(win)\nSumatraPDF.cpp", fillcolor="#ffcdd2", style=filled];
         
         hide_arch [label="if (!win->archTools.on || hideSecondaryToolbars)\n  ShowWindow(hwndReBar2, SW_HIDE)", fillcolor="#ffcdd2", style=filled];
         hide_fc [label="if (!win->flashcard.on || hideSecondaryToolbars)\n  ShowWindow(hwndReBarFlashcard, SW_HIDE)", fillcolor="#ffcdd2", style=filled];
@@ -152,13 +153,11 @@ digraph ToolbarCriticalOrdering {
         log5 [label="[edit] CmdEditToolsToggle: editMode=1\n→ Edit toggle triggered", fillcolor="#e1bee7", style=filled, shape=note];
         log6 [label="[d6] contentDy=24 cyChild(old)=30 childDy=28\n→ SetToolbarBandToRowHeight measured 1 row", fillcolor="#fff9c4", style=filled, shape=note];
     }
-}
-
     // ============================================================
     // CRITICAL FIX: NM_CUSTOMDRAW for Secondary Toolbars
     // ============================================================
     subgraph cluster_rule4 {
-        label="RULE #4: NM_CUSTOMDRAW MUST handle ALL toolbars (Toolbar.cpp:972)";
+        label="RULE #4: NM_CUSTOMDRAW MUST handle ALL toolbars (Toolbar.cpp)";
         color="#ff0000";
         style=bold;
         penwidth=2.0;

@@ -1,0 +1,199 @@
+{
+  "note": "Known-stale references recorded when the FLOW check was introduced. CI fails only on NEW staleness. Pay down over time; --baseline never lets an entry grow.",
+  "maps": {
+    "annotation-edit-flow.dot": {
+      "files": [],
+      "symbols": [
+        "FzFindImageAtPos",
+        "GetAnnotationAtPoint",
+        "SetAnnotationAuthor",
+        "SetAnnotationColor",
+        "SetAnnotationContents",
+        "SkipAnnotationValidation",
+        "UpdateFileStateForTab"
+      ]
+    },
+    "command-system.dot": {
+      "files": [
+        "Commands_Crop.cpp",
+        "Commands_Nav.cpp",
+        "MenuEnabler.cpp",
+        "ReadAloud.cpp"
+      ],
+      "symbols": [
+        "CmdContrastDown",
+        "CmdContrastUp",
+        "CmdEditApply",
+        "CmdEditCrop",
+        "HandleCmdBack",
+        "HandleCmdDisplayMode",
+        "HandleCmdGoToPage",
+        "HandleCmdPresentation",
+        "IsCommandAvailable"
+      ]
+    },
+    "document-load-flow.dot": {
+      "files": [
+        "Settings.cpp"
+      ],
+      "symbols": [
+        "LoadDocumentThreadData",
+        "MigrateGlobalPrefs",
+        "UpdateFileStateForTab"
+      ]
+    },
+    "homepage.dot": {
+      "files": [],
+      "symbols": [
+        "CollectHomePageFiles",
+        "HomeLayoutCacheFilesMatch",
+        "HomeLayoutCacheMatches",
+        "HomePageWnd"
+      ]
+    },
+    "print-export.dot": {
+      "files": [
+        "PrintDialog.cpp"
+      ],
+      "symbols": [
+        "CmdExtractImages",
+        "CmdExtractText",
+        "CmdPrintSetup",
+        "HandleCmdExtractText",
+        "PageLayoutMargin",
+        "PrintToPdf"
+      ]
+    },
+    "profile-portable-drive.dot": {
+      "files": [],
+      "symbols": [
+        "DriveSyncFiles"
+      ]
+    },
+    "resource-management.dot": {
+      "files": [],
+      "symbols": [
+        "UpdateFileStateForTab"
+      ]
+    },
+    "search-dde-flow.dot": {
+      "files": [
+        "ReadAloud.cpp"
+      ],
+      "symbols": [
+        "CmdFindWindow",
+        "HitTestLink",
+        "QueuedOpenCmd",
+        "UpdateNavHistory"
+      ]
+    },
+    "settings-system.dot": {
+      "files": [
+        "AdvancedOptions.cpp",
+        "Settings.cpp"
+      ],
+      "symbols": [
+        "MigrateGlobalPrefs",
+        "UpdateFileStateForTab"
+      ]
+    },
+    "stress-testing.dot": {
+      "files": [],
+      "symbols": [
+        "StressTestRunner"
+      ]
+    },
+    "tab-system.dot": {
+      "files": [],
+      "symbols": [
+        "OpenNewWindow"
+      ]
+    },
+    "tab-window-management.dot": {
+      "files": [],
+      "symbols": [
+        "AddTabToGroup",
+        "CreateGroupFromSelection",
+        "FrameWndProc",
+        "MoveGroupTabs",
+        "RemoveTabFromGroup",
+        "RestoreTabsFromHistory",
+        "TabGroupsLoad",
+        "TabGroupsSave"
+      ]
+    },
+    "theme-darkmode.dot": {
+      "files": [],
+      "symbols": [
+        "OnEraseBkgnd",
+        "ThemeHighlightColor",
+        "ToolbarSubclassSecondaryToolbar"
+      ]
+    },
+    "toolbar-critical-ordering.dot": {
+      "files": [],
+      "symbols": [
+        "ToolbarSubclassSecondaryToolbar"
+      ]
+    },
+    "toolbar-debug-log-analysis.dot": {
+      "files": [],
+      "symbols": [
+        "ToolbarSubclassSecondaryToolbar"
+      ]
+    },
+    "toolbar-function-callgraph.dot": {
+      "files": [],
+      "symbols": [
+        "CmdShowToolbar",
+        "FlashcardWndProc",
+        "FrameWndProc",
+        "HandleCmdFlashcardToggle",
+        "MenuBarWndProc",
+        "ToggleMainToolbar",
+        "ToolbarSubclassSecondaryToolbar"
+      ]
+    },
+    "toolbar-per-toolbar-state.dot": {
+      "files": [],
+      "symbols": [
+        "TbDeleteButton",
+        "ToolbarPackStateIndex"
+      ]
+    },
+    "toolbar-system.dot": {
+      "files": [],
+      "symbols": [
+        "ThemeHighlightColor",
+        "ToolbarPackStateIndex",
+        "ToolbarSubclassSecondaryToolbar"
+      ]
+    },
+    "toolbar-user-interactions.dot": {
+      "files": [],
+      "symbols": [
+        "TbDeleteButton",
+        "ToolbarSubclassSecondaryToolbar"
+      ]
+    },
+    "tumatrapdf.dot": {
+      "files": [],
+      "symbols": [
+        "FitSinglePage"
+      ]
+    },
+    "UX.dot": {
+      "files": [],
+      "symbols": [
+        "CmdArchApply",
+        "CmdGoToNextPrevFavorite"
+      ]
+    },
+    "webview-markdown.dot": {
+      "files": [],
+      "symbols": [
+        "PrintToPdf"
+      ]
+    }
+  }
+}

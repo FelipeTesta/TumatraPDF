@@ -1,3 +1,4 @@
+// dot-sync: verified=2026-11-23 refs=4c84637d9895
 digraph ProfileSystem {
     // Snapshot: 2026-11-21 (s69) — Profile Sync: correct merge, complete migration, honest UI
     rankdir=TB;
@@ -16,7 +17,7 @@ digraph ProfileSystem {
 format v1 (kProfileDataVersion=1) + checksum field
 holds: books study states | readingStats/fcStats\nday rows (per-machine) | perDoc counters
 backup\\NN\\tumatraPDF-data_1.json + stamp.txt\n(9 slots x 8h rolling)", fillcolor="#c8e6c9", style=filled];
-        gprofile [label="gProfile (ProfileData.cpp:69)
+        gprofile [label="gProfile (ProfileData.cpp)
 Vec<ProfileBook> books (key = md5(pdfPath) hex,
   docName/docPath/FlashcardStudyDoc)
 Vec<ProfDayMachine> readingDaily / studyDaily
@@ -32,7 +33,7 @@ Profile captures STATS + STUDY STATE only", fillcolor="#f5f5f5", style=filled];
 
     // ===================== LOAD PIPELINE =====================
     subgraph cluster_load {
-        label="Load pipeline (ProfileDataEnsureLoaded ProfileData.cpp:1799)";
+        label="Load pipeline (ProfileDataEnsureLoaded ProfileData.cpp)";
         color="#2196f3";
         style=filled;
         fillcolor="#e3f2fd";
@@ -53,7 +54,7 @@ mismatch -> refuse import with log line; absent checksum (old file)
         backup_rec [label="Corrupt: scan 9 backup slots, newest valid\nslot -> primary (RecoverBackupSlot :2514)\nnone -> ProfImportLegacy + dirty+Save", fillcolor="#fff9c4", style=filled];
         cloud [label="Cloud-revert detect (:1860)
 newest backup slot lastWriteTs > primary ts
- -> gCloudRevertPending (:80) = true (consumed at startup,\n SumatraStartup.cpp:2866; skipped when gForTesting)", fillcolor="#fff9c4", style=filled];
+ -> gCloudRevertPending (:80) = true (consumed at startup,\n SumatraStartup.cpp; skipped when gForTesting)", fillcolor="#fff9c4", style=filled];
         parse [label="ProfParseBooks (:419) / ProfParseDaySection (:1490)
 / ProfParseInfoSection (:1527) -> gProfile", fillcolor="#bbdefb", style=filled];
         reconcile [label="ProfReconcileSidecars (:1007) — startup adopt
@@ -105,7 +106,7 @@ drops gProfile in-memory state, re-EnsureLoaded, SaveNow", fillcolor="#e1bee7", 
         fillcolor="#fff3e0";
 
         fc_hook [label="Flashcard.cpp: FlashcardStudySave\n-> ProfileDataUpdateStudyDoc (:1936) FULL REPLACE\nFlashcardStudyLoad -> ProfileDataMergeStudyDoc (:1948)\nnewest-wins per state key (lastReviewedAt >=)\nfirst-contact adopt; FlashcardDeleteAllStudyFiles\n-> ProfileDataClearStudyDocs (:1999)", fillcolor="#fff3e0", style=filled];
-        stats [label="ReadingStats.cpp:178 / FlashcardStats.cpp:173,238\nProfileDataAddReadingSec / AddFlashcardSec / AddFlashcardCard\n live ticks (dirty-only; clamp [0,86400]; save cadence)", fillcolor="#fff3e0", style=filled];
+        stats [label="ReadingStats.cpp / FlashcardStats.cpp,238\nProfileDataAddReadingSec / AddFlashcardSec / AddFlashcardCard\n live ticks (dirty-only; clamp [0,86400]; save cadence)", fillcolor="#fff3e0", style=filled];
         dayflush [label="FlashcardStatsFlush / ReadingStats flush (dirtySec>=60)\n ProfileDataUpsertStudyDay / UpsertReadingDay — replaces THIS machine's row,\n other machines' rows untouched; SaveNow materializes", fillcolor="#fff3e0", style=filled];
         dual [label="kProfDualWriteSidecars (ReadingStats.cpp / FlashcardStats.cpp / Flashcard.cpp)\n= true — sidecar flashcard-stats.txt / reading-stats.txt\n+ per-book *.json STILL written; profile upserts unconditional", fillcolor="#ffcdd2", style=filled];
         pullhook [label="ProfPullHistory reads gFileHistory FileState\n readingTimeSec / flashcardStudyTimeSec / flashcardCardsDone\n (perDoc snapshot; source of P1-migration corruption)", fillcolor="#fff3e0", style=filled];
@@ -123,10 +124,10 @@ drops gProfile in-memory state, re-EnsureLoaded, SaveNow", fillcolor="#e1bee7", 
         style=filled;
         fillcolor="#fce4ec";
 
-        homebtn [label="Home ⟳ Sync button (HomePage.cpp:2546, HomeSyncBtnWnd)
+        homebtn [label="Home ⟳ Sync button (HomePage.cpp, HomeSyncBtnWnd)
 next to 'Stats' header; click -> ShowProfileSyncDialog
 (bubble hit-test local->root bridge)", fillcolor="#bbdefb", style=filled];
-        syncwnd [label="Profile Sync window (ProfileSyncWnd.cpp:738)
+        syncwnd [label="Profile Sync window (ProfileSyncWnd.cpp)
 class TUMATRA_PROFILE_SYNC; read-only readout:
  dir / file / format v / size / last save / machine /
  counts (books, readingDays, studyDays) / backups +
@@ -137,16 +138,16 @@ class TUMATRA_PROFILE_SYNC; read-only readout:
 copies PRIMARY + backup\\ + stats\\ + study\\ trees; dest-exists -> confirm overwrite;
 atomic replace via temp + MoveFileExW\nImport (ProfileDataImportFromJson :1280)
 prompt TUMATRA_PROFILE_IMPORT: REPLACE (.pre-import copy + atomic install) or\nMERGE — larger total per day, newer state per card; validates source checksum", fillcolor="#bbdefb", style=filled];
-        backupwnd [label="Profile Backups dialog (ProfileBackupWnd.cpp:307)
+        backupwnd [label="Profile Backups dialog (ProfileBackupWnd.cpp)
 class TUMATRA_PROFILE_BACKUP (420x520); 9 slots x8h;
  stamp per slot; 5s hold Restore (1s orange progress);
  keyboard: Up/Down/Home/End select slot, SPACE hold-to-restore;
  failed restore -> message box (not log only); Esc close;
  DwmSetWindowAttribute dark caption (s40)", fillcolor="#bbdefb", style=filled];
-        cloudwnd [label="Cloud revert modal (ProfileBackupWnd.cpp:364)
+        cloudwnd [label="Cloud revert modal (ProfileBackupWnd.cpp)
 class TUMATRA_CLOUD_REVERT (380x220); primary vs newest-backup\nstamp; Restore (default) / Keep; Esc = Keep;
-called from SumatraStartup.cpp:2866 (skipped if gForTesting)", fillcolor="#bbdefb", style=filled];
-        cmd [label="Commands: CmdProfileBackups (Commands.h:340/690)\n dispatch SumatraPDF.cpp:10473; gen-commands palette\n 'Profile: Backups...'; NO menu / shortcut\n CmdProfileSync (gen-commands.ts:350, Commands.h:357/700)\n dispatch SumatraPDF.cpp:10473; palette 'Profile: Sync...'\n (Home button only)", fillcolor="#ffcdd2", style=filled];
+called from SumatraStartup.cpp (skipped if gForTesting)", fillcolor="#bbdefb", style=filled];
+        cmd [label="Commands: CmdProfileBackups (Commands.h/690)\n dispatch SumatraPDF.cpp; gen-commands palette\n 'Profile: Backups...'; NO menu / shortcut\n CmdProfileSync (gen-commands.ts:350, Commands.h/700)\n dispatch SumatraPDF.cpp; palette 'Profile: Sync...'\n (Home button only)", fillcolor="#ffcdd2", style=filled];
 
         homebtn -> syncwnd;
         syncwnd -> backupwnd [style=dotted];
@@ -180,7 +181,7 @@ called from SumatraStartup.cpp:2866 (skipped if gForTesting)", fillcolor="#bbdef
         fillcolor="#ffebee";
 
         p1 [label="P1-migration — FIXED (s64-R9m / s68)
-FileState blob: 44 fields + 44 names, FlashcardStudyTimeSec appended LAST\n(AppSettings.cpp:170 kMigDst ends 'FlashcardStudyTimeSec'; L152 'names blob 44')\nReal migration: MigrateFileStateNames (AppSettings.cpp:193)\ngen3 has FlashcardStudyTimeSec key -> NO-OP skip;\ngen2 has FlashcardCardsDone but not FlashcardStudyTimeSec -> migrate;\ngen1 has neither -> migrate with same shift\n(AppSettings.cpp:189-192 comment)", fillcolor="#c8e6c9", style=filled];
+FileState blob: 44 fields + 44 names, FlashcardStudyTimeSec appended LAST\n(AppSettings.cpp kMigDst ends 'FlashcardStudyTimeSec'; L152 'names blob 44')\nReal migration: MigrateFileStateNames (AppSettings.cpp)\ngen3 has FlashcardStudyTimeSec key -> NO-OP skip;\ngen2 has FlashcardCardsDone but not FlashcardStudyTimeSec -> migrate;\ngen1 has neither -> migrate with same shift\n(AppSettings.cpp comment)", fillcolor="#c8e6c9", style=filled];
         f8 [label="F8 — dual-write gate flip (TODO)
 slices 1-2 shipped (s36-bs/bt): live stats -> profile;
 Config list merge; remaining: FlashcardStudyListDocs iterate

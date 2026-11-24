@@ -1,3 +1,4 @@
+// dot-sync: verified=2026-11-23 refs=e3d24b5e3dfe
 digraph TabSystem {
     rankdir=TB;
     node [shape=box, style=rounded, fontname="Consolas", fontsize=9];
@@ -13,7 +14,7 @@ digraph TabSystem {
 
         boot [label="WinMain → SumatraStartup\n• read settings (ActiveTabGroup, TabGroups, SessionData)\n• Precedence: activeTabGroup non-empty AND group exists with tabFiles > 0\n  ⇒ restoreSession = FALSE, load group files\n• Else: normal session restore (FileHistory)", fillcolor="#c8e6c9", style=filled];
         suppress [label="SuppressGroupAutoSave around boot restore loop\n• true BEFORE LoadDocument/TabsSelect\n• cleared AFTER TabsSelect (TabGroupsManage.cpp)\n• prevents first auto-save hook clobbering active group\n(SuppressGroupAutoSave true/false)", fillcolor="#bbdefb", style=filled];
-        empty_group [label="Empty active group → suppress session restore\n(TabGroupsManage.cpp:625/267, SumatraStartup.cpp:2679)\nActivateTabGroupInWindow no longer rejects empty tabFiles\n— activates empty group, loads nothing", fillcolor="#bbdefb", style=filled];
+        empty_group [label="Empty active group → suppress session restore\n(TabGroupsManage.cpp/267, SumatraStartup.cpp)\nActivateTabGroupInWindow no longer rejects empty tabFiles\n— activates empty group, loads nothing", fillcolor="#bbdefb", style=filled];
     }
 
     // ===================== DROPDOWN BUTTON =====================
@@ -85,7 +86,7 @@ digraph TabSystem {
     btn -> build [style=dotted];
     build -> track -> leftclick;
     track -> rightclick;
-    leftclick -> newsession::dialog [style=dotted, label="session item → new session"];
+    leftclick -> newsession_dialog [style=dotted, label="session item → new session"];
     rightclick -> rename;
     rightclick -> delete;
     rightclick -> unsynced [style=dotted];

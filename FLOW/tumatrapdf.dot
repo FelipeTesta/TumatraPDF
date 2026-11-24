@@ -1,3 +1,4 @@
+// dot-sync: verified=2026-11-23 refs=af50efd556fe
 digraph TumatraPDF {
     rankdir=TB;
     node [shape=box, style=rounded];
@@ -38,9 +39,9 @@ digraph TumatraPDF {
         upstream -> patches [label="modified by\ndirect patch"];
     }
 
-    // ===================== TOOLBAR — REAL ORDER (Toolbar.cpp:2845-3014) =====================
+    // ===================== TOOLBAR — REAL ORDER (Toolbar.cpp) =====================
     subgraph cluster_toolbar {
-        label="Toolbar — gToolbarButtons[] (Toolbar.cpp:2845-3014)";
+        label="Toolbar — gToolbarButtons[] (Toolbar.cpp)";
         style=dashed;
         color="#666";
 
@@ -65,7 +66,7 @@ digraph TumatraPDF {
 
         menubar [label="Bar: File · View · Go To · Zoom · Selection · Read Aloud\nFavorites (+Tab Groups submenu L558) · Settings\nNew &Tools [TUMATRA] · Help · Debug   (menuDefMenubar L862-911)"];
         newtools [label="New &Tools [TUMATRA] — menuDefNewTools L592-641:\nAuto-Scroll: Toggle · Speed Up · Speed Down\nContrast: Toggle · Up (+10%) · Down (−10%)\nViewport Crop · Margin Trim · Trim Config", shape=box, style="rounded,filled", fillcolor="#c8e6c9"];
-        filepicker [label="File: \"Use TumatraPDF File Picker\" [TUMATRA]\n(CmdToggleFilePicker; dup in Settings; handler SumatraPDF.cpp:9654)", shape=note, fillcolor="#e3f2fd", style=filled];
+        filepicker [label="File: \"Use TumatraPDF File Picker\" [TUMATRA]\n(CmdToggleFilePicker; dup in Settings; handler SumatraPDF.cpp)", shape=note, fillcolor="#e3f2fd", style=filled];
 
         menubar -> newtools;
         menubar -> filepicker [style=dotted];
@@ -91,7 +92,7 @@ digraph TumatraPDF {
         color="#666";
 
         setG [label="Globals [TUMATRA]:\nViewportCrop ver3.7 {Left Right Top Bottom=0,\nColGap=0, Enabled=f, QuickToggle=f (orphan)}\nTrim ver3.7 {Top=0, Bottom=0, Enabled=f}\nAutoScrollShowEta=t (gate ETA toolbar)\nfilePicker=\"\" (os|sumatrapdf)"];
-        setD [label="Per-document (FileState) [TUMATRA]:\nAutoScrollSpeedMultiplier=0.1 (clamp 0.1–10)\nInvertColors=f · ContrastEnabled=f · ContrastOpacity=50\nsave SumatraPDF.cpp:829-833 / restore :2039-2045\nspeed save in AutoScroll.cpp (AutoScrollSpeedAdjust)\nUpdateDocumentColors() :2045 (invert restore fix)"];
+        setD [label="Per-document (FileState) [TUMATRA]:\nAutoScrollSpeedMultiplier=0.1 (clamp 0.1–10)\nInvertColors=f · ContrastEnabled=f · ContrastOpacity=50\nsave SumatraPDF.cpp / restore :2039-2045\nspeed save in AutoScroll.cpp (AutoScrollSpeedAdjust)\nUpdateDocumentColors() :2045 (invert restore fix)"];
         setwarn [label="⚠ NEVER edit @gen-start/@gen-end by hand —\nchange cmd/gen-settings.ts and regenerate\n(bun cmd/gen-settings.ts)", shape=note, fillcolor="#fff3e0", style=filled];
 
         setG -> setwarn [style=dotted];
@@ -103,14 +104,14 @@ digraph TumatraPDF {
         style=dashed;
         color="#1565c0";
 
-        feat_scroll [label="AutoScroll\n· continuous F9: timer tick -> AutoScrollContinuousTick\n  (AutoScroll.cpp:338) -> MoveDocBy -> ScrollYBy -> WM_PAINT\n· ETA: page-based (timePerPage x remaining, resync per page)\n  pause (Shift-hold/Ctrl) excluded; canvas overlay label\n  (WS_EX_LAYERED + colorkey, Toolbar.cpp WndProcEtaOverlay)\n· md-webview: wv->Eval(window.scrollBy(0,dy)) branch;\n  JS autoscrollBottom -> OnAutoScrollBottom -> stop timer\n· see FLOW/autoscroll.dot (full pipeline)"];
-        feat_contrast [label="Contrast (overlay)\n· layered child window over canvas:\n  ContrastOverlay.cpp:34-104\n  alpha via AlphaFromOpacity static helper :10\n  call sites L77 + L107\n· handlers SumatraPDF.cpp:10923-10987 (steps ±10)\n· per-document persistence\n· md-webview: div#__sumatra_contrast CSS overlay via Eval\n  (pointer-events:none, z-index max,\n  opacity=contrastOpacity*255/100/255.0f);\n  CreateContrastOverlay no-op for md;\n  RestoreContrastOverlay on OnDocumentComplete"];
+        feat_scroll [label="AutoScroll\n· continuous F9: timer tick -> AutoScrollContinuousTick\n  (AutoScroll.cpp) -> MoveDocBy -> ScrollYBy -> WM_PAINT\n· ETA: page-based (timePerPage x remaining, resync per page)\n  pause (Shift-hold/Ctrl) excluded; canvas overlay label\n  (WS_EX_LAYERED + colorkey, Toolbar.cpp WndProcEtaOverlay)\n· md-webview: wv->Eval(window.scrollBy(0,dy)) branch;\n  JS autoscrollBottom -> OnAutoScrollBottom -> stop timer\n· see FLOW/autoscroll.dot (full pipeline)"];
+        feat_contrast [label="Contrast (overlay)\n· layered child window over canvas:\n  ContrastOverlay.cpp\n  alpha via AlphaFromOpacity static helper :10\n  call sites L77 + L107\n· handlers SumatraPDF.cpp (steps ±10)\n· per-document persistence\n· md-webview: div#__sumatra_contrast CSS overlay via Eval\n  (pointer-events:none, z-index max,\n  opacity=contrastOpacity*255/100/255.0f];\n  CreateContrastOverlay no-op for md;\n  RestoreContrastOverlay on OnDocumentComplete"];
         feat_crop [label="ViewportCrop v1 (legacy, candidates to remove)\n+ TC2 (Two Columns v2): 2N virtual pages, colGap overlap,\n  Shift-hold quick view - see FLOW/two-columns-v2.dot\n· DisplayModel VirtualToPhysical/ColumnOfVirtual\n· render cache re-enabled (cached tc2 ~1ms blit)"];
-        feat_trim [label="MarginTrim (clip top/bottom)\n· tile clip via pageRect:\n  RenderCache.cpp:360/745/1170\n· toggle relayout + frees cache\n  SumatraPDF.cpp:10961-10974\n· draggable red guide lines:\n  Canvas.cpp:1624/2019/3179"];
+        feat_trim [label="MarginTrim (clip top/bottom)\n· tile clip via pageRect:\n  RenderCache.cpp/745/1170\n· toggle relayout + frees cache\n  SumatraPDF.cpp\n· draggable red guide lines:\n  Canvas.cpp/2019/3179"];
         feat_trimdlg [label="TrimConfigDialog (new)\n· singleton gTrimConfigWnd, Show L335\n· edits synced on drag:\n  TrimConfigDialogSyncEdits L189"];
-        feat_tabs [label="Tabs (VirtWnds — TabsCtrl.cpp)\n· active tab underline 3px: Paint L224-225\n· Alt+Click closes tab: L719-723\n· Middle-click closes: L775-779\n· freeze mechanism REMOVED (2026-08-24)\n· Home tab always idx 0 pinned (Tabs.cpp:712-726)\n  ⇒ nTabs ≥ 2 with 1 doc\n· LayoutTabs dx=min(DpiScale(TabWidth),(clientW−5)/nTabs)\n· Tab groups (TabGroupsManage): activeTabGroup, live auto-sync, dropdown button/menu\n  ⇒ see FLOW/tab-system.dot (full pipeline: boot restore, dropdown, new/rename/delete,\n  auto-sync guards, lazy switch)"];
+        feat_tabs [label="Tabs (VirtWnds — TabsCtrl.cpp)\n· active tab underline 3px: Paint L224-225\n· Alt+Click closes tab: L719-723\n· Middle-click closes: L775-779\n· freeze mechanism REMOVED (2026-08-24)\n· Home tab always idx 0 pinned (Tabs.cpp)\n  ⇒ nTabs ≥ 2 with 1 doc\n· LayoutTabs dx=min(DpiScale(TabWidth),(clientW−5)/nTabs)\n· Tab groups (TabGroupsManage): activeTabGroup, live auto-sync, dropdown button/menu\n  ⇒ see FLOW/tab-system.dot (full pipeline: boot restore, dropdown, new/rename/delete,\n  auto-sync guards, lazy switch)"];
         feat_persist [label="Per-doc persistence\ninvert+contrast restored on reopen\nLoadDocument :2039-2045 →\nUpdateDocumentColors() :2045\nCreateContrastOverlay after ctrl=:2096"];
-        feat_picker [label="Own File Picker\npref os↔sumatrapdf\nSumatraPDF.cpp:5852-5860"];
+        feat_picker [label="Own File Picker\npref os↔sumatrapdf\nSumatraPDF.cpp"];
 
         feat_flash [label="Flashcards (cloze positional)\n· selection -> MuPDF highlight (author=TumatraPDF-Flashcard)\n· study: opaque mask only current card; reveal removes\n· SM-2 due filter + relearn; keys 1-4, Space/Enter\n· Flashcard.cpp / Commands_Flashcard.cpp / FlashcardToolbar.\n  / FlashcardSidebar — see FLOW/flashcard.dot"];
 
@@ -140,7 +141,7 @@ digraph TumatraPDF {
         style=dashed;
         color="#b71c1c";
 
-        dead1 [label="V1 crop: QuickToggleViewportCrop() v1 REMOVED 2026-09-22 (zero callers)\n(DisplayModel.cpp:443-444 'QuickToggleViewportCrop (v1) was removed 2026-09-22')\n+ v1 CROP still live: ApplyViewportCrop() (DisplayModel.cpp:415), used by CmdViewportCropToggle\n  (SumatraPDF.cpp:11892 'cropDm->ApplyViewportCrop();')\n+ v1/v2 fields coexist in DisplayModel.h: viewportCropEnabled (L368), viewportCropV2Enabled (L375)\n+ hwndCardCount / studyModeType: PRUNED (no longer exist)\n+ CmdFlashcardNext IS wired (Commands_Flashcard.cpp:1187 'case CmdFlashcardNext:')\n-> TODO.md R5 prune (stale entry)", fillcolor="#ffebee", style=filled];
+        dead1 [label="V1 crop: QuickToggleViewportCrop() v1 REMOVED 2026-09-22 (zero callers)\n(DisplayModel.cpp 'QuickToggleViewportCrop (v1) was removed 2026-09-22')\n+ v1 CROP still live: ApplyViewportCrop() (DisplayModel.cpp), used by CmdViewportCropToggle\n  (SumatraPDF.cpp 'cropDm->ApplyViewportCrop();')\n+ v1/v2 fields coexist in DisplayModel.h: viewportCropEnabled (L368), viewportCropV2Enabled (L375)\n+ hwndCardCount / studyModeType: PRUNED (no longer exist)\n+ CmdFlashcardNext IS wired (Commands_Flashcard.cpp 'case CmdFlashcardNext:')\n-> TODO.md R5 prune (stale entry)", fillcolor="#ffebee", style=filled];
     }
 
     // ===================== DEPENDENCIES =====================
@@ -154,7 +155,7 @@ digraph TumatraPDF {
     mupdf -> render;
 
     // ===================== NOTES / FINDINGS =====================
-    notes [label="AUDIT 2026-11-01 (tree-sitter + serena):\ndup: colX math x4, trim rect x3, contrast JS x3 divergent,\ntrim-drag lines x3. Bug: TrimConfigDialog no VirtualToPhysical → FIXED: TrimConfigDialog.cpp:93-95 comment + L96 'RectF mb = dm->PageMediaBox(dm->CurrentPageNo());' routes virtual->physical under TC2.\nGod files: SumatraPDF.cpp 14.2k lines (16C continues).\nRefactor phases R1-R7 in TODO.md.", shape=note, fillcolor="#fff9c4", style=filled];
+    notes [label="AUDIT 2026-11-01 (tree-sitter + serena):\ndup: colX math x4, trim rect x3, contrast JS x3 divergent,\ntrim-drag lines x3. Bug: TrimConfigDialog no VirtualToPhysical → FIXED: TrimConfigDialog.cpp comment + L96 'RectF mb = dm->PageMediaBox(dm->CurrentPageNo());' routes virtual->physical under TC2.\nGod files: SumatraPDF.cpp 14.2k lines (16C continues).\nRefactor phases R1-R7 in TODO.md.", shape=note, fillcolor="#fff9c4", style=filled];
     audit [label="AUDIT 2026-08-24:\ndiagram rewritten from real code\n(gToolbarButtons, menuDefNewTools, Accelerators,\ngen-settings.ts, explore agent).\nBottlenecks logged in lemma memory.\n\nBATCHES 1-3 (2026-08-24):\n· dead close-icon code removed (TabsCtrl)\n· AutoScroll module extracted (src/AutoScroll.{h,cpp})\n· perf guards: gAnyToggleChecked early-out,\n  width-gated ETA reposition, StringFormat statics\n  in TabWnd::Paint\n· lint: RenderCache unused param, static\n  SafeDeleteTrimConfigDialog, comment moved .h→.cpp\n· MERGE.md corrected (factual, fork point ~912ecf2)"];
 
     // ===================== LEGEND =====================
@@ -168,9 +169,9 @@ digraph TumatraPDF {
         deadN [label="Dead code", fillcolor="#ffebee", style=filled];
     }
 
-    hold_pdf [label="Page Hold frame (PDF)\nPageHoldCapture (DisplayModel.cpp:3022) + PaintPageHoldFrame\n(DisplayModel.cpp:3102): 2px peru border-only, stored in PAGE coords\nof anchor page, repainted via CvtToScreen -> zoom/scroll faithful.\nCmdPageHoldToggle (SumatraPDF.cpp:11991) toggles hold + auto-scroll pause.", fillcolor="#e3f2fd", style=filled];
-    hold_md [label="Page Hold (markdown/webview)\nDOM frame full-width at reading line (MarkdownModel.cpp:823 HoldCapture,\n854 HoldInjectFrame, 885 HoldRestore); page-side JS is scroll authority;\nfirst click now works.", fillcolor="#e3f2fd", style=filled];
-    hold_autoscroll [label="Hold -> auto-scroll pause\nAutoScrollSetHoldActive (AutoScroll.cpp:370);\nautoPausedByHold (fact) vs autoSuspendedByHold (intent,\nMainWindow.h:387-395); start refused while Hold active;\nresume only when foreground + no other pause owns it.", fillcolor="#e3f2fd", style=filled];
+    hold_pdf [label="Page Hold frame (PDF)\nPageHoldCapture (DisplayModel.cpp) + PaintPageHoldFrame\n(DisplayModel.cpp): 2px peru border-only, stored in PAGE coords\nof anchor page, repainted via CvtToScreen -> zoom/scroll faithful.\nCmdPageHoldToggle (SumatraPDF.cpp) toggles hold + auto-scroll pause.", fillcolor="#e3f2fd", style=filled];
+    hold_md [label="Page Hold (markdown/webview)\nDOM frame full-width at reading line (MarkdownModel.cpp HoldCapture,\n854 HoldInjectFrame, 885 HoldRestore); page-side JS is scroll authority;\nfirst click now works.", fillcolor="#e3f2fd", style=filled];
+    hold_autoscroll [label="Hold -> auto-scroll pause\nAutoScrollSetHoldActive (AutoScroll.cpp);\nautoPausedByHold (fact) vs autoSuspendedByHold (intent,\nMainWindow.h); start refused while Hold active;\nresume only when foreground + no other pause owns it.", fillcolor="#e3f2fd", style=filled];
 
     feat_scroll -> hold_pdf [style=dotted];
     hold_pdf -> hold_md [style=dotted];

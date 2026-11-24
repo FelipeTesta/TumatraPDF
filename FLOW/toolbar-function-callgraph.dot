@@ -1,3 +1,4 @@
+// dot-sync: verified=2026-11-23 refs=ea7ebbe7b8d8
 digraph ToolbarFunctionCallGraph {
     rankdir=LR;
     node [shape=box, style=rounded, fontname="Consolas", fontsize=9];
@@ -13,9 +14,9 @@ digraph ToolbarFunctionCallGraph {
         label="Entry Points";
         color="#4285f4";
         
-        frame_on_cmd [label="FrameOnCommand(hwnd, msg, wp, lp)\nSumatraPDF.cpp:13000+", fillcolor="#c8e6c9", style=filled];
-        win_main [label="WinMain → CreateAndShowMainWindow\nSumatraStartup.cpp:2585+", fillcolor="#c8e6c9", style=filled];
-        load_doc [label="LoadDocument → LoadDocumentFinish\nSumatraPDF.cpp:3978/3308", fillcolor="#c8e6c9", style=filled];
+        frame_on_cmd [label="FrameOnCommand(hwnd, msg, wp, lp)\nSumatraPDF.cpp+", fillcolor="#c8e6c9", style=filled];
+        win_main [label="WinMain → CreateAndShowMainWindow\nSumatraStartup.cpp+", fillcolor="#c8e6c9", style=filled];
+        load_doc [label="LoadDocument → LoadDocumentFinish\nSumatraPDF.cpp/3308", fillcolor="#c8e6c9", style=filled];
     }
 
     // ============================================================
@@ -25,14 +26,14 @@ digraph ToolbarFunctionCallGraph {
         label="Toolbar Creation Functions";
         color="#4caf50";
         
-        create_toolbar [label="CreateToolbar(win)\nToolbar.cpp:2794\n// Main toolbar", fillcolor="#bbdefb", style=filled];
-        create_toolbar2 [label="CreateToolbar2(win)\nToolbar.cpp:2963\n// Arch Tools toolbar", fillcolor="#bbdefb", style=filled];
+        create_toolbar [label="CreateToolbar(win)\nToolbar.cpp\n// Main toolbar", fillcolor="#bbdefb", style=filled];
+        create_toolbar2 [label="CreateToolbar2(win)\nToolbar.cpp\n// Arch Tools toolbar", fillcolor="#bbdefb", style=filled];
         fc_toolbar_create [label="FlashcardToolbarCreate(win)\nFlashcardToolbar.cpp", fillcolor="#fff9c4", style=filled];
-        edit_toolbar_create [label="EditToolbarCreate(win)\nCommands_Edit.cpp:74", fillcolor="#e1bee7", style=filled];
+        edit_toolbar_create [label="EditToolbarCreate(win)\nCommands_Edit.cpp", fillcolor="#e1bee7", style=filled];
         
-        toolbar_setup_rebar [label="ToolbarSetupSecondaryRebar(hwndRebar)\nToolbar.cpp:3111", fillcolor="#fff9c4", style=filled];
-        toolbar_subclass_tb [label="ToolbarSubclassSecondaryToolbar(win, hwnd)\nToolbar.cpp:3128", fillcolor="#ffcdd2", style=filled];
-        toolbar_apply_theme [label="ToolbarApplyThemeToRebar(hwndRebar, hwndTb)\nToolbar.cpp:3097 — LEGACY", fillcolor="#ffcdd2", style=filled];
+        toolbar_setup_rebar [label="ToolbarSetupSecondaryRebar(hwndRebar)\nToolbar.cpp", fillcolor="#fff9c4", style=filled];
+        toolbar_subclass_tb [label="ToolbarSubclassSecondaryToolbar(win, hwnd)\nToolbar.cpp", fillcolor="#ffcdd2", style=filled];
+        toolbar_apply_theme [label="ToolbarApplyThemeToRebar(hwndRebar, hwndTb)\nToolbar.cpp — LEGACY", fillcolor="#ffcdd2", style=filled];
     }
 
     // ============================================================
@@ -42,13 +43,13 @@ digraph ToolbarFunctionCallGraph {
         label="Toolbar State / Toggle Functions";
         color="#ff9800";
         
-        arch_toggle [label="HandleCmdArchToolsToggle(win)\nCommands_ArchTools.cpp:134", fillcolor="#bbdefb", style=filled];
+        arch_toggle [label="HandleCmdArchToolsToggle(win)\nCommands_ArchTools.cpp", fillcolor="#bbdefb", style=filled];
         fc_toggle [label="HandleCmdFlashcardToggle(win)\nCommands_Flashcard.cpp", fillcolor="#fff9c4", style=filled];
-        edit_toggle [label="HandleCmdEditToolsToggle(win)\nCommands_Edit.cpp:969", fillcolor="#e1bee7", style=filled];
+        edit_toggle [label="HandleCmdEditToolsToggle(win)\nCommands_Edit.cpp", fillcolor="#e1bee7", style=filled];
         main_toggle [label="ToggleMainToolbar(win)\nToolbar.cpp", fillcolor="#c8e6c9", style=filled];
         
-        update_arch_state [label="UpdateToolbar2State(win)\nToolbar.cpp:3148", fillcolor="#bbdefb", style=filled];
-        update_main_state [label="ToolbarUpdateStateForWindow(win, force)\nToolbar.cpp:1600+", fillcolor="#c8e6c9", style=filled];
+        update_arch_state [label="UpdateToolbar2State(win)\nToolbar.cpp", fillcolor="#bbdefb", style=filled];
+        update_main_state [label="ToolbarUpdateStateForWindow(win, force)\nToolbar.cpp+", fillcolor="#c8e6c9", style=filled];
         set_btn_checked [label="SetToolbarButtonCheckedState(win, cmdId, checked)\nToolbar.cpp", fillcolor="#bbdefb", style=filled];
     }
 
@@ -59,13 +60,13 @@ digraph ToolbarFunctionCallGraph {
         label="Relayout & Positioning";
         color="#607d8b";
         
-        relayout_frame [label="RelayoutFrame(win, updateToolbars, sidebarDx)\nSumatraPDF.cpp:6300+", fillcolor="#e1bee7", style=filled];
-        set_band_row_height [label="SetToolbarBandToRowHeight(hwndToolbar)\nToolbar.cpp:1502", fillcolor="#bbdefb", style=filled];
-        rewrap_after_sizing [label="ToolbarRewrapAfterSizing(win, hwnd, force)\nToolbar.cpp:1570", fillcolor="#bbdefb", style=filled);
+        relayout_frame [label="RelayoutFrame(win, updateToolbars, sidebarDx)\nSumatraPDF.cpp+", fillcolor="#e1bee7", style=filled];
+        set_band_row_height [label="SetToolbarBandToRowHeight(hwndToolbar)\nToolbar.cpp", fillcolor="#bbdefb", style=filled];
+        rewrap_after_sizing [label="ToolbarRewrapAfterSizing(win, hwnd, force)\nToolbar.cpp", fillcolor="#bbdefb", style=filled]
         schedule_ui_update [label="ScheduleUiUpdate(win, kUiRelayout)\nSumatraPDF.cpp", fillcolor="#c8e6c9", style=filled];
-        layout_children [label="LayoutToolbarChildWindows(win)\nToolbar.cpp:1850+", fillcolor="#bbdefb", style=filled);
-        position_children [label="PositionToolbarChildWindows(win)\nToolbar.cpp:1900+", fillcolor="#bbdefb", style=filled);
-        update_page_text [label="UpdateToolbarPageText(win, nPages)\nToolbar.cpp:2000+", fillcolor="#bbdefb", style=filled);
+        layout_children [label="LayoutToolbarChildWindows(win)\nToolbar.cpp+", fillcolor="#bbdefb", style=filled]
+        position_children [label="PositionToolbarChildWindows(win)\nToolbar.cpp+", fillcolor="#bbdefb", style=filled]
+        update_page_text [label="UpdateToolbarPageText(win, nPages)\nToolbar.cpp+", fillcolor="#bbdefb", style=filled]
     }
 
     // ============================================================
@@ -75,7 +76,7 @@ digraph ToolbarFunctionCallGraph {
         label="WndProcToolbar Message Handling";
         color="#e91e63";
         
-        wndproc_tb [label="WndProcToolbar(hwnd, msg, wp, lp)\nToolbar.cpp:1658", fillcolor="#ffcdd2", style=filled];
+        wndproc_tb [label="WndProcToolbar(hwnd, msg, wp, lp)\nToolbar.cpp", fillcolor="#ffcdd2", style=filled];
         
         // Message handlers
         on_ctlcolor [label="WM_CTLCOLORSTATIC/EDIT/BTN\n→ Theme colors for child controls", fillcolor="#bbdefb", style=filled];
@@ -93,7 +94,7 @@ digraph ToolbarFunctionCallGraph {
         label="ReBarWndProc";
         color="#9c27b0";
         
-        rebar_wndproc [label="ReBarWndProc(hWnd, uMsg, wParam, lParam, ...)\nToolbar.cpp:956", fillcolor="#fff9c4", style=filled];
+        rebar_wndproc [label="ReBarWndProc(hWnd, uMsg, wParam, lParam, ...)\nToolbar.cpp", fillcolor="#fff9c4", style=filled];
         rebar_chevrondrop [label="RBN_CHEVRONPUSHED\n→ Show chevron dropdown menu", fillcolor="#bbdefb", style=filled];
         rebar_heightchange [label="RBN_HEIGHTCHANGE\n→ Forward to parent for relayout", fillcolor="#bbdefb", style=filled];
         rebar_layout [label="WM_SIZE / WM_WINDOWPOSCHANGED\n→ Band height sync", fillcolor="#bbdefb", style=filled];
@@ -107,13 +108,13 @@ digraph ToolbarFunctionCallGraph {
         color="#3f51b5";
         
         frame_notify [label="FrameWndProc WM_NOTIFY\n→ NM_CUSTOMDRAW from toolbar", fillcolor="#c8e6c9", style=filled];
-        tb_notify [label="WndProcToolbar WM_NOTIFY\n→ NM_CUSTOMDRAW (toolbar buttons)", fillcolor="#bbdefb", style=filled);
-        fc_notify [label="FlashcardWndProc WM_NOTIFY\n→ NM_CUSTOMDRAW (flashcard toolbar)", fillcolor="#fff9c4", style=filled);
-        menu_notify [label="MenuBarWndProc WM_NOTIFY\n→ NM_CUSTOMDRAW (menu bar)", fillcolor="#e1bee7", style=filled);
+        tb_notify [label="WndProcToolbar WM_NOTIFY\n→ NM_CUSTOMDRAW (toolbar buttons)", fillcolor="#bbdefb", style=filled]
+        fc_notify [label="FlashcardWndProc WM_NOTIFY\n→ NM_CUSTOMDRAW (flashcard toolbar)", fillcolor="#fff9c4", style=filled]
+        menu_notify [label="MenuBarWndProc WM_NOTIFY\n→ NM_CUSTOMDRAW (menu bar)", fillcolor="#e1bee7", style=filled]
         
         cd_prepaint [label="CDDS_PREPAINT → CDRF_NOTIFYITEMDRAW", fillcolor="#bbdefb", style=filled];
-        cd_item_prepaint [label="CDDS_ITEMPREPAINT\nDraw button background + text\nChecked underline overlay", fillcolor="#bbdefb", style=filled);
-        cd_postpaint [label="CDDS_POSTPAINT", fillcolor="#bbdefb", style=filled);
+        cd_item_prepaint [label="CDDS_ITEMPREPAINT\nDraw button background + text\nChecked underline overlay", fillcolor="#bbdefb", style=filled]
+        cd_postpaint [label="CDDS_POSTPAINT", fillcolor="#bbdefb", style=filled]
     }
 
     // ============================================================
@@ -124,9 +125,9 @@ digraph ToolbarFunctionCallGraph {
         color="#795548";
         
         destroy_main [label="DestroyToolbar(win)\nToolbar.cpp", fillcolor="#c8e6c9", style=filled];
-        destroy_arch [label="DestroyToolbar2(win)\nToolbar.cpp:3141", fillcolor="#bbdefb", style=filled);
-        destroy_fc [label="FlashcardToolbarDestroy(win)\nFlashcardToolbar.cpp", fillcolor="#fff9c4", style=filled);
-        destroy_edit [label="EditToolbarDestroy(win)\nCommands_Edit.cpp:189", fillcolor="#e1bee7", style=filled);
+        destroy_arch [label="DestroyToolbar2(win)\nToolbar.cpp", fillcolor="#bbdefb", style=filled]
+        destroy_fc [label="FlashcardToolbarDestroy(win)\nFlashcardToolbar.cpp", fillcolor="#fff9c4", style=filled]
+        destroy_edit [label="EditToolbarDestroy(win)\nCommands_Edit.cpp", fillcolor="#e1bee7", style=filled]
     }
 
     // ============================================================
@@ -242,7 +243,7 @@ digraph ToolbarFunctionCallGraph {
         
         sToolbarPackStates [label="static struct ToolbarPackState {\n  int lastBuiltDx;\n  int lastPackedAvailDx;\n} sToolbarPackStates[4];\n// Index 0=main, 1=arch, 2=fc, 3=edit", fillcolor="#fff9c4", style=filled];
         
-        sToolbarRewrapStates [label="static struct ToolbarRewrapState {\n  int lastWidth;\n  bool rewrapPending;\n} sToolbarRewrapStates[4];", fillcolor="#fff9c4", style=filled);
+        sToolbarRewrapStates [label="static struct ToolbarRewrapState {\n  int lastWidth;\n  bool rewrapPending;\n} sToolbarRewrapStates[4];", fillcolor="#fff9c4", style=filled]
     }
     
     rewrap_after_sizing -> sToolbarPackStates [style=dotted, label="uses"];

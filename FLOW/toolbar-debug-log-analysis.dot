@@ -1,3 +1,4 @@
+// dot-sync: verified=2026-11-23 refs=31d895b0df1d
 digraph ToolbarDebugLogAnalysis {
     rankdir=TB;
     node [shape=box, style=rounded, fontname="Consolas", fontsize=10];
@@ -197,11 +198,11 @@ digraph ToolbarDebugLogAnalysis {
         
         dn_symptom [label="SYMPTOM:\n• Toolbar band visible but WHITE/BLANK\n• No button text visible\n• TB_GETITEMRECT works but rendering fails\n• Main toolbar OK, only secondary toolbars affected", fillcolor="#ffcdd2", style=filled, shape=note, color="#ff0000", penwidth=2.0];
         
-        dn_check1 [label="CHECK 1: NM_CUSTOMDRAW handling\nReBarWndProc (Toolbar.cpp:972)\nOnly checked: win->hwndToolbar == chwnd\nSecondary toolbars NOT handled!", fillcolor="#bbdefb", style=filled];
+        dn_check1 [label="CHECK 1: NM_CUSTOMDRAW handling\nReBarWndProc (Toolbar.cpp)\nOnly checked: win->hwndToolbar == chwnd\nSecondary toolbars NOT handled!", fillcolor="#bbdefb", style=filled];
         
         dn_check2 [label="CHECK 2: Theme strip done correctly\nSetWindowTheme(hwnd, L\"\", L\"\") BEFORE buttons\niBitmap = TbIcon::Text (-2)\nBut no custom draw = default rendering = WHITE", fillcolor="#bbdefb", style=filled];
         
-        dn_fix [label="FIX: Extend NM_CUSTOMDRAW check to ALL toolbars\nbool isToolbarCustomDraw =\n  (win->hwndToolbar == chwnd) ||\n  (win->archTools.hwndToolbar2 == chwnd) ||\n  (win->flashcard.hwndToolbarFlashcard == chwnd) ||\n  (win->editTools.hwndToolbarEdit == chwnd);\nif (isToolbarCustomDraw) { handle custom draw }\nToolbar.cpp:972", fillcolor="#c8e6c9", style=filled, penwidth=2.0, color="#2e7d32"];
+        dn_fix [label="FIX: Extend NM_CUSTOMDRAW check to ALL toolbars\nbool isToolbarCustomDraw =\n  (win->hwndToolbar == chwnd) ||\n  (win->archTools.hwndToolbar2 == chwnd) ||\n  (win->flashcard.hwndToolbarFlashcard == chwnd) ||\n  (win->editTools.hwndToolbarEdit == chwnd);\nif (isToolbarCustomDraw) { handle custom draw }\nToolbar.cpp", fillcolor="#c8e6c9", style=filled, penwidth=2.0, color="#2e7d32"];
         
         dn_symptom -> dn_check1 -> dn_check2 -> dn_fix;
     }

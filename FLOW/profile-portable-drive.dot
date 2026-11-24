@@ -1,3 +1,4 @@
+// dot-sync: verified=2026-11-23 refs=4df5d093a58f
 digraph ProfilePortableDrive {
     rankdir=TB;
     node [shape=box, style=rounded, fontname="Consolas", fontsize=9];
@@ -58,7 +59,7 @@ NO perDoc/day rows — nothing was adopted\nstats\\: reading 15B | flashcard 0B"
 
     // ===================== WHY THE PORTABLE->INSTALL IMPORT DOES NOTHING =====================
     subgraph cluster_f5 {
-        label="Root cause — ProfImportPortableInstall (ProfileData.cpp:893, F5, s36-br F4-lineage)";
+        label="Root cause — ProfImportPortableInstall (ProfileData.cpp, F5, s36-br F4-lineage)";
         color="#f44336";
         style=filled;
         fillcolor="#ffebee";

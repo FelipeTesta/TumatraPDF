@@ -1,3 +1,4 @@
+// dot-sync: verified=2026-11-23 refs=dbff517e7663
 digraph ToolbarUserInteractions {
     rankdir=TB;
     node [shape=box, style=rounded, fontname="Consolas", fontsize=10];
@@ -12,13 +13,13 @@ digraph ToolbarUserInteractions {
         color="#4caf50";
         
         u1_click [label="User clicks Arch Tools button\n(CmdArchToolsToggle)", fillcolor="#c8e6c9", style=filled];
-        u1_cmd [label="FrameOnCommand →\nHandleCmdArchToolsToggle(win)\nCommands_ArchTools.cpp:134", fillcolor="#bbdefb", style=filled];
+        u1_cmd [label="FrameOnCommand →\nHandleCmdArchToolsToggle(win)\nCommands_ArchTools.cpp", fillcolor="#bbdefb", style=filled];
         u1_check [label="if (!gGlobalPrefs->archToolsEnabled) return;\nif (IsCurrentDocMarkdown) return;", fillcolor="#fff9c4", style=filled];
         u1_toggle_on [label="win->archTools.on = true", fillcolor="#c8e6c9", style=filled];
-        u1_create [label="if (!win->archTools.hwndReBar2)\n  CreateToolbar2(win)\nToolbar.cpp:2963", fillcolor="#bbdefb", style=filled];
+        u1_create [label="if (!win->archTools.hwndReBar2)\n  CreateToolbar2(win)\nToolbar.cpp", fillcolor="#bbdefb", style=filled];
         u1_show [label="ShowWindow(hwndReBar2, SW_SHOW)", fillcolor="#c8e6c9", style=filled];
-        u1_update_state [label="UpdateToolbar2State(win)\nToolbar.cpp:3148\nSet TBSTATE_CHECKED for toggle btns", fillcolor="#bbdefb", style=filled];
-        u1_relayout [label="RelayoutFrame(win, true, -1)\nSumatraPDF.cpp:6300+", fillcolor="#e1bee7", style=filled];
+        u1_update_state [label="UpdateToolbar2State(win)\nToolbar.cpp\nSet TBSTATE_CHECKED for toggle btns", fillcolor="#bbdefb", style=filled];
+        u1_relayout [label="RelayoutFrame(win, true, -1)\nSumatraPDF.cpp+", fillcolor="#e1bee7", style=filled];
         u1_repaint [label="ScheduleRepaint(win, 0)\n// Canvas redraw for overlay lines", fillcolor="#e1bee7", style=filled];
         
         u1_click -> u1_cmd -> u1_check -> u1_toggle_on -> u1_create -> u1_show -> u1_update_state -> u1_relayout -> u1_repaint;
@@ -50,16 +51,16 @@ digraph ToolbarUserInteractions {
         color="#ff9800";
         
         u3_resize [label="User drags window edge\nWM_SIZE sent to hwndToolbar", fillcolor="#c8e6c9", style=filled];
-        u3_wndproc [label="WndProcToolbar(hwnd, WM_SIZE, ...)\nToolbar.cpp:1746", fillcolor="#bbdefb", style=filled];
+        u3_wndproc [label="WndProcToolbar(hwnd, WM_SIZE, ...)\nToolbar.cpp", fillcolor="#bbdefb", style=filled];
         u3_defproc [label="CallWindowProc(DefWndProcToolbar,...)\n// comctl does wrap-aware layout", fillcolor="#bbdefb", style=filled];
         u3_main_only [label="if (hwnd == win->hwndToolbar)\n// ONLY main toolbar!", fillcolor="#ffcdd2", style=filled];
         u3_page_text [label="UpdateToolbarPageText(win, nPages)", fillcolor="#bbdefb", style=filled];
         u3_layout_child [label="LayoutToolbarChildWindows(win)\n// Page box follows anchor btn", fillcolor="#bbdefb", style=filled];
         u3_timer [label="SetTimer(hwnd, kRewrapToolbarTimerId, 200)\n// Debounce continuous WM_SIZE", fillcolor="#ffcdd2", style=filled];
-        u3_band_height [label="SetToolbarBandToRowHeight(hwndToolbar)\nToolbar.cpp:1502", fillcolor="#bbdefb", style=filled];
+        u3_band_height [label="SetToolbarBandToRowHeight(hwndToolbar)\nToolbar.cpp", fillcolor="#bbdefb", style=filled];
         u3_band_changed [label="if (band height changed) {\n  win->uiState.layout = {}\n  ScheduleUiUpdate(kUiRelayout)\n}", fillcolor="#c8e6c9", style=filled];
         u3_timer_fire [label="~200ms later: WM_TIMER\nKillTimer → ToolbarRewrapAfterSizing", fillcolor="#ffcdd2", style=filled];
-        u3_rewrap [label="ToolbarRewrapAfterSizing(win, hwnd, false)\nToolbar.cpp:1570\nif (width same as last) return\nTbDeleteButton(all) → TbAddButtons(all)\n// Rebuild at CURRENT width", fillcolor="#bbdefb", style=filled];
+        u3_rewrap [label="ToolbarRewrapAfterSizing(win, hwnd, false)\nToolbar.cpp\nif (width same as last) return\nTbDeleteButton(all) → TbAddButtons(all)\n// Rebuild at CURRENT width", fillcolor="#bbdefb", style=filled];
         
         u3_resize -> u3_wndproc -> u3_defproc -> u3_main_only;
         u3_main_only -> u3_page_text -> u3_layout_child -> u3_timer;
@@ -74,9 +75,9 @@ digraph ToolbarUserInteractions {
         color="#e91e63";
         
         u4_click [label="User clicks Edit Tools button\n(CmdEditToolsToggle)", fillcolor="#c8e6c9", style=filled];
-        u4_cmd [label="FrameOnCommand →\nHandleCmdEditToolsToggle(win)\nCommands_Edit.cpp:969", fillcolor="#bbdefb", style=filled];
+        u4_cmd [label="FrameOnCommand →\nHandleCmdEditToolsToggle(win)\nCommands_Edit.cpp", fillcolor="#bbdefb", style=filled];
         u4_toggle_on [label="win->editTools.on = true", fillcolor="#c8e6c9", style=filled];
-        u4_create [label="EditToolbarCreate(win)\nCommands_Edit.cpp:74", fillcolor="#e1bee7", style=filled];
+        u4_create [label="EditToolbarCreate(win)\nCommands_Edit.cpp", fillcolor="#e1bee7", style=filled];
         u4_setup_rebar [label="ToolbarSetupSecondaryRebar(hwndRebar)\n// subclass + RB_SETBARINFO + bkcolor", fillcolor="#e1bee7", style=filled];
         u4_create_tb [label="CreateWindowEx(TOOLBARCLASSNAME)\nTBSTYLE_WRAPABLE + BTNS_SHOWTEXT", fillcolor="#e1bee7", style=filled];
         u4_theme_strip [label="SetWindowTheme(hwndToolbar, L\"\", L\"\")\n// BEFORE TbAddButtons!", fillcolor="#ffcdd2", style=filled];
@@ -97,7 +98,7 @@ digraph ToolbarUserInteractions {
         color="#9c27b0";
         
         u5_home [label="User opens Home page\nwin->showHomeOverlay = true", fillcolor="#c8e6c9", style=filled];
-        u5_relayout [label="RelayoutFrame(win, true, -1)\nSumatraPDF.cpp:6381", fillcolor="#e1bee7", style=filled];
+        u5_relayout [label="RelayoutFrame(win, true, -1)\nSumatraPDF.cpp", fillcolor="#e1bee7", style=filled];
         u5_hide_flag [label="hideSecondaryToolbars = win->showHomeOverlay ||\nIsCurrentDocMarkdown(win)\n// = true", fillcolor="#ffcdd2", style=filled];
         u5_arch_hide [label="if (archTools.hwndReBar2)\n  if (!on || hideSecondary) SW_HIDE", fillcolor="#ffcdd2", style=filled];
         u5_fc_hide [label="if (flashcard.hwndReBarFlashcard)\n  if (!on || hideSecondary) SW_HIDE", fillcolor="#ffcdd2", style=filled];
@@ -119,11 +120,11 @@ digraph ToolbarUserInteractions {
         color="#795548";
         
         u6_click [label="User clicks 'Scale' button\nTBN_DROPDOWN / WM_COMMAND", fillcolor="#c8e6c9", style=filled];
-        u6_cmd [label="FrameOnCommand →\nHandleCmdArchScale(win)\nCommands_ArchTools.cpp:29", fillcolor="#bbdefb", style=filled);
+        u6_cmd [label="FrameOnCommand →\nHandleCmdArchScale(win)\nCommands_ArchTools.cpp", fillcolor="#bbdefb", style=filled]
         u6_mode [label="if (!ps.scaleLineDefined) {\n  toolMode = 1 (Scale mode)\n  SetCursor(IDC_CROSS)\n}\nShowArchScaleDialog(win)", fillcolor="#bbdefb", style=filled];
         u6_dialog [label="ArchScaleDialog opens\nUser enters scale, clicks OK", fillcolor="#fff9c4", style=filled];
-        u6_save [label="Scale saved to win->archTools.scaleStates[pageNo]\nUpdateToolbar2State(win)\n// Refresh button checked states", fillcolor="#e1bee7", style=filled);
-        u6_repaint [label="ScheduleRepaint(win, 0)\n// Draw green scale line on canvas", fillcolor="#e1bee7", style=filled);
+        u6_save [label="Scale saved to win->archTools.scaleStates[pageNo]\nUpdateToolbar2State(win)\n// Refresh button checked states", fillcolor="#e1bee7", style=filled]
+        u6_repaint [label="ScheduleRepaint(win, 0)\n// Draw green scale line on canvas", fillcolor="#e1bee7", style=filled]
         
         u6_click -> u6_cmd -> u6_mode -> u6_dialog -> u6_save -> u6_repaint;
     }
@@ -136,10 +137,10 @@ digraph ToolbarUserInteractions {
     u4_relayout -> u3_resize [style=dashed];
     u5_relayout -> u3_resize [style=dashed];
     
-    u1_create ..> u4_create [style=dashed, color="#ff9800", label="same pattern (CreateToolbar2)"];
-    u4_create ..> u1_create [style=dashed, color="#ff9800"];
+    u1_create -> u4_create [style=dashed, color="#ff9800", label="same pattern (CreateToolbar2)"];
+    u4_create -> u1_create [style=dashed, color="#ff9800"];
     
-    u1_update_state ..> u6_save [style=dashed, color="#795548", label="same UpdateToolbar2State"];
+    u1_update_state -> u6_save [style=dashed, color="#795548", label="same UpdateToolbar2State"];
     
     // ============================================================
     // DEBUG CHECKPOINTS

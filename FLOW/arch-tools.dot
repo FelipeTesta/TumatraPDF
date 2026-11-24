@@ -1,3 +1,4 @@
+// dot-sync: verified=2026-11-23 refs=3547b08ea0a6
 digraph ArchTools {
     rankdir=TB;
     node [shape=box, style=rounded];

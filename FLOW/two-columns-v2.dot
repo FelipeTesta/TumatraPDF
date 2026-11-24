@@ -1,3 +1,4 @@
+// dot-sync: verified=2026-11-23 refs=92c4be48d2ee
 digraph TwoColumnsV2 {
     rankdir=TB;
     node [shape=box, style=rounded];

@@ -1,0 +1,19 @@
+# Tokens that FLOW/*.dot maps legitimately mention but that do not exist in this repository.
+# Checked by scripts/flow-sync.ts. One token per line; scope to one map with "map.dot: Token".
+# Anything that IS ours and is missing belongs in FLOW/.sync-baseline.json as debt instead,
+# so the ratchet can drive it to zero.
+
+# Win32 / system APIs
+GetGuiResources
+
+# WebView2 COM interface callbacks (shipped in the nuget package, not in the tree)
+OnNavigationStarting
+OnWebResourceRequested
+OnPermissionRequested
+IsScriptEnabled
+
+# External tools referenced by the process maps
+DbgViewCli
+
+# Generic placeholder used in prose ("a handler like HandleCmdFoo")
+HandleCmdXxx

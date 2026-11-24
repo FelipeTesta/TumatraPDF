@@ -1,3 +1,4 @@
+// dot-sync: verified=2026-11-23 refs=da39a3ee5e6b
 // Toolbar White/No Buttons - Cause Tree & Analysis Map
 // TumatraPDF - Debug Flow: all potential causes, discarded items, and current status
 digraph ToolbarWhiteNoButtons {
@@ -122,13 +123,14 @@ digraph ToolbarWhiteNoButtons {
 
     symptom -> status;
     f2 -> status [label="investigating chrome=0"];
+
+    note1 [label="FIXES APPLIED:\nA: Theme strip BEFORE buttons\nB: iBitmap = TbIcon::Text (-2)\nC: NM_CUSTOMDRAW extended to all 4 toolbars\nE: force=true rewrap removed + reentrancy guards", shape=note, fillcolor="#c8e6c9", color="#2e7d32"];
+
+    note2 [label="STILL OPEN:\n- chrome=0 in logs (secondary toolbar non-client height)\n- Buttons exist geometrically but not painted\n- Need vision model to analyze actual PNGs\n- Need to verify NM_CUSTOMDRAW actually fires for secondary toolbars", shape=note, fillcolor="#fff3e0", color="#ff9800"];
+
+    note3 [label="LOG REFERENCES:\n- s36-ax: flashcard white band (5 causes)\n- s36-k: toolbar round-trip + drag collapse\n- s36-az: arch band 90px fix\n- s36-bb: startup AV / reentrancy", shape=note, fillcolor="#e3f2fd", color="#3f51b5"];
 }
 
 // ==========================================
 // LEGEND (as notes)
 // ==========================================
-note1 [label="FIXES APPLIED:\nA: Theme strip BEFORE buttons\nB: iBitmap = TbIcon::Text (-2)\nC: NM_CUSTOMDRAW extended to all 4 toolbars\nE: force=true rewrap removed + reentrancy guards", shape=note, fillcolor="#c8e6c9", color="#2e7d32"];
-
-note2 [label="STILL OPEN:\n- chrome=0 in logs (secondary toolbar non-client height)\n- Buttons exist geometrically but not painted\n- Need vision model to analyze actual PNGs\n- Need to verify NM_CUSTOMDRAW actually fires for secondary toolbars", shape=note, fillcolor="#fff3e0", color="#ff9800"];
-
-note3 [label="LOG REFERENCES:\n- s36-ax: flashcard white band (5 causes)\n- s36-k: toolbar round-trip + drag collapse\n- s36-az: arch band 90px fix\n- s36-bb: startup AV / reentrancy", shape=note, fillcolor="#e3f2fd", color="#3f51b5"];

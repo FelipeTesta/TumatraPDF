@@ -11,9 +11,9 @@ digraph CropAlign {
         label="Cluster 1: Tool invocation + line drawing (Crop Align, toolMode=5)";
         color="#4caf50";
 
-        c1_cmd [label="CmdArchAlign (Edit toolbar, CmdArchAlign=525)\nHandleCmdArchAlign\nCommands_ArchTools.cpp:117\nguard kAlignToggleGuardMs=500 (:37)\ntoolMode 0<->5 toggle (s50-R8 idempotency)", fillcolor="#c8e6c9", style=filled];
+        c1_cmd [label="CmdArchAlign (Edit toolbar, CmdArchAlign=525)\nHandleCmdArchAlign\nCommands_ArchTools.cpp\nguard kAlignToggleGuardMs=500 (:37)\ntoolMode 0<->5 toggle (s50-R8 idempotency)", fillcolor="#c8e6c9", style=filled];
         c1_draw [label="User draws line on canvas (LIVE rubber-band)\nWM_LBUTTONDOWN/-MOVE/-UP (toolMode==5)\narchTools.point1/point2 (page coords)\nCanvas.cpp OnMouseMove drag preview :1855-1886\nCanvas.cpp OnMouseLeftButtonDown drag start :2564-2575\nclick-click 2nd path :2576-2593", fillcolor="#bbdefb", style=filled];
-        c1_fin [label="FinalizeAlign(win, dm, pageNo)\nCanvas.cpp:2848\nangle vs nearer axis atan2f (:2870)\nnormDeg [-90,90] (:2873-2888)\naxis 0=vertical / 1=horizontal (:2882-2888)\nrotation = -measuredAngle (:2891) CCW+; s64-R7: totalAngle = residual (absolute angle from pristine, single Fm0)\n— R6 delta-sum (alignAppliedAngle + residual) REMOVED; one line per session.\nSIGN CONVENTION (PyMuPDF-verified): PDF y-up rotation angle = signed image-space deviation — apply -40deg rights a -40deg-tilted line, +10deg rights a 10deg-off-vertical line; single Fm0 about page center, mediabox = AABB of ORIGINAL rotated by total (no compounding)\ncrop = mediabox rotated about center (:2897-2919)\nclamp to mediabox (:2921-2924)\naspect preserved to mediabox W:H (:2925-2934)\nAfter apply: alignLine cleared → line disappears from canvas; page stays deskewed.", fillcolor="#bbdefb", style=filled];
+        c1_fin [label="FinalizeAlign(win, dm, pageNo)\nCanvas.cpp\nangle vs nearer axis atan2f (:2870)\nnormDeg [-90,90] (:2873-2888)\naxis 0=vertical / 1=horizontal (:2882-2888)\nrotation = -measuredAngle (:2891) CCW+; s64-R7: totalAngle = residual (absolute angle from pristine, single Fm0)\n— R6 delta-sum (alignAppliedAngle + residual) REMOVED; one line per session.\nSIGN CONVENTION (PyMuPDF-verified): PDF y-up rotation angle = signed image-space deviation — apply -40deg rights a -40deg-tilted line, +10deg rights a 10deg-off-vertical line; single Fm0 about page center, mediabox = AABB of ORIGINAL rotated by total (no compounding)\ncrop = mediabox rotated about center (:2897-2919)\nclamp to mediabox (:2921-2924)\naspect preserved to mediabox W:H (:2925-2934)\nAfter apply: alignLine cleared → line disappears from canvas; page stays deskewed.", fillcolor="#bbdefb", style=filled];
 
         c1_cmd -> c1_draw -> c1_fin;
     }
@@ -41,7 +41,7 @@ digraph CropAlign {
         label="Cluster 1b: Ignore-draw-when-applied + ESC discard (s64-R7)";
         color="#e91e63";
 
-        c1b_mouse [label="OnMouseLeftButtonDown: toolMode=5, dragLine=0\nCanvas.cpp:2564\nNEW (s64-R7): if this page already has an active align preview\n(em->hasPreviewGeomEdit && em->previewGeomEdit.pageNo == pageNo), IGNORE the drag start\n— log and return without placing point1. User must discard via ESC / toggle-off first.\nThe R6 restore-pristine-on-second-draw + per-page delta-sum is REMOVED.", fillcolor="#fce4ec", style=filled];
+        c1b_mouse [label="OnMouseLeftButtonDown: toolMode=5, dragLine=0\nCanvas.cpp\nNEW (s64-R7): if this page already has an active align preview\n(em->hasPreviewGeomEdit && em->previewGeomEdit.pageNo == pageNo), IGNORE the drag start\n— log and return without placing point1. User must discard via ESC / toggle-off first.\nThe R6 restore-pristine-on-second-draw + per-page delta-sum is REMOVED.", fillcolor="#fce4ec", style=filled];
         c1b_esc [label="WM_KEYDOWN VK_ESCAPE (Canvas.cpp WndProcCanvas, s64-R7)\nWhen toolMode==5: DiscardPreview(pageNo, dm) reverts page to pristine +\nclears preview state; then clears alignLine/dragLine/mouseAction, releases capture.\nResult: page back to pristine, ready for a new align line.", fillcolor="#fce4ec", style=filled];
 
         c1b_mouse -> c1b_esc [label="gate → discard → redraw"];
@@ -58,12 +58,12 @@ digraph CropAlign {
         label="Cluster 2: Finalize + instant apply (s50-R9/R10)";
         color="#2196f3";
 
-        c2_queue [label="dm->GetEngine()->QueuePageGeometry(pageNo, rotation, bbox)\nEngineMupdf.cpp:4050\nrejects pages with engine annotations/widgets (:4057-4072)\nper-page dedupe (:4075-4082)\nmodifiedPageGeometry = true (:4088)", fillcolor="#bbdefb", style=filled];
-        c2_apply [label="dm->GetEngine()->ApplyPendingGeometryEditsNow()\nCanvas.cpp:2949\nEngineMupdf.cpp:7132\nPass1 docLock (:7141) applies to live pdfdoc\n  CAPTURE pristine state at FIRST apply (s64)\n    keeps pdf_keep_obj refs to pageDict, contents, resources\n    captures orig MediaBox, CropBox, /Rotate\nPass2 pagesLock+renderLock (:7463) drops caches", fillcolor="#bbdefb", style=filled];
-        c2_fix [label="NEW (s63 FIX): gRenderCache->FreeForDisplayModel(dm)\nCanvas.cpp immediately after ApplyPendingGeometryEditsNow\nprecedent: TrimConfigDialog.cpp:146, Commands_Image.cpp:157/247,\nCommands_Edit.cpp:927, ImageEditHostSumatra.cpp:152\nDROP stale (dm,pageNo,rotation,zoom,tile) bitmaps", fillcolor="#c8e6c9", style=filled];
-        c2_build [label="dm->BuildPagesInfo()\nCanvas.cpp:2957 (was 2951)\nDisplayModel.cpp:1013\nre-AllocArray pagesInfo (state=Unknown)\n0.00ms EXPECTED — measurement deferred to Relayout\n(useLazyMediaBoxes/default box, :1036)", fillcolor="#e1bee7", style=filled];
-        c2_relayout [label="dm->RelayoutKeepingView()\nCanvas.cpp:2958 (was 2952)\nDisplayModel.cpp:1603\nanchor FirstVisiblePageNo + dyInPage (:1604-1611)\nRelayout(zoomVirtual, rotation) (:1613)\nPageMediaBox :820 -> engine->PageMediabox :831 (pass2 mediabox)\nRecalcVisibleParts :1619 -> RenderVisibleParts :1620\ncb->UpdateScrollbars :1621 -> RepaintDisplay :1622 (Repaint -> cb->Repaint :410)", fillcolor="#e1bee7", style=filled];
-        c2_repaint [label="ScheduleRepaint(win, 0)\nCanvas.cpp:2969 (was 2963)\ncanvas WM_PAINT -> Canvas.cpp:4074 gRenderCache->Paint(...)", fillcolor="#c8e6c9", style=filled];
+        c2_queue [label="dm->GetEngine()->QueuePageGeometry(pageNo, rotation, bbox)\nEngineMupdf.cpp\nrejects pages with engine annotations/widgets (:4057-4072)\nper-page dedupe (:4075-4082)\nmodifiedPageGeometry = true (:4088)", fillcolor="#bbdefb", style=filled];
+        c2_apply [label="dm->GetEngine()->ApplyPendingGeometryEditsNow()\nCanvas.cpp\nEngineMupdf.cpp\nPass1 docLock (:7141) applies to live pdfdoc\n  CAPTURE pristine state at FIRST apply (s64)\n    keeps pdf_keep_obj refs to pageDict, contents, resources\n    captures orig MediaBox, CropBox, /Rotate\nPass2 pagesLock+renderLock (:7463) drops caches", fillcolor="#bbdefb", style=filled];
+        c2_fix [label="NEW (s63 FIX): gRenderCache->FreeForDisplayModel(dm)\nCanvas.cpp immediately after ApplyPendingGeometryEditsNow\nprecedent: TrimConfigDialog.cpp, Commands_Image.cpp/247,\nCommands_Edit.cpp, ImageEditHostSumatra.cpp\nDROP stale (dm,pageNo,rotation,zoom,tile) bitmaps", fillcolor="#c8e6c9", style=filled];
+        c2_build [label="dm->BuildPagesInfo()\nCanvas.cpp (was 2951)\nDisplayModel.cpp\nre-AllocArray pagesInfo (state=Unknown)\n0.00ms EXPECTED — measurement deferred to Relayout\n(useLazyMediaBoxes/default box, :1036)", fillcolor="#e1bee7", style=filled];
+        c2_relayout [label="dm->RelayoutKeepingView()\nCanvas.cpp (was 2952)\nDisplayModel.cpp\nanchor FirstVisiblePageNo + dyInPage (:1604-1611)\nRelayout(zoomVirtual, rotation) (:1613)\nPageMediaBox :820 -> engine->PageMediabox :831 (pass2 mediabox)\nRecalcVisibleParts :1619 -> RenderVisibleParts :1620\ncb->UpdateScrollbars :1621 -> RepaintDisplay :1622 (Repaint -> cb->Repaint :410)", fillcolor="#e1bee7", style=filled];
+        c2_repaint [label="ScheduleRepaint(win, 0)\nCanvas.cpp (was 2963)\ncanvas WM_PAINT -> Canvas.cpp gRenderCache->Paint(...)", fillcolor="#c8e6c9", style=filled];
 
         c2_queue -> c2_apply -> c2_fix -> c2_build -> c2_relayout -> c2_repaint;
     }
@@ -88,9 +88,9 @@ digraph CropAlign {
         label="Cluster 4: Cache invalidation (s50-R10 two-pass)";
         color="#ff9800";
 
-        c4_pass2 [label="Pass 2 pagesLock+renderLock (:7363-7391)\nfor each pendingGeomEdit:\nIF newMediabox non-empty: pageInfo->mediabox = :7375-7377 (R3 only!)\nfz_drop_page + pageInfo->page = nullptr (:7379-7382)\nfz_drop_display_list + displayList = nullptr (:7384-7387)\nelementsNeedRebuilding = true (:7389) — consumed EngineMupdf.cpp:1774\nappliedInMemory = true (:7393)", fillcolor="#bbdefb", style=filled];
-        c4_red [label="GREEN — FIXED (s63): RenderCache bitmap cache\nkeyed (dm, pageNo, rotation, zoom, tile). FinalizeAlign and\nApplyPreviewGeometry call gRenderCache->FreeForDisplayModel(dm)\nbefore BuildPagesInfo, dropping stale (dm,pageNo,rotation,zoom,tile)\nentries so the next paint re-renders from the mutated pdfdoc.\nPaintTile Find() (RenderCache.cpp:1132) now MISSes post-apply;\nBlitPixmapRegion (:1179) paints the NEW deskewed bitmap.\nTestAlignApply (ControlCmd 66) mirrors the same tail.", fillcolor="#c8e6c9", style=filled];
-        c4_getorbuild [label="GetOrBuildPageDisplayList\nEngineMupdf.cpp:4626\nrebuilds displayList lazily from reloaded fz_page (after drop)\nnext RenderPage uses NEW page content (XObject /Matrix)", fillcolor="#e1bee7", style=filled];
+        c4_pass2 [label="Pass 2 pagesLock+renderLock (:7363-7391)\nfor each pendingGeomEdit:\nIF newMediabox non-empty: pageInfo->mediabox = :7375-7377 (R3 only!)\nfz_drop_page + pageInfo->page = nullptr (:7379-7382)\nfz_drop_display_list + displayList = nullptr (:7384-7387)\nelementsNeedRebuilding = true (:7389) — consumed EngineMupdf.cpp\nappliedInMemory = true (:7393)", fillcolor="#bbdefb", style=filled];
+        c4_red [label="GREEN — FIXED (s63): RenderCache bitmap cache\nkeyed (dm, pageNo, rotation, zoom, tile). FinalizeAlign and\nApplyPreviewGeometry call gRenderCache->FreeForDisplayModel(dm)\nbefore BuildPagesInfo, dropping stale (dm,pageNo,rotation,zoom,tile)\nentries so the next paint re-renders from the mutated pdfdoc.\nPaintTile Find() (RenderCache.cpp) now MISSes post-apply;\nBlitPixmapRegion (:1179) paints the NEW deskewed bitmap.\nTestAlignApply (ControlCmd 66) mirrors the same tail.", fillcolor="#c8e6c9", style=filled];
+        c4_getorbuild [label="GetOrBuildPageDisplayList\nEngineMupdf.cpp\nrebuilds displayList lazily from reloaded fz_page (after drop)\nnext RenderPage uses NEW page content (XObject /Matrix)", fillcolor="#e1bee7", style=filled];
 
         c4_pass2 -> c4_red [style=dashed, color="#d32f2f"];
         c4_red -> c4_getorbuild [style=dashed, label="post-fix path"];
@@ -103,7 +103,7 @@ digraph CropAlign {
         label="Cluster 5: Render/repaint path (post-fix)";
         color="#795548";
 
-        c5_paint [label="Canvas WM_PAINT\nCanvas.cpp:4074 gRenderCache->Paint(hdc, bounds, dm, pageNo, pi, ...)\nrenderMissing=true -> Find(dm,pageNo,rotation,zoom,&tile) (:1132)", fillcolor="#bbdefb", style=filled];
+        c5_paint [label="Canvas WM_PAINT\nCanvas.cpp gRenderCache->Paint(hdc, bounds, dm, pageNo, pi, ...)\nrenderMissing=true -> Find(dm,pageNo,rotation,zoom,&tile) (:1132)", fillcolor="#bbdefb", style=filled];
         c5_miss [label="Post-fix: cache MISS (FreeForDisplayModel dropped entries)\n-> RequestRendering(dm, pageNo, tile) (:1144) render thread\nRenderPage: GetFzPageInfo reloads fz_page (pageInfo->page was null)\nGetOrBuildPageDisplayList (:4626) rebuilds from mutated pdfdoc\ncontent = q /FmN Do Q with rotated /Matrix -> pixmap at NEW mediabox size\nentry cached -> BlitPixmapRegion (:1179) = DESKEWED BITMAP", fillcolor="#c8e6c9", style=filled];
         c5_hit [label="PRE-FIX (resolved s63): cache HIT (stale)\nold bitmap blitted; content stayed UNROTATED = no visual deskew.\nNo longer reachable: FreeForDisplayModel(dm) forces a cache MISS\nso every post-apply paint re-renders from the mutated pdfdoc.", fillcolor="#c8e6c9", style=filled];
 
@@ -118,7 +118,7 @@ digraph CropAlign {
         label="Cluster 6: Save path (geometry re-apply skip)";
         color="#000000";
 
-        c6_save [label="Ctrl+S / quit -> EngineMupdfSaveUpdated\nEngineMupdf.cpp:7545\nPREVIEW GATING (s64-R2): RestorePreviewIfNeeded(dm) reverts any\nuncommitted preview (hasPreviewGeomEdit not in pendingGeomEdits)\nbefore saving — only promoted (committed) edits persist.\nSaves pendingGeomEdits via ApplyPendingGeometryEdits unless\nappliedInMemory (instant visual apply already wrote the live doc).\nSets appliedInMemory=false + modifiedPageGeometry=false on success.", fillcolor="#e1bee7", style=filled];
+        c6_save [label="Ctrl+S / quit -> EngineMupdfSaveUpdated\nEngineMupdf.cpp\nPREVIEW GATING (s64-R2): RestorePreviewIfNeeded(dm) reverts any\nuncommitted preview (hasPreviewGeomEdit not in pendingGeomEdits)\nbefore saving — only promoted (committed) edits persist.\nSaves pendingGeomEdits via ApplyPendingGeometryEdits unless\nappliedInMemory (instant visual apply already wrote the live doc).\nSets appliedInMemory=false + modifiedPageGeometry=false on success.", fillcolor="#e1bee7", style=filled];
         c6_geomtest [label="Control cmds (SumatraControl.cpp, enum ControlCmd)\nTestAlignQueue = 64 — queue page-geometry edit to pendingGeomEdits\nTestGeomSave = 65 — headless fresh-engine save (own engine, not live)\nTestAlignApply = 66 — DIRECT in-memory apply (QueuePageGeometry +\n  ApplyPendingGeometryEditsNow) — persists on save, NOT gated\nTestAlignCommit = 67 — PromotePreviewToPending (commit preview)\nTestAlignDiscard = 68 — DiscardPreview (revert preview to pristine)\nTestGetPageNo = 69 — introspection\nmbBefore/mbAfter logged in TestAlignApply result", fillcolor="#fff9c4", style=filled];
 
         c6_save -> c6_geomtest [style=dashed, label="exercised by tests"];
@@ -158,10 +158,10 @@ digraph CropAlign {
         label="Cluster 8: s64 preview/commit/discard state machine (EngineMupdf_Preview.cpp)";
         color="#673ab7";
 
-        c8_preview [label="ApplyPreviewGeometry(pageNo, angleDeg, cropRect, dm)\nEngineMupdf_Preview.cpp:25\nPREVIEW — in-memory visual only, does NOT add to pendingGeomEdits.\nCaptures pristine PagePristineState at FIRST apply.\nApplies R2 (/Rotate+CropBox) or R3 (Form XObject FmN) to live pdfdoc.\nSets hasPreviewGeomEdit=true, appliedInMemory=true.\nInvalidates RenderCache + BuildPagesInfo + RelayoutKeepingView.", fillcolor="#bbdefb", style=filled];
-        c8_commit [label="PromotePreviewToPending(pageNo)\nEngineMupdf_Preview.cpp:382\nCOMMIT — moves previewGeomEdit → pendingGeomEdits.\nTriggered by CmdArchAlignApply=526 (GUI Apply button)\nor TestAlignCommit=67 (control).\nSaved file = single deskew (last angle from ORIGINAL via pristine restore).", fillcolor="#c8e6c9", style=filled];
-        c8_discard [label="DiscardPreview(pageNo, dm)\nEngineMupdf_Preview.cpp:400\nDISCARD — RestorePageGeometry reverts page to pristine.\nTriggered by ESC / tool-switch / TestAlignDiscard=68.\nFile stays PRISTINE.", fillcolor="#ffcdd2", style=filled];
-        c8_restore [label="RestorePreviewIfNeeded(dm)\nEngineMupdf_Preview.cpp:414\nSAVE PATH — reverts uncommitted preview (hasPreviewGeomEdit\nnot in pendingGeomEdits) before pdf_save_document.\nOnly committed (promoted) edits are persisted.", fillcolor="#c8e6c9", style=filled];
+        c8_preview [label="ApplyPreviewGeometry(pageNo, angleDeg, cropRect, dm)\nEngineMupdf_Preview.cpp\nPREVIEW — in-memory visual only, does NOT add to pendingGeomEdits.\nCaptures pristine PagePristineState at FIRST apply.\nApplies R2 (/Rotate+CropBox) or R3 (Form XObject FmN) to live pdfdoc.\nSets hasPreviewGeomEdit=true, appliedInMemory=true.\nInvalidates RenderCache + BuildPagesInfo + RelayoutKeepingView.", fillcolor="#bbdefb", style=filled];
+        c8_commit [label="PromotePreviewToPending(pageNo)\nEngineMupdf_Preview.cpp\nCOMMIT — moves previewGeomEdit → pendingGeomEdits.\nTriggered by CmdArchAlignApply=526 (GUI Apply button)\nor TestAlignCommit=67 (control).\nSaved file = single deskew (last angle from ORIGINAL via pristine restore).", fillcolor="#c8e6c9", style=filled];
+        c8_discard [label="DiscardPreview(pageNo, dm)\nEngineMupdf_Preview.cpp\nDISCARD — RestorePageGeometry reverts page to pristine.\nTriggered by ESC / tool-switch / TestAlignDiscard=68.\nFile stays PRISTINE.", fillcolor="#ffcdd2", style=filled];
+        c8_restore [label="RestorePreviewIfNeeded(dm)\nEngineMupdf_Preview.cpp\nSAVE PATH — reverts uncommitted preview (hasPreviewGeomEdit\nnot in pendingGeomEdits) before pdf_save_document.\nOnly committed (promoted) edits are persisted.", fillcolor="#c8e6c9", style=filled];
         c8_ctrl [label="Control cmds (SumatraControl.cpp)\nTestAlignQueue = 64  (queue to pendingGeomEdits)\nTestAlignApply = 66  (direct in-memory apply, NOT gated)\nTestAlignCommit = 67  (PromotePreviewToPending)\nTestAlignDiscard = 68  (DiscardPreview)\nTestGeomSave = 65  (fresh-engine headless save, own engine)", fillcolor="#fff9c4", style=filled];
 
         c8_preview -> c8_commit [label="commit (CmdArchAlignApply=526)"];
@@ -194,7 +194,7 @@ digraph CropAlign {
 // s64-R5 (2026-11-13) findings + fixes — 4 live-validated Crop Align GUI bugs
 // ============================================================
 // Bug 1 — selection coords incoherent after righting:
-//   Root cause: none in apply path. ApplyPreviewGeometry (EngineMupdf_Preview.cpp:25)
+//   Root cause: none in apply path. ApplyPreviewGeometry (EngineMupdf_Preview.cpp)
 //   already mirrors ApplyPendingGeometryEditsNow tail: drops cached fz_page +
 //   FreeForDisplayModel(dm) + BuildPagesInfo + RelayoutKeepingView, so pageInfo
 //   mediabox + render use NEW geometry. No code change needed; tail present.
@@ -207,7 +207,7 @@ digraph CropAlign {
 //   point → condition never true → discard skipped on toggle-off. Mixed
 //   preview/pending/appliedInMemory state left live.
 //   Fix: call DiscardArchPreview(win) unconditionally when oldMode==5 (line ~162).
-//   Escape discard: VK_ESCAPE path exists only for crop drag (Canvas.cpp:1994);
+//   Escape discard: VK_ESCAPE path exists only for crop drag (Canvas.cpp);
 //   align toggle-off + DiscardArchPreview covers the align case.
 //
 // Bug 3 — repeated line draw accumulates rotation:
@@ -224,12 +224,12 @@ digraph CropAlign {
 //   (Cluster 1b) + ESC discard (Cluster 1b) — no delta-sum accumulation.
 //
 // Bug 4 — 🔴 dirty dot not lighting:
-//   Root cause: EngineMupdfHasUnsavedAnnotations (EngineMupdf.cpp:7903) reads
+//   Root cause: EngineMupdfHasUnsavedAnnotations (EngineMupdf.cpp) reads
 //   modifiedAnnotations || modifiedPageGeometry || modifiedOutline, but
 //   ApplyPreviewGeometry only set hasPreviewGeomEdit + appliedInMemory, NOT
 //   modifiedPageGeometry → dot stayed OFF after preview apply.
 //   Fix: set modifiedPageGeometry = true in ApplyPreviewGeometry
-//   (EngineMupdf_Preview.cpp:387) so dot lights on preview apply; DiscardPreview
+//   (EngineMupdf_Preview.cpp) so dot lights on preview apply; DiscardPreview
 //   clears it; commit keeps lit until save.
 // ============================================================
 // s64-R7 (2026-11-13) Crop Align — single-line UX, R6 accumulation removed
@@ -264,7 +264,7 @@ digraph CropAlign {
 // ============================================================
 // s64-R7c (2026-11-13) ESC keeps Crop Align tool ON (toolMode=5)
 // ============================================================
-// Root cause: SumatraPDF.cpp:8207 FrameOnKeydown WM_KEYDOWN VK_ESCAPE sets
+// Root cause: SumatraPDF.cpp FrameOnKeydown WM_KEYDOWN VK_ESCAPE sets
 // win->archTools.toolMode = 0 for ANY toolMode != 0, including 5 (READ-ONLY,
 // cannot fix there). User log proof: "[arch] Esc cancel: draw mode cancelled,
 // was mode=5" then toolbar button OFF.
@@ -282,8 +282,8 @@ digraph CropAlign {
 // s64-R7d (2026-11-13) ESC discard keeps tool ON via LIVE frame path
 // ============================================================
 // Root cause: key-handler liveness decided by FOCUS policy. Canvas clicks call
-// HwndSetFocus(hwndFrame) (Canvas.cpp:2779/:3629/:4389) -> canvas never has
-// keyboard focus -> ESC goes to FRAME -> FrameOnKeydown (SumatraPDF.cpp:8185-8258).
+// HwndSetFocus(hwndFrame) (Canvas.cpp/:3629/:4389) -> canvas never has
+// keyboard focus -> ESC goes to FRAME -> FrameOnKeydown (SumatraPDF.cpp).
 // FrameOnKeydown zeros toolMode=0 on ESC for ANY toolMode incl 5 ("Esc cancel:
 // draw mode cancelled", ~:8237), turning align OFF.
 // Fix (ARCHITECT AUTHORIZED this round): MINIMAL surgical edit of SumatraPDF.cpp
