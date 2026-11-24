@@ -157,6 +157,55 @@
 ### Notes
 - Production code NOT changed in this round — analysis + maps only.
 - Three dominant per-rating costs identified: (1) FlashcardStudyPruneStates O(states x cards) Flashcard.cpp:662-690, (2) FlashcardStudySave full JSON rewrite + tmp + MoveFileExW Flashcard.cpp:697-763, (3) FlashcardSidebarPopulate O(cards x states) + text + LB msgs FlashcardSidebar.cpp:657-718 (when Lista open).
+
+## 2026-11-23 (s76 cont.2) — Flashcard study perf: P1 invariant fix + true complexity + duplicate-key rule
+
+### Fixed
+- **P1 data-loss bug**: `FlashcardStudyLoad` early-return path (profile-only adopt at :1276) returned WITHOUT sorting → binary search missed states → SM-2 progress lost + duplicate keys written. FIX: `FlashcardStudySortStates(doc.states)` now called on ALL return paths (file, legacy fallback, adopt-by-name, profile-only).
+- **Duplicate-key rule**: `FlashcardStudySortStates` (VecSort + dedup) keeps the entry with the newest `lastReviewedAt`; older duplicate dropped silently. Applied at load, parse, and prune.
+- **Profile side comment**: `ProfileData.cpp:2008` — profile states stored in insertion order (never binary-searched); invariant enforced at consumer (`FlashcardStudyLoad`), not in profile.
+
+### Added
+- `FlashcardU64Cmp` / `FlashcardStudyStateKeyCmp` — file-scope comparators for `VecSort` (repo-native qsort).
+- `FlashcardStudySortStates` now uses `VecSort` (O(N log N)) + adjacent dedup by `lastReviewedAt` desc for equal keys.
+- `FlashcardStudyPruneStates` card-keys sort uses `VecSort` (O(C log C)) instead of insertion sort (O(C^2)).
+- `FlashcardStudyParseJsonInto` ensures sorted invariant after parse (covers Config recover-backup, import, resync paths).
+- `Commands_Flashcard.cpp:289` linear scan → `FlashcardStateFindIdx` binary search.
+
+### Producer audit (every `tab->flashcard.studyDoc = ...` assignment):
+| Producer | File:line | Sorted? | Fix |
+|---|---|---|---|
+| `FlashcardStudyLoad` (file/legacy/adopt) | Flashcard.cpp:1277 | ✓ | sort on all returns |
+| `FlashcardStudyLoad` (profile-only) | Flashcard.cpp:1276 | ✓ | sort added |
+| `FlashcardStudyParseJsonInto` | Flashcard.cpp:1202 | ✓ | sort after parse |
+| `FlashcardStudyRecoverBackup` → `FlashcardStudyLoad` | FlashcardToolbar.cpp:1152 | ✓ | via FlashcardStudyLoad |
+| `ProfileDataGetStudyDoc` → `FlashcardStudyLoad` | Flashcard.cpp:1276 | ✓ | sort in caller |
+| `FlashcardStudyLoad` (adopt-by-name) | Flashcard.cpp:1277 | ✓ | sort after merge |
+
+### True complexity (corrected):
+- State lookup: O(S) → O(log S)
+- State insert (rate): O(S) append → O(S) shift (search O(log S))
+- **Prune: O(S × C) → O(C log C + S)** (VecSort + merge pass)
+- Sidebar: O(C × S) → O(C log S)
+- Toolbar count: O(C × S) → O(C log S)
+
+### Binary-search edge-case table (FlashcardStateFindIdx):
+| Input | Expected result |
+|---|---|
+| empty vec | -1, insert=0 |
+| single element (match) | 0 |
+| single element (miss, key < element) | -1, insert=0 |
+| single element (miss, key > element) | -1, insert=1 |
+| key smaller than all | -1, insert=0 |
+| key larger than all | -1, insert=len |
+| key in middle (found) | index |
+| key in middle (miss) | -1, insert=position |
+
+### Verified
+- Build green (0 errors, 0 warnings).
+- JSON format unchanged (keys written in sorted order; object order irrelevant).
+- `FlashcardStudyPruneStates` returns dropped count; states remain sorted after merge pass.
+- All producers sorted; profile side never binary-searched (comment added at ProfileData.cpp:2008).
 - FlashcardPrewarmInvalidate drain loop dead: Flashcard.cpp:550 condition false immediately — no actual wait.
 - Stale claims corrected: prewarmer implemented (not planned), tick uses wall-clock GetTickCount64 (not tick count), credits owning tab (not focused tab).
 - Improvement options (O1..O7) await user review after external model analysis.

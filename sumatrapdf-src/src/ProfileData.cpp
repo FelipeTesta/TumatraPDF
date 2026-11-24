@@ -2005,6 +2005,12 @@ void ProfileDataMergeStudyDoc(const char* pdfPath, const FlashcardStudyDoc& doc)
     ProfileDataSaveNow();
 }
 
+// Profile study states (b->study.states) are stored in INSERTION ORDER (not sorted).
+// They are only ever iterated / merged / copied; NEVER binary-searched.
+// The per-book FlashcardStudyDoc returned by ProfileDataGetStudyDoc is sorted by
+// FlashcardStudyLoad before use. Do NOT "fix" the profile side to be sorted —
+// the invariant is enforced at the consumer (FlashcardStudyLoad / parse), not here.
+
 // hand the profile study states back to the book loader (legacy file absent)
 bool ProfileDataGetStudyDoc(const char* pdfPath, FlashcardStudyDoc& out) {
     ProfileDataEnsureLoaded();

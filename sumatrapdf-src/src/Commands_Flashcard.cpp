@@ -286,13 +286,12 @@ static void CollectTabCards(MainWindow* win, WindowTab* tab, i64 now, Vec<Flashc
         // SRS: include only cards that are new (never rated) or due for review
         bool isNew = true;
         bool isDue = false;
-        for (int j = 0; j < len(tab->flashcard.studyDoc.states); j++) {
-            if (tab->flashcard.studyDoc.states[j].key == card.key) {
-                const FlashcardStudyState& s = tab->flashcard.studyDoc.states[j].state;
-                isNew = (s.rating == 0);
-                isDue = (!isNew && s.nextReviewAt <= now);
-                break;
-            }
+        // Binary search in sorted states.
+        int foundIdx = FlashcardStateFindIdx(tab->flashcard.studyDoc.states, card.key, nullptr);
+        if (foundIdx >= 0) {
+            const FlashcardStudyState& s = tab->flashcard.studyDoc.states[foundIdx].state;
+            isNew = (s.rating == 0);
+            isDue = (!isNew && s.nextReviewAt <= now);
         }
         FlashcardQueueEntry entry;
         entry.tab = tab;

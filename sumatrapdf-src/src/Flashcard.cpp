@@ -680,13 +680,54 @@ int FlashcardStudyRecoverBackup() {
     return 0;
 }
 
+// Comparator for u64 (card keys). Used with VecSort (qsort).
+// VecSort expects: int (*)(const u64* a, const u64* b).
+static int FlashcardU64Cmp(const u64* a, const u64* b) {
+    if (*a < *b) return -1;
+    if (*a > *b) return 1;
+    return 0;
+}
+
+// Comparator for StateEntry by key (ascending), tie-break by newest lastReviewedAt.
+// VecSort expects: int (*)(const StateEntry* a, const StateEntry* b).
+static int FlashcardStudyStateKeyCmp(const FlashcardStudyDoc::StateEntry* a, const FlashcardStudyDoc::StateEntry* b) {
+    if (a->key < b->key) return -1;
+    if (a->key > b->key) return 1;
+    // Duplicate keys: keep the one with the newest lastReviewedAt (higher wins).
+    // This handles corrupted/duplicate JSON gracefully — the newer review wins.
+    if (a->state.lastReviewedAt > b->state.lastReviewedAt) return -1;
+    if (a->state.lastReviewedAt < b->state.lastReviewedAt) return 1;
+    return 0;
+}
+
+// Sort StateEntry vec by key (ascending) using repo-native VecSort (qsort).
+// Deduplicates duplicate keys by keeping the entry with the newest lastReviewedAt.
+// Called after load/parse and after any bulk operation that might break the
+// sorted invariant. Complexity: O(N log N).
+static void FlashcardStudySortStates(Vec<FlashcardStudyDoc::StateEntry>& states) {
+    if (len(states) > 1) {
+        VecSort(states, FlashcardStudyStateKeyCmp);
+        // VecSort keeps all entries; deduplicate adjacent equal keys (keep first,
+        // which has the newest lastReviewedAt because the comparator sorts by
+        // lastReviewedAt descending for equal keys).
+        int write = 1;
+        for (int read = 1; read < len(states); read++) {
+            if (states[read].key != states[write - 1].key) {
+                if (write != read) states[write] = states[read];
+                write++;
+            }
+        }
+        if (write < len(states)) {
+            states.len = write;
+        }
+    }
+}
+
 // Drop study states whose card no longer exists in the document. A card dies
 // when its highlight annotation is deleted, but its SM-2 entry stayed in the
 // JSON forever: every save wrote it back and the Config window counted states
 // for cards that are not in the book. Returns how many entries were dropped.
-// Complexity: O(S + C log C) where S = states, C = cards (vs O(S x C) before).
-// Both doc.states (already sorted by key) and a temporary sorted copy of card
-// keys are traversed in a single merge pass.
+// Complexity: O(C log C + S) where S = states, C = cards.
 int FlashcardStudyPruneStates(FlashcardStudyDoc& doc, const Vec<Flashcard>& cards) {
     int nStates = len(doc.states);
     if (nStates == 0) {
@@ -706,16 +747,8 @@ int FlashcardStudyPruneStates(FlashcardStudyDoc& doc, const Vec<Flashcard>& card
     for (int i = 0; i < nCards; i++) {
         cardKeys[i] = cards[i].key;
     }
-    // Sort card keys (insertion sort — fast for typical C < 500)
-    for (int i = 1; i < nCards; i++) {
-        u64 key = cardKeys[i];
-        int j = i - 1;
-        while (j >= 0 && cardKeys[j] > key) {
-            cardKeys[j + 1] = cardKeys[j];
-            j--;
-        }
-        cardKeys[j + 1] = key;
-    }
+    // Sort card keys using repo-native VecSort (qsort) — O(C log C).
+    VecSort(cardKeys, FlashcardU64Cmp);
 
     // Merge pass: both doc.states and cardKeys are sorted ascending by key.
     // Keep only states whose key exists in cardKeys.
@@ -1176,7 +1209,7 @@ static char* ParseJsonDocNameDup(Str json);
 static Str FlashcardStudyAdoptByName(const char* filePath, Str dstPath);
 
 // parse a study JSON (version + states) into doc; shared by StudyLoad and the
-// manual resync
+// manual resync. Ensures the sorted-by-key invariant.
 void FlashcardStudyParseJsonInto(Str json, FlashcardStudyDoc& doc) {
     auto findAnyChar = [](Str s, Str chars) -> int {
         for (int i = 0; i < len(s); i++) {
@@ -1205,22 +1238,8 @@ void FlashcardStudyParseJsonInto(Str json, FlashcardStudyDoc& doc) {
     }
 
     ParseJsonObject(json, &doc.states);
-}
-
-// Sort StateEntry vec by key (ascending). Simple insertion sort — fast for
-// small N (typical study docs have < 500 entries). Called after load and
-// after any bulk operation that might break the sorted invariant.
-static void FlashcardStudySortStates(Vec<FlashcardStudyDoc::StateEntry>& states) {
-    int n = len(states);
-    for (int i = 1; i < n; i++) {
-        FlashcardStudyDoc::StateEntry key = states[i];
-        int j = i - 1;
-        while (j >= 0 && states[j].key > key.key) {
-            states[j + 1] = states[j];
-            j--;
-        }
-        states[j + 1] = key;
-    }
+    // Ensure sorted-by-key invariant for binary search.
+    FlashcardStudySortStates(doc.states);
 }
 
 FlashcardStudyDoc FlashcardStudyLoad(const char* filePath) {
@@ -1262,6 +1281,8 @@ FlashcardStudyDoc FlashcardStudyLoad(const char* filePath) {
             // existed on a new machine) — adopt from the profile store which
             // can hold the states synced from another machine
             ProfileDataGetStudyDoc(filePath, doc);
+            // Profile states are NOT sorted; enforce the invariant before return.
+            FlashcardStudySortStates(doc.states);
             logf("[fc] FlashcardStudyLoad - profile-only adopt: %d entries\n", len(doc.states));
             return doc;
         }
