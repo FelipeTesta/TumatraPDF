@@ -242,6 +242,8 @@ void ReadingStatsAddSeconds(MainWindow* win, float sec) {
             fs->readingTimeSec += whole;
             fs->lastActivityTs = (int)time(nullptr);
             ProfileDataAddReadingSec(tab->filePath.s, whole);
+            // Track the active book for Home page "last read" pin.
+            str::ReplaceWithCopy(&win->lastActiveBookPath, tab->filePath);
         }
     }
     ReadingStatsAddDaily((float)whole);

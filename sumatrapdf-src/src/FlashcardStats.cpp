@@ -312,6 +312,10 @@ void FlashcardStatsAddSeconds(MainWindow* win, WindowTab* tab, float sec) {
             fs->flashcardStudyTimeSec += whole;
             fs->lastActivityTs = (int)time(nullptr);
             ProfileDataAddFlashcardSec(tab->filePath.s, whole);
+            // Track the active book for Home page "last read" pin.
+            // Use the owning window (tab->win) since the tab may belong to a different window.
+            MainWindow* ownerWin = tab->win;
+            str::ReplaceWithCopy(&ownerWin->lastActiveBookPath, tab->filePath);
         }
     }
     FlashcardStatsAddDaily((float)whole);

@@ -1339,7 +1339,8 @@ int HomeStatsWnd::ColX(int col) const {
 void HomeStatsWnd::Paint(VirtWndPaintCtx& ctx) {
     Rect b = ctx.bounds;
     // 320/520 are DIP breakpoints (band dx is already in scaled px)
-    if (b.IsEmpty() || b.dx < DpiScale(win->hwndFrame, 320)) {
+    // Also require minimum height for the heatmap/graph to be usable.
+    if (b.IsEmpty() || b.dx < DpiScale(win->hwndFrame, 320) || b.dy < DpiScale(win->hwndFrame, 150)) {
         return;
     }
     if (year == 0) {
@@ -1379,10 +1380,13 @@ void HomeStatsWnd::Paint(VirtWndPaintCtx& ctx) {
     // --- left column: most-read ranking + totals ---
     int pad = dpi(8);
     // adaptive split: the list needs room for name + time + bar, so it takes a
-    // bigger share on narrow bands; both sides are clamped so neither collapses
-    int rankPct = (statsTab == 2) ? 40 : 34;
+    // bigger share on narrow bands; both sides are clamped so neither collapses.
+    // Use a FIXED percentage for all stats tabs (Read/Flashcards/Sessions) so the
+    // "Study History" column width never changes when switching the active tab.
+    // The larger percentage (sessions mode) accommodates the three numeric columns.
+    int rankPct = 40;
     if (b.dx < DpiScale(win->hwndFrame, 760)) {
-        rankPct = (statsTab == 2) ? 48 : 42;
+        rankPct = 48;
     }
     int rankW = (b.dx * rankPct) / 100;
     if (b.dx < DpiScale(win->hwndFrame, 560)) {
@@ -1524,45 +1528,66 @@ void HomeStatsWnd::Paint(VirtWndPaintCtx& ctx) {
             ranked[j + 1] = e;
         }
 
-        // pinned row = most recent reading/study activity (autoscroll or study);
-        // fallback = MRU-first book with stats.
+        // pinned row = active document tab's book (if any), else most recent
+        // reading/study activity; fallback = MRU-first book with stats.
+        // Using the tracked active book avoids 1-second timestamp granularity
+        // issues where ties would incorrectly prefer the book with more total time.
         FileState* pinnedFs = nullptr;
         if (statsTab != 2) {
-            // first, try to find the ranked book with the largest lastActivityTs > 0
-            int bestIdx = -1;
-            int bestTs = 0;
-            for (int i = 0; i < len(ranked); i++) {
-                int ts = ranked[i]->lastActivityTs;
-                if (ts > bestTs) {
-                    bestTs = ts;
-                    bestIdx = i;
-                }
-            }
-            if (bestIdx >= 0) {
-                // move the most recently active book to the top
-                pinnedFs = ranked[bestIdx];
-                for (int j = bestIdx; j > 0; j--) {
-                    ranked[j] = ranked[j - 1];
-                }
-                ranked[0] = pinnedFs;
-            } else {
-                // no book has a timestamp (all zero = pre-field data):
-                // fall back to original behaviour — MRU-first book that has stats
-                for (int i = 0; i < len(all); i++) {
-                    int at = -1;
-                    for (int j = 0; j < len(ranked); j++) {
-                        if (ranked[j] == all[i]) {
-                            at = j;
-                            break;
-                        }
-                    }
-                    if (at >= 0) {
-                        pinnedFs = ranked[at];
-                        for (int j = at; j > 0; j--) {
+            // First priority: the currently active document tab's book (tracked in
+            // MainWindow::lastActiveBookPath, updated on tab switch and when time
+            // is credited). This is the most reliable signal of "what the user is
+            // looking at right now".
+            if (win->lastActiveBookPath && len(win->lastActiveBookPath) > 0) {
+                for (int i = 0; i < len(ranked); i++) {
+                    if (str::Eq(ranked[i]->filePath, win->lastActiveBookPath)) {
+                        pinnedFs = ranked[i];
+                        // move to top
+                        for (int j = i; j > 0; j--) {
                             ranked[j] = ranked[j - 1];
                         }
                         ranked[0] = pinnedFs;
                         break;
+                    }
+                }
+            }
+            // Second priority: most recent activity timestamp (fallback when no
+            // active tab is tracked, e.g. Home page itself is active).
+            if (!pinnedFs) {
+                int bestIdx = -1;
+                int bestTs = 0;
+                for (int i = 0; i < len(ranked); i++) {
+                    int ts = ranked[i]->lastActivityTs;
+                    if (ts > bestTs) {
+                        bestTs = ts;
+                        bestIdx = i;
+                    }
+                }
+                if (bestIdx >= 0) {
+                    pinnedFs = ranked[bestIdx];
+                    for (int j = bestIdx; j > 0; j--) {
+                        ranked[j] = ranked[j - 1];
+                    }
+                    ranked[0] = pinnedFs;
+                } else {
+                    // no book has a timestamp (all zero = pre-field data):
+                    // fall back to original behaviour — MRU-first book that has stats
+                    for (int i = 0; i < len(all); i++) {
+                        int at = -1;
+                        for (int j = 0; j < len(ranked); j++) {
+                            if (ranked[j] == all[i]) {
+                                at = j;
+                                break;
+                            }
+                        }
+                        if (at >= 0) {
+                            pinnedFs = ranked[at];
+                            for (int j = at; j > 0; j--) {
+                                ranked[j] = ranked[j - 1];
+                            }
+                            ranked[0] = pinnedFs;
+                            break;
+                        }
                     }
                 }
             }
@@ -1881,25 +1906,41 @@ void HomeStatsWnd::Paint(VirtWndPaintCtx& ctx) {
     // month-separated layout (user 2026-10-16): a wider gap between month
     // blocks; weekday letters for ALL 7 rows, vertically centered with their
     // row; 3-letter month names BELOW each block, centered over it
+    // Cells must ALWAYS be square. Compute cell size from the available height
+    // (7 rows) since that's the constrained dimension; width follows.
     int labelDx = dpi(12);
     int gridW = heatW - labelDx;
     int cellGap = 2;
     monthGapPx = dpi(6);
-    cellDx = (gridW - 52 * cellGap - 11 * monthGapPx) / 53;
-    cellDy = dpi(9);
     int rowGap = 2;
-    // containment over legibility: a higher floor can push the grid past the
-    // band's right edge on narrow windows (53 columns + 11 month gaps).
-    // 53*(2+2)+11*6=278px always fits because Paint early-returns below 320.
-    if (cellDx < 2) {
-        cellDx = 2;
-    }
-    // grid mode = ONLY the heatmap (no annual bar chart here — that is graph
-    // mode's job). Center the grid between the year row and the month names.
-    int gridDy = 7 * (cellDy + rowGap);
     int monthLblDy = dpi(14);
     int topUsable = b.y + yearRowDy;
     int bottomUsable = b.y + b.dy - pad - monthLblDy;
+    int availGridDy = bottomUsable - topUsable;
+    // 7 rows, each cellDy + rowGap, but last row has no rowGap after it
+    // cellDy = (availGridDy - 6 * rowGap) / 7, floored to at least 2
+    cellDy = (availGridDy - 6 * rowGap) / 7;
+    if (cellDy < 2) {
+        cellDy = 2;
+    }
+    // Square cells: cellDx == cellDy
+    cellDx = cellDy;
+    // Recompute gridW needed for 53 columns + 11 month gaps with square cells
+    int neededGridW = 53 * (cellDx + cellGap) + 11 * monthGapPx - cellGap; // -cellGap because last col has no gap
+    // If neededGridW > gridW, we must shrink cells to fit width (keep square)
+    if (neededGridW > gridW) {
+        // Solve: 53*(cell + cellGap) + 11*monthGapPx - cellGap <= gridW
+        // 53*cell + 53*cellGap + 11*monthGapPx - cellGap <= gridW
+        // 53*cell <= gridW - 52*cellGap - 11*monthGapPx
+        cellDx = (gridW - 52 * cellGap - 11 * monthGapPx) / 53;
+        cellDy = cellDx;
+        if (cellDx < 2) {
+            cellDx = cellDy = 2;
+        }
+    }
+    int gridDy = 7 * (cellDy + rowGap) - rowGap; // 7 rows, 6 gaps between them
+    // grid mode = ONLY the heatmap (no annual bar chart here — that is graph
+    // mode's job). Center the grid between the year row and the month names.
     int extra = bottomUsable - topUsable - gridDy;
     if (extra < 0) {
         extra = 0;
@@ -2489,7 +2530,6 @@ static void LayoutHomePage(HomePageLayout& l) {
     int hdrY0 = DpiScale(hdc, 8);
     int statsGapY = DpiScale(hdc, 8);
     int booksSepGapY = DpiScale(hdc, 12);
-    int statsBandDy = DpiScale(hdc, 220);
     int searchAreaDyPre = DpiScale(hdc, kHeaderSearchGapY + kSearchEditDy + 2 + kSearchThumbnailsGapY);
 
     Str booksTxt = _TRA("Recently Opened");
@@ -2524,6 +2564,27 @@ static void LayoutHomePage(HomePageLayout& l) {
         tipHeight = tip->MinIntrinsicHeight(thumbsContentWidth) + (2 * tipPadding);
     }
     int contentBottomY = std::max(0, rc.dy - tipHeight - DpiScale(hdc, kThumbsMiddleMargin));
+
+    // stats band height: adaptive with minimum to prevent overlap at small heights.
+    // Reserve space for other fixed sections (headers, search, tip) and give the
+    // rest to the stats band, but clamp to a minimum so the heatmap/graph stays usable.
+    int minStatsBandDy = DpiScale(hdc, 150);
+    int maxStatsBandDy = DpiScale(hdc, 220);
+    // We'll compute the adaptive statsBandDy after measuring header sizes.
+    int statsBandDy = maxStatsBandDy; // default, may be reduced below
+
+    // Adaptive stats band height: use available viewport height minus fixed sections,
+    // clamped to [minStatsBandDy, maxStatsBandDy]. This prevents overlap at small
+    // window heights while giving the heatmap/graph maximum space when available.
+    int fixedSectionsDy = hdrY0 + statsHdrSize.dy + statsGapY + booksSepGapY + booksHdrSize.dy + searchAreaDyPre;
+    int availForStatsBand = contentBottomY - fixedSectionsDy;
+    if (availForStatsBand < minStatsBandDy) {
+        statsBandDy = minStatsBandDy;
+    } else if (availForStatsBand > maxStatsBandDy) {
+        statsBandDy = maxStatsBandDy;
+    } else {
+        statsBandDy = availForStatsBand;
+    }
 
     // content height with everything unscrolled (for the scroll clamp)
     int nFiles = len(fileStates);
@@ -3073,6 +3134,100 @@ TempStr HomeListRowsResultTemp(int* exitCodeOut) {
         // still reads kSizeNotFetched and its size text is empty
         out.Append(fmt("row=%d size='%s' sizeRect=%d,%d,%d,%d path=%s\n", i, FileSizeForHomeListTemp(t.fileSize), r.x,
                        r.y, r.dx, r.dy, path));
+    }
+    return finish(0);
+}
+
+// Return the currently pinned book path on the Home page (for testing).
+// Deterministic test hook for the -dbg-control protocol.
+TempStr HomePinnedBookResultTemp(int* exitCodeOut) {
+    str::Builder out;
+    auto finish = [&](int code) -> TempStr {
+        if (exitCodeOut) {
+            *exitCodeOut = code;
+        }
+        return ToStrTemp(out);
+    };
+
+    if (len(gWindows) == 0) {
+        out.Append("NOWINDOW\n");
+        return finish(2);
+    }
+    MainWindow* win = gWindows[0];
+    HomeChromeWnd* chrome = EnsureHomeChrome(win);
+    if (!chrome || !chrome->stats || !win->homeRoot) {
+        out.Append("NOCHROME\n");
+        return finish(2);
+    }
+    // Trigger a layout/paint to ensure the pinned book is computed
+    HwndInvalidate(win->hwndCanvas);
+    // The pinned book is the first entry in the ranked list (index 0 after pinning)
+    // We need to recompute the ranked list to find it. Replicate the logic from Paint.
+    Vec<FileState*> all;
+    gFileHistory.GetRecentlyOpenedOrder(all);
+    Vec<FileState*> ranked;
+    for (int i = 0; i < len(all); i++) {
+        FileState* fs = all[i];
+        int timeSec = fs->readingTimeSec; // statsTab 0 = Reading
+        if (fs && timeSec > 0 && len(fs->filePath) > 0) {
+            ranked.Append(fs);
+        }
+    }
+    // insertion sort desc by readingTimeSec
+    for (int i = 1; i < len(ranked); i++) {
+        FileState* e = ranked[i];
+        int j = i - 1;
+        int eSec = e->readingTimeSec;
+        while (j >= 0) {
+            int jSec = ranked[j]->readingTimeSec;
+            if (jSec >= eSec) break;
+            ranked[j + 1] = ranked[j];
+            j--;
+        }
+        ranked[j + 1] = e;
+    }
+    // Apply the same pinning logic as in Paint (statsTab=0 for Reading)
+    FileState* pinnedFs = nullptr;
+    if (win->lastActiveBookPath && len(win->lastActiveBookPath) > 0) {
+        for (int i = 0; i < len(ranked); i++) {
+            if (str::Eq(ranked[i]->filePath, win->lastActiveBookPath)) {
+                pinnedFs = ranked[i];
+                break;
+            }
+        }
+    }
+    if (!pinnedFs) {
+        int bestIdx = -1;
+        int bestTs = 0;
+        for (int i = 0; i < len(ranked); i++) {
+            int ts = ranked[i]->lastActivityTs;
+            if (ts > bestTs) {
+                bestTs = ts;
+                bestIdx = i;
+            }
+        }
+        if (bestIdx >= 0) {
+            pinnedFs = ranked[bestIdx];
+        } else {
+            for (int i = 0; i < len(all); i++) {
+                int at = -1;
+                for (int j = 0; j < len(ranked); j++) {
+                    if (ranked[j] == all[i]) {
+                        at = j;
+                        break;
+                    }
+                }
+                if (at >= 0) {
+                    pinnedFs = ranked[at];
+                    break;
+                }
+            }
+        }
+    }
+    if (pinnedFs) {
+        out.Append(fmt("OK pinned=%s\n", pinnedFs->filePath));
+    } else {
+        out.Append("OK pinned=(none)\n");
     }
     return finish(0);
 }

@@ -42,3 +42,4 @@ void HomePageClearActiveEntry(MainWindow* win);
 
 TempStr HomeListRowsResultTemp(int* exitCodeOut);
 TempStr StatsToggleGraphResultTemp(int* exitCodeOut);
+TempStr HomePinnedBookResultTemp(int* exitCodeOut);

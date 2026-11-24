@@ -401,6 +401,10 @@ struct MainWindow {
     // accumulator per window so two windows' ticks don't interleave).
     float readingStatsAccumSec = 0.0f;
     float flashcardStatsAccumSec = 0.0f;
+    // Track the active document tab's book path for Home page "last read" pin.
+    // Updated when the active tab changes to a document tab and when reading/
+    // study time is credited. Avoids 1-second timestamp granularity issues.
+    Str lastActiveBookPath;
     // --- end auto-scroll feature ---
 
     // --- trim config dialog state ---

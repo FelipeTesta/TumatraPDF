@@ -119,6 +119,7 @@ MainWindow::~MainWindow() {
     str::Free(urlOnLastButtonDown);
     str::Free(homeSearchQuery);
     str::Free(activeTabGroup);
+    str::Free(lastActiveBookPath);
 
     UnsubclassToc(this);
     HomePageDestroyChrome(this);

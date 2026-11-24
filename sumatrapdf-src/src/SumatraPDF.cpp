@@ -4286,6 +4286,12 @@ void LoadModelIntoTab(WindowTab* tab) {
     if (tab->type == WindowTab::Type::None) {
         logf("LoadModelIntoTab: tab 0x%p has Type::None, skipping reload\n", tab);
     } else if (!tab->IsAboutTab()) {
+        // Track the active document tab's book for Home page "last read" pin.
+        // This avoids 1-second timestamp granularity issues when multiple tabs
+        // have the same lastActivityTs.
+        if (tab->filePath && len(tab->filePath) > 0) {
+            str::ReplaceWithCopy(&win->lastActiveBookPath, tab->filePath);
+        }
         if (gGlobalPrefs->lazyLoading && !tab->ctrl && tab->loadState == WindowTab::LoadState::None) {
             ReloadDocument(win, false);
         } else {
