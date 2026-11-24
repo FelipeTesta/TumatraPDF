@@ -1,7 +1,7 @@
 [English](README.md) · **Español**
 
 > **Última actualización:** 2026-11-23 · base: [README.md](README.md) `v1.0.20`
-<!-- readme-sync: source-blob=e21a7757a903cc9deb75f2711cdac4c64c58e30e version=1.0.21 synced=2026-11-23 -->
+<!-- readme-sync: source-blob=0c615791fcc7f03daa75c7a45b356f3269460262 version=1.0.21 synced=2026-11-24 -->
 
 # TumatraPDF
 
@@ -167,7 +167,11 @@ TumatraPDF no está firmado con código, así que la primera vez que Windows eje
 
 Haz clic en "Más información" -> "Ejecutar de todos modos"; o haz clic derecho en el archivo -> Propiedades -> marca "Desbloquear" al final -> Aplicar; o en PowerShell: `Unblock-File .\TumatraPDF-portable-win64.exe`.
 
-La versión instalada advierte solo una vez (el instalador elimina la marca de descarga); la versión portable deja de advertir después del primer lanzamiento. Si Defender pone el archivo en cuarentena en su lugar, compara su SHA-256 con los hashes publicados en las notas de la versión y abre un issue si difieren.
+La versión instalada advierte solo una vez (el instalador elimina la marca de descarga al instalar). La versión portable conserva la marca de descarga — eliminamos el auto-desbloqueo al inicio porque es una solución ineficaz para SmartScreen en un binario sin firmar Y un detonante clásico de falsos positivos en antivirus. Desbloquea una vez ("Más información -> Ejecutar de todos modos" / Propiedades -> Desbloquear) y Windows recordará la aprobación para ese archivo.
+
+### Falsos positivos de antivirus en compilaciones sin firmar
+
+Si un antivirus marca o pone en cuarentena el portable o el instalador: compara el SHA-256 del archivo con los hashes publicados en las notas de la versión. Si los hashes coinciden, el archivo es exactamente el que publicamos y la detección es un falso positivo. Agrega una exclusión para el archivo en tu antivirus (los pasos varían según el AV) en lugar de desactivar la protección. Si la detección persiste, abre un issue con el nombre del producto AV y el ID de la detección.
 
 ## Arquitectura
 

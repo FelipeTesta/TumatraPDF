@@ -27,9 +27,13 @@ server — all crash dumps stay in `%LOCALAPPDATA%` on your machine.
 
 The builds are not code-signed and there is no code-signing certificate. The source is public (GPLv3 fork of SumatraPDF) and every release publishes the SHA-256 of both assets in the release notes, so a download can be verified against those hashes.
 
-The Windows warning comes from the Mark of the Web that browsers attach to downloaded files: SmartScreen shows "Windows protected your PC" and blocks the launch until you click "More info -> Run anyway". To proceed: click "More info" -> "Run anyway"; or right-click the file -> Properties -> tick "Unblock" at the bottom -> Apply; or in PowerShell `Unblock-File .\TumatraPDF-portable-win64.exe`. The installed copy warns only once (the installer removes the download mark at install time); the portable keeps the mark, so a best-effort startup self-unblock makes it start silently from the second launch on.
+The Windows warning comes from the Mark of the Web that browsers attach to downloaded files: SmartScreen shows "Windows protected your PC" and blocks the launch until you click "More info -> Run anyway". To proceed: click "More info" -> "Run anyway"; or right-click the file -> Properties -> tick "Unblock" at the bottom -> Apply; or in PowerShell `Unblock-File .\TumatraPDF-portable-win64.exe`. The installed copy warns only once (the installer removes the download mark at install time). The portable keeps the download mark — we removed the startup self-unblock because it is an ineffective SmartScreen workaround for an unsigned binary AND a classic AV false-positive trigger. Unblock once ("More info -> Run anyway" / Properties -> Unblock) and Windows remembers the approval for that file.
 
 This warning is an unsigned-build notice, not a malware verdict. If Defender itself quarantines the file (a Windows Security alert saying the file was removed), compare the file's SHA-256 with the one published in the release notes and report a mismatch in an issue — if the hashes match, the file is intact.
+
+### Antivirus false positives on unsigned builds
+
+If an antivirus flags or quarantines the portable or installer: compare the file's SHA-256 with the hashes published in the release notes. If the hashes match, the file is exactly what we published and the detection is a false positive. Add an exclusion for the file in your AV (per-AV steps vary) rather than disabling protection. If the detection persists, open an issue with the AV product name and the detection ID.
 
 ## Supported versions
 

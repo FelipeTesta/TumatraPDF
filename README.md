@@ -172,7 +172,11 @@ TumatraPDF is not code-signed, so the first time Windows runs a file downloaded 
 
 Click **"More info" -> "Run anyway"**; or right-click the file -> Properties -> tick **"Unblock"** at the bottom -> Apply; or in PowerShell: `Unblock-File .\TumatraPDF-portable-win64.exe`.
 
-The installed copy warns only once (the installer removes the download mark); the portable stops warning after the first run (startup self-unblock). If Defender quarantines the file instead, compare its SHA-256 with the hashes published in the release notes and open an issue if they differ.
+The installed copy warns only once (the installer removes the download mark at install time). The portable keeps the download mark — we removed the startup self-unblock because it is an ineffective SmartScreen workaround for an unsigned binary AND a classic AV false-positive trigger. Unblock once ("More info -> Run anyway" / Properties -> Unblock) and Windows remembers the approval for that file.
+
+### Antivirus false positives on unsigned builds
+
+If an antivirus flags or quarantines the portable or installer: compare the file's SHA-256 with the hashes published in the release notes. If the hashes match, the file is exactly what we published and the detection is a false positive. Add an exclusion for the file in your AV (per-AV steps vary) rather than disabling protection. If the detection persists, open an issue with the AV product name and the detection ID.
 
 ## Architecture
 
