@@ -441,6 +441,8 @@ enum class ControlCmd : u16 {
     TestFlushFlashcardBookkeeping = 89,
     TestFlashcardFlush = 90,
     TestFlashcardVisibleCardIndices = 91,
+    // Home page geometry probe (ITEM 1-3): returns layout rects, cell sizes, month mapping, hover state
+    TestHomeGeometry = 92,
 };
 
 enum class ControlArgType : u16 {
@@ -1060,6 +1062,13 @@ static void ExecuteControlRequest(ControlRequest* req) {
         case ControlCmd::TestHomePinnedBook: {
             int exitCode = 0;
             Str res = HomePinnedBookResultTemp(&exitCode);
+            AppendTestResult(req, exitCode, res);
+            break;
+        }
+
+        case ControlCmd::TestHomeGeometry: {
+            int exitCode = 0;
+            Str res = HomeGeometryResultTemp(&exitCode);
             AppendTestResult(req, exitCode, res);
             break;
         }

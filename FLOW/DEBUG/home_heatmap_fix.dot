@@ -1,0 +1,65 @@
+digraph HomeHeatmapFix {
+    rankdir=TB;
+    node [fontname="Consolas", fontsize=10];
+    edge [fontname="Consolas", fontsize=9];
+
+    subgraph cluster_item1 {
+        label="ITEM 1: Heatmap Uniform Grid + Border Colors";
+        style=dashed;
+        color=blue;
+        
+        h1 [label="ColX() - monthGapPx removal\nHomePage.cpp:1329-1337", shape=box, color=red];
+        h2 [label="Paint() - cellDx/cellDy formula\nHomePage.cpp:1909-1940", shape=box, color=red];
+        h3 [label="Paint() - month border colors\nHomePage.cpp:1982-2035", shape=box, color=red];
+        h4 [label="Paint() - month labels no overlap\nHomePage.cpp:1969-1981", shape=box, color=red];
+        h5 [label="monthStartCol[] computation\nHomePage.cpp:1952-1954", shape=box, color=green];
+        
+        h1 -> h2 [label="geometry"];
+        h2 -> h3 [label="cell drawing"];
+        h3 -> h4 [label="labels"];
+    }
+
+    subgraph cluster_item2 {
+        label="ITEM 2: Vertical Stack Layout";
+        style=dashed;
+        color=green;
+        
+        v1 [label="LayoutHomePage() - statsGapY, booksSepGapY\nHomePage.cpp:2530-2587", shape=box, color=red];
+        v2 [label="rcStats rect computation\nHomePage.cpp:2647-2651", shape=box, color=red];
+        v3 [label="booksHdrY positioning\nHomePage.cpp:2654-2670", shape=box, color=red];
+        v4 [label="fixedTop / totalContentDy\nHomePage.cpp:2607-2608", shape=box, color=red];
+        v5 [label="minStatsBandDy / maxStatsBandDy\nHomePage.cpp:2571-2572", shape=box, color=red];
+        
+        v1 -> v2 [label="band height"];
+        v2 -> v3 [label="stack order"];
+        v3 -> v4 [label="scroll flow"];
+    }
+
+    subgraph cluster_item3 {
+        label="ITEM 3: Hover Fade Out";
+        style=dashed;
+        color=orange;
+        
+        f1 [label="HomeStatsWnd::hoverDay state\nHomePage.cpp:1281", shape=box, color=red];
+        f2 [label="OnMouseMove - hover detection\nHomePage.cpp:2244-2271", shape=box, color=red];
+        f3 [label="OnMouseLeave / WM_MOUSELEAVE\nHomePage.cpp:~3589, ~3717", shape=box, color=red];
+        f4 [label="ClearHover() ~4293", shape=box, color=red];
+        f5 [label="VirtWnd hover state (vwfHovered)", shape=box, color=green];
+        
+        f1 -> f2 [label="set hoverDay"];
+        f2 -> f3 [label="mouse leaves"];
+        f3 -> f4 [label="clear"];
+    }
+
+    subgraph cluster_verification {
+        label="Verification";
+        style=dashed;
+        color=purple;
+        
+        vr1 [label="Month mapping: first/last doy per month\n→ col/row", shape=note];
+        vr2 [label="Cell size at 1200/900/640 width:\ncellDx, cellDy, grid rect", shape=note];
+        vr3 [label="3 blocks rects (study history / graph / books)\nno overlap, study history > 0 height", shape=note];
+        vr4 [label="Hover fade: alpha 255→0 in ~0.5-0.7s", shape=note];
+        vr5 [label="Screenshots: dark/light × grid/graph", shape=note];
+    }
+}

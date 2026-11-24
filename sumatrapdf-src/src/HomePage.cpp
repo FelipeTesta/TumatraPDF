@@ -878,7 +878,8 @@ struct HomePageLayout {
     int totalContentDy = 0;          // total height of all thumbnail rows
     int thumbsVisibleDy = 0;         // visible height for thumbnails area
     Rect rcThumbsArea;               // clip rect for thumbnails
-    Rect rcStats;                    // reading-stats band (empty = hidden)
+    Rect rcStudyHistory;             // study history band (ranking column, full width)
+    Rect rcStats;                    // heatmap/graph band (empty = hidden)
     Rect rcBooksHdr;                 // books-section title rect (D1)
 
     // search filter
@@ -1046,9 +1047,12 @@ static Kind kindHomeChromeWnd = "homeChromeWnd";
 
 struct HomeStatsWnd; // defined below (before HomePageLayoutCache)
 
+struct HomeStudyHistoryWnd; // defined below (before HomePageLayoutCache)
+
 struct HomeChromeWnd : VirtWnd {
     HomeTipWnd* tip = nullptr;
     HomeStatsWnd* stats = nullptr;
+    HomeStudyHistoryWnd* studyHistory = nullptr;
     HomeEntriesWnd* entries = nullptr;
     VirtWndText* hdr = nullptr;
     VirtWndText* booksHdr = nullptr; // D1: books-section title (below stats)
@@ -1279,28 +1283,53 @@ struct HomeStatsWnd : VirtWnd {
     int cellDy = 10;
     int firstCol = 0;  // weekday row of Jan 1 (Monday-first)
     int hoverDay = -1; // day-of-year under the mouse, -1 = none
+    // hover fade state (ITEM 3): fade out over 500ms after mouse leaves
+    int hoverFadeAlpha = 255;      // 255 = fully visible, 0 = faded out
+    UINT_PTR hoverFadeTimer = 0;   // timer ID for fade animation
+    int hoverFadeTargetDay = -1;   // the day that was hovered when fade started
+    DWORD hoverFadeStartTime = 0;  // GetTickCount() when fade started
     // D7: calendar mode — grid (heatmap) or line graph (day x hours)
     bool graphMode = false;
     Rect rcMode; // the Grid/Graph toggle (window coords)
-    // D3: most-read list — internal scroll (wheel) + ranking column rect
-    Rect rcRank;        // window coords (same convention as rcGrid)
-    int rankScroll = 0; // first visible row
-    int rankRows = 0;   // rows that fit (recomputed in Paint)
-    int rankCount = 0;  // total ranked books (recomputed in Paint)
-    // Tabs: 0 = Read, 1 = Flashcards, 2 = Sessions
-    int statsTab = 0;    // 0 = Reading, 1 = Flashcards, 2 = Sessions
-    Rect rcReadTab;      // Read tab hit rect
-    Rect rcFlashcardTab; // Flashcards tab hit rect
-    Rect rcSessionsTab;  // Sessions tab hit rect
-    // month-separated grid geometry (Paint refreshes; shared with handlers):
-    // monthGapPx = extra x separation between month blocks; monthStartCol[m]
-    // = first week column of month m (index 1..12)
-    int monthGapPx = 0;
+    // uniform grid geometry (Paint refreshes; shared with handlers):
+    // monthStartCol[m] = first week column of month m (index 1..12)
+    // monthBorderAlt[m] = true for silver border, false for gray (alternating per month; Jan=false=gray, Feb=true=silver)
     int monthStartCol[13] = {};
+    bool monthBorderAlt[13] = {};
 
     int ColX(int col) const;
     void Paint(VirtWndPaintCtx&) override;
     void PaintGraph(Gdiplus::Graphics* g, Rect b, int heatX0, int heatW, int pad); // D7
+    bool OnMouseDown(VirtWndMouseEvent&) override;
+    bool OnMouseUp(VirtWndMouseEvent&) override;
+    bool OnMouseMove(VirtWndMouseEvent&) override;
+    bool OnMouseWheel(VirtWndMouseEvent&) override;
+    bool OnSetCursor(Point) override;
+    TempStr GetTooltipTemp(Point) override;
+    void OnMouseEnter() override;
+    void OnMouseLeave() override;
+    void StartHoverFade();
+    void StopHoverFade();
+    static void CALLBACK HoverFadeTimerProc(HWND, UINT, UINT_PTR, DWORD);
+};
+
+// Study History band (ranking column): separate VirtWnd for the left column
+// that used to be painted inside HomeStatsWnd. Handles tabs (Read/Flashcards/Sessions)
+// and ranked list with internal scroll.
+struct HomeStudyHistoryWnd : VirtWnd {
+    MainWindow* win = nullptr;
+    // Tabs: 0 = Read, 1 = Flashcards, 2 = Sessions
+    int statsTab = 0;
+    Rect rcReadTab;
+    Rect rcFlashcardTab;
+    Rect rcSessionsTab;
+    // ranked list geometry
+    Rect rcRank;
+    int rankScroll = 0;
+    int rankRows = 0;
+    int rankCount = 0;
+
+    void Paint(VirtWndPaintCtx&) override;
     bool OnMouseDown(VirtWndMouseEvent&) override;
     bool OnMouseUp(VirtWndMouseEvent&) override;
     bool OnMouseMove(VirtWndMouseEvent&) override;
@@ -1324,16 +1353,10 @@ static int HomeStatsDoyOfMonthFirst(int year, int m) {
     return doy;
 }
 
-// x of week column `col` in the month-separated grid: month blocks add a
-// wider gap before each month's first column; grid paint + hover share this
+// x of week column `col` in the uniform grid: no month gaps; column pitch is
+// cellDx + cellGap (2). Grid paint + hover share this.
 int HomeStatsWnd::ColX(int col) const {
-    int x = rcGrid.x + col * (cellDx + 2);
-    for (int m = 2; m <= 12; m++) {
-        if (monthStartCol[m] <= col) {
-            x += monthGapPx;
-        }
-    }
-    return x;
+    return rcGrid.x + col * (cellDx + 2);
 }
 
 void HomeStatsWnd::Paint(VirtWndPaintCtx& ctx) {
@@ -1377,495 +1400,10 @@ void HomeStatsWnd::Paint(VirtWndPaintCtx& ctx) {
     Gdiplus::SolidBrush silverBrush(GpCol(ac.silverHi)); // hovered data cell
     Gdiplus::Pen emptyOutlinePen(GpCol(ac.cellOutline));
 
-    // --- left column: most-read ranking + totals ---
+    // Heatmap/Graph band now uses full width (study history is separate band).
     int pad = dpi(8);
-    // adaptive split: the list needs room for name + time + bar, so it takes a
-    // bigger share on narrow bands; both sides are clamped so neither collapses.
-    // Use a FIXED percentage for all stats tabs (Read/Flashcards/Sessions) so the
-    // "Study History" column width never changes when switching the active tab.
-    // The larger percentage (sessions mode) accommodates the three numeric columns.
-    int rankPct = 40;
-    if (b.dx < DpiScale(win->hwndFrame, 760)) {
-        rankPct = 48;
-    }
-    int rankW = (b.dx * rankPct) / 100;
-    if (b.dx < DpiScale(win->hwndFrame, 560)) {
-        rankW = 0; // too narrow: chart only
-    }
-    if (rankW > 0) {
-        int minRankW = DpiScale(win->hwndFrame, 320);
-        int maxRankW = DpiScale(win->hwndFrame, 560);
-        if (rankW < minRankW) rankW = minRankW;
-        if (rankW > maxRankW) rankW = maxRankW;
-        if (rankW > b.dx / 2) rankW = b.dx / 2;
-    }
-    int heatX0 = b.x + rankW + (rankW > 0 ? pad * 2 : 0);
-    int heatW = b.x + b.dx - heatX0;
-
-    // ranked is used in both rankW > 0 and totals line, so declare here
-    Vec<FileState*> ranked;
-
-    if (rankW > 0) {
-        // nothing in this column may paint into the chart area
-        g->SetClip(Gdiplus::RectF((float)b.x, (float)b.y, (float)rankW, (float)b.dy));
-        g->DrawString(L"Study History", -1, &fontTitle, Gdiplus::PointF((float)b.x, (float)b.y), &valBrush);
-
-        // --- chips on the same line as the title (height dpi(20)), right-aligned ---
-        int tabY = b.y;
-        int tabDy = dpi(20);
-        int tabPad = dpi(8);
-        // chip labels
-        TempStr readLabel = _TRA("Read");
-        TempStr fcLabel = _TRA("Flashcards");
-        TempStr sessionsLabel = _TRA("Sessions");
-        // measure chip widths
-        Gdiplus::RectF rRead, rFc, rSessions;
-        g->MeasureString(ToWStrTemp(Str(readLabel)).s, -1, &fontLabel, Gdiplus::PointF(0, 0), &rRead);
-        g->MeasureString(ToWStrTemp(Str(fcLabel)).s, -1, &fontLabel, Gdiplus::PointF(0, 0), &rFc);
-        g->MeasureString(ToWStrTemp(Str(sessionsLabel)).s, -1, &fontLabel, Gdiplus::PointF(0, 0), &rSessions);
-        int readTabDx = (int)rRead.Width + tabPad * 2;
-        int fcTabDx = (int)rFc.Width + tabPad * 2;
-        int sessionsTabDx = (int)rSessions.Width + tabPad * 2;
-        int chipsTotalW = readTabDx + fcTabDx + sessionsTabDx;
-        int chipsStartX = b.x + rankW - chipsTotalW; // right-aligned in ranking column
-        if (chipsStartX < b.x) chipsStartX = b.x;
-        // fallback: short chip labels when narrow
-        if (chipsTotalW > rankW - pad) {
-            readLabel = _TRA("R");
-            fcLabel = _TRA("FC");
-            sessionsLabel = _TRA("S");
-            g->MeasureString(ToWStrTemp(Str(readLabel)).s, -1, &fontLabel, Gdiplus::PointF(0, 0), &rRead);
-            g->MeasureString(ToWStrTemp(Str(fcLabel)).s, -1, &fontLabel, Gdiplus::PointF(0, 0), &rFc);
-            g->MeasureString(ToWStrTemp(Str(sessionsLabel)).s, -1, &fontLabel, Gdiplus::PointF(0, 0), &rSessions);
-            readTabDx = (int)rRead.Width + tabPad * 2;
-            fcTabDx = (int)rFc.Width + tabPad * 2;
-            sessionsTabDx = (int)rSessions.Width + tabPad * 2;
-            chipsTotalW = readTabDx + fcTabDx + sessionsTabDx;
-            chipsStartX = b.x + rankW - chipsTotalW;
-            if (chipsStartX < b.x) chipsStartX = b.x;
-        }
-        // store tab rects for hit-testing
-        rcReadTab = {chipsStartX, tabY, readTabDx, tabDy};
-        rcFlashcardTab = {chipsStartX + readTabDx, tabY, fcTabDx, tabDy};
-        rcSessionsTab = {chipsStartX + readTabDx + fcTabDx, tabY, sessionsTabDx, tabDy};
-        // draw chips with improved contrast per theme
-        bool darkTheme = DsIsDarkTheme();
-        Gdiplus::Pen tabBorderPen(GpCol(ac.cellOutline));
-        // Inactive: dark theme = RGB(38,44,56) fill, ac.cellOutline border, ac.silverHi text
-        //             light theme = ac.cellEmpty fill, ac.cellOutline border, ac.text text
-        // Active: dark theme = ac.silverHi fill, ac.silverHi border, RGB(20,24,36) text
-        //         light theme = ac.textStrong fill, ac.textStrong border, white text
-        Gdiplus::SolidBrush tabInactiveDarkFill(GpCol(RGB(38, 44, 56))); // dark theme inactive fill
-        Gdiplus::SolidBrush tabInactiveLightFill(GpCol(ac.cellEmpty));
-        Gdiplus::SolidBrush tabActiveDarkFill(GpCol(ac.silverHi));
-        Gdiplus::SolidBrush tabActiveLightFill(GpCol(ac.textStrong));
-        Gdiplus::SolidBrush tabInactiveDarkText(GpCol(ac.silverHi));
-        Gdiplus::SolidBrush tabInactiveLightText(GpCol(ac.text));
-        Gdiplus::SolidBrush tabActiveDarkText(GpCol(RGB(20, 24, 36)));         // RGB(20,24,36) active dark text
-        Gdiplus::SolidBrush tabActiveLightText(Gdiplus::Color(255, 255, 255)); // white
-        // pick brushes for a chip (dark/light, by active state)
-        auto pickBrushes = [&](int chipIdx, Gdiplus::SolidBrush*& fill, Gdiplus::SolidBrush*& text) {
-            if (darkTheme) {
-                fill = chipIdx == statsTab ? &tabActiveDarkFill : &tabInactiveDarkFill;
-                text = chipIdx == statsTab ? &tabActiveDarkText : &tabInactiveDarkText;
-            } else {
-                fill = chipIdx == statsTab ? &tabActiveLightFill : &tabInactiveLightFill;
-                text = chipIdx == statsTab ? &tabActiveLightText : &tabInactiveLightText;
-            }
-        };
-        // Draw Read chip (idx 0)
-        Gdiplus::SolidBrush* chipFill = nullptr;
-        Gdiplus::SolidBrush* chipText = nullptr;
-        pickBrushes(0, chipFill, chipText);
-        g->FillRectangle(chipFill, rcReadTab.x, rcReadTab.y, rcReadTab.dx, rcReadTab.dy);
-        g->DrawRectangle(&tabBorderPen, rcReadTab.x, rcReadTab.y, rcReadTab.dx, rcReadTab.dy);
-        g->DrawString(ToWStrTemp(Str(readLabel)).s, -1, &fontLabel,
-                      Gdiplus::PointF((float)(rcReadTab.x + tabPad),
-                                      (float)(rcReadTab.y + (rcReadTab.dy - (int)rRead.Height) / 2)),
-                      chipText);
-        // Draw Flashcards chip (idx 1)
-        pickBrushes(1, chipFill, chipText);
-        g->FillRectangle(chipFill, rcFlashcardTab.x, rcFlashcardTab.y, rcFlashcardTab.dx, rcFlashcardTab.dy);
-        g->DrawRectangle(&tabBorderPen, rcFlashcardTab.x, rcFlashcardTab.y, rcFlashcardTab.dx, rcFlashcardTab.dy);
-        g->DrawString(ToWStrTemp(Str(fcLabel)).s, -1, &fontLabel,
-                      Gdiplus::PointF((float)(rcFlashcardTab.x + tabPad),
-                                      (float)(rcFlashcardTab.y + (rcFlashcardTab.dy - (int)rFc.Height) / 2)),
-                      chipText);
-        // Draw Sessions chip (idx 2)
-        pickBrushes(2, chipFill, chipText);
-        g->FillRectangle(chipFill, rcSessionsTab.x, rcSessionsTab.y, rcSessionsTab.dx, rcSessionsTab.dy);
-        g->DrawRectangle(&tabBorderPen, rcSessionsTab.x, rcSessionsTab.y, rcSessionsTab.dx, rcSessionsTab.dy);
-        g->DrawString(ToWStrTemp(Str(sessionsLabel)).s, -1, &fontLabel,
-                      Gdiplus::PointF((float)(rcSessionsTab.x + tabPad),
-                                      (float)(rcSessionsTab.y + (rcSessionsTab.dy - (int)rSessions.Height) / 2)),
-                      chipText);
-
-        // build the ranked list
-        Vec<FileState*> all;
-        gFileHistory.GetRecentlyOpenedOrder(all);
-
-        // Session entries for statsTab == 2 mode
-        Vec<SessionStatEntry> sessionEntries;
-
-        for (int i = 0; i < len(all); i++) {
-            FileState* fs = all[i];
-            int timeSec = (statsTab == 1) ? fs->flashcardStudyTimeSec : fs->readingTimeSec;
-            if (fs && timeSec > 0 && len(fs->filePath) > 0) {
-                ranked.Append(fs);
-            }
-        }
-        // insertion sort desc by the active time field (Vec has no iterators)
-        for (int i = 1; i < len(ranked); i++) {
-            FileState* e = ranked[i];
-            int j = i - 1;
-            int eSec = (statsTab == 1) ? e->flashcardStudyTimeSec : e->readingTimeSec;
-            while (j >= 0) {
-                int jSec = (statsTab == 1) ? ranked[j]->flashcardStudyTimeSec : ranked[j]->readingTimeSec;
-                if (jSec >= eSec) break;
-                ranked[j + 1] = ranked[j];
-                j--;
-            }
-            ranked[j + 1] = e;
-        }
-
-        // pinned row = active document tab's book (if any), else most recent
-        // reading/study activity; fallback = MRU-first book with stats.
-        // Using the tracked active book avoids 1-second timestamp granularity
-        // issues where ties would incorrectly prefer the book with more total time.
-        FileState* pinnedFs = nullptr;
-        if (statsTab != 2) {
-            // First priority: the currently active document tab's book (tracked in
-            // MainWindow::lastActiveBookPath, updated on tab switch and when time
-            // is credited). This is the most reliable signal of "what the user is
-            // looking at right now".
-            if (win->lastActiveBookPath && len(win->lastActiveBookPath) > 0) {
-                for (int i = 0; i < len(ranked); i++) {
-                    if (str::Eq(ranked[i]->filePath, win->lastActiveBookPath)) {
-                        pinnedFs = ranked[i];
-                        // move to top
-                        for (int j = i; j > 0; j--) {
-                            ranked[j] = ranked[j - 1];
-                        }
-                        ranked[0] = pinnedFs;
-                        break;
-                    }
-                }
-            }
-            // Second priority: most recent activity timestamp (fallback when no
-            // active tab is tracked, e.g. Home page itself is active).
-            if (!pinnedFs) {
-                int bestIdx = -1;
-                int bestTs = 0;
-                for (int i = 0; i < len(ranked); i++) {
-                    int ts = ranked[i]->lastActivityTs;
-                    if (ts > bestTs) {
-                        bestTs = ts;
-                        bestIdx = i;
-                    }
-                }
-                if (bestIdx >= 0) {
-                    pinnedFs = ranked[bestIdx];
-                    for (int j = bestIdx; j > 0; j--) {
-                        ranked[j] = ranked[j - 1];
-                    }
-                    ranked[0] = pinnedFs;
-                } else {
-                    // no book has a timestamp (all zero = pre-field data):
-                    // fall back to original behaviour — MRU-first book that has stats
-                    for (int i = 0; i < len(all); i++) {
-                        int at = -1;
-                        for (int j = 0; j < len(ranked); j++) {
-                            if (ranked[j] == all[i]) {
-                                at = j;
-                                break;
-                            }
-                        }
-                        if (at >= 0) {
-                            pinnedFs = ranked[at];
-                            for (int j = at; j > 0; j--) {
-                                ranked[j] = ranked[j - 1];
-                            }
-                            ranked[0] = pinnedFs;
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-
-        // Populate session entries if in sessions mode
-        bool pinnedSess = false;
-        Vec<SessionStatEntry> filtered;
-        if (statsTab == 2) {
-            ProfileDataGetSessionStats(sessionEntries);
-            // filter entries with readSec + fcSec > 0
-            filtered.Reset();
-            for (int i = 0; i < len(sessionEntries); i++) {
-                if (sessionEntries[i].readSec + sessionEntries[i].fcSec > 0) {
-                    // check if group still exists in gGlobalPrefs->tabGroups
-                    bool groupExists = false;
-                    if (gGlobalPrefs && gGlobalPrefs->tabGroups) {
-                        for (int j = 0; j < len(*gGlobalPrefs->tabGroups); j++) {
-                            if ((*gGlobalPrefs->tabGroups)[j] &&
-                                str::EqI(sessionEntries[i].name, (*gGlobalPrefs->tabGroups)[j]->name)) {
-                                groupExists = true;
-                                break;
-                            }
-                        }
-                    }
-                    if (groupExists) {
-                        filtered.Append(sessionEntries[i]);
-                    }
-                }
-            }
-            // insertion sort desc by readSec + fcSec (Vec has no iterators)
-            for (int i = 1; i < len(filtered); i++) {
-                SessionStatEntry e = filtered[i];
-                int j = i - 1;
-                while (j >= 0) {
-                    int curSec = filtered[j].readSec + filtered[j].fcSec;
-                    if (curSec >= e.readSec + e.fcSec) break;
-                    filtered[j + 1] = filtered[j];
-                    j--;
-                }
-                filtered[j + 1] = e;
-            }
-            // pin the most recently active group at the top. Rows loaded from an
-            // older sidecar have lastUsedTs == 0 and simply keep the time order.
-            int pinnedSessIdx = -1;
-            u32 pinnedSessTs = 0;
-            for (int i = 0; i < len(filtered); i++) {
-                if (filtered[i].lastUsedTs > pinnedSessTs) {
-                    pinnedSessTs = filtered[i].lastUsedTs;
-                    pinnedSessIdx = i;
-                }
-            }
-            if (pinnedSessIdx > 0) {
-                SessionStatEntry pinned = filtered[pinnedSessIdx];
-                for (int j = pinnedSessIdx; j > 0; j--) {
-                    filtered[j] = filtered[j - 1];
-                }
-                filtered[0] = pinned;
-            }
-            pinnedSess = (pinnedSessIdx >= 0 && pinnedSessTs > 0);
-            // set rankCount from filtered entries
-            rankCount = len(filtered);
-            if (rankScroll > rankCount - rankRows) {
-                rankScroll = rankCount - rankRows;
-            }
-            if (rankScroll < 0) {
-                rankScroll = 0;
-            }
-        }
-
-        // list top offset: chips now live on the title row (single row ~20 DIP + pads)
-        int y = b.y + pad + dpi(28); // below chips
-        int rowDy = dpi(17);
-        // totals line(s) at the bottom of the ranking column: measured first so
-        // the reserved height is exact and the text can never spill into the chart
-        SYSTEMTIME st{};
-        GetLocalTime(&st);
-        int todayKey = (int)st.wYear * 10000 + (int)st.wMonth * 100 + (int)st.wDay;
-        int readTodaySec = ProfileDataReadingDaySec(todayKey);
-        int readTotalSec = ProfileDataReadingTotalSec();
-        int fcTodaySec = ProfileDataStudyDaySec(todayKey);
-        int fcTotalSec = ProfileDataStudyTotalSec();
-        int fcTodayCards = ProfileDataStudyDayCards(todayKey);
-        int fcTotalCards = ProfileDataStudyTotalCards();
-        TempStr totalsRead = fmt("Read: Today %s | Total: %s", Str(HomeStatsFormatMinTemp(readTodaySec)),
-                                 Str(HomeStatsFormatMinTemp(readTotalSec)));
-        TempStr totalsFc =
-            fmt("Flashcards: Today %d cards / %s | Total: %d cards / %s", fcTodayCards,
-                Str(HomeStatsFormatMinTemp(fcTodaySec)), fcTotalCards, Str(HomeStatsFormatMinTemp(fcTotalSec)));
-        int totalsAvailW = rankW - 2 * pad;
-        Gdiplus::RectF totalsMeasure;
-        g->MeasureString(ToWStrTemp(Str(totalsRead)).s, -1, &fontLabel, Gdiplus::PointF(0, 0), &totalsMeasure);
-        int totalsReadW = (int)totalsMeasure.Width;
-        g->MeasureString(ToWStrTemp(Str(totalsFc)).s, -1, &fontLabel, Gdiplus::PointF(0, 0), &totalsMeasure);
-        int totalsFcW = (int)totalsMeasure.Width;
-        // one line only when BOTH halves plus the gap between them fit: the
-        // one-line draw concatenates them, so testing each half alone clipped
-        // the tail (the column clip cut "/ 25m" off at wide windows)
-        bool totalsTwoLines = (totalsReadW + dpi(24) + totalsFcW) > totalsAvailW;
-        int totalsDy = totalsTwoLines ? dpi(28) : dpi(14);
-        // the scroll hint gets its own band between the list and the totals
-        int hintDy = dpi(13);
-        int listTop = y;
-        int listBottom = b.y + b.dy - pad - totalsDy - hintDy - dpi(6);
-        rankRows = (listBottom - listTop) / rowDy;
-        if (rankRows < 1) {
-            rankRows = 1;
-        }
-        if (statsTab != 2) {
-            rankCount = len(ranked);
-        }
-        if (rankScroll > rankCount - rankRows) {
-            rankScroll = rankCount - rankRows;
-        }
-        if (rankScroll < 0) {
-            rankScroll = 0;
-        }
-        rcRank = {b.x, listTop, rankW, listBottom - listTop};
-        // bars are proportional to the largest value in the list (not to row 0:
-        // the pinned "last studied" row is usually not the biggest reader)
-        int maxSecRanked = 1;
-        if (statsTab == 2) {
-            for (int i = 0; i < len(filtered); i++) {
-                int tot = filtered[i].readSec + filtered[i].fcSec;
-                if (tot > maxSecRanked) maxSecRanked = tot;
-            }
-        } else {
-            for (int i = 0; i < len(ranked); i++) {
-                int s = (statsTab == 1) ? ranked[i]->flashcardStudyTimeSec : ranked[i]->readingTimeSec;
-                if (s > maxSecRanked) maxSecRanked = s;
-            }
-        }
-        Gdiplus::SolidBrush barBrush(GpCol(ac.silver)); // silver (D4)
-        int nRows = std::min(rankCount - rankScroll, rankRows);
-        for (int i = 0; i < nRows; i++) {
-            // ---- sessions mode data ----
-            int sessionIdx = rankScroll + i;
-            bool isSessions = (statsTab == 2);
-            const SessionStatEntry* entry;
-            if (isSessions) {
-                entry = &filtered[sessionIdx];
-            } else {
-                entry = nullptr;
-            }
-            // ---- common data source ----
-            FileState* fs = isSessions ? nullptr : ranked[rankScroll + i];
-            // name: from file path (Read/Flashcards) or from session entry name (Sessions)
-            TempStr baseName;
-            int readSec = 0, fcSec = 0, fcCards = 0, total = 0;
-            int sec = 0;
-            if (isSessions) {
-                baseName = Str(entry->name.s, entry->name.len); // use explicit len
-                readSec = entry->readSec;
-                fcSec = entry->fcSec;
-                fcCards = entry->fcCards;
-                total = readSec + fcSec;
-                sec = total;
-            } else {
-                baseName = path::GetBaseNameTemp(fs->filePath);
-                sec = (statsTab == 1) ? fs->flashcardStudyTimeSec : fs->readingTimeSec;
-            }
-            // column texts: Sessions get three numeric columns (Read | Flashcards |
-            // Total) before the bar; the other tabs keep one time string.
-            // flashcard rows also show the rated-card count (user 2026-10-25)
-            TempStr timeTxt;
-            TempStr sessReadTxt;
-            TempStr sessFcTxt;
-            TempStr sessTotalTxt;
-            if (isSessions) {
-                sessReadTxt = HomeStatsFormatMinTemp(readSec);
-                // time first, count last: if a column is too narrow the ellipsis
-                // then eats the count, never the time
-                sessFcTxt = fcCards > 0 ? fmt("%s (%d)", Str(HomeStatsFormatMinTemp(fcSec)), fcCards)
-                                        : HomeStatsFormatMinTemp(fcSec);
-                sessTotalTxt = HomeStatsFormatMinTemp(total);
-            } else if (statsTab == 1 && fs->flashcardCardsDone > 0) {
-                timeTxt = fmt("%d cards / %s", fs->flashcardCardsDone, Str(HomeStatsFormatMinTemp(sec)));
-            } else {
-                timeTxt = HomeStatsFormatMinTemp(sec);
-            }
-            int rowY = listTop + i * rowDy;
-            // fixed columns: name (left, ellipsized) | time (right-aligned) | bar (fixed x)
-            int colNameW = (rankW * (isSessions ? 26 : 50)) / 100 - pad;
-            if (colNameW < dpi(40)) {
-                colNameW = dpi(40);
-            }
-            int colBarW = (rankW * (isSessions ? 20 : 22)) / 100;
-            int colTimeR = b.x + rankW - pad - colBarW - dpi(8);
-            int colTimeL = b.x + pad + colNameW + dpi(4);
-            if (colTimeR < colTimeL + dpi(20)) {
-                colTimeR = colTimeL + dpi(20);
-            }
-            int barStartX = colTimeR + dpi(8);
-            int barMaxW = b.x + rankW - pad - barStartX;
-            if (barMaxW < dpi(10)) {
-                barMaxW = dpi(10);
-            }
-            bool isPinned = isSessions ? (sessionIdx == 0 && pinnedSess) : (fs == pinnedFs);
-            Gdiplus::SolidBrush pinnedDarkBrush(Gdiplus::Color(255, 255, 255)); // user: white
-            Gdiplus::SolidBrush pinnedLightBrush(GpCol(ac.textStrong));         // white would vanish on light
-            Gdiplus::SolidBrush* nameBrush = isPinned ? (darkTheme ? &pinnedDarkBrush : &pinnedLightBrush) : &txtBrush;
-            Gdiplus::StringFormat sfCell;
-            sfCell.SetFormatFlags(Gdiplus::StringFormatFlagsNoWrap);
-            sfCell.SetTrimming(Gdiplus::StringTrimmingEllipsisCharacter);
-            sfCell.SetAlignment(Gdiplus::StringAlignmentNear);
-            sfCell.SetLineAlignment(Gdiplus::StringAlignmentCenter);
-            Gdiplus::RectF nameRc((float)(b.x + pad), (float)rowY, (float)colNameW, (float)rowDy);
-            g->DrawString(ToWStrTemp(Str(baseName)).s, -1, &fontLabel, nameRc, &sfCell, nameBrush);
-            sfCell.SetAlignment(Gdiplus::StringAlignmentFar);
-            if (isSessions) {
-                // three numeric columns before the bar: Read | Flashcards | Total
-                int sessGap = dpi(6);
-                int sessColW = (colTimeR - colTimeL - 2 * sessGap) / 3;
-                if (sessColW < dpi(12)) {
-                    sessColW = dpi(12);
-                }
-                const TempStr* sessTxts[3] = {&sessReadTxt, &sessFcTxt, &sessTotalTxt};
-                for (int c = 0; c < 3; c++) {
-                    Gdiplus::RectF cRc((float)(colTimeL + c * (sessColW + sessGap)), (float)rowY, (float)sessColW,
-                                       (float)rowDy);
-                    g->DrawString(ToWStrTemp(Str(*sessTxts[c])).s, -1, &fontLabel, cRc, &sfCell, &valBrush);
-                }
-            } else {
-                Gdiplus::RectF timeRc((float)colTimeL, (float)rowY, (float)(colTimeR - colTimeL), (float)rowDy);
-                g->DrawString(ToWStrTemp(Str(timeTxt)).s, -1, &fontLabel, timeRc, &sfCell, &valBrush);
-            }
-            // bar proportional to total (sessions) or sec (Read/Flashcards)
-            int barW;
-            if (isSessions) {
-                barW = (int)(((float)total / (float)maxSecRanked) * (float)barMaxW);
-            } else {
-                barW = (int)(((float)sec / (float)maxSecRanked) * (float)barMaxW);
-            }
-            if (barW > barMaxW) {
-                barW = barMaxW;
-            }
-            if (sec > 0 && barW < 2) {
-                barW = 2;
-            }
-            g->FillRectangle(&barBrush, barStartX, rowY + dpi(4), barW, rowDy - dpi(9));
-        }
-        if (rankCount == 0) {
-            // empty state depends on mode
-            if (statsTab == 1) {
-                g->DrawString(L"Study flashcards to collect stats", -1, &fontLabel,
-                              Gdiplus::PointF((float)(b.x + pad), (float)y), &txtBrush);
-            } else if (statsTab == 2) {
-                g->DrawString(L"Study with a tab group active to collect session stats", -1, &fontLabel,
-                              Gdiplus::PointF((float)(b.x + pad), (float)y), &txtBrush);
-            } else {
-                g->DrawString(L"Read with auto-scroll to collect stats", -1, &fontLabel,
-                              Gdiplus::PointF((float)(b.x + pad), (float)y), &txtBrush);
-            }
-        } else if (rankCount > rankRows) {
-            // scroll hint
-            if (statsTab == 2) {
-                TempStr more = fmt("%d groups - scroll", rankCount);
-                g->DrawString(ToWStrTemp(Str(more)).s, -1, &fontLabel,
-                              Gdiplus::PointF((float)(b.x + pad), (float)(listBottom + dpi(1))), &txtBrush);
-            } else {
-                TempStr more = fmt("%d books - scroll", rankCount);
-                g->DrawString(ToWStrTemp(Str(more)).s, -1, &fontLabel,
-                              Gdiplus::PointF((float)(b.x + pad), (float)(listBottom + dpi(1))), &txtBrush);
-            }
-        }
-        // totals: bottom-anchored; two lines only when the band is too narrow
-        if (totalsTwoLines) {
-            g->DrawString(ToWStrTemp(Str(totalsRead)).s, -1, &fontLabel,
-                          Gdiplus::PointF((float)(b.x + pad), (float)(b.y + b.dy - pad - dpi(26))), &valBrush);
-            g->DrawString(ToWStrTemp(Str(totalsFc)).s, -1, &fontLabel,
-                          Gdiplus::PointF((float)(b.x + pad), (float)(b.y + b.dy - pad - dpi(13))), &valBrush);
-        } else {
-            TempStr totalsAll = fmt("%s    %s", Str(totalsRead), Str(totalsFc));
-            g->DrawString(ToWStrTemp(Str(totalsAll)).s, -1, &fontLabel,
-                          Gdiplus::PointF((float)(b.x + pad), (float)(b.y + b.dy - pad - dpi(13))), &valBrush);
-        }
-        g->ResetClip();
-    }
+    int heatX0 = b.x;
+    int heatW = b.dx;
 
     // --- year navigation row ---
     int yearRowDy = dpi(16);
@@ -1903,54 +1441,42 @@ void HomeStatsWnd::Paint(VirtWndPaintCtx& ctx) {
     }
 
     // --- heatmap grid (Monday-first rows, GitHub/Anki style) ---
-    // month-separated layout (user 2026-10-16): a wider gap between month
-    // blocks; weekday letters for ALL 7 rows, vertically centered with their
-    // row; 3-letter month names BELOW each block, centered over it
-    // Cells must ALWAYS be square. Compute cell size from the available height
-    // (7 rows) since that's the constrained dimension; width follows.
+    // uniform grid: no month gaps; column pitch = cellDx + cellGap (2).
+    // cell is ALWAYS SQUARE: cellDx == cellDy.
+    // size = min(cellWidthPitch, cellHeightPitch), floored at 2.
+    // grid does NOT stretch to fill the band; it's sized by the square cells.
     int labelDx = dpi(12);
     int gridW = heatW - labelDx;
     int cellGap = 2;
-    monthGapPx = dpi(6);
     int rowGap = 2;
     int monthLblDy = dpi(14);
     int topUsable = b.y + yearRowDy;
     int bottomUsable = b.y + b.dy - pad - monthLblDy;
     int availGridDy = bottomUsable - topUsable;
-    // 7 rows, each cellDy + rowGap, but last row has no rowGap after it
-    // cellDy = (availGridDy - 6 * rowGap) / 7, floored to at least 2
-    cellDy = (availGridDy - 6 * rowGap) / 7;
-    if (cellDy < 2) {
-        cellDy = 2;
+    // cellHeightPitch: max square size that fits 7 rows + 6 gaps in available height
+    int cellHeightPitch = (availGridDy - 6 * rowGap) / 7;
+    if (cellHeightPitch < 2) {
+        cellHeightPitch = 2;
     }
-    // Square cells: cellDx == cellDy
-    cellDx = cellDy;
-    // Recompute gridW needed for 53 columns + 11 month gaps with square cells
-    int neededGridW = 53 * (cellDx + cellGap) + 11 * monthGapPx - cellGap; // -cellGap because last col has no gap
-    // If neededGridW > gridW, we must shrink cells to fit width (keep square)
-    if (neededGridW > gridW) {
-        // Solve: 53*(cell + cellGap) + 11*monthGapPx - cellGap <= gridW
-        // 53*cell + 53*cellGap + 11*monthGapPx - cellGap <= gridW
-        // 53*cell <= gridW - 52*cellGap - 11*monthGapPx
-        cellDx = (gridW - 52 * cellGap - 11 * monthGapPx) / 53;
-        cellDy = cellDx;
-        if (cellDx < 2) {
-            cellDx = cellDy = 2;
-        }
+    // cellWidthPitch: max square size that fits 53 cols + 52 gaps in available width
+    int cellWidthPitch = (gridW - 52 * cellGap) / 53;
+    if (cellWidthPitch < 2) {
+        cellWidthPitch = 2;
     }
+    // ALWAYS square: pick the smaller of the two pitches
+    cellDx = cellDy = (cellWidthPitch < cellHeightPitch) ? cellWidthPitch : cellHeightPitch;
     int gridDy = 7 * (cellDy + rowGap) - rowGap; // 7 rows, 6 gaps between them
+    int gridDx = 53 * (cellDx + cellGap) - cellGap; // 53 cols, 52 gaps
     // grid mode = ONLY the heatmap (no annual bar chart here — that is graph
-    // mode's job). Center the grid between the year row and the month names.
-    int extra = bottomUsable - topUsable - gridDy;
-    if (extra < 0) {
-        extra = 0;
-    }
-    rcGrid = {heatX0 + labelDx, topUsable + extra / 2, 53 * (cellDx + cellGap) + 11 * monthGapPx, gridDy};
+    // mode's job). Top-align the grid under the year row (not centered), so the
+    // month labels stay attached to the grid and don't drift.
+    rcGrid = {heatX0 + labelDx, topUsable, gridDx, gridDy};
     int jan1Wd = 0;
     HomeStatsDateFromDayOfYear(year, 1, nullptr, nullptr, &jan1Wd);
     firstCol = (jan1Wd + 6) % 7; // Monday-first row index of Jan 1
     for (int m = 1; m <= 12; m++) {
         monthStartCol[m] = (firstCol + HomeStatsDoyOfMonthFirst(year, m) - 1) / 7;
+        monthBorderAlt[m] = (m % 2 == 0); // Jan=1 (odd)=gray (false), Feb=2 (even)=silver (true), ...
     }
     // weekday labels: one letter per day, Monday-first, vertically centered
     // with the row it names
@@ -1965,22 +1491,45 @@ void HomeStatsWnd::Paint(VirtWndPaintCtx& ctx) {
             g->DrawString(letter, 1, &fontLabel, Gdiplus::PointF((float)heatX0, y), &txtBrush);
         }
     }
-    // month names below each block, centered over the columns it spans
+    // month names below each block, centered over the columns it spans.
+    // Stagger on two rows if labels would overlap (detect by checking if
+    // next label's left edge < current label's right edge + small gap).
+    struct MonthLabel { int m; int x0; int x1; int width; int row; };
+    MonthLabel labels[12];
+    int labelCount = 0;
     for (int m = 1; m <= 12; m++) {
         int c0 = monthStartCol[m];
         int c1 = (m < 12) ? monthStartCol[m + 1] : 53;
         int x0 = ColX(c0);
-        int x1 = ColX(c1) - cellGap; // right edge of the month's last column
+        int x1 = ColX(c1) - cellGap;
         Gdiplus::RectF nameRc;
         g->MeasureString(kStatsMonthNames[m - 1], 3, &fontLabel, Gdiplus::PointF(0, 0), &nameRc);
-        if (x1 - x0 >= (int)nameRc.Width + 4) { // skip on very narrow blocks
-            float cx = (float)(x0 + x1) / 2.0f - nameRc.Width / 2.0f;
-            g->DrawString(kStatsMonthNames[m - 1], 3, &fontLabel,
-                          Gdiplus::PointF(cx, (float)(rcGrid.y + rcGrid.dy + dpi(2))), &txtBrush);
+        int w = (int)nameRc.Width;
+        if (x1 - x0 >= w + 4) {
+            labels[labelCount++] = {m, x0, x1, w, 0};
         }
     }
-    // cells — D2 styling: empty = black w/ slight gray outline; filled = graded
-    // silver-grays by reading time; hovered = silver; TODAY = orange outline
+    // assign rows (0 or 1) to avoid overlap
+    for (int i = 0; i < labelCount; i++) {
+        int row = 0;
+        if (i > 0) {
+            int prevRight = labels[i - 1].x0 + (labels[i - 1].x1 - labels[i - 1].x0) / 2 + labels[i - 1].width / 2;
+            int currLeft = labels[i].x0 + (labels[i].x1 - labels[i].x0) / 2 - labels[i].width / 2;
+            if (currLeft < prevRight + dpi(4)) {
+                row = 1;
+            }
+        }
+        labels[i].row = row;
+    }
+    for (int i = 0; i < labelCount; i++) {
+        const auto& L = labels[i];
+        float cx = (float)(L.x0 + L.x1) / 2.0f - (float)L.width / 2.0f;
+        float cy = (float)(rcGrid.y + rcGrid.dy + dpi(2) + L.row * dpi(14));
+        g->DrawString(kStatsMonthNames[L.m - 1], 3, &fontLabel,
+                      Gdiplus::PointF(cx, cy), &txtBrush);
+    }
+    // cells — fill by reading time; hovered = silver; TODAY = orange outline.
+    // Month border: alternating gray/silver per monthBorderAlt[].
     int todayDoy = 0;
     {
         SYSTEMTIME st{};
@@ -1999,6 +1548,9 @@ void HomeStatsWnd::Paint(VirtWndPaintCtx& ctx) {
         }
     }
     Gdiplus::Pen todayPen(GpCol(ac.today), 1.6f); // orange: TODAY
+    // month border pens (theme tokens)
+    Gdiplus::Pen grayBorderPen(GpCol(ac.cellOutline));      // gray (dark) / light gray (light)
+    Gdiplus::Pen silverBorderPen(GpCol(ac.silverHi));       // silver accent
     int daysInYear = HomeStatsDaysInYear(year);
     for (int doy = 1; doy <= daysInYear; doy++) {
         int mm = 0, dd = 0;
@@ -2009,11 +1561,23 @@ void HomeStatsWnd::Paint(VirtWndPaintCtx& ctx) {
         int col = idx / 7;
         int cx = ColX(col);
         int cy = rcGrid.y + row * (cellDy + rowGap);
+        // border color by the day's REAL month (mm), not the week column
+        bool useSilverBorder = monthBorderAlt[mm];
+        Gdiplus::Pen* borderPen = useSilverBorder ? &silverBorderPen : &grayBorderPen;
         if (sec == 0) {
             g->FillRectangle(&emptyBrush, cx, cy, cellDx, cellDy);
-            g->DrawRectangle(&emptyOutlinePen, cx, cy, cellDx, cellDy);
-        } else if (doy == hoverDay) {
-            g->FillRectangle(&silverBrush, cx, cy, cellDx, cellDy);
+            g->DrawRectangle(borderPen, cx, cy, cellDx, cellDy);
+        } else if (doy == hoverDay && hoverFadeAlpha > 0) {
+            // Apply fade alpha to hover highlight
+            if (hoverFadeAlpha >= 255) {
+                g->FillRectangle(&silverBrush, cx, cy, cellDx, cellDy);
+            } else {
+                Gdiplus::Color hoverColor = GpCol(ac.silverHi);
+                BYTE a = (BYTE)hoverFadeAlpha;
+                Gdiplus::SolidBrush fadeBrush(Gdiplus::Color(a, hoverColor.GetR(), hoverColor.GetG(), hoverColor.GetB()));
+                g->FillRectangle(&fadeBrush, cx, cy, cellDx, cellDy);
+            }
+            g->DrawRectangle(borderPen, cx, cy, cellDx, cellDy);
         } else {
             int mins = sec / 60;
             Gdiplus::ARGB c;
@@ -2028,6 +1592,7 @@ void HomeStatsWnd::Paint(VirtWndPaintCtx& ctx) {
             }
             Gdiplus::SolidBrush cellBrush(c);
             g->FillRectangle(&cellBrush, cx, cy, cellDx, cellDy);
+            g->DrawRectangle(borderPen, cx, cy, cellDx, cellDy);
         }
         if (doy == todayDoy) {
             g->DrawRectangle(&todayPen, cx - 1, cy - 1, cellDx + 2, cellDy + 2);
@@ -2191,28 +1756,6 @@ bool HomeStatsWnd::OnMouseUp(VirtWndMouseEvent& e) {
     // ptWindow), while the rc* rects are in WINDOW coords (set in Paint from
     // ctx.bounds) — convert before hit-testing
     Point pt{e.pt.x + bounds.x, e.pt.y + bounds.y};
-    // Tabs: 0 = Read, 1 = Flashcards, 2 = Sessions
-    if (rcReadTab.Contains(pt)) {
-        if (statsTab != 0) {
-            statsTab = 0;
-            HwndInvalidate(win->hwndCanvas);
-        }
-        return true;
-    }
-    if (rcFlashcardTab.Contains(pt)) {
-        if (statsTab != 1) {
-            statsTab = 1;
-            HwndInvalidate(win->hwndCanvas);
-        }
-        return true;
-    }
-    if (rcSessionsTab.Contains(pt)) {
-        if (statsTab != 2) {
-            statsTab = 2;
-            HwndInvalidate(win->hwndCanvas);
-        }
-        return true;
-    }
     // D7: Grid <-> Graph toggle
     if (rcMode.Contains(pt)) {
         graphMode = !graphMode;
@@ -2273,8 +1816,7 @@ bool HomeStatsWnd::OnMouseMove(VirtWndMouseEvent& e) {
 bool HomeStatsWnd::OnSetCursor(Point pt) {
     // pt arrives LOCAL to our bounds; rcPrev/rcNext/rcMode are in window coords
     Point ptAbs{pt.x + bounds.x, pt.y + bounds.y};
-    if (rcPrev.Contains(ptAbs) || rcNext.Contains(ptAbs) || rcMode.Contains(ptAbs) || rcReadTab.Contains(ptAbs) ||
-        rcFlashcardTab.Contains(ptAbs) || rcSessionsTab.Contains(ptAbs)) {
+    if (rcPrev.Contains(ptAbs) || rcNext.Contains(ptAbs) || rcMode.Contains(ptAbs)) {
         SetCursorCached(IDC_HAND);
     } else {
         SetCursorCached(IDC_ARROW);
@@ -2283,43 +1825,12 @@ bool HomeStatsWnd::OnSetCursor(Point pt) {
 }
 
 bool HomeStatsWnd::OnMouseWheel(VirtWndMouseEvent& e) {
-    // D3: internal scroll of the most-read list — wheel over the ranking
-    // column scrolls its rows (the home page itself doesn't scroll then).
-    // ev.pt is LOCAL (see OnMouseUp); rcRank is in window coords.
-    Point pt{e.pt.x + bounds.x, e.pt.y + bounds.y};
-    if (!rcRank.Contains(pt) || rankCount <= rankRows) {
-        return false; // not ours: let the home page scroll
-    }
-    // e.wheelDelta: positive = wheel up (earlier rows), negative = down
-    int step = e.wheelDelta > 0 ? -1 : 1;
-    if (e.wheelDelta == 0) {
-        return false;
-    }
-    int newScroll = rankScroll + step * 3;
-    if (newScroll > rankCount - rankRows) {
-        newScroll = rankCount - rankRows;
-    }
-    if (newScroll < 0) {
-        newScroll = 0;
-    }
-    if (newScroll != rankScroll) {
-        rankScroll = newScroll;
-        HwndInvalidate(win->hwndCanvas);
-    }
-    return true; // consumed
+    // Ranking column is now in HomeStudyHistoryWnd; no wheel handling here.
+    return false;
 }
 
 TempStr HomeStatsWnd::GetTooltipTemp(Point pt) {
     Point ptAbs{pt.x + bounds.x, pt.y + bounds.y};
-    if (rcReadTab.Contains(ptAbs)) {
-        return _TRA("Reading time per book (auto-scroll on)");
-    }
-    if (rcFlashcardTab.Contains(ptAbs)) {
-        return _TRA("Flashcard study time per book");
-    }
-    if (rcSessionsTab.Contains(ptAbs)) {
-        return _TRA("Study time per tab group (survives book removal)");
-    }
     if (hoverDay < 1) {
         return {};
     }
@@ -2338,6 +1849,451 @@ TempStr HomeStatsWnd::GetTooltipTemp(Point pt) {
     return fmt("%d-%02d-%02d\nRead: %s\nFlashcards: %s", year, mm, dd, Str(readT), Str(fcT));
 }
 
+void HomeStatsWnd::OnMouseEnter() {
+    // Mouse re-entered during fade: cancel fade and show immediately
+    StopHoverFade();
+    hoverFadeAlpha = 255;
+    Invalidate();
+}
+
+void HomeStatsWnd::OnMouseLeave() {
+    // Mouse left the heatmap band: start fade out
+    if (hoverDay >= 1 && hoverFadeAlpha > 0) {
+        StartHoverFade();
+    }
+}
+
+void HomeStatsWnd::StartHoverFade() {
+    if (hoverFadeTimer != 0) {
+        return; // already fading
+    }
+    hoverFadeTargetDay = hoverDay;
+    hoverFadeStartTime = GetTickCount();
+    hoverFadeAlpha = 255;
+    HWND hwnd = GetHwnd();
+    if (hwnd) {
+        hoverFadeTimer = SetTimer(hwnd, (UINT_PTR)this, 16, nullptr); // ~60fps
+    }
+}
+
+void HomeStatsWnd::StopHoverFade() {
+    if (hoverFadeTimer != 0) {
+        HWND hwnd = GetHwnd();
+        if (hwnd) {
+            KillTimer(hwnd, hoverFadeTimer);
+        }
+        hoverFadeTimer = 0;
+        hoverFadeTargetDay = -1;
+        hoverFadeAlpha = 255;
+    }
+}
+
+void CALLBACK HomeStatsWnd::HoverFadeTimerProc(HWND hwnd, UINT, UINT_PTR id, DWORD) {
+    auto* self = (HomeStatsWnd*)id;
+    if (!self || self->hoverFadeTimer == 0) {
+        return;
+    }
+    DWORD now = GetTickCount();
+    DWORD elapsed = now - self->hoverFadeStartTime;
+    if (elapsed >= 500) {
+        // fade complete
+        self->hoverFadeAlpha = 0;
+        self->hoverDay = -1;
+        self->StopHoverFade();
+        self->Invalidate();
+    } else {
+        // linear fade 255 -> 0 over 500ms
+        self->hoverFadeAlpha = (int)(255 * (1.0 - (double)elapsed / 500.0));
+        if (self->hoverFadeAlpha < 0) self->hoverFadeAlpha = 0;
+        self->Invalidate();
+    }
+}
+
+// --- HomeStudyHistoryWnd implementation ---
+
+void HomeStudyHistoryWnd::Paint(VirtWndPaintCtx& ctx) {
+    Rect b = ctx.bounds;
+    if (b.IsEmpty() || b.dx < DpiScale(win->hwndFrame, 320) || b.dy < DpiScale(win->hwndFrame, 80)) {
+        return;
+    }
+    HDC hdc = GfxHdc(ctx.gfx);
+    if (!hdc) return;
+    Gdiplus::Graphics gStorage(hdc);
+    if (gStorage.GetLastStatus() != Gdiplus::Ok) return;
+    Gdiplus::Graphics* g = &gStorage;
+    g->SetTextRenderingHint(Gdiplus::TextRenderingHintClearTypeGridFit);
+    auto dpi = [this](int v) { return DpiScale(win->hwndFrame, v); };
+    DsAccents ac = DsAccentsGet();
+    Gdiplus::Font fontLabel(DsFontFamily(), DsFontSizePx(win->hwndFrame, DsFontSizeLabel()), Gdiplus::FontStyleRegular, Gdiplus::UnitPixel);
+    Gdiplus::Font fontTitle(DsFontFamily(), DsFontSizePx(win->hwndFrame, DsFontSizeTitle()), Gdiplus::FontStyleBold, Gdiplus::UnitPixel);
+    Gdiplus::SolidBrush txtBrush(GpCol(ac.text));
+    Gdiplus::SolidBrush valBrush(GpCol(ac.textStrong));
+    Gdiplus::SolidBrush hotBrush(GpCol(ac.textHot));
+    Gdiplus::SolidBrush silverBrush(GpCol(ac.silverHi));
+    bool darkTheme = DsIsDarkTheme();
+
+    int pad = dpi(8);
+    // Title "Study History"
+    g->DrawString(L"Study History", -1, &fontTitle, Gdiplus::PointF((float)b.x, (float)b.y), &valBrush);
+
+    // Tabs: Read / Flashcards / Sessions (same as HomeStatsWnd)
+    int tabY = b.y;
+    int tabDy = dpi(20);
+    int tabPad = dpi(8);
+    TempStr readLabel = _TRA("Read");
+    TempStr fcLabel = _TRA("Flashcards");
+    TempStr sessionsLabel = _TRA("Sessions");
+    Gdiplus::RectF rRead, rFc, rSessions;
+    g->MeasureString(ToWStrTemp(Str(readLabel)).s, -1, &fontLabel, Gdiplus::PointF(0, 0), &rRead);
+    g->MeasureString(ToWStrTemp(Str(fcLabel)).s, -1, &fontLabel, Gdiplus::PointF(0, 0), &rFc);
+    g->MeasureString(ToWStrTemp(Str(sessionsLabel)).s, -1, &fontLabel, Gdiplus::PointF(0, 0), &rSessions);
+    int readTabDx = (int)rRead.Width + tabPad * 2;
+    int fcTabDx = (int)rFc.Width + tabPad * 2;
+    int sessionsTabDx = (int)rSessions.Width + tabPad * 2;
+    int chipsTotalW = readTabDx + fcTabDx + sessionsTabDx;
+    int chipsStartX = b.x + b.dx - chipsTotalW;
+    if (chipsStartX < b.x) chipsStartX = b.x;
+    if (chipsTotalW > b.dx - pad) {
+        readLabel = _TRA("R");
+        fcLabel = _TRA("FC");
+        sessionsLabel = _TRA("S");
+        g->MeasureString(ToWStrTemp(Str(readLabel)).s, -1, &fontLabel, Gdiplus::PointF(0, 0), &rRead);
+        g->MeasureString(ToWStrTemp(Str(fcLabel)).s, -1, &fontLabel, Gdiplus::PointF(0, 0), &rFc);
+        g->MeasureString(ToWStrTemp(Str(sessionsLabel)).s, -1, &fontLabel, Gdiplus::PointF(0, 0), &rSessions);
+        readTabDx = (int)rRead.Width + tabPad * 2;
+        fcTabDx = (int)rFc.Width + tabPad * 2;
+        sessionsTabDx = (int)rSessions.Width + tabPad * 2;
+        chipsTotalW = readTabDx + fcTabDx + sessionsTabDx;
+        chipsStartX = b.x + b.dx - chipsTotalW;
+        if (chipsStartX < b.x) chipsStartX = b.x;
+    }
+    rcReadTab = {chipsStartX, tabY, readTabDx, tabDy};
+    rcFlashcardTab = {chipsStartX + readTabDx, tabY, fcTabDx, tabDy};
+    rcSessionsTab = {chipsStartX + readTabDx + fcTabDx, tabY, sessionsTabDx, tabDy};
+
+    Gdiplus::Pen tabBorderPen(GpCol(ac.cellOutline));
+    Gdiplus::SolidBrush tabInactiveDarkFill(GpCol(RGB(38, 44, 56)));
+    Gdiplus::SolidBrush tabInactiveLightFill(GpCol(ac.cellEmpty));
+    Gdiplus::SolidBrush tabActiveDarkFill(GpCol(ac.silverHi));
+    Gdiplus::SolidBrush tabActiveLightFill(GpCol(ac.textStrong));
+    Gdiplus::SolidBrush tabInactiveDarkText(GpCol(ac.silverHi));
+    Gdiplus::SolidBrush tabInactiveLightText(GpCol(ac.text));
+    Gdiplus::SolidBrush tabActiveDarkText(GpCol(RGB(20, 24, 36)));
+    Gdiplus::SolidBrush tabActiveLightText(Gdiplus::Color(255, 255, 255));
+    auto pickBrushes = [&](int chipIdx, Gdiplus::SolidBrush*& fill, Gdiplus::SolidBrush*& text) {
+        if (darkTheme) {
+            fill = chipIdx == statsTab ? &tabActiveDarkFill : &tabInactiveDarkFill;
+            text = chipIdx == statsTab ? &tabActiveDarkText : &tabInactiveDarkText;
+        } else {
+            fill = chipIdx == statsTab ? &tabActiveLightFill : &tabInactiveLightFill;
+            text = chipIdx == statsTab ? &tabActiveLightText : &tabInactiveLightText;
+        }
+    };
+    // Draw Read chip
+    Gdiplus::SolidBrush* chipFill = nullptr;
+    Gdiplus::SolidBrush* chipText = nullptr;
+    pickBrushes(0, chipFill, chipText);
+    g->FillRectangle(chipFill, rcReadTab.x, rcReadTab.y, rcReadTab.dx, rcReadTab.dy);
+    g->DrawRectangle(&tabBorderPen, rcReadTab.x, rcReadTab.y, rcReadTab.dx, rcReadTab.dy);
+    g->DrawString(ToWStrTemp(Str(readLabel)).s, -1, &fontLabel,
+                  Gdiplus::PointF((float)(rcReadTab.x + tabPad), (float)(rcReadTab.y + (rcReadTab.dy - (int)rRead.Height) / 2)), chipText);
+    // Draw Flashcards chip
+    pickBrushes(1, chipFill, chipText);
+    g->FillRectangle(chipFill, rcFlashcardTab.x, rcFlashcardTab.y, rcFlashcardTab.dx, rcFlashcardTab.dy);
+    g->DrawRectangle(&tabBorderPen, rcFlashcardTab.x, rcFlashcardTab.y, rcFlashcardTab.dx, rcFlashcardTab.dy);
+    g->DrawString(ToWStrTemp(Str(fcLabel)).s, -1, &fontLabel,
+                  Gdiplus::PointF((float)(rcFlashcardTab.x + tabPad), (float)(rcFlashcardTab.y + (rcFlashcardTab.dy - (int)rFc.Height) / 2)), chipText);
+    // Draw Sessions chip
+    pickBrushes(2, chipFill, chipText);
+    g->FillRectangle(chipFill, rcSessionsTab.x, rcSessionsTab.y, rcSessionsTab.dx, rcSessionsTab.dy);
+    g->DrawRectangle(&tabBorderPen, rcSessionsTab.x, rcSessionsTab.y, rcSessionsTab.dx, rcSessionsTab.dy);
+    g->DrawString(ToWStrTemp(Str(sessionsLabel)).s, -1, &fontLabel,
+                  Gdiplus::PointF((float)(rcSessionsTab.x + tabPad), (float)(rcSessionsTab.y + (rcSessionsTab.dy - (int)rSessions.Height) / 2)), chipText);
+
+    // Build ranked list (same logic as HomeStatsWnd)
+    Vec<FileState*> all;
+    gFileHistory.GetRecentlyOpenedOrder(all);
+    Vec<SessionStatEntry> sessionEntries;
+    Vec<FileState*> ranked;
+    Vec<SessionStatEntry> filtered;
+
+    for (int i = 0; i < len(all); i++) {
+        FileState* fs = all[i];
+        int timeSec = (statsTab == 1) ? fs->flashcardStudyTimeSec : fs->readingTimeSec;
+        if (fs && timeSec > 0 && len(fs->filePath) > 0) {
+            ranked.Append(fs);
+        }
+    }
+    for (int i = 1; i < len(ranked); i++) {
+        FileState* e = ranked[i];
+        int j = i - 1;
+        int eSec = (statsTab == 1) ? e->flashcardStudyTimeSec : e->readingTimeSec;
+        while (j >= 0) {
+            int jSec = (statsTab == 1) ? ranked[j]->flashcardStudyTimeSec : ranked[j]->readingTimeSec;
+            if (jSec >= eSec) break;
+            ranked[j + 1] = ranked[j];
+            j--;
+        }
+        ranked[j + 1] = e;
+    }
+
+    // Pinning logic
+    FileState* pinnedFs = nullptr;
+    if (statsTab != 2) {
+        if (win->lastActiveBookPath && len(win->lastActiveBookPath) > 0) {
+            for (int i = 0; i < len(ranked); i++) {
+                if (str::Eq(ranked[i]->filePath, win->lastActiveBookPath)) {
+                    pinnedFs = ranked[i];
+                    for (int j = i; j > 0; j--) ranked[j] = ranked[j - 1];
+                    ranked[0] = pinnedFs;
+                    break;
+                }
+            }
+        }
+        if (!pinnedFs) {
+            int bestIdx = -1, bestTs = 0;
+            for (int i = 0; i < len(ranked); i++) {
+                int ts = ranked[i]->lastActivityTs;
+                if (ts > bestTs) { bestTs = ts; bestIdx = i; }
+            }
+            if (bestIdx >= 0) {
+                pinnedFs = ranked[bestIdx];
+                for (int j = bestIdx; j > 0; j--) ranked[j] = ranked[j - 1];
+                ranked[0] = pinnedFs;
+            } else {
+                for (int i = 0; i < len(all); i++) {
+                    int at = -1;
+                    for (int j = 0; j < len(ranked); j++) if (ranked[j] == all[i]) { at = j; break; }
+                    if (at >= 0) {
+                        pinnedFs = ranked[at];
+                        for (int j = at; j > 0; j--) ranked[j] = ranked[j - 1];
+                        ranked[0] = pinnedFs;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    bool pinnedSess = false;
+    if (statsTab == 2) {
+        ProfileDataGetSessionStats(sessionEntries);
+        filtered.Reset();
+        for (int i = 0; i < len(sessionEntries); i++) {
+            if (sessionEntries[i].readSec + sessionEntries[i].fcSec > 0) {
+                bool groupExists = false;
+                if (gGlobalPrefs && gGlobalPrefs->tabGroups) {
+                    for (int j = 0; j < len(*gGlobalPrefs->tabGroups); j++) {
+                        if ((*gGlobalPrefs->tabGroups)[j] && str::EqI(sessionEntries[i].name, (*gGlobalPrefs->tabGroups)[j]->name)) {
+                            groupExists = true; break;
+                        }
+                    }
+                }
+                if (groupExists) filtered.Append(sessionEntries[i]);
+            }
+        }
+        for (int i = 1; i < len(filtered); i++) {
+            SessionStatEntry e = filtered[i];
+            int j = i - 1;
+            while (j >= 0) {
+                int curSec = filtered[j].readSec + filtered[j].fcSec;
+                if (curSec >= e.readSec + e.fcSec) break;
+                filtered[j + 1] = filtered[j]; j--;
+            }
+            filtered[j + 1] = e;
+        }
+        int pinnedSessIdx = -1; u32 pinnedSessTs = 0;
+        for (int i = 0; i < len(filtered); i++) {
+            if (filtered[i].lastUsedTs > pinnedSessTs) { pinnedSessTs = filtered[i].lastUsedTs; pinnedSessIdx = i; }
+        }
+        if (pinnedSessIdx > 0) {
+            SessionStatEntry pinned = filtered[pinnedSessIdx];
+            for (int j = pinnedSessIdx; j > 0; j--) filtered[j] = filtered[j - 1];
+            filtered[0] = pinned;
+        }
+        pinnedSess = (pinnedSessIdx >= 0 && pinnedSessTs > 0);
+        rankCount = len(filtered);
+        if (rankScroll > rankCount - rankRows) rankScroll = rankCount - rankRows;
+        if (rankScroll < 0) rankScroll = 0;
+    }
+
+    int y = b.y + pad + dpi(28); // below chips
+    int rowDy = dpi(17);
+    SYSTEMTIME st{}; GetLocalTime(&st);
+    int todayKey = (int)st.wYear * 10000 + (int)st.wMonth * 100 + (int)st.wDay;
+    int readTodaySec = ProfileDataReadingDaySec(todayKey);
+    int readTotalSec = ProfileDataReadingTotalSec();
+    int fcTodaySec = ProfileDataStudyDaySec(todayKey);
+    int fcTotalSec = ProfileDataStudyTotalSec();
+    int fcTodayCards = ProfileDataStudyDayCards(todayKey);
+    int fcTotalCards = ProfileDataStudyTotalCards();
+    TempStr totalsRead = fmt("Read: Today %s | Total: %s", Str(HomeStatsFormatMinTemp(readTodaySec)), Str(HomeStatsFormatMinTemp(readTotalSec)));
+    TempStr totalsFc = fmt("Flashcards: Today %d cards / %s | Total: %d cards / %s", fcTodayCards, Str(HomeStatsFormatMinTemp(fcTodaySec)), fcTotalCards, Str(HomeStatsFormatMinTemp(fcTotalSec)));
+    int totalsAvailW = b.dx - 2 * pad;
+    Gdiplus::RectF totalsMeasure;
+    g->MeasureString(ToWStrTemp(Str(totalsRead)).s, -1, &fontLabel, Gdiplus::PointF(0, 0), &totalsMeasure);
+    int totalsReadW = (int)totalsMeasure.Width;
+    g->MeasureString(ToWStrTemp(Str(totalsFc)).s, -1, &fontLabel, Gdiplus::PointF(0, 0), &totalsMeasure);
+    int totalsFcW = (int)totalsMeasure.Width;
+    bool totalsTwoLines = (totalsReadW + dpi(24) + totalsFcW) > totalsAvailW;
+    int totalsDy = totalsTwoLines ? dpi(28) : dpi(14);
+    int hintDy = dpi(13);
+    int listTop = y;
+    int listBottom = b.y + b.dy - pad - totalsDy - hintDy - dpi(6);
+    rankRows = (listBottom - listTop) / rowDy;
+    if (rankRows < 1) rankRows = 1;
+    if (statsTab != 2) rankCount = len(ranked);
+    if (rankScroll > rankCount - rankRows) rankScroll = rankCount - rankRows;
+    if (rankScroll < 0) rankScroll = 0;
+    rcRank = {b.x, listTop, b.dx, listBottom - listTop};
+
+    int maxSecRanked = 1;
+    if (statsTab == 2) {
+        for (int i = 0; i < len(filtered); i++) {
+            int tot = filtered[i].readSec + filtered[i].fcSec;
+            if (tot > maxSecRanked) maxSecRanked = tot;
+        }
+    } else {
+        for (int i = 0; i < len(ranked); i++) {
+            int s = (statsTab == 1) ? ranked[i]->flashcardStudyTimeSec : ranked[i]->readingTimeSec;
+            if (s > maxSecRanked) maxSecRanked = s;
+        }
+    }
+    Gdiplus::SolidBrush barBrush(GpCol(ac.silver));
+    int nRows = std::min(rankCount - rankScroll, rankRows);
+    for (int i = 0; i < nRows; i++) {
+        int sessionIdx = rankScroll + i;
+        bool isSessions = (statsTab == 2);
+        const SessionStatEntry* entry = isSessions ? &filtered[sessionIdx] : nullptr;
+        FileState* fs = isSessions ? nullptr : ranked[rankScroll + i];
+        TempStr baseName;
+        int readSec = 0, fcSec = 0, fcCards = 0, total = 0, sec = 0;
+        if (isSessions) {
+            baseName = Str(entry->name.s, entry->name.len);
+            readSec = entry->readSec; fcSec = entry->fcSec; fcCards = entry->fcCards;
+            total = readSec + fcSec; sec = total;
+        } else {
+            baseName = path::GetBaseNameTemp(fs->filePath);
+            sec = (statsTab == 1) ? fs->flashcardStudyTimeSec : fs->readingTimeSec;
+        }
+        TempStr timeTxt, sessReadTxt, sessFcTxt, sessTotalTxt;
+        if (isSessions) {
+            sessReadTxt = HomeStatsFormatMinTemp(readSec);
+            sessFcTxt = fcCards > 0 ? fmt("%s (%d)", Str(HomeStatsFormatMinTemp(fcSec)), fcCards) : HomeStatsFormatMinTemp(fcSec);
+            sessTotalTxt = HomeStatsFormatMinTemp(total);
+        } else if (statsTab == 1 && fs->flashcardCardsDone > 0) {
+            timeTxt = fmt("%d cards / %s", fs->flashcardCardsDone, Str(HomeStatsFormatMinTemp(sec)));
+        } else {
+            timeTxt = HomeStatsFormatMinTemp(sec);
+        }
+        int rowY = listTop + i * rowDy;
+        int colNameW = (b.dx * (isSessions ? 26 : 50)) / 100 - pad;
+        if (colNameW < dpi(40)) colNameW = dpi(40);
+        int colBarW = (b.dx * (isSessions ? 20 : 22)) / 100;
+        int colTimeR = b.x + b.dx - pad - colBarW - dpi(8);
+        int colTimeL = b.x + pad + colNameW + dpi(4);
+        if (colTimeR < colTimeL + dpi(20)) colTimeR = colTimeL + dpi(20);
+        int barStartX = colTimeR + dpi(8);
+        int barMaxW = b.x + b.dx - pad - barStartX;
+        if (barMaxW < dpi(10)) barMaxW = dpi(10);
+        bool isPinned = isSessions ? (sessionIdx == 0 && pinnedSess) : (fs == pinnedFs);
+        Gdiplus::SolidBrush pinnedDarkBrush(Gdiplus::Color(255, 255, 255));
+        Gdiplus::SolidBrush pinnedLightBrush(GpCol(ac.textStrong));
+        Gdiplus::SolidBrush* nameBrush = isPinned ? (darkTheme ? &pinnedDarkBrush : &pinnedLightBrush) : &txtBrush;
+        Gdiplus::StringFormat sfCell;
+        sfCell.SetFormatFlags(Gdiplus::StringFormatFlagsNoWrap);
+        sfCell.SetTrimming(Gdiplus::StringTrimmingEllipsisCharacter);
+        sfCell.SetAlignment(Gdiplus::StringAlignmentNear);
+        sfCell.SetLineAlignment(Gdiplus::StringAlignmentCenter);
+        Gdiplus::RectF nameRc((float)(b.x + pad), (float)rowY, (float)colNameW, (float)rowDy);
+        g->DrawString(ToWStrTemp(Str(baseName)).s, -1, &fontLabel, nameRc, &sfCell, nameBrush);
+        sfCell.SetAlignment(Gdiplus::StringAlignmentFar);
+        if (isSessions) {
+            int sessGap = dpi(6);
+            int sessColW = (colTimeR - colTimeL - 2 * sessGap) / 3;
+            if (sessColW < dpi(12)) sessColW = dpi(12);
+            const TempStr* sessTxts[3] = {&sessReadTxt, &sessFcTxt, &sessTotalTxt};
+            for (int c = 0; c < 3; c++) {
+                Gdiplus::RectF cRc((float)(colTimeL + c * (sessColW + sessGap)), (float)rowY, (float)sessColW, (float)rowDy);
+                g->DrawString(ToWStrTemp(Str(*sessTxts[c])).s, -1, &fontLabel, cRc, &sfCell, &valBrush);
+            }
+        } else {
+            Gdiplus::RectF timeRc((float)colTimeL, (float)rowY, (float)(colTimeR - colTimeL), (float)rowDy);
+            g->DrawString(ToWStrTemp(Str(timeTxt)).s, -1, &fontLabel, timeRc, &sfCell, &valBrush);
+        }
+        int barW = isSessions ? (int)(((float)total / (float)maxSecRanked) * (float)barMaxW) : (int)(((float)sec / (float)maxSecRanked) * (float)barMaxW);
+        if (barW > barMaxW) barW = barMaxW;
+        if (sec > 0 && barW < 2) barW = 2;
+        g->FillRectangle(&barBrush, barStartX, rowY + dpi(4), barW, rowDy - dpi(9));
+    }
+    if (rankCount == 0) {
+        if (statsTab == 1) g->DrawString(L"Study flashcards to collect stats", -1, &fontLabel, Gdiplus::PointF((float)(b.x + pad), (float)y), &txtBrush);
+        else if (statsTab == 2) g->DrawString(L"Study with a tab group active to collect session stats", -1, &fontLabel, Gdiplus::PointF((float)(b.x + pad), (float)y), &txtBrush);
+        else g->DrawString(L"Read with auto-scroll to collect stats", -1, &fontLabel, Gdiplus::PointF((float)(b.x + pad), (float)y), &txtBrush);
+    } else if (rankCount > rankRows) {
+        if (statsTab == 2) {
+            TempStr more = fmt("%d groups - scroll", rankCount);
+            g->DrawString(ToWStrTemp(Str(more)).s, -1, &fontLabel, Gdiplus::PointF((float)(b.x + pad), (float)(listBottom + dpi(1))), &txtBrush);
+        } else {
+            TempStr more = fmt("%d books - scroll", rankCount);
+            g->DrawString(ToWStrTemp(Str(more)).s, -1, &fontLabel, Gdiplus::PointF((float)(b.x + pad), (float)(listBottom + dpi(1))), &txtBrush);
+        }
+    }
+    if (totalsTwoLines) {
+        g->DrawString(ToWStrTemp(Str(totalsRead)).s, -1, &fontLabel, Gdiplus::PointF((float)(b.x + pad), (float)(b.y + b.dy - pad - dpi(26))), &valBrush);
+        g->DrawString(ToWStrTemp(Str(totalsFc)).s, -1, &fontLabel, Gdiplus::PointF((float)(b.x + pad), (float)(b.y + b.dy - pad - dpi(13))), &valBrush);
+    } else {
+        TempStr totalsAll = fmt("%s    %s", Str(totalsRead), Str(totalsFc));
+        g->DrawString(ToWStrTemp(Str(totalsAll)).s, -1, &fontLabel, Gdiplus::PointF((float)(b.x + pad), (float)(b.y + b.dy - pad - dpi(13))), &valBrush);
+    }
+    // Separator at bottom
+    Gdiplus::Pen sepPen(GpCol(ac.separator));
+    g->DrawLine(&sepPen, (float)b.x, (float)(b.y + b.dy - 1), (float)(b.x + b.dx), (float)(b.y + b.dy - 1));
+}
+
+bool HomeStudyHistoryWnd::OnMouseDown(VirtWndMouseEvent& e) { return !bounds.IsEmpty(); }
+
+bool HomeStudyHistoryWnd::OnMouseUp(VirtWndMouseEvent& e) {
+    Point pt{e.pt.x + bounds.x, e.pt.y + bounds.y};
+    if (rcReadTab.Contains(pt)) { if (statsTab != 0) { statsTab = 0; HwndInvalidate(win->hwndCanvas); } return true; }
+    if (rcFlashcardTab.Contains(pt)) { if (statsTab != 1) { statsTab = 1; HwndInvalidate(win->hwndCanvas); } return true; }
+    if (rcSessionsTab.Contains(pt)) { if (statsTab != 2) { statsTab = 2; HwndInvalidate(win->hwndCanvas); } return true; }
+    return true;
+}
+
+bool HomeStudyHistoryWnd::OnMouseMove(VirtWndMouseEvent& e) {
+    // No hover tracking needed for study history (tabs only)
+    return true;
+}
+
+bool HomeStudyHistoryWnd::OnMouseWheel(VirtWndMouseEvent& e) {
+    Point pt{e.pt.x + bounds.x, e.pt.y + bounds.y};
+    if (!rcRank.Contains(pt) || rankCount <= rankRows) return false;
+    int step = e.wheelDelta > 0 ? -1 : 1;
+    if (e.wheelDelta == 0) return false;
+    int newScroll = rankScroll + step * 3;
+    if (newScroll > rankCount - rankRows) newScroll = rankCount - rankRows;
+    if (newScroll < 0) newScroll = 0;
+    if (newScroll != rankScroll) { rankScroll = newScroll; HwndInvalidate(win->hwndCanvas); }
+    return true;
+}
+
+bool HomeStudyHistoryWnd::OnSetCursor(Point pt) {
+    Point ptAbs{pt.x + bounds.x, pt.y + bounds.y};
+    if (rcReadTab.Contains(ptAbs) || rcFlashcardTab.Contains(ptAbs) || rcSessionsTab.Contains(ptAbs)) {
+        SetCursorCached(IDC_HAND);
+    } else { SetCursorCached(IDC_ARROW); }
+    return true;
+}
+
+TempStr HomeStudyHistoryWnd::GetTooltipTemp(Point pt) {
+    Point ptAbs{pt.x + bounds.x, pt.y + bounds.y};
+    if (rcReadTab.Contains(ptAbs)) return _TRA("Reading time per book (auto-scroll on)");
+    if (rcFlashcardTab.Contains(ptAbs)) return _TRA("Flashcard study time per book");
+    if (rcSessionsTab.Contains(ptAbs)) return _TRA("Study time per tab group (survives book removal)");
+    return {};
+}
+
 struct HomePageLayoutCache {
     bool valid = false;
     Rect canvasRc;
@@ -2353,7 +2309,8 @@ struct HomePageLayoutCache {
     Rect rcThumbsArea;
     Rect rcSearchBorder;
     Rect rcSearchClear;
-    Rect rcStats;    // reading-stats band (empty = hidden)
+    Rect rcStudyHistory; // study history band (ranking column)
+    Rect rcStats;    // heatmap/graph band (empty = hidden)
     Rect rcBooksHdr; // books-section title rect (D1)
     Rect rcIconOpen;
     Rect rcIconListView;
@@ -2430,6 +2387,7 @@ static void SaveHomeLayoutCache(const HomePageLayout& l, Str filterText, int scr
     c.rcThumbsArea = l.rcThumbsArea;
     c.rcSearchBorder = l.rcSearchBorder;
     c.rcSearchClear = l.rcSearchClear;
+    c.rcStudyHistory = l.rcStudyHistory;
     c.rcStats = l.rcStats;
     c.rcBooksHdr = l.rcBooksHdr;
     c.rcIconOpen = l.rcIconOpen;
@@ -2565,25 +2523,46 @@ static void LayoutHomePage(HomePageLayout& l) {
     }
     int contentBottomY = std::max(0, rc.dy - tipHeight - DpiScale(hdc, kThumbsMiddleMargin));
 
-    // stats band height: adaptive with minimum to prevent overlap at small heights.
-    // Reserve space for other fixed sections (headers, search, tip) and give the
-    // rest to the stats band, but clamp to a minimum so the heatmap/graph stays usable.
-    int minStatsBandDy = DpiScale(hdc, 150);
-    int maxStatsBandDy = DpiScale(hdc, 220);
-    // We'll compute the adaptive statsBandDy after measuring header sizes.
-    int statsBandDy = maxStatsBandDy; // default, may be reduced below
+    // Study History band (ranking column): fixed height, always visible.
+    // Heatmap/Graph band: adaptive with minimum.
+    int minStudyHistoryDy = DpiScale(hdc, 120);
+    int maxStudyHistoryDy = DpiScale(hdc, 180);
+    int minHeatmapDy = DpiScale(hdc, 150);
+    int maxHeatmapDy = DpiScale(hdc, 220);
 
-    // Adaptive stats band height: use available viewport height minus fixed sections,
-    // clamped to [minStatsBandDy, maxStatsBandDy]. This prevents overlap at small
-    // window heights while giving the heatmap/graph maximum space when available.
+    // Fixed sections excluding the two stats bands
     int fixedSectionsDy = hdrY0 + statsHdrSize.dy + statsGapY + booksSepGapY + booksHdrSize.dy + searchAreaDyPre;
-    int availForStatsBand = contentBottomY - fixedSectionsDy;
-    if (availForStatsBand < minStatsBandDy) {
-        statsBandDy = minStatsBandDy;
-    } else if (availForStatsBand > maxStatsBandDy) {
-        statsBandDy = maxStatsBandDy;
+    int availForStatsBands = contentBottomY - fixedSectionsDy;
+
+    // Study History band gets priority: reserve its min height first
+    int studyHistoryBandDy = minStudyHistoryDy;
+    int heatmapBandDy = minHeatmapDy;
+
+    if (availForStatsBands >= minStudyHistoryDy + minHeatmapDy) {
+        // Both can have at least minimum; distribute extra space proportionally
+        int extra = availForStatsBands - minStudyHistoryDy - minHeatmapDy;
+        // Give 40% to study history, 60% to heatmap (heatmap benefits more from height)
+        int studyHistoryExtra = (extra * 40) / 100;
+        int heatmapExtra = extra - studyHistoryExtra;
+        studyHistoryBandDy = std::min(minStudyHistoryDy + studyHistoryExtra, maxStudyHistoryDy);
+        heatmapBandDy = std::min(minHeatmapDy + heatmapExtra, maxHeatmapDy);
+        // If study history hits max, give remainder to heatmap
+        if (studyHistoryBandDy >= maxStudyHistoryDy) {
+            heatmapBandDy = std::min(heatmapBandDy + (studyHistoryBandDy - maxStudyHistoryDy), maxHeatmapDy);
+            studyHistoryBandDy = maxStudyHistoryDy;
+        }
+        // If heatmap hits max, give remainder to study history
+        if (heatmapBandDy >= maxHeatmapDy) {
+            studyHistoryBandDy = std::min(studyHistoryBandDy + (heatmapBandDy - maxHeatmapDy), maxStudyHistoryDy);
+            heatmapBandDy = maxHeatmapDy;
+        }
     } else {
-        statsBandDy = availForStatsBand;
+        // Not enough space for both minimums: study history gets absolute priority
+        studyHistoryBandDy = minStudyHistoryDy;
+        heatmapBandDy = std::max(0, availForStatsBands - studyHistoryBandDy);
+        if (heatmapBandDy < DpiScale(hdc, 60)) {
+            heatmapBandDy = DpiScale(hdc, 60); // absolute minimum for heatmap to be usable
+        }
     }
 
     // content height with everything unscrolled (for the scroll clamp)
@@ -2604,7 +2583,10 @@ static void LayoutHomePage(HomePageLayout& l) {
     if (thumbsContentDy > 0) {
         thumbsContentDy += thumbsContentPadTop;
     }
-    int fixedTop = hdrY0 + statsHdrSize.dy + statsGapY + statsBandDy + booksSepGapY + booksHdrSize.dy + searchAreaDyPre;
+    int statsGapBetweenBands = DpiScale(hdc, 8); // gap between study history and heatmap bands
+    int fixedTop = hdrY0 + statsHdrSize.dy + statsGapY
+                 + studyHistoryBandDy + statsGapBetweenBands
+                 + heatmapBandDy + booksSepGapY + booksHdrSize.dy + searchAreaDyPre;
     int totalContentDy = fixedTop + thumbsContentDy;
     int maxScrollY = std::max(0, totalContentDy - contentBottomY);
     int scrollY = std::min(std::max(win->homePageScrollY, 0), maxScrollY);
@@ -2641,14 +2623,16 @@ static void LayoutHomePage(HomePageLayout& l) {
     }
     syncBtn->SetBounds(rcSync);
 
-    // --- reading-stats band: always drawn; scrolls with the rest of the flow ---
-    // the stats band spans the full content width (not just the thumbnail grid):
-    // at half-screen widths the grid-derived width squeezed the ranking column
+    // --- Study History band (ranking column, full width): always drawn ---
     int statsDx = rc.dx - thumbsStartX - kThumbsMarginRight;
     if (statsDx < thumbsContentWidth) {
         statsDx = thumbsContentWidth;
     }
-    l.rcStats = Rect{thumbsStartX, rcHdr.y + rcHdr.dy + statsGapY, statsDx, statsBandDy};
+    l.rcStudyHistory = Rect{thumbsStartX, rcHdr.y + rcHdr.dy + statsGapY, statsDx, studyHistoryBandDy};
+
+    // --- Heatmap/Graph band (full width): always drawn, toggles with Grid/Graph ---
+    int heatmapY = l.rcStudyHistory.y + l.rcStudyHistory.dy + statsGapBetweenBands;
+    l.rcStats = Rect{thumbsStartX, heatmapY, statsDx, heatmapBandDy};
 
     // --- books-section header (recently opened + view icons + open link) ---
     int booksHdrY = l.rcStats.y + l.rcStats.dy + booksSepGapY;
@@ -3070,6 +3054,107 @@ static void DrawHomeHelpButton(HDC hdc, Rect r) {
     SetTextColor(hdc, RGB(0, 0, 0));
     HdcDrawText(hdc, "?", r, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX, font);
     SetBkMode(hdc, oldBk);
+}
+
+// Debug command to print home page geometry for verification (ITEM 1-3)
+TempStr HomeGeometryResultTemp(int* exitCodeOut) {
+    if (len(gWindows) == 0) {
+        if (exitCodeOut) *exitCodeOut = 2;
+        return StrL("NOWINDOW");
+    }
+    MainWindow* win = gWindows[0];
+    HomeChromeWnd* chrome = EnsureHomeChrome(win);
+    if (!chrome || !chrome->stats || !win->homeRoot) {
+        if (exitCodeOut) *exitCodeOut = 2;
+        return StrL("NOCHROME");
+    }
+    // Force a paint so the layout cache is populated
+    HwndInvalidate(win->hwndCanvas);
+    // Run message loop briefly to process the paint
+    MSG msg;
+    for (int i = 0; i < 10; i++) {
+        if (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
+            TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
+    }
+    auto& c = gHomeLayoutCache;
+    if (!c.valid) {
+        if (exitCodeOut) *exitCodeOut = 2;
+        return StrL("NOLAYOUT");
+    }
+    str::Builder out;
+    out.Append(fmt("OK\n"));
+    out.Append(fmt("rcStudyHistory=%d,%d,%d,%d\n", c.rcStudyHistory.x, c.rcStudyHistory.y, c.rcStudyHistory.dx, c.rcStudyHistory.dy));
+    out.Append(fmt("rcStats=%d,%d,%d,%d\n", c.rcStats.x, c.rcStats.y, c.rcStats.dx, c.rcStats.dy));
+    out.Append(fmt("rcBooksHdr=%d,%d,%d,%d\n", c.rcBooksHdr.x, c.rcBooksHdr.y, c.rcBooksHdr.dx, c.rcBooksHdr.dy));
+    out.Append(fmt("rcThumbsArea=%d,%d,%d,%d\n", c.rcThumbsArea.x, c.rcThumbsArea.y, c.rcThumbsArea.dx, c.rcThumbsArea.dy));
+    out.Append(fmt("totalContentDy=%d thumbsVisibleDy=%d scrollY=%d\n", c.totalContentDy, c.thumbsVisibleDy, c.scrollY));
+    
+    // Heatmap cell info
+    if (chrome->stats) {
+        out.Append(fmt("cellDx=%d cellDy=%d rcGrid=%d,%d,%d,%d\n", 
+            chrome->stats->cellDx, chrome->stats->cellDy,
+            chrome->stats->rcGrid.x, chrome->stats->rcGrid.y, chrome->stats->rcGrid.dx, chrome->stats->rcGrid.dy));
+        // Month mapping
+        for (int m = 1; m <= 12; m++) {
+            int c0 = chrome->stats->monthStartCol[m];
+            int c1 = (m < 12) ? chrome->stats->monthStartCol[m+1] : 53;
+            out.Append(fmt("month%d: col=%d-%d border=%s\n", m, c0, c1-1, Str(chrome->stats->monthBorderAlt[m] ? "silver" : "gray")));
+        }
+        
+        // Border parity mismatch check: compare actual day month vs column-based month
+        int daysInYear = HomeStatsDaysInYear(chrome->stats->year);
+        int mismatches = 0;
+        int firstCol = chrome->stats->firstCol;
+        for (int doy = 1; doy <= daysInYear; doy++) {
+            int mm = 0, dd = 0;
+            HomeStatsDateFromDayOfYear(chrome->stats->year, doy, &mm, &dd, nullptr);
+            int idx = firstCol + doy - 1;
+            int col = idx / 7;
+            // Find which month the column thinks this day is in
+            int colMonth = 1;
+            for (int m = 12; m >= 1; m--) {
+                if (chrome->stats->monthStartCol[m] <= col) {
+                    colMonth = m;
+                    break;
+                }
+            }
+            if (mm != colMonth) {
+                mismatches++;
+            }
+        }
+        out.Append(fmt("borderMismatches=%d\n", mismatches));
+        
+        // Report week columns that span two months
+        out.Append("splitWeeks=");
+        bool first = true;
+        for (int col = 0; col < 53; col++) {
+            int firstDoy = col * 7 - firstCol + 1;
+            int lastDoy = (col + 1) * 7 - firstCol;
+            if (firstDoy < 1) firstDoy = 1;
+            if (lastDoy > daysInYear) lastDoy = daysInYear;
+            if (firstDoy > lastDoy) continue;
+            int firstMonth = 0, lastMonth = 0;
+            HomeStatsDateFromDayOfYear(chrome->stats->year, firstDoy, &firstMonth, nullptr, nullptr);
+            HomeStatsDateFromDayOfYear(chrome->stats->year, lastDoy, &lastMonth, nullptr, nullptr);
+            if (firstMonth != lastMonth) {
+                if (!first) out.Append(",");
+                out.Append(fmt("%d(%d-%d)", col, firstMonth, lastMonth));
+                first = false;
+            }
+        }
+        out.Append("\n");
+    }
+    
+    // Hover state
+    if (chrome->stats) {
+        out.Append(fmt("hoverFadeAlpha=%d hoverDay=%d hoverFadeTimerActive=%d\n",
+            chrome->stats->hoverFadeAlpha, chrome->stats->hoverDay, chrome->stats->hoverFadeTimer != 0 ? 1 : 0));
+    }
+    
+    if (exitCodeOut) *exitCodeOut = 0;
+    return ToStrTemp(out);
 }
 
 // Flip the home-page stats band between the heatmap grid and the line-graph
@@ -3632,6 +3717,11 @@ static HomeChromeWnd* EnsureHomeChrome(MainWindow* win) {
     chrome->stats->win = win;
     chrome->AddChild(chrome->stats);
 
+    // study history band (ranking column): separate from heatmap
+    chrome->studyHistory = new HomeStudyHistoryWnd();
+    chrome->studyHistory->win = win;
+    chrome->AddChild(chrome->studyHistory);
+
     chrome->thumbView = new HomeViewIconWnd();
     chrome->thumbView->win = win;
     chrome->thumbView->listView = false;
@@ -3784,6 +3874,10 @@ static void HomePageSyncChrome(HomePageLayout& l) {
     // reading-stats band (FASE B3): empty bounds = hidden (HitTest false)
     chrome->stats->SetBounds(l.rcStats);
     chrome->stats->visibility = flowVis(l.rcStats);
+
+    // study history band (ranking column): separate from heatmap
+    chrome->studyHistory->SetBounds(l.rcStudyHistory);
+    chrome->studyHistory->visibility = flowVis(l.rcStudyHistory);
 
     // file entries: clipped to the thumbnails band, like the static links were
     HomeEntriesWnd* entries = chrome->entries;

@@ -105,6 +105,8 @@ export enum ControlCommand {
   // Request: none
   // Response: int32 ok (1=passed, 0=failed), string message
   TestFlashcardVisibleCardIndices = 91,
+  // Home page geometry probe (ITEM 1-3): returns layout rects, cell sizes, month mapping, hover state
+  TestHomeGeometry = 92,
 }
 
 export type ControlArg = number | string | Uint8Array | ControlArg[];
@@ -484,7 +486,7 @@ export async function runControlCommand(
 if (import.meta.main) {
   const [exe, cmdName, ...args] = process.argv.slice(2);
   if (!exe || !cmdName) {
-    console.log("Usage: bun cmd/control.ts <SumatraPDF.exe> <ping|test-search|test-command-enabled|test-home-pinned-book|test-flashcard-visible-card-indices|test-flashcard-flush|test-rate-flashcard|test-create-flashcard|test-flush-flashcard-bookkeeping> [args...]");
+    console.log("Usage: bun cmd/control.ts <SumatraPDF.exe> <ping|test-search|test-command-enabled|test-home-pinned-book|test-flashcard-visible-card-indices|test-flashcard-flush|test-rate-flashcard|test-create-flashcard|test-flush-flashcard-bookkeeping|test-home-geometry> [args...]");
     process.exit(1);
   }
   let cmd = 0;
@@ -506,6 +508,8 @@ if (import.meta.main) {
     cmd = ControlCommand.TestCreateFlashcard;
   } else if (cmdName === "test-flush-flashcard-bookkeeping") {
     cmd = ControlCommand.TestFlushFlashcardBookkeeping;
+  } else if (cmdName === "test-home-geometry") {
+    cmd = ControlCommand.TestHomeGeometry;
   }
   if (!cmd) {
     throw new Error(`unknown command: ${cmdName}`);
