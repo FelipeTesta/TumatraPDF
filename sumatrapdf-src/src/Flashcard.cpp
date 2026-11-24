@@ -4,6 +4,7 @@
 #include "base/Base.h"
 #include "base/Crypto.h"
 #include "base/File.h"
+#include "SumatraConfig.h"
 
 extern "C" {
 #include <mupdf/pdf.h>
@@ -17,6 +18,7 @@ extern "C" {
 #include "DocProperties.h"
 #include "TreeModel.h"
 #include "EngineBase.h"
+#include "DisplayModel.h"
 #include "EngineMupdf.h"
 #include "base/GuessFileType.h"
 #include "EngineAll.h"
@@ -24,6 +26,7 @@ extern "C" {
 #include "AppTools.h"
 #include "ProfileData.h"
 #include "Flashcard.h"
+#include "Commands_Flashcard.h"
 
 // Stable card key: FNV-1a hash of page + quantized bounds. MuPDF can renumber
 // annotation objects on save (pdf_to_num is not stable), so we key study state
@@ -89,6 +92,31 @@ static u32 FlashcardAuthorToken(Str author) {
         return 0;
     }
     return v ? v : 1;
+}
+
+// Binary search helper: finds the index of a StateEntry with the given key
+// in a SORTED Vec<StateEntry>. Returns the index if found, otherwise -1.
+// If not found, *outInsertIdx (if non-null) receives the index where the
+// key would be inserted to maintain sorted order.
+int FlashcardStateFindIdx(const Vec<FlashcardStudyDoc::StateEntry>& states, u64 key, int* outInsertIdx) {
+    int lo = 0;
+    int hi = len(states) - 1;
+    while (lo <= hi) {
+        int mid = (lo + hi) >> 1;
+        u64 midKey = states[mid].key;
+        if (midKey == key) {
+            return mid;
+        }
+        if (midKey < key) {
+            lo = mid + 1;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    if (outInsertIdx) {
+        *outInsertIdx = lo;
+    }
+    return -1;
 }
 
 // Iterate all annotations on all pages and extract flashcards.
@@ -267,6 +295,120 @@ Vec<Flashcard> FlashcardLoadFromDocument(EngineMupdf* engine) {
     }
 
     logf("[fc] FlashcardLoadFromDocument - found %d flashcards\n", len(result));
+    return result;
+}
+
+// Build per-page card index for fast visible-page iteration in PaintFlashcardMasks.
+// Maps physical page number (1-based) -> list of card indices that have a mask
+// on that page (primary page or any extraPages). Clears and rebuilds
+// tabState.cardIndicesByPage.
+void FlashcardBuildPageIndex(FlashcardTabState& tabState) {
+    tabState.cardIndicesByPage.Reset();
+    if (len(tabState.cards) == 0) {
+        return;
+    }
+    // Find max physical page number to size the index
+    int maxPageNo = 0;
+    for (int i = 0; i < len(tabState.cards); i++) {
+        const Flashcard& card = tabState.cards[i];
+        if (card.pageNo > maxPageNo) maxPageNo = card.pageNo;
+        for (int g = 0; g < len(card.extraPages); g++) {
+            if (card.extraPages[g].pageNo > maxPageNo) maxPageNo = card.extraPages[g].pageNo;
+        }
+    }
+    // Resize index: 1-based physical page number -> vector of card indices
+    tabState.cardIndicesByPage.AppendBlanks(maxPageNo + 1);
+    for (int i = 0; i < len(tabState.cards); i++) {
+        const Flashcard& card = tabState.cards[i];
+        // Primary page
+        if (card.pageNo >= 1 && card.pageNo <= maxPageNo) {
+            tabState.cardIndicesByPage[card.pageNo].Append(i);
+        }
+        // Extra pages (cross-page clozes)
+        for (int g = 0; g < len(card.extraPages); g++) {
+            int p = card.extraPages[g].pageNo;
+            if (p >= 1 && p <= maxPageNo) {
+                tabState.cardIndicesByPage[p].Append(i);
+            }
+        }
+    }
+}
+
+// Compute which card indices are candidates for painting based on visible pages.
+// Includes active card and Lista-selected card even if their pages are not visible.
+Vec<int> FlashcardVisibleCardIndices(const DisplayModel* dm, const Vec<Flashcard>& cards,
+                                     const Vec<Vec<int>>& pageIndex, int studyCardIdx, int listCardIdx) {
+    Vec<int> result;
+    if (!dm || len(cards) == 0) {
+        return result;
+    }
+
+    // Build set of visible physical pages from the layout
+    Vec<int> visiblePhysPages;
+    int vPageCount = dm->PageCount();
+    if (vPageCount > 0 && dm->pagesInfo) {
+        int maxPhysPage = 0;
+        for (int vPage = 1; vPage <= vPageCount; vPage++) {
+            const PageInfo* pi = dm->GetPageInfo(vPage);
+            if (pi && pi->physicalPageNo > maxPhysPage) {
+                maxPhysPage = pi->physicalPageNo;
+            }
+        }
+        if (maxPhysPage > 0) {
+            Vec<char> physPageVisible;
+            physPageVisible.AppendBlanks(maxPhysPage + 1);
+            for (int vPage = 1; vPage <= vPageCount; vPage++) {
+                const PageInfo* pi = dm->GetPageInfo(vPage);
+                if (pi && pi->visibleRatio > 0.0f && pi->physicalPageNo >= 1) {
+                    physPageVisible[pi->physicalPageNo] = 1;
+                }
+            }
+            // Always include the active card's pages
+            if (studyCardIdx >= 0 && studyCardIdx < len(cards)) {
+                int p = cards[studyCardIdx].pageNo;
+                if (p >= 1 && p <= maxPhysPage) physPageVisible[p] = 1;
+                for (int g = 0; g < len(cards[studyCardIdx].extraPages); g++) {
+                    int ep = cards[studyCardIdx].extraPages[g].pageNo;
+                    if (ep >= 1 && ep <= maxPhysPage) physPageVisible[ep] = 1;
+                }
+            }
+            // Always include the Lista-selected card's pages
+            if (listCardIdx >= 0 && listCardIdx < len(cards)) {
+                int p = cards[listCardIdx].pageNo;
+                if (p >= 1 && p <= maxPhysPage) physPageVisible[p] = 1;
+                for (int g = 0; g < len(cards[listCardIdx].extraPages); g++) {
+                    int ep = cards[listCardIdx].extraPages[g].pageNo;
+                    if (ep >= 1 && ep <= maxPhysPage) physPageVisible[ep] = 1;
+                }
+            }
+            for (int p = 1; p <= maxPhysPage; p++) {
+                if (physPageVisible[p]) {
+                    visiblePhysPages.Append(p);
+                }
+            }
+        }
+    }
+
+    // Use page index if available, otherwise return all cards (fallback)
+    if (len(pageIndex) > 0) {
+        for (int pi = 0; pi < len(visiblePhysPages); pi++) {
+            int physPage = visiblePhysPages[pi];
+            if (physPage < len(pageIndex)) {
+                const Vec<int>& cardIndices = pageIndex[physPage];
+                for (int ci = 0; ci < len(cardIndices); ci++) {
+                    int cardIdx = cardIndices[ci];
+                    if (cardIdx >= 0 && cardIdx < len(cards)) {
+                        result.Append(cardIdx);
+                    }
+                }
+            }
+        }
+    } else {
+        // Fallback: all cards
+        for (int i = 0; i < len(cards); i++) {
+            result.Append(i);
+        }
+    }
     return result;
 }
 
@@ -548,6 +690,39 @@ void FlashcardStudyWriteJsonStringLit(FILE* f, Str s) {
     fputc('"', f);
 }
 
+// Shared JSON writer: writes the per-book study JSON to an already-open FILE*.
+// Used by both the synchronous FlashcardStudySave and the async worker.
+// Returns true on success, false on failure (I/O error during write).
+bool FlashcardStudyWriteJsonToFile(FILE* f, int version, Str docName, Str docPath,
+                                   const Vec<FlashcardStudyDoc::StateEntry>& states) {
+    fprintf(f, "{\n  \"version\": %d,\n  \"docName\": ", version);
+    FlashcardStudyWriteJsonStringLit(f, docName);
+    fprintf(f, ",\n  \"docPath\": ");
+    FlashcardStudyWriteJsonStringLit(f, docPath);
+    fprintf(f, ",\n  \"states\": {\n");
+
+    bool first = true;
+    for (int i = 0; i < len(states); i++) {
+        auto& entry = states[i];
+        if (!first) {
+            fprintf(f, ",\n");
+        }
+        first = false;
+        fprintf(f, "    \"%llu\": ", (unsigned long long)entry.key);
+        FlashcardStudyWriteJsonValue(f, entry.state);
+    }
+
+    fprintf(f,
+            "\n  }\n"
+            "}\n");
+
+    // Check for write errors
+    if (ferror(f)) {
+        return false;
+    }
+    return true;
+}
+
 // Local rolling backups of the study dir: full copies of every *.json in
 // backup\<slot>\ (1d / 3d / 7d). Refreshed after each successful save when the
 // snapshot is older than the slot's age (cheap stamp-file guard, so a normal
@@ -598,7 +773,7 @@ static void FlashcardStudyBackupRefreshSlot(Str dir, Str slotDir) {
     }
 }
 
-static void FlashcardStudyMaybeBackup() {
+void FlashcardStudyMaybeBackup() {
     TempStr dir = FlashcardStudyDir();
     i64 now = (i64)time(nullptr) * 1000;
     for (auto& s : kFcBackupSlots) {
@@ -655,37 +830,135 @@ int FlashcardStudyRecoverBackup() {
     return 0;
 }
 
+// Comparator for u64 (card keys). Used with VecSort (qsort).
+// VecSort expects: int (*)(const u64* a, const u64* b).
+static int FlashcardU64Cmp(const u64* a, const u64* b) {
+    if (*a < *b) return -1;
+    if (*a > *b) return 1;
+    return 0;
+}
+
+// Comparator for StateEntry by key (ascending), tie-break by newest lastReviewedAt.
+// VecSort expects: int (*)(const StateEntry* a, const StateEntry* b).
+static int FlashcardStudyStateKeyCmp(const FlashcardStudyDoc::StateEntry* a, const FlashcardStudyDoc::StateEntry* b) {
+    if (a->key < b->key) return -1;
+    if (a->key > b->key) return 1;
+    // Duplicate keys: keep the one with the newest lastReviewedAt (higher wins).
+    // This handles corrupted/duplicate JSON gracefully — the newer review wins.
+    if (a->state.lastReviewedAt > b->state.lastReviewedAt) return -1;
+    if (a->state.lastReviewedAt < b->state.lastReviewedAt) return 1;
+    return 0;
+}
+
+// Sort StateEntry vec by key (ascending) using repo-native VecSort (qsort).
+// Deduplicates duplicate keys by keeping the entry with the newest lastReviewedAt.
+// Called after load/parse and after any bulk operation that might break the
+// sorted invariant. Complexity: O(N log N).
+static void FlashcardStudySortStates(Vec<FlashcardStudyDoc::StateEntry>& states) {
+    if (len(states) > 1) {
+        VecSort(states, FlashcardStudyStateKeyCmp);
+        // VecSort keeps all entries; deduplicate adjacent equal keys (keep first,
+        // which has the newest lastReviewedAt because the comparator sorts by
+        // lastReviewedAt descending for equal keys).
+        int write = 1;
+        for (int read = 1; read < len(states); read++) {
+            if (states[read].key != states[write - 1].key) {
+                if (write != read) states[write] = states[read];
+                write++;
+            }
+        }
+        if (write < len(states)) {
+            states.len = write;
+        }
+    }
+}
+
+// Verify the study states vector is sorted by key (ascending) and has no
+// duplicate keys. O(S), no allocations. Debug builds only (gIsDebugBuild).
+// On violation: logs an unmistakable error line with the offending keys and
+// caller location. Returns true if sorted, false if violated.
+bool FlashcardStudyVerifySorted(const Vec<FlashcardStudyDoc::StateEntry>& states, const char* where) {
+    if (!gIsDebugBuild) {
+        return true; // no-op in release
+    }
+    int n = len(states);
+    Str whereStr = Str(where);
+    for (int i = 1; i < n; i++) {
+        u64 prevKey = states[i - 1].key;
+        u64 curKey = states[i].key;
+        if (curKey < prevKey) {
+            logf("[fc] ERROR: study states NOT sorted (key=%llu after %llu) at %s [%s:%d]\n",
+                 (unsigned long long)curKey, (unsigned long long)prevKey, whereStr, Str(__FILE__), __LINE__);
+            return false;
+        }
+        if (curKey == prevKey) {
+            logf("[fc] ERROR: study states DUPLICATE key=%llu at %s [%s:%d]\n", (unsigned long long)curKey, whereStr,
+                 Str(__FILE__), __LINE__);
+            return false;
+        }
+    }
+    return true;
+}
+
 // Drop study states whose card no longer exists in the document. A card dies
 // when its highlight annotation is deleted, but its SM-2 entry stayed in the
 // JSON forever: every save wrote it back and the Config window counted states
 // for cards that are not in the book. Returns how many entries were dropped.
+// Complexity: O(C log C + S) where S = states, C = cards.
 int FlashcardStudyPruneStates(FlashcardStudyDoc& doc, const Vec<Flashcard>& cards) {
-    int n = len(doc.states);
-    if (n == 0) {
+    int nStates = len(doc.states);
+    if (nStates == 0) {
         return 0;
     }
-    int kept = 0;
-    for (int i = 0; i < n; i++) {
-        u64 key = doc.states[i].key;
-        bool alive = false;
-        for (int j = 0; j < len(cards); j++) {
-            if (cards[j].key == key) {
-                alive = true;
-                break;
-            }
-        }
-        if (!alive) {
-            continue;
-        }
-        if (kept != i) {
-            doc.states[kept] = doc.states[i];
-        }
-        kept++;
+    int nCards = len(cards);
+    if (nCards == 0) {
+        int removed = nStates;
+        doc.states.len = 0;
+        return removed;
     }
-    int removed = n - kept;
+
+    // Build a sorted array of card keys (cards are not sorted by key in memory;
+    // they are in page order). We copy and sort keys for the merge pass.
+    Vec<u64> cardKeys;
+    VecResize(cardKeys, nCards);
+    for (int i = 0; i < nCards; i++) {
+        cardKeys[i] = cards[i].key;
+    }
+    // Sort card keys using repo-native VecSort (qsort) — O(C log C).
+    VecSort(cardKeys, FlashcardU64Cmp);
+
+    // Merge pass: both doc.states and cardKeys are sorted ascending by key.
+    // Keep only states whose key exists in cardKeys.
+    int kept = 0;
+    int iState = 0;
+    int iCard = 0;
+    while (iState < nStates && iCard < nCards) {
+        u64 stateKey = doc.states[iState].key;
+        u64 cardKey = cardKeys[iCard];
+        if (stateKey < cardKey) {
+            // State has no matching card — drop it
+            iState++;
+        } else if (stateKey > cardKey) {
+            // Card has no state (new card) — advance card pointer
+            iCard++;
+        } else {
+            // Match — keep this state
+            if (kept != iState) {
+                doc.states[kept] = doc.states[iState];
+            }
+            kept++;
+            iState++;
+            iCard++;
+        }
+    }
+    // Remaining states (if any) have keys > all card keys — drop them
+
+    int removed = nStates - kept;
     if (removed > 0) {
         doc.states.len = kept;
     }
+    // Verify the sorted invariant is preserved after prune (debug only)
+    FlashcardStudyVerifySorted(doc.states, "FlashcardStudyPruneStates");
     return removed;
 }
 
@@ -693,7 +966,8 @@ int FlashcardStudyPruneStates(FlashcardStudyDoc& doc, const Vec<Flashcard>& card
 // still stream the fresh states into the single-file profile store (unconditional)
 static bool kProfDualWriteSidecars = true;
 
-// Save flashcard study state to external JSON file
+// Save flashcard study state to external JSON file (synchronous, used for
+// adopt/resync/load paths where the caller needs to wait for the write)
 void FlashcardStudySave(const char* filePath, const FlashcardStudyDoc& doc) {
     logf("[fc] FlashcardStudySave - saving to %s\n", Str(filePath));
     if (!filePath) {
@@ -721,31 +995,17 @@ void FlashcardStudySave(const char* filePath, const FlashcardStudyDoc& doc) {
             return;
         }
 
-        // docName (base name of the book) lets the Config window list books by
-        // name; docPath (full path) powers the sync markers (moved/renamed
-        // detection) and is re-validated by Re-check in that window
-        fprintf(f, "{\n  \"version\": %d,\n  \"docName\": ", doc.version);
-        FlashcardStudyWriteJsonStringLit(f, path::GetBaseNameTemp(Str(filePath)));
-        fprintf(f, ",\n  \"docPath\": ");
-        FlashcardStudyWriteJsonStringLit(f, filePath);
-        fprintf(f, ",\n  \"states\": {\n");
-
-        bool first = true;
-        for (int i = 0; i < doc.states.len; i++) {
-            auto& entry = doc.states.els[i];
-            if (!first) {
-                fprintf(f, ",\n");
-            }
-            first = false;
-            fprintf(f, "    \"%llu\": ", (unsigned long long)entry.key);
-            FlashcardStudyWriteJsonValue(f, entry.state);
-        }
-
-        fprintf(f,
-                "\n  }\n"
-                "}\n");
+        Str docName = path::GetBaseNameTemp(Str(filePath));
+        Str docPath = Str(filePath);
+        bool okWrite = FlashcardStudyWriteJsonToFile(f, doc.version, docName, docPath, doc.states);
 
         fclose(f);
+
+        if (!okWrite) {
+            logf("[fc] FlashcardStudySave - ERROR: write failed for '%s'\n", Str(path));
+            remove(tmpPath.s);
+            return;
+        }
 
         // MOVEFILE_REPLACE_EXISTING makes the swap single-step; fall back to
         // remove+rename if the replace fails (e.g. antivirus holding a handle)
@@ -769,6 +1029,24 @@ void FlashcardStudySave(const char* filePath, const FlashcardStudyDoc& doc) {
 
     // stream the fresh states into the single-file profile store too
     ProfileDataUpdateStudyDoc(filePath, doc);
+}
+
+// Save flashcard study state to external JSON file asynchronously (worker thread).
+// The caller provides a snapshot of the states (copied from studyDoc.states), the
+// resolved file path, docName (base name of PDF), and docPath (full PDF path).
+// The profile write (ProfileDataUpdateStudyDoc) is NOT included — the caller
+// must do that separately on the UI thread.
+// The backup (FlashcardStudyMaybeBackup) is also NOT included — caller must call it.
+void FlashcardStudySaveAsync(const Vec<FlashcardStudyDoc::StateEntry>& states, const char* resolvedPath, Str docName,
+                             Str docPath, int version) {
+    // Enqueue to worker thread (implemented in Commands_Flashcard.cpp)
+    FlashcardStudySaveAsyncWorker(states, resolvedPath, docName, docPath, version);
+}
+
+// Join the save worker at app exit with a bounded timeout (3s).
+// Returns true if the worker stopped cleanly, false on timeout.
+bool FlashcardSaveWorkerJoin() {
+    return FlashcardSaveWorkerJoinWorker();
 }
 
 // Delete every study-history JSON in the study dir — the review histories
@@ -1115,7 +1393,7 @@ static char* ParseJsonDocNameDup(Str json);
 static Str FlashcardStudyAdoptByName(const char* filePath, Str dstPath);
 
 // parse a study JSON (version + states) into doc; shared by StudyLoad and the
-// manual resync
+// manual resync. Ensures the sorted-by-key invariant.
 void FlashcardStudyParseJsonInto(Str json, FlashcardStudyDoc& doc) {
     auto findAnyChar = [](Str s, Str chars) -> int {
         for (int i = 0; i < len(s); i++) {
@@ -1144,6 +1422,9 @@ void FlashcardStudyParseJsonInto(Str json, FlashcardStudyDoc& doc) {
     }
 
     ParseJsonObject(json, &doc.states);
+    // Ensure sorted-by-key invariant for binary search.
+    FlashcardStudySortStates(doc.states);
+    FlashcardStudyVerifySorted(doc.states, "FlashcardStudyParseJsonInto");
 }
 
 FlashcardStudyDoc FlashcardStudyLoad(const char* filePath) {
@@ -1185,6 +1466,9 @@ FlashcardStudyDoc FlashcardStudyLoad(const char* filePath) {
             // existed on a new machine) — adopt from the profile store which
             // can hold the states synced from another machine
             ProfileDataGetStudyDoc(filePath, doc);
+            // Profile states are NOT sorted; enforce the invariant before return.
+            FlashcardStudySortStates(doc.states);
+            FlashcardStudyVerifySorted(doc.states, "FlashcardStudyLoad:profile-only");
             logf("[fc] FlashcardStudyLoad - profile-only adopt: %d entries\n", len(doc.states));
             return doc;
         }
@@ -1194,6 +1478,11 @@ FlashcardStudyDoc FlashcardStudyLoad(const char* filePath) {
     // merge into the profile ALWAYS (not only on save): two machines converge
     // on the newest state per card key as soon as they load a book
     ProfileDataMergeStudyDoc(filePath, doc);
+
+    // Ensure states are sorted by key for binary search lookups.
+    // The JSON object order is not guaranteed; we sort in-place after load.
+    FlashcardStudySortStates(doc.states);
+    FlashcardStudyVerifySorted(doc.states, "FlashcardStudyLoad:file");
 
     logf("[fc] FlashcardStudyLoad - loaded %d entries\n", len(doc.states));
     return doc;

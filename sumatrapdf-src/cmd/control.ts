@@ -70,25 +70,41 @@ export enum ControlCommand {
   TestTocToolbarButton = 70,
   TestBookmarkDelete = 71,
   TestRunCommand = 72,
-  TestPageHold = 73,
-  TestGetZoom = 74,
+  TestPageHold = 74,
+  TestGetZoom = 75,
   // Manual multi-window test instrumentation (intentional, kept).
   // Drives/focuses/reads stats per window via the control pipe.
   // No automated test uses these hooks yet.
-  TestNewWindow = 75,
+  TestNewWindow = 76,
+  TestWindowStats = 77,
+  TestOpenInWindow = 78,
+  TestFocusWindow = 79,
+  TestRunCommandInWindow = 80,
   // Manual profile sync test instrumentation (intentional, kept).
   // Drives profile sync actions via the control pipe.
   // No automated test uses these hooks yet.
-  TestProfileSetFolder = 80,
-  TestProfileExport = 81,
-  TestProfileImport = 82,
-  TestProfileStatus = 83,
-  TestCommandEnabled = 84,
-  TestHomePinnedBook = 85,
-  TestWindowStats = 76,
-  TestOpenInWindow = 77,
-  TestFocusWindow = 78,
-  TestRunCommandInWindow = 79,
+  TestProfileSetFolder = 81,
+  TestProfileExport = 82,
+  TestProfileImport = 83,
+  TestProfileStatus = 84,
+  TestCommandEnabled = 85,
+  TestHomePinnedBook = 86,
+  // Flashcard study perf test commands.
+  // Rate a flashcard in the current study session: int cardIdx, int rating (1-4)
+  TestRateFlashcard = 87,
+  // Create a test flashcard at a specific page: int pageNo, int rating
+  // Creates a flashcard and optionally rates it immediately
+  TestCreateFlashcard = 88,
+  // Flush deferred flashcard bookkeeping (prune/save/sidebar)
+  TestFlushFlashcardBookkeeping = 89,
+  // Flush flashcard bookkeeping and return detailed stats:
+  // Request: int32 mode (0=full flush, 1=save-only)
+  // Response: int32 ok, int32 pendingTabCount, int32 stateCount, string studyDocPath
+  TestFlashcardFlush = 90,
+  // Test FlashcardVisibleCardIndices helper (flashcard paint perf optimization)
+  // Request: none
+  // Response: int32 ok (1=passed, 0=failed), string message
+  TestFlashcardVisibleCardIndices = 91,
 }
 
 export type ControlArg = number | string | Uint8Array | ControlArg[];
@@ -468,21 +484,33 @@ export async function runControlCommand(
 if (import.meta.main) {
   const [exe, cmdName, ...args] = process.argv.slice(2);
   if (!exe || !cmdName) {
-    console.log("Usage: bun cmd/control.ts <SumatraPDF.exe> <ping|test-search> [args...]");
+    console.log("Usage: bun cmd/control.ts <SumatraPDF.exe> <ping|test-search|test-command-enabled|test-home-pinned-book|test-flashcard-visible-card-indices|test-flashcard-flush|test-rate-flashcard|test-create-flashcard|test-flush-flashcard-bookkeeping> [args...]");
     process.exit(1);
   }
-  const cmd =
-    cmdName === "ping"
-      ? ControlCommand.Ping
-      : cmdName === "test-search"
-        ? ControlCommand.TestSearch
-        : cmdName === "test-command-enabled"
-          ? ControlCommand.TestCommandEnabled
-          : 0;
+  let cmd = 0;
+  if (cmdName === "ping") {
+    cmd = ControlCommand.Ping;
+  } else if (cmdName === "test-search") {
+    cmd = ControlCommand.TestSearch;
+  } else if (cmdName === "test-command-enabled") {
+    cmd = ControlCommand.TestCommandEnabled;
+  } else if (cmdName === "test-home-pinned-book") {
+    cmd = ControlCommand.TestHomePinnedBook;
+  } else if (cmdName === "test-flashcard-visible-card-indices") {
+    cmd = ControlCommand.TestFlashcardVisibleCardIndices;
+  } else if (cmdName === "test-flashcard-flush") {
+    cmd = ControlCommand.TestFlashcardFlush;
+  } else if (cmdName === "test-rate-flashcard") {
+    cmd = ControlCommand.TestRateFlashcard;
+  } else if (cmdName === "test-create-flashcard") {
+    cmd = ControlCommand.TestCreateFlashcard;
+  } else if (cmdName === "test-flush-flashcard-bookkeeping") {
+    cmd = ControlCommand.TestFlushFlashcardBookkeeping;
+  }
   if (!cmd) {
     throw new Error(`unknown command: ${cmdName}`);
   }
-  const cmdArgs = cmdName === "test-command-enabled" && args[0] !== undefined ? [Number(args[0])] : [];
+  const cmdArgs = (cmdName === "test-command-enabled" || cmdName === "test-rate-flashcard" || cmdName === "test-create-flashcard" || cmdName === "test-flashcard-flush") && args[0] !== undefined ? [Number(args[0])] : (cmdName === "test-create-flashcard" && args[1] !== undefined ? [Number(args[0]), Number(args[1])] : []);
   const res = await runControlCommand(exe, cmd, cmdArgs);
   console.log(JSON.stringify(res));
 }

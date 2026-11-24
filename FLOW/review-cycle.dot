@@ -1,3 +1,4 @@
+// dot-sync: verified=2026-11-24 refs=da39a3ee5e6b
 digraph ReviewCycle {
     rankdir=TB;
     node [shape=box, style=rounded];

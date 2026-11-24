@@ -10,6 +10,7 @@ class EngineBase;
 struct Annotation;
 struct MainWindow;
 struct WindowTab;
+struct DisplayModel;
 
 // FlashcardPageGroup — one page's part of a cross-page cloze. A cloze that
 // spans a page break is stored as one Highlight per page (a PDF annotation
@@ -79,6 +80,11 @@ struct FlashcardTabState {
     Str filterExpr;
     bool filterEnabled = true; // ON/OFF switch (keeps the expression)
     bool cardsLoaded = false;  // lazy: true once FlashcardLoadFromDocument ran
+    // Per-page card index: physical page number (1-based) -> list of card indices
+    // that have a mask on that page (primary or extraPages). Built by
+    // FlashcardBuildPageIndex() when cards are loaded. Invalidated when
+    // tab->flashcard.cards is reassigned.
+    Vec<Vec<int>> cardIndicesByPage;
 };
 
 // FcListRow — backing data for one row of the Lista panel (the label string
@@ -94,6 +100,18 @@ struct FcListRow {
 
 // Load flashcards from PDF annotations in the current document
 Vec<Flashcard> FlashcardLoadFromDocument(EngineMupdf* engine);
+
+// Build per-page card index (physical page -> card indices) for fast visible-page
+// iteration in PaintFlashcardMasks. Must be called after tab->flashcard.cards is
+// assigned. Clears and rebuilds tab->flashcard.cardIndicesByPage.
+void FlashcardBuildPageIndex(FlashcardTabState& tabState);
+
+// Compute which card indices are candidates for painting based on visible pages.
+// Returns a Vec<int> of card indices that would be painted (includes active card
+// and Lista-selected card even if their pages are not visible). Pure helper for
+// testing and for PaintFlashcardMasks to share logic.
+Vec<int> FlashcardVisibleCardIndices(const DisplayModel* dm, const Vec<Flashcard>& cards,
+                                     const Vec<Vec<int>>& pageIndex, int studyCardIdx, int listCardIdx);
 
 // Create a flashcard Highlight annotation for the given PAGE-space rects
 // (author/color/opacity per the flashcard recipe). groupToken != 0 tags the
@@ -127,14 +145,38 @@ int FlashcardImportFromPdf(EngineMupdf* dstEngine, Vec<Flashcard>& existing, con
 // Returns -1 when the source can't be opened.
 int FlashcardImportDiffCount(Vec<Flashcard>& existing, const char* srcPath, int* srcCountOut);
 
-// Save flashcard study state to external JSON file
+// Save flashcard study state to external JSON file (synchronous, used for
+// adopt/resync/load paths where the caller needs to wait for the write)
 void FlashcardStudySave(const char* filePath, const FlashcardStudyDoc& doc);
+
+// Save flashcard study state to external JSON file asynchronously (worker thread).
+// The caller provides a snapshot of the states (copied from studyDoc.states), the
+// resolved file path, docName (base name of PDF), and docPath (full PDF path).
+// The profile write (ProfileDataUpdateStudyDoc) is NOT included — the caller
+// must do that separately on the UI thread.
+// The backup (FlashcardStudyMaybeBackup) is also NOT included — caller must call it.
+void FlashcardStudySaveAsync(const Vec<FlashcardStudyDoc::StateEntry>& states, const char* resolvedPath, Str docName,
+                             Str docPath, int version);
+
+// Join the save worker at app exit with a bounded timeout (3s).
+// Returns true if the worker stopped cleanly, false on timeout.
+bool FlashcardSaveWorkerJoin();
 
 // Drop study states whose card no longer exists in the document
 int FlashcardStudyPruneStates(FlashcardStudyDoc& doc, const Vec<Flashcard>& cards);
 
+// Binary search in a SORTED Vec<StateEntry>. Returns index if found, else -1.
+// If not found and outInsertIdx is non-null, sets it to the insert position.
+int FlashcardStateFindIdx(const Vec<FlashcardStudyDoc::StateEntry>& states, u64 key, int* outInsertIdx);
+
 // Load flashcard study state from external JSON file
 FlashcardStudyDoc FlashcardStudyLoad(const char* filePath);
+
+// Verify the study states vector is sorted by key (ascending) and has no
+// duplicate keys. Debug builds only (compiled out in release via gIsDebugBuild).
+// On violation: logs an unmistakable error line with the offending keys and
+// caller location. Returns true if sorted, false if violated.
+bool FlashcardStudyVerifySorted(const Vec<FlashcardStudyDoc::StateEntry>& states, const char* where);
 
 // Manual RESYNC: re-point an existing study JSON (old md5 file) at a new PDF
 // path (book renamed on disk). Returns false when the JSON can't be read.
@@ -149,6 +191,10 @@ void FlashcardSm2Update(FlashcardStudyState& state, int rating);
 
 // Get the JSON file path for a document's flashcard study state
 TempStr FlashcardStudyPath(const char* filePath);
+
+// Rolling local backups of the study dir (1d / 3d / 7d slots).
+// Cheap stamp guard inside — called after each successful save.
+void FlashcardStudyMaybeBackup();
 
 // Directory where the study-history JSONs live: the flashcardSettings.studyDir
 // setting when set (e.g. a cloud-synced folder for backup), else the per-exe
@@ -176,6 +222,11 @@ int FlashcardStudyListDocs(Vec<FlashcardStudyDocInfo>& out);
 void FlashcardStudyWriteJsonValue(FILE* f, const FlashcardStudyState& state);
 // write s as a JSON string literal (escapes backslash / quote / control chars)
 void FlashcardStudyWriteJsonStringLit(FILE* f, Str s);
+// Shared JSON writer: writes the per-book study JSON to an already-open FILE*.
+// Used by both the synchronous FlashcardStudySave and the async worker.
+// Returns true on success, false on failure (I/O error during write).
+bool FlashcardStudyWriteJsonToFile(FILE* f, int version, Str docName, Str docPath,
+                                   const Vec<FlashcardStudyDoc::StateEntry>& states);
 // parse the union of the study-state entries of a JSON blob into the doc
 // (finds the "states" section; works on any wrapper JSON holding that shape)
 void FlashcardStudyParseJsonInto(Str json, FlashcardStudyDoc& doc);

@@ -1,3 +1,4 @@
+// dot-sync: verified=2026-11-24 refs=ab15596a8bf5
 digraph TabWindowManagement {
     rankdir=TB;
     node [shape=box, style=rounded, fontname="Consolas", fontsize=9];
@@ -11,9 +12,9 @@ digraph TabWindowManagement {
         style=filled;
         fillcolor="#e3f2fd";
 
-        win_struct [label="MainWindow struct\n• hwndFrame / hwndToolbar / hwndReBar\n• Vec<WindowTab*> tabs\n• int activeTabIdx\n• ArchToolsState archTools\n• FlashcardState flashcard\n• EditToolsState editTools\n• showHomeOverlay\n• uiState (layout cache)", fillcolor="#c8e6c9", style=filled);
-        create_win [label="CreateAndShowMainWindow()\nSumatraStartup.cpp:2585\n• CreateWindowEx(FrameWndProc)\n• CreateToolbar()\n• LoadSettings()\n• RestoreTabsFromHistory()", fillcolor="#bbdefb", style=filled);
-        multi_win [label="Multiple MainWindows\n• gWindows (Vec<MainWindow*>)\n• Each has own tabs vector\n• Cross-window: favorites, tab groups\n• Flashcard session: opens NEW window", fillcolor="#bbdefb", style=filled);
+        win_struct [label="MainWindow struct\n• hwndFrame / hwndToolbar / hwndReBar\n• Vec<WindowTab*> tabs\n• int activeTabIdx\n• ArchToolsState archTools\n• FlashcardState flashcard\n• EditToolsState editTools\n• showHomeOverlay\n• uiState (layout cache)", fillcolor="#c8e6c9", style=filled]
+        create_win [label="CreateAndShowMainWindow()\nSumatraStartup.cpp\n• CreateWindowEx(FrameWndProc)\n• CreateToolbar()\n• LoadSettings()\n• RestoreTabsFromHistory()", fillcolor="#bbdefb", style=filled]
+        multi_win [label="Multiple MainWindows\n• gWindows (Vec<MainWindow*>)\n• Each has own tabs vector\n• Cross-window: favorites, tab groups\n• Flashcard session: opens NEW window", fillcolor="#bbdefb", style=filled]
     }
 
     // ===================== WINDOW TAB =====================
@@ -23,8 +24,8 @@ digraph TabWindowManagement {
         style=filled;
         fillcolor="#fce4ec";
 
-        tab_struct [label="WindowTab struct\n• MainWindow* win\n• EngineBase* ctrl\n• DisplayModel* displayModel\n• FileState* fileState\n• FlashcardTabState flashcard\n• SelectionState selection\n• ReadAloudState readAloud\n• int tabGroupId", fillcolor="#c8e6c9", style=filled);
-        flashcard_tab [label="FlashcardTabState (per-tab)\n• Vec<Flashcard> cards\n• FlashcardStudyDoc* studyDoc\n• Str filterExpr\n• bool filterEnabled\n• bool cardsLoaded (lazy)", fillcolor="#fff9c4", style=filled);
+        tab_struct [label="WindowTab struct\n• MainWindow* win\n• EngineBase* ctrl\n• DisplayModel* displayModel\n• FileState* fileState\n• FlashcardTabState flashcard\n• SelectionState selection\n• ReadAloudState readAloud\n• int tabGroupId", fillcolor="#c8e6c9", style=filled]
+        flashcard_tab [label="FlashcardTabState (per-tab)\n• Vec<Flashcard> cards\n• FlashcardStudyDoc* studyDoc\n• Str filterExpr\n• bool filterEnabled\n• bool cardsLoaded (lazy)", fillcolor="#fff9c4", style=filled]
     }
 
     // ===================== TABS CONTROL (VIRTWND) =====================
@@ -34,10 +35,10 @@ digraph TabWindowManagement {
         style=filled;
         fillcolor="#fff3e0";
 
-        virtwnd [label="VirtWnd Tree Root\nTabsCtrl.cpp\n• hwndTabCtrl (SysTabControl32)\n• VirtWnd children = tab buttons\n• Paint: active underline 3px (L224-225)\n• Hit-test: TabCtrl_HitTest()", fillcolor="#c8e6c9", style=filled);
-        home_tab [label="Home Tab (pinned idx 0)\nTabs.cpp:712-726\n• Always exists when tabs enabled\n• nTabs ≥ 2 with 1 doc\n• ToggleFavoritesTab() shows it", fillcolor="#e1bee7", style=filled);
-        tab_close [label="Close Tab Interactions\n• Alt+Click: L719-723 (closes tab)\n• Middle-click: L775-779 (closes/autoscroll)\n• Ctrl+Shift+T: reopen closed\n• Freeze mechanism REMOVED (2026-08-24)", fillcolor="#bbdefb", style=filled);
-        tab_layout [label="LayoutTabs()\n• dx = min(DpiScale(TabWidth), (clientW-5)/nTabs)\n• Recalc on RelayoutFrame\n• Scroll buttons if overflow", fillcolor="#bbdefb", style=filled);
+        virtwnd [label="VirtWnd Tree Root\nTabsCtrl.cpp\n• hwndTabCtrl (SysTabControl32)\n• VirtWnd children = tab buttons\n• Paint: active underline 3px (L224-225)\n• Hit-test: TabCtrl_HitTest()", fillcolor="#c8e6c9", style=filled]
+        home_tab [label="Home Tab (pinned idx 0)\nTabs.cpp\n• Always exists when tabs enabled\n• nTabs ≥ 2 with 1 doc\n• ToggleFavoritesTab() shows it", fillcolor="#e1bee7", style=filled]
+        tab_close [label="Close Tab Interactions\n• Alt+Click: L719-723 (closes tab)\n• Middle-click: L775-779 (closes/autoscroll)\n• Ctrl+Shift+T: reopen closed\n• Freeze mechanism REMOVED (2026-08-24)", fillcolor="#bbdefb", style=filled]
+        tab_layout [label="LayoutTabs()\n• dx = min(DpiScale(TabWidth), (clientW-5)/nTabs)\n• Recalc on RelayoutFrame\n• Scroll buttons if overflow", fillcolor="#bbdefb", style=filled]
     }
 
     // ===================== TAB GROUPS =====================
@@ -47,8 +48,8 @@ digraph TabWindowManagement {
         style=filled;
         fillcolor="#f3e5f5";
 
-        groups [label="Tab Groups\n• Vec<TabGroup> per window\n• Group = {name, Vec<tabIdx>}\n• Menu: Favorites → Tab Groups submenu (L558)\n• Save/Restore: TabGroupsSave/Load", fillcolor="#bbdefb", style=filled);
-        group_ops [label="Operations\n• CreateGroupFromSelection()\n• AddTabToGroup / RemoveTabFromGroup\n• MoveGroupTabs()\n• DeleteGroup()\n• Persist in FileState.tabGroupId", fillcolor="#c8e6c9", style=filled);
+        groups [label="Tab Groups\n• Vec<TabGroup> per window\n• Group = {name, Vec<tabIdx>}\n• Menu: Favorites → Tab Groups submenu (L558)\n• Save/Restore: TabGroupsSave/Load", fillcolor="#bbdefb", style=filled]
+        group_ops [label="Operations\n• CreateGroupFromSelection()\n• AddTabToGroup / RemoveTabFromGroup\n• MoveGroupTabs()\n• DeleteGroup()\n• Persist in FileState.tabGroupId", fillcolor="#c8e6c9", style=filled]
     }
 
     // ===================== TAB LIFECYCLE =====================
@@ -58,10 +59,10 @@ digraph TabWindowManagement {
         style=filled;
         fillcolor="#e8f5e9";
 
-        add_tab [label="AddTabToWindow(win, tab)\nTabs.cpp:380\n• push_back to win->tabs\n• TabsCtrl insert item\n• LoadModelIntoTab() if ctrl\n• RelayoutFrame()", fillcolor="#c8e6c9", style=filled);
-        select_tab [label="TabsSelect(win, idx)\nTabs.cpp:450\n• win->activeTabIdx = idx\n• TabCtrl_SetCurSel\n• LoadModelIntoTab() if lazy\n• UpdateUI (toolbar page text)\n• FlashcardOnTabChanged hook", fillcolor="#c8e6c9", style=filled);
-        close_tab [label="CloseTab(win, idx)\nTabs.cpp:520\n• Save FileState to history\n• Destroy DisplayModel + Engine\n• gRenderCache->FreeForDisplayModel()\n• TabsCtrl delete item\n• Select adjacent tab\n• RelayoutFrame()", fillcolor="#c8e6c9", style=filled);
-        reopen_tab [label="ReopenLastClosedFile()\nTabs.cpp:580\n• gFileHistory.RecentlyClosed*\n• LoadDocument() with saved state\n• Ctrl+Shift+T reopens whole window\ngClosedGroupSizes tracks groups", fillcolor="#e1bee7", style=filled);
+        add_tab [label="AddTabToWindow(win, tab)\nTabs.cpp\n• push_back to win->tabs\n• TabsCtrl insert item\n• LoadModelIntoTab() if ctrl\n• RelayoutFrame()", fillcolor="#c8e6c9", style=filled]
+        select_tab [label="TabsSelect(win, idx)\nTabs.cpp\n• win->activeTabIdx = idx\n• TabCtrl_SetCurSel\n• LoadModelIntoTab() if lazy\n• UpdateUI (toolbar page text)\n• FlashcardOnTabChanged hook", fillcolor="#c8e6c9", style=filled]
+        close_tab [label="CloseTab(win, idx)\nTabs.cpp\n• Save FileState to history\n• Destroy DisplayModel + Engine\n• gRenderCache->FreeForDisplayModel()\n• TabsCtrl delete item\n• Select adjacent tab\n• RelayoutFrame()", fillcolor="#c8e6c9", style=filled]
+        reopen_tab [label="ReopenLastClosedFile()\nTabs.cpp\n• gFileHistory.RecentlyClosed*\n• LoadDocument() with saved state\n• Ctrl+Shift+T reopens whole window\ngClosedGroupSizes tracks groups", fillcolor="#e1bee7", style=filled]
     }
 
     // ===================== RELAYOUT =====================
@@ -71,8 +72,8 @@ digraph TabWindowManagement {
         style=filled;
         fillcolor="#efebe9";
 
-        relayout [label="RelayoutFrame(win, updateToolbars, sidebarDx)\nSumatraPDF.cpp:6343\n• Main toolbar band height\n• Secondary toolbars (arch/fc/edit) Y stack\n• Sidebar (AI chat / Flashcard Lista) width\n• Canvas gets remaining rect\n• Updates TabCtrl position", fillcolor="#c8e6c9", style=filled);
-        tab_pos [label="TabCtrl Position\n• Below main toolbar\n• Above secondary toolbars\n• Height = TabCtrl_GetItemRect()\n• RelayoutFrame updates on toolbar show/hide", fillcolor="#bbdefb", style=filled);
+        relayout [label="RelayoutFrame(win, updateToolbars, sidebarDx)\nSumatraPDF.cpp\n• Main toolbar band height\n• Secondary toolbars (arch/fc/edit) Y stack\n• Sidebar (AI chat / Flashcard Lista) width\n• Canvas gets remaining rect\n• Updates TabCtrl position", fillcolor="#c8e6c9", style=filled]
+        tab_pos [label="TabCtrl Position\n• Below main toolbar\n• Above secondary toolbars\n• Height = TabCtrl_GetItemRect()\n• RelayoutFrame updates on toolbar show/hide", fillcolor="#bbdefb", style=filled]
     }
 
     // ===================== STARTUP RESTORE =====================
@@ -82,8 +83,8 @@ digraph TabWindowManagement {
         style=filled;
         fillcolor="#eceff1";
 
-        restore [label="RestoreTabsFromHistory()\nSumatraStartup.cpp\n• gFileHistory.RecentlyOpened\n• LoadDocument for each\n• lazyLoad = gGlobalPrefs->lazyLoading\n• RestoreMissingTabOnStartup()\n• TabGroupsLoad()", fillcolor="#c8e6c9", style=filled);
-        lazy_load [label="Lazy Loading\nSumatraStartup.cpp:2719\n• Tab created, Engine NOT loaded\n• ReloadDocument on first select\n• gGlobalPrefs->lazyLoading flag", fillcolor="#bbdefb", style=filled);
+        restore [label="RestoreTabsFromHistory()\nSumatraStartup.cpp\n• gFileHistory.RecentlyOpened\n• LoadDocument for each\n• lazyLoad = gGlobalPrefs->lazyLoading\n• RestoreMissingTabOnStartup()\n• TabGroupsLoad()", fillcolor="#c8e6c9", style=filled]
+        lazy_load [label="Lazy Loading\nSumatraStartup.cpp\n• Tab created, Engine NOT loaded\n• ReloadDocument on first select\n• gGlobalPrefs->lazyLoading flag", fillcolor="#bbdefb", style=filled]
     }
 
     // ===================== FLASHCARD PER-TAB =====================
@@ -93,8 +94,8 @@ digraph TabWindowManagement {
         style=filled;
         fillcolor="#e3f2fd";
 
-        fc_tab_state [label="WindowTab::flashcard\n= FlashcardTabState{\n  cards, studyDoc,\n  filterExpr, filterEnabled,\n  cardsLoaded (lazy)\n}\nFlashcardOnTabChanged hook\nin LoadModelIntoTab", fillcolor="#c8e6c9", style=filled);
-        fc_cross_tab [label="Cross-tab isolation\n• Mask bleed FIXED (s22)\n• Each tab own cards/studyDoc\n• Global session = sum over tabs\n• Toolbar counter: scope-aware", fillcolor="#bbdefb", style=filled);
+        fc_tab_state [label="WindowTab::flashcard\n= FlashcardTabState{\n  cards, studyDoc,\n  filterExpr, filterEnabled,\n  cardsLoaded (lazy)\n}\nFlashcardOnTabChanged hook\nin LoadModelIntoTab", fillcolor="#c8e6c9", style=filled]
+        fc_cross_tab [label="Cross-tab isolation\n• Mask bleed FIXED (s22)\n• Each tab own cards/studyDoc\n• Global session = sum over tabs\n• Toolbar counter: scope-aware", fillcolor="#bbdefb", style=filled]
     }
 
     // ===================== EDGES =====================
@@ -127,9 +128,9 @@ digraph TabWindowManagement {
     fc_tab_state -> fc_cross_tab;
 
     // Cross-refs to other systems
-    tab_struct ..> dm [style=dotted, label="DisplayModel"];
-    tab_struct ..> ctrl [style=dotted, label="EngineBase"];
-    close_tab ..> cache [style=dotted, label="FreeForDisplayModel"];
+    tab_struct -> dm [style=dotted, label="DisplayModel"];
+    tab_struct -> ctrl [style=dotted, label="EngineBase"];
+    close_tab -> cache [style=dotted, label="FreeForDisplayModel"];
 
     // Legend
     subgraph cluster_legend {

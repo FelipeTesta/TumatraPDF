@@ -1,14 +1,15 @@
+// dot-sync: verified=2026-11-24 refs=09bae36baedd
 digraph AutoScroll {
     rankdir=TB;
     node [shape=box, style=rounded];
 
     start [label="F9 / toolbar toggle\nCmdAutoScrollToggle", fillcolor="#c8e6c9", style=filled];
     timer [label="SetTimer kContinuousAutoScrollTimerID\n(AutoScroll.cpp)", fillcolor="#bbdefb", style=filled];
-    tick [label="AutoScrollContinuousTick\n(AutoScroll.cpp:338)\nearly-return if viewportCropV2QuickToggled (Shift-hold pause)", fillcolor="#bbdefb", style=filled];
-    movedoc [label="win->MoveDocBy(0, dy)\nMainWindow.cpp:435 -> WindowTab.cpp:169", fillcolor="#bbdefb", style=filled];
-    scrolly [label="DisplayModel::ScrollYBy(dy, false)\nDisplayModel.cpp:2236", fillcolor="#bbdefb", style=filled];
+    tick [label="AutoScrollContinuousTick\n(AutoScroll.cpp)\nearly-return if viewportCropV2QuickToggled (Shift-hold pause)", fillcolor="#bbdefb", style=filled];
+    movedoc [label="win->MoveDocBy(0, dy)\nMainWindow.cpp -> WindowTab.cpp", fillcolor="#bbdefb", style=filled];
+    scrolly [label="DisplayModel::ScrollYBy(dy, false)\nDisplayModel.cpp", fillcolor="#bbdefb", style=filled];
     parts [label="RecalcVisibleParts + RenderVisibleParts\n(no-op for non-cache) -> RepaintDisplay", fillcolor="#e1bee7", style=filled];
-    paint [label="WM_PAINT -> OnPaintDocument\nCanvas.cpp -> DrawDocument loop\n-> RenderCache::Paint (RenderCache.cpp:1140)", fillcolor="#e1bee7", style=filled];
+    paint [label="WM_PAINT -> OnPaintDocument\nCanvas.cpp -> DrawDocument loop\n-> RenderCache::Paint (RenderCache.cpp)", fillcolor="#e1bee7", style=filled];
     cache [label="cached path: blit tiles (~1ms)\nnon-cache: engine->RenderPage SYNC (~23ms)", fillcolor="#fff9c4", style=filled];
     end [label="IsAtDocumentEnd -> KillTimer", fillcolor="#ffcdd2", style=filled];
 
@@ -16,7 +17,7 @@ digraph AutoScroll {
     etaUi [label="ETA label: canvas overlay (WndProcEtaOverlay, Toolbar.cpp)\nWS_EX_LAYERED + SetLayeredWindowAttributes + magenta colorkey\nREQUIRED or invisible", shape=note, fillcolor="#fff9c4", style=filled];
 
     md [label="Markdown (.md) webview branch - SEPARATE ETA logic:\nrAF loop __tumatraAS (60fps, px/sec)\nscroll steps quantized to whole DEVICE pixels\n(step=floor(accum*dpr)/dpr; 1-CSS-px steps at 125/150%\nscaling = fractional device px = subpixel shimmer)\nthrottled autoscrollProgress notify ~10s -> OnAutoScrollProgress\nfloor 1min; autoscrollBottom -> hide label + stop", shape=box, fillcolor="#e3f2fd", style=filled];
-    mdhop [label="ADAPTER TRAP (2026-09-23 fix):\nJS notify -> BrowserDocView::OnJsNotifyCb\n-> MarkdownHtmlWindowHandler (adapter, MarkdownModel.cpp:179)\n-> MarkdownModel -> ControllerCallbackHandler\nadapter MUST forward every new HtmlWindowCallback method\n(no-op default = feature silently dead)", shape=note, fillcolor="#ffcdd2", style=filled];
+    mdhop [label="ADAPTER TRAP (2026-09-23 fix):\nJS notify -> BrowserDocView::OnJsNotifyCb\n-> MarkdownHtmlWindowHandler (adapter, MarkdownModel.cpp)\n-> MarkdownModel -> ControllerCallbackHandler\nadapter MUST forward every new HtmlWindowCallback method\n(no-op default = feature silently dead)", shape=note, fillcolor="#ffcdd2", style=filled];
     mdkeys [label="WebView2 keys (2026-09-23):\nkBlockSpaceScrollJs: Chromium-native Space=page-down lives INSIDE\nthe webview, outside the accel table -> preventDefault via init script\nkForwardAppKeysJs: plain letters A-Z -> notify('appKey') ->\nresolveAccelCmd -> WM_COMMAND (WebView2 only raises\nAcceleratorKeyPressed for F-keys/arrows/Home/End)\nCtrl pause: dm-branch tick owns the Ctrl early-return;\nwebview branch = webviewCtrlDown state machine -> SetWebviewAutoScroll(0)\n.md reading pos: fs->scrollPos -> ScrollTo on LoadDoc\n(seeds htmlScrollPos, applied at OnDocumentComplete like CHM)", shape=note, fillcolor="#e3f2fd", style=filled];
 
     shift [label="Shift hold = PAUSE tick (quick view full page)\nrelease resumes; viewport remap via RestoreViewportAfterV2Toggle\n(fraction-of-page dyInPage, not raw px)", shape=box, fillcolor="#fff9c4", style=filled];
@@ -33,7 +34,7 @@ digraph AutoScroll {
     speed [label="Speed: round-step table 25-1600 px/min\nF7 +20% / F8 -20%\npersist FileState AutoScrollSpeedMultiplier", shape=box, fillcolor="#f5f5f5", style=filled];
     start -> speed [style=dotted];
 
-    hold [label="Hold active = third pause reason (MainWindow.h:387-395):\nautoPausedByHold = fact (Hold is ON) vs autoSuspendedByHold = intent\n(scroll was running, Hold stopped it, wants to resume).\nStart refused while Hold active; resume only when foreground\nand no other pause owns it. AutoScrollSetHoldActive (AutoScroll.cpp:370).", fillcolor="#fff9c4", style=filled];
+    hold [label="Hold active = third pause reason (MainWindow.h):\nautoPausedByHold = fact (Hold is ON) vs autoSuspendedByHold = intent\n(scroll was running, Hold stopped it, wants to resume).\nStart refused while Hold active; resume only when foreground\nand no other pause owns it. AutoScrollSetHoldActive (AutoScroll.cpp).", fillcolor="#fff9c4", style=filled];
 
     tick -> hold [style=dotted];
     hold -> shift [style=dotted, label="both pause tick"];

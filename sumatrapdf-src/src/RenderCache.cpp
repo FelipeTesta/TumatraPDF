@@ -616,7 +616,19 @@ void RenderCache::RequestRendering(DisplayModel* dm, int pageNo) {
 /* Render a bitmap for page <pageNo> in <dm>. */
 void RenderCache::RequestRendering(DisplayModel* dm, int pageNo, TilePosition tile, bool clearQueueForPage,
                                    const PredictiveChain* chain) {
-    // rcLogf("RenderCache::RequestRendering: pageNo %d\n", pageNo);
+    RequestRenderingInternal(dm, pageNo, tile, clearQueueForPage, chain, false);
+}
+
+/* Speculative variant: same as RequestRendering but marks the request as
+   speculative (lower priority). Used by flashcard prefetch/prewarm. */
+void RenderCache::RequestRenderingSpeculative(DisplayModel* dm, int pageNo, TilePosition tile, bool clearQueueForPage,
+                                              const PredictiveChain* chain) {
+    RequestRenderingInternal(dm, pageNo, tile, clearQueueForPage, chain, true);
+}
+
+void RenderCache::RequestRenderingInternal(DisplayModel* dm, int pageNo, TilePosition tile, bool clearQueueForPage,
+                                           const PredictiveChain* chain, bool speculative) {
+    // rcLogf("RenderCache::RequestRendering: pageNo %d spec=%d\n", pageNo, (int)speculative);
     ScopedRecursiveMutex scope(&requestAccess);
     ReportIf(!dm);
     if (!dm || dm->pauseRendering) {
@@ -654,22 +666,40 @@ void RenderCache::RequestRendering(DisplayModel* dm, int pageNo, TilePosition ti
         ClearQueueForDisplayModel(dm, pageNo, &tile);
     }
 
+    // check for duplicate request
     for (int i = 0; i < requestCount; i++) {
         PageRenderRequest* req = &(requests[i]);
         if ((req->pageNo == pageNo) && (req->dm == dm) && (req->tile == tile)) {
             if ((req->zoom == zoom) && (req->rotation == rotation)) {
                 /* Request with exactly the same parameters already queued for
-                   rendering. Move it to the top of the queue so that it'll
-                   be rendered faster. */
+                   rendering. If the existing request is visible and the incoming
+                   is speculative, keep the existing one at its priority (don't
+                   move to tail and don't overwrite speculative flag). If both
+                   are speculative or incoming is visible, move to tail so newest
+                   data wins and it gets served next. */
+                if (!req->speculative && speculative) {
+                    // existing is visible, incoming is speculative: keep visible priority
+                    return;
+                }
+                /* Move to tail so newest wins. Preserve speculative flag if
+                   existing was speculative and incoming is visible (visible wins). */
                 PageRenderRequest tmp;
                 tmp = requests[requestCount - 1];
                 requests[requestCount - 1] = *req;
                 *req = tmp;
+                // Visible incoming overwrites speculative existing
+                if (!speculative) {
+                    requests[requestCount - 1].speculative = false;
+                }
             } else {
                 /* There was a request queued for the same page but with different
                    zoom or rotation, so only replace this request */
                 req->zoom = zoom;
                 req->rotation = rotation;
+                // Visible incoming overwrites speculative existing
+                if (!speculative) {
+                    req->speculative = false;
+                }
             }
             return;
         }
@@ -682,7 +712,7 @@ void RenderCache::RequestRendering(DisplayModel* dm, int pageNo, TilePosition ti
     }
 
     auto cb = MkMethod1<DisplayModel, PageRenderRequest*, &DisplayModel::RenderFinishedAsync>(dm);
-    Render(dm, pageNo, rotation, zoom, &tile, nullptr, cb, chain);
+    Render(dm, pageNo, rotation, zoom, &tile, nullptr, cb, chain, speculative);
 }
 
 // Start (or continue) a chain of predictive renders. Renders the first page in
@@ -738,7 +768,7 @@ void RenderCache::RequestPredictiveRendering(DisplayModel* dm, int originPageNo,
 
 void RenderCache::Render(DisplayModel* dm, int pageNo, int rotation, float zoom, RectF pageRect,
                          const Func1<PageRenderRequest*>& callback) {
-    bool ok = Render(dm, pageNo, rotation, zoom, nullptr, &pageRect, callback);
+    bool ok = Render(dm, pageNo, rotation, zoom, nullptr, &pageRect, callback, nullptr, false);
     if (!ok) {
         // create a dummy request to notify callback of failure
         PageRenderRequest req;
@@ -751,8 +781,9 @@ void RenderCache::Render(DisplayModel* dm, int pageNo, int rotation, float zoom,
 }
 
 bool RenderCache::Render(DisplayModel* dm, int pageNo, int rotation, float zoom, TilePosition* tile, RectF* pageRect,
-                         const Func1<PageRenderRequest*>& renderFinishedCb, const PredictiveChain* chain) {
-    rcLogf("RenderCache::Render: pageNo %d\n", pageNo);
+                         const Func1<PageRenderRequest*>& renderFinishedCb, const PredictiveChain* chain,
+                         bool speculative) {
+    rcLogf("RenderCache::Render: pageNo %d spec=%d\n", pageNo, (int)speculative);
     ReportIf(!dm);
     if (!dm || dm->pauseRendering) {
         return false;
@@ -769,19 +800,32 @@ bool RenderCache::Render(DisplayModel* dm, int pageNo, int rotation, float zoom,
 
     /* add request to the queue */
     if (requestCount == MAX_PAGE_REQUESTS) {
-        /* queue is full -> remove the oldest items on the queue */
-        if (requests[0].renderFinishedCb.IsValid()) {
-            requests[0].abort = true;
-            requests[0].bmp = nullptr;
-            requests[0].errorCode = 0;
-            requests[0].renderFinishedCb.Call(&requests[0]);
+        /* queue is full -> evict a SPECULATIVE request if any exists;
+           only if all are visible, drop the oldest (current behavior) */
+        int evictIdx = -1;
+        for (int i = 0; i < MAX_PAGE_REQUESTS; i++) {
+            if (requests[i].speculative) {
+                evictIdx = i;
+                break;
+            }
         }
-        // PageRenderRequest holds a Func1, so it isn't trivially copyable and
-        // memmove() over it is undefined; shift with assignment instead
-        for (int i = 0; i < MAX_PAGE_REQUESTS - 1; i++) {
+        if (evictIdx == -1) {
+            // all visible: drop oldest (index 0)
+            evictIdx = 0;
+        }
+        if (requests[evictIdx].renderFinishedCb.IsValid()) {
+            requests[evictIdx].abort = true;
+            requests[evictIdx].bmp = nullptr;
+            requests[evictIdx].errorCode = 0;
+            requests[evictIdx].renderFinishedCb.Call(&requests[evictIdx]);
+        }
+        // Shift elements to fill the gap
+        for (int i = evictIdx; i < MAX_PAGE_REQUESTS - 1; i++) {
             requests[i] = requests[i + 1];
         }
         newRequest = &(requests[MAX_PAGE_REQUESTS - 1]);
+        logf("[fc][perf] renderq: queue full, evicted idx=%d (speculative=%d) to make room\n", evictIdx,
+             (int)requests[MAX_PAGE_REQUESTS - 1].speculative);
     } else {
         newRequest = &(requests[requestCount]);
         requestCount++;
@@ -807,6 +851,7 @@ bool RenderCache::Render(DisplayModel* dm, int pageNo, int rotation, float zoom,
     newRequest->errorCode = 0;
     newRequest->predictiveOriginPageNo = 0;
     newRequest->nPredictiveRequests = 0;
+    newRequest->speculative = speculative;
     if (chain) {
         newRequest->predictiveOriginPageNo = chain->originPageNo;
         newRequest->nPredictiveRequests = chain->nPages;
@@ -815,6 +860,17 @@ bool RenderCache::Render(DisplayModel* dm, int pageNo, int rotation, float zoom,
         }
     }
     newRequest->renderFinishedCb = renderFinishedCb;
+
+    // Log queue state for debugging
+    int specCount = 0, visCount = 0;
+    for (int i = 0; i < requestCount; i++) {
+        if (requests[i].speculative)
+            specCount++;
+        else
+            visCount++;
+    }
+    logf("[fc][perf] renderq: queued spec=%d vis=%d (pageNo=%d spec=%d)\n", specCount, visCount, pageNo,
+         (int)speculative);
 
     ReleaseSemaphore(startRendering, 1, nullptr);
 
@@ -867,9 +923,35 @@ bool RenderCache::GetNextRequest(PageRenderRequest* req, int threadIdx) {
         return false;
     }
 
-    int idx = requestCount - 1;
-    requestCount = idx;
-    *req = requests[idx];
+    // Prefer non-speculative (visible) requests: scan from tail for first visible.
+    // If none found, take the speculative tail (old behavior).
+    int idx = -1;
+    for (int i = requestCount - 1; i >= 0; i--) {
+        if (!requests[i].speculative) {
+            idx = i;
+            break;
+        }
+    }
+    if (idx == -1) {
+        // all speculative: take the tail (newest speculative)
+        idx = requestCount - 1;
+    } else if (idx != requestCount - 1) {
+        // we found a visible request that is NOT at the tail
+        int specAfter = requestCount - 1 - idx;
+        logf("[fc][perf] renderq: serving visible over %d speculative (idx=%d tail=%d)\n", specAfter, idx,
+             requestCount - 1);
+    }
+
+    // Move the selected request to the tail position (if not already there)
+    // so that the array stays compact and we can just decrement requestCount
+    PageRenderRequest selected = requests[idx];
+    for (int i = idx; i < requestCount - 1; i++) {
+        requests[i] = requests[i + 1];
+    }
+    requests[requestCount - 1] = selected;
+    requestCount--;
+
+    *req = requests[requestCount];
     req->darkModeEpoch = darkModeEpoch;
     curReqs[threadIdx] = req;
     ReportIf(req->abort);

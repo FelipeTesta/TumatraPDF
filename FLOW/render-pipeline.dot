@@ -1,3 +1,4 @@
+// dot-sync: verified=2026-11-24 refs=a7e96d3866d6
 digraph RenderPipeline {
     rankdir=TB;
     node [shape=box, style=rounded, fontname="Consolas", fontsize=9];
@@ -20,13 +21,13 @@ digraph RenderPipeline {
         fillcolor="#e8f5e9";
 
         paint_entry [label="RenderCache::Paint(dm, hdc, rc)\n~line 1140", fillcolor="#c8e6c9", style=filled];
-        should_cache [label="ShouldCacheRendering(dm)\nDisplayModel.cpp:2200\nreturn !marginTrimEnabled &&\n!viewportCropV2Active", fillcolor="#fff9c4", style=filled];
+        should_cache [label="ShouldCacheRendering(dm)\nDisplayModel.cpp\nreturn !marginTrimEnabled &&\n!viewportCropV2Active", fillcolor="#fff9c4", style=filled];
         recalc_parts [label="RecalcVisibleParts(dm)\nDisplayModel.cpp\n-> visible page range", fillcolor="#e1bee7", style=filled];
         render_visible [label="RenderVisibleParts(dm)\nDisplayModel.cpp\n-> queue render requests", fillcolor="#e1bee7", style=filled];
 
         // Cached path
-        get_tile [label="GetTileRectDevice/User/OnScreen\nRenderCache.cpp:360/745/1170\nroute virtual->physical for TC2", fillcolor="#bbdefb", style=filled];
-        find_tile [label="Find(tileKey) -> cache hit?\nNEWEST-FIRST scan (O(1) hot)\nRenderCache.cpp:941", fillcolor="#bbdefb", style=filled];
+        get_tile [label="GetTileRectDevice/User/OnScreen\nRenderCache.cpp/745/1170\nroute virtual->physical for TC2", fillcolor="#bbdefb", style=filled];
+        find_tile [label="Find(tileKey) -> cache hit?\nNEWEST-FIRST scan (O(1) hot)\nRenderCache.cpp", fillcolor="#bbdefb", style=filled];
         blit [label="BlitPixmap(hdc, tileBmp, rect)\n~1ms cached blit", fillcolor="#c8e6c9", style=filled];
 
         // Non-cached path
@@ -36,11 +37,11 @@ digraph RenderPipeline {
 
         // Predictive rendering (Serena)
         pred_render [label="Predictive Rendering\nRenderCache::RequestPredictiveRendering\nLIFO queue -> nearby pages pre-rendered\nGetNextRequest() pops tail", fillcolor="#e3f2fd", style=filled];
-        abort_cookie [label="AbortCookie (EngineBase.h:398)\nRender interruption helper\nChecked in render loop\nSet on RelayoutFrame / tab close\nPrevents stale renders", fillcolor="#fff9c4", style=filled];
+        abort_cookie [label="AbortCookie (EngineBase.h)\nRender interruption helper\nChecked in render loop\nSet on RelayoutFrame / tab close\nPrevents stale renders", fillcolor="#fff9c4", style=filled];
         render_guard [label="Render Thread Guard (LOG.md:2099)\nDiscards queued requests with invalid pageNo\nPost-relayout (2N->N page count change)\nInstead of feeding engine -> ReportIf storm", fillcolor="#c8e6c9", style=filled];
 
         // Trim/TC2 integration
-        trim_math [label="Trim: pageRect clip + shift\nRenderCache.cpp:360/745/1170\ntrimTop/trimBottom per doc", fillcolor="#e3f2fd", style=filled];
+        trim_math [label="Trim: pageRect clip + shift\nRenderCache.cpp/745/1170\ntrimTop/trimBottom per doc", fillcolor="#e3f2fd", style=filled];
         tc2_math [label="TC2: mediabox halved + colX shift\nVirtualToPhysical(pageNo)\ncolumn 0/1 = left/right", fillcolor="#e3f2fd", style=filled];
 
         paint_entry -> should_cache;
@@ -72,7 +73,7 @@ digraph RenderPipeline {
         virtual_phys [label="VirtualToPhysical(v)\n= (v+1)/2\nColumnOfVirtual(v)\n= (v-1)%2", fillcolor="#bbdefb", style=filled];
         page_media_box [label="PageMediaBox(pageNo)\nTC2: halve mediabox dx\ntrim: shrink top/bottom\nRoutes virtual->physical", fillcolor="#bbdefb", style=filled];
         cvt_screen [label="CvtToScreen/CvtFromScreen\npage coords <-> canvas client\nincludes scroll + zoom\nTC2: pt.x +/-= colX", fillcolor="#bbdefb", style=filled];
-        scroll [label="ScrollYBy(dy, false)\nTC2: column advance\nDisplayModel.cpp:2236", fillcolor="#e1bee7", style=filled];
+        scroll [label="ScrollYBy(dy, false)\nTC2: column advance\nDisplayModel.cpp", fillcolor="#e1bee7", style=filled];
         build_pages [label="BuildPagesInfo()\npageCount / mediaBoxes\nTC2: 2N virtual pages", fillcolor="#fff9c4", style=filled];
 
         // Navigation history (Serena)
@@ -91,10 +92,10 @@ digraph RenderPipeline {
         style=filled;
         fillcolor="#f3e5f5";
 
-        engine_base [label="EngineBase (virtual)\nEngineBase.h:425\nKind kind\nRenderPage() pure virtual\nPageMediaBox()\nTransform()\nHasClipOptimizations()\nSearchText()\nGetAnnotations()\nGetToc()\nGetNamedDest()\nExtractText()\nSaveFileAs()\nGetPageImage()", fillcolor="#bbdefb", style=filled];
-        engine_mupdf [label="EngineMupdf : EngineBase\nEngineMupdf.cpp:4972\nRenderPage() -> MuPDF\nfz_run_page()\nPageMediaBox() -> fz_bound_page()\nHasClipOptimizationsLocked()\nFzNewContentBBoxDevice\nDarkLegacySkipRects\nReplaceImageWithFile()\nExtractPageTextLocked()", fillcolor="#c8e6c9", style=filled];
-        engine_ebook [label="EngineEbook : EngineBase\nEngineEbook.cpp:346\nRenderPage() -> Gumbo/HTML", fillcolor="#bbdefb", style=filled];
-        engine_img [label="EngineImages : EngineBase\nEngineImages.cpp:454\nRenderPage() -> GDI+", fillcolor="#bbdefb", style=filled];
+        engine_base [label="EngineBase (virtual)\nEngineBase.h\nKind kind\nRenderPage() pure virtual\nPageMediaBox()\nTransform()\nHasClipOptimizations()\nSearchText()\nGetAnnotations()\nGetToc()\nGetNamedDest()\nExtractText()\nSaveFileAs()\nGetPageImage()", fillcolor="#bbdefb", style=filled];
+        engine_mupdf [label="EngineMupdf : EngineBase\nEngineMupdf.cpp\nRenderPage() -> MuPDF\nfz_run_page()\nPageMediaBox() -> fz_bound_page()\nHasClipOptimizationsLocked()\nFzNewContentBBoxDevice\nDarkLegacySkipRects\nReplaceImageWithFile()\nExtractPageTextLocked()", fillcolor="#c8e6c9", style=filled];
+        engine_ebook [label="EngineEbook : EngineBase\nEngineEbook.cpp\nRenderPage() -> Gumbo/HTML", fillcolor="#bbdefb", style=filled];
+        engine_img [label="EngineImages : EngineBase\nEngineImages.cpp\nRenderPage() -> GDI+", fillcolor="#bbdefb", style=filled];
 
         engine_base -> engine_mupdf [label="PDF"];
         engine_base -> engine_ebook [label="EPUB/MD"];
@@ -140,7 +141,7 @@ digraph RenderPipeline {
         tc2_feat [label="Two Columns v2\nvirtual->physical routing\nevery engine call\ndisplay cache key = virtual", fillcolor="#e3f2fd", style=filled];
         contrast_feat [label="Contrast\nPDF: WS_EX_LAYERED overlay\nMD: CSS filter via WebView2\nper-doc persist", fillcolor="#fff9c4", style=filled];
         invert_feat [label="Invert\nRecolorPixmap in cached\n+ non-cached Paint\nper-doc persist", fillcolor="#fff9c4", style=filled];
-        flashcard_feat [label="Flashcard (study=on) - PaintFlashcardMasks Canvas.cpp:4109\nPER-TRANSITION PAINT PATH:\n1. WM_PAINT -> OnPaintDocument -> DrawDocument loop\n2. PaintFlashcardMasks called per paint\n3. studyCardIdx = (studyMode && currentCardIdx valid && e.tab==CurrentTab)\n   ? e.cardIdx : -1\n4. For EACH card in current tab:\n   isActiveCard = (i == studyCardIdx)\n   listActiveHere = (activeListCardTab == fcTab && i == activeListCardIdx)\n   opaque = (isActiveCard && !revealMode)\n5. Per quad rect:\n   vPage = PhysicalToVirtualForRect(pageNo, bounds, &vr)\n   rc = CvtToScreen(vPage, vr)  // viewport-relative\n   if rc.Intersect(viewPortRect).IsEmpty(): continue (culling s36-ar)\n   GDI+ draw: SolidBrush (opaque gray/accent) or markerBrush (translucent)\n   GDI+ objects HOISTED out of loop (s36-ar: one brush/pen per paint)\nCOST PER TRANSITION:\n- Viewport culling: O(cards x quads) but cheap (rect math)\n- Active card: 1 opaque draw (peru/orange accent)\n- Inactive cards: translucent marker draws (culled if off-screen)\n- Lista-selected card: peru outline (persistent)\nTC2: every rect routes PhysicalToVirtualForRect (column mapping)\nNO stext extraction here (only in Sidebar Populate)", fillcolor="#e1bee7", style=filled];
+        flashcard_feat [label="Flashcard (study=on) - PaintFlashcardMasks Canvas.cpp\nPER-TRANSITION PAINT PATH:\n1. WM_PAINT -> OnPaintDocument -> DrawDocument loop\n2. PaintFlashcardMasks called per paint\n3. studyCardIdx = (studyMode && currentCardIdx valid && e.tab==CurrentTab)\n   ? e.cardIdx : -1\n4. For EACH card in current tab:\n   isActiveCard = (i == studyCardIdx)\n   listActiveHere = (activeListCardTab == fcTab && i == activeListCardIdx)\n   opaque = (isActiveCard && !revealMode)\n5. Per quad rect:\n   vPage = PhysicalToVirtualForRect(pageNo, bounds, &vr)\n   rc = CvtToScreen(vPage, vr)  // viewport-relative\n   if rc.Intersect(viewPortRect).IsEmpty(): continue (culling s36-ar)\n   GDI+ draw: SolidBrush (opaque gray/accent) or markerBrush (translucent)\n   GDI+ objects HOISTED out of loop (s36-ar: one brush/pen per paint)\nCOST PER TRANSITION:\n- Viewport culling: O(cards x quads) but cheap (rect math)\n- Active card: 1 opaque draw (peru/orange accent)\n- Inactive cards: translucent marker draws (culled if off-screen)\n- Lista-selected card: peru outline (persistent)\nTC2: every rect routes PhysicalToVirtualForRect (column mapping)\nNO stext extraction here (only in Sidebar Populate)", fillcolor="#e1bee7", style=filled];
         readaloud [label="ReadAloud\nReadAloudHighlight.cpp\nWord rects via CvtToScreen\nSync with TTS playback", fillcolor="#e3f2fd", style=filled];
         cad [label="CAD Enhancement\nEngineMupdf::RunCadDetection\nToggleCadEnhanceOverride\nDarkLegacySkipRects", fillcolor="#fff9c4", style=filled];
 

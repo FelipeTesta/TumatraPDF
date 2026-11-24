@@ -21,3 +21,4 @@ TempStr PageLinksResultTemp(Str path, int pageNo, int* exitCodeOut = nullptr);
 TempStr TocNavigateResultTemp(int destNo, int* exitCodeOut = nullptr);
 TempStr MarkdownTocNavigateResultTemp(int destNo, int minScrollY, int* exitCodeOut = nullptr);
 TempStr MarkdownFollowLinkResultTemp(Str href, bool follow, int* exitCodeOut = nullptr);
+TempStr FlashcardVisibleCardIndicesTestTemp(int* exitCodeOut = nullptr);

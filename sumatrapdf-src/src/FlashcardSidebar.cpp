@@ -655,7 +655,7 @@ void FlashcardSidebarShow(MainWindow* win) {
 }
 
 void FlashcardSidebarPopulate(MainWindow* win) {
-    if (!win->flashcard.hwndListaBox || !win->flashcard.hwndListaView) {
+    if (!win->flashcard.hwndListaBox || !win->flashcard.hwndListaView || !win->uiState.fcListVisible) {
         return;
     }
     HWND hwndList = win->flashcard.hwndListaView;
@@ -684,13 +684,13 @@ void FlashcardSidebarPopulate(MainWindow* win) {
         row.cardIdx = i;
         row.pageNo = card.pageNo;
         row.pageNoEnd = len(card.extraPages) > 0 ? card.extraPages[len(card.extraPages) - 1].pageNo : card.pageNo;
-        for (auto& st : tab->flashcard.studyDoc.states) {
-            if (st.key == card.key) {
-                row.rating = st.state.rating;
-                row.interval = st.state.interval;
-                row.nextReviewAt = st.state.nextReviewAt;
-                break;
-            }
+        // Binary search in sorted states
+        int foundIdx = FlashcardStateFindIdx(tab->flashcard.studyDoc.states, card.key, nullptr);
+        if (foundIdx >= 0) {
+            const FlashcardStudyState& st = tab->flashcard.studyDoc.states[foundIdx].state;
+            row.rating = st.rating;
+            row.interval = st.interval;
+            row.nextReviewAt = st.nextReviewAt;
         }
         if (row.rating == 0) {
             nNew++;
@@ -754,4 +754,98 @@ bool FlashcardSidebarSelectAndScrollToCard(MainWindow* win, int cardIdx) {
         }
     }
     return false;
+}
+
+// Incremental sidebar update: refresh a single row whose study state changed (rating).
+// Returns true if incremental update was performed, false if full rebuild needed.
+// Preconditions for incremental update:
+//  1. Lista panel exists and is visible
+//  2. The rated card's tab is the current tab (Lista only shows current tab's cards)
+//  3. The studyOrder index is valid and maps to a card in the current tab
+//  4. The listaRows count matches the listbox item count (no structural changes)
+//  5. The card hasn't been added/removed (only state changed: rating/interval/nextReviewAt)
+// If any precondition fails, returns false and caller must do full rebuild via FlashcardSidebarPopulate.
+// The static label (masked text) does not change on state update -> no page text extraction.
+bool FlashcardSidebarUpdateIncremental(MainWindow* win, int studyOrderIdx, WindowTab* tab) {
+    if (!win || !win->flashcard.hwndListaBox || !win->flashcard.hwndListaView || !win->uiState.fcListVisible) {
+        return false;
+    }
+    // Lista only shows current tab's cards. If the rated card is in another tab,
+    // we can't do incremental (would need tab switch + full rebuild).
+    WindowTab* curTab = win->CurrentTab();
+    if (tab != curTab) {
+        logf("[fc][perf] sidebar: incremental skipped (tab mismatch: rated=%p current=%p)\n", (void*)tab,
+             (void*)curTab);
+        return false;
+    }
+    if (!tab || studyOrderIdx < 0) {
+        return false;
+    }
+    // The studyOrder entry must be valid
+    if (studyOrderIdx >= len(win->flashcard.studyOrder)) {
+        logf("[fc][perf] sidebar: incremental skipped (studyOrderIdx=%d >= len=%d)\n", studyOrderIdx,
+             len(win->flashcard.studyOrder));
+        return false;
+    }
+    FlashcardQueueEntry& e = win->flashcard.studyOrder[studyOrderIdx];
+    if (e.tab != tab || e.cardIdx < 0 || e.cardIdx >= len(tab->flashcard.cards)) {
+        logf("[fc][perf] sidebar: incremental skipped (invalid queue entry tab=%p cardIdx=%d)\n", (void*)e.tab,
+             e.cardIdx);
+        return false;
+    }
+    // The card in the tab's cards array
+    Flashcard& card = tab->flashcard.cards[e.cardIdx];
+    // Find the corresponding row in listaRows (by cardIdx)
+    int rowIdx = -1;
+    for (int i = 0; i < len(win->flashcard.listaRows); i++) {
+        if (win->flashcard.listaRows[i].cardIdx == e.cardIdx) {
+            rowIdx = i;
+            break;
+        }
+    }
+    if (rowIdx < 0) {
+        logf("[fc][perf] sidebar: incremental skipped (cardIdx=%d not found in listaRows)\n", e.cardIdx);
+        return false;
+    }
+    // Verify listbox item count matches listaRows count (no structural changes)
+    HWND hwndList = win->flashcard.hwndListaView;
+    int listCount = (int)SendMessageW(hwndList, LB_GETCOUNT, 0, 0);
+    if (listCount != len(win->flashcard.listaRows)) {
+        logf("[fc][perf] sidebar: incremental skipped (listCount=%d != listaRows=%d)\n", listCount,
+             len(win->flashcard.listaRows));
+        return false;
+    }
+    // Verify the listbox item data at rowIdx matches the cardIdx
+    LRESULT itemData = SendMessageW(hwndList, LB_GETITEMDATA, (WPARAM)rowIdx, 0);
+    if (itemData != e.cardIdx) {
+        logf("[fc][perf] sidebar: incremental skipped (itemData=%lld != cardIdx=%d at rowIdx=%d)\n", itemData,
+             e.cardIdx, rowIdx);
+        return false;
+    }
+    // All preconditions met: update the row's state data from the study state
+    int foundIdx = FlashcardStateFindIdx(tab->flashcard.studyDoc.states, card.key, nullptr);
+    if (foundIdx >= 0) {
+        const FlashcardStudyState& st = tab->flashcard.studyDoc.states[foundIdx].state;
+        win->flashcard.listaRows[rowIdx].rating = st.rating;
+        win->flashcard.listaRows[rowIdx].interval = st.interval;
+        win->flashcard.listaRows[rowIdx].nextReviewAt = st.nextReviewAt;
+    } else {
+        // No study state (shouldn't happen after rating, but handle gracefully)
+        win->flashcard.listaRows[rowIdx].rating = 0;
+        win->flashcard.listaRows[rowIdx].interval = 0;
+        win->flashcard.listaRows[rowIdx].nextReviewAt = 0;
+    }
+    // The static label (masked text) is stored in the listbox item itself and
+    // does not change when only the study state changes. We do NOT re-extract
+    // page text here - that only happens in full rebuild (FlashcardSidebarPopulate).
+    // Invalidate just this row to trigger owner-draw repaint with new Due/Status.
+    RECT itemRect;
+    if (SendMessageW(hwndList, LB_GETITEMRECT, (WPARAM)rowIdx, (LPARAM)&itemRect)) {
+        InvalidateRect(hwndList, &itemRect, TRUE);
+    }
+    // Also update the Due/Status in the header strip if it shows aggregates
+    // (not needed currently, but kept for symmetry)
+    logf("[fc][perf] sidebar: incremental updated row=%d cardIdx=%d rating=%d interval=%d\n", rowIdx, e.cardIdx,
+         win->flashcard.listaRows[rowIdx].rating, win->flashcard.listaRows[rowIdx].interval);
+    return true;
 }

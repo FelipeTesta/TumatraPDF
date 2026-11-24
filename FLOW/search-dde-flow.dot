@@ -1,3 +1,4 @@
+// dot-sync: verified=2026-11-24 refs=2afd7f4c18e1
 digraph SearchDDEFlow {
     rankdir=TB;
     node [shape=box, style=rounded, fontname="Consolas", fontsize=9];
@@ -11,9 +12,9 @@ digraph SearchDDEFlow {
         style=filled;
         fillcolor="#e3f2fd";
 
-        find_bar [label="FindBar.cpp\n• Toolbar find box (hwndFindBox)\n• Incremental search\n• Case/Whole-word/Regex toggles\n• CmdFind / CmdFindNext / CmdFindPrev\n• UpdateFindbox() / UpdateToolbarFindText()", fillcolor="#c8e6c9", style=filled);
-        find_window [label="FindWindow.cpp\n• Standalone find dialog (modeless)\n• List results with context\n• Double-click → navigate\n• CmdFindWindow\n• Owner-drawn listbox", fillcolor="#bbdefb", style=filled);
-        search_highlight [label="Search Highlight Render\nCanvas.cpp:DrawDocument\n• Yellow/Green highlight rects\n• Current match = orange\n• Uses DisplayModel::CvtToScreen\n• FindResult: {pageNo, rects[], context}", fillcolor="#e1bee7", style=filled);
+        find_bar [label="FindBar.cpp\n• Toolbar find box (hwndFindBox)\n• Incremental search\n• Case/Whole-word/Regex toggles\n• CmdFind / CmdFindNext / CmdFindPrev\n• UpdateFindbox() / UpdateToolbarFindText()", fillcolor="#c8e6c9", style=filled]
+        find_window [label="FindWindow.cpp\n• Standalone find dialog (modeless)\n• List results with context\n• Double-click → navigate\n• CmdFindWindow\n• Owner-drawn listbox", fillcolor="#bbdefb", style=filled]
+        search_highlight [label="Search Highlight Render\nCanvas.cpp:DrawDocument\n• Yellow/Green highlight rects\n• Current match = orange\n• Uses DisplayModel::CvtToScreen\n• FindResult: {pageNo, rects[], context}", fillcolor="#e1bee7", style=filled]
     }
 
     // ===================== SEARCH MODEL =====================
@@ -23,9 +24,9 @@ digraph SearchDDEFlow {
         style=filled;
         fillcolor="#fce4ec";
 
-        find_model [label="FindModel struct\n• Str query\n• Vec<FindResult> results\n  {pageNo, rects[], context}\n• int currentResultIdx\n• bool caseSensitive / wholeWord / regex\n• FindResult: pageNo + quads + context", fillcolor="#c8e6c9", style=filled);
-        search_engine [label="EngineBase::SearchText()\nEngineMupdf.cpp:7381\n• fz_search_page()\n• Returns Vec<fz_quad> hits\n• Highlight annot created\n• fz_new_stext_page_from_page2", fillcolor="#bbdefb", style=filled);
-        result_nav [label="Result Navigation\n• FindNext/Prev → currentResultIdx±1\n• ScrollTo(result.pageNo, rect)\n• Highlight current in FindWindow\n• DisplayModel::GetPageNoByPoint()", fillcolor="#bbdefb", style=filled);
+        find_model [label="FindModel struct\n• Str query\n• Vec<FindResult> results\n  {pageNo, rects[], context}\n• int currentResultIdx\n• bool caseSensitive / wholeWord / regex\n• FindResult: pageNo + quads + context", fillcolor="#c8e6c9", style=filled]
+        search_engine [label="EngineBase::SearchText()\nEngineMupdf.cpp\n• fz_search_page()\n• Returns Vec<fz_quad> hits\n• Highlight annot created\n• fz_new_stext_page_from_page2", fillcolor="#bbdefb", style=filled]
+        result_nav [label="Result Navigation\n• FindNext/Prev → currentResultIdx±1\n• ScrollTo(result.pageNo, rect)\n• Highlight current in FindWindow\n• DisplayModel::GetPageNoByPoint()", fillcolor="#bbdefb", style=filled]
     }
 
     // ===================== DDE / COPYDATA =====================
@@ -35,10 +36,10 @@ digraph SearchDDEFlow {
         style=filled;
         fillcolor="#fff3e0";
 
-        dde_server [label="DDE Server\n• Service: \"SumatraPDF\"\n• Topic: \"Control\"\n• Exec: \"[open(\\\"path\\\")]\"\n• RegisterClass + DdeInitialize\n• DdeCallback()", fillcolor="#c8e6c9", style=filled);
-        copydata [label="WM_COPYDATA Handler\nSearchAndDDE.cpp:2200\n• dwData = COPYDATA_SUMATRA\n• lpData = path + options\n• HandleOpenCmd() → LoadDocument\n• Reuses existing instance", fillcolor="#c8e6c9", style=filled);
-        handle_open [label="HandleOpenCmd()\nSearchAndDDE.cpp:2200\n• Parses path + flags\n• newWindow / setFocus / forceRefresh\n• inCurrentTab / isCtrl\n• gIsStartup queue (2938)\n• LoadDocument / ReloadDocument", fillcolor="#bbdefb", style=filled);
-        dde_client [label="DDE Client (external)\n• Explorer \"Open With\"\n• Browser downloads\n• Other apps\n• Sends WM_COPYDATA", fillcolor="#bbdefb", style=filled);
+        dde_server [label="DDE Server\n• Service: \"SumatraPDF\"\n• Topic: \"Control\"\n• Exec: \"[open(\\\"path\\\")]\"\n• RegisterClass + DdeInitialize\n• DdeCallback()", fillcolor="#c8e6c9", style=filled]
+        copydata [label="WM_COPYDATA Handler\nSearchAndDDE.cpp\n• dwData = COPYDATA_SUMATRA\n• lpData = path + options\n• HandleOpenCmd() → LoadDocument\n• Reuses existing instance", fillcolor="#c8e6c9", style=filled]
+        handle_open [label="HandleOpenCmd()\nSearchAndDDE.cpp\n• Parses path + flags\n• newWindow / setFocus / forceRefresh\n• inCurrentTab / isCtrl\n• gIsStartup queue (2938)\n• LoadDocument / ReloadDocument", fillcolor="#bbdefb", style=filled]
+        dde_client [label="DDE Client (external)\n• Explorer \"Open With\"\n• Browser downloads\n• Other apps\n• Sends WM_COPYDATA", fillcolor="#bbdefb", style=filled]
     }
 
     // ===================== STARTUP RACE PROTECTION =====================
@@ -48,21 +49,21 @@ digraph SearchDDEFlow {
         style=filled;
         fillcolor="#ffebee";
 
-        gIsStartup [label="gIsStartup flag\nSumatraStartup.cpp\n• True during initial loads\n• Queue COPYDATA opens\n• Prevents duplicate loads\n• Same path: cmdline + DDE", fillcolor="#c8e6c9", style=filled);
-        queue [label="QueuedOpenCmd struct\n• path + flags\n• Posted to UI thread\n• Processed after current LoadDocument\n• Fixes #4576 (password PDF race)", fillcolor="#bbdefb", style=filled);
+        gIsStartup [label="gIsStartup flag\nSumatraStartup.cpp\n• True during initial loads\n• Queue COPYDATA opens\n• Prevents duplicate loads\n• Same path: cmdline + DDE", fillcolor="#c8e6c9", style=filled]
+        queue [label="QueuedOpenCmd struct\n• path + flags\n• Posted to UI thread\n• Processed after current LoadDocument\n• Fixes #4576 (password PDF race)", fillcolor="#bbdefb", style=filled]
     }
 
     // ===================== EXTERNAL OPEN FLOW =====================
     subgraph cluster_external {
-        label="External Open Flow (SearchAndDDE.cpp:2004+)";
+        label="External Open Flow (SearchAndDDE.cpp+)";
         color="#9c27b0";
         style=filled;
         fillcolor="#f3e5f5";
 
-        external [label="External Open Request\n• DDE / COPYDATA / cmdline\n• SearchAndDDE.cpp:2200", fillcolor="#bbdefb", style=filled);
-        find_win [label="FindMainWindowByFile()\nSumatraPDF.cpp:848\n• Case-insensitive path match\n• Returns MainWindow* or null", fillcolor="#bbdefb", style=filled);
-        reuse_check [label="Reuse Logic\n• activateExisting = true (default)\n• forceReuse = false (new tab)\n• isCtrl → new tab\n• newWindow flag → new window", fillcolor="#fff9c4", style=filled);
-        load_or_reload [label="LoadDocument() or ReloadDocument()\n• If not loaded → LoadDocument\n• If loaded + forceRefresh → Reload\n• If loaded, no refresh → activate tab", fillcolor="#c8e6c9", style=filled);
+        external [label="External Open Request\n• DDE / COPYDATA / cmdline\n• SearchAndDDE.cpp", fillcolor="#bbdefb", style=filled]
+        find_win [label="FindMainWindowByFile()\nSumatraPDF.cpp\n• Case-insensitive path match\n• Returns MainWindow* or null", fillcolor="#bbdefb", style=filled]
+        reuse_check [label="Reuse Logic\n• activateExisting = true (default)\n• forceReuse = false (new tab)\n• isCtrl → new tab\n• newWindow flag → new window", fillcolor="#fff9c4", style=filled]
+        load_or_reload [label="LoadDocument() or ReloadDocument()\n• If not loaded → LoadDocument\n• If loaded + forceRefresh → Reload\n• If loaded, no refresh → activate tab", fillcolor="#c8e6c9", style=filled]
     }
 
     // ===================== TABLE OF CONTENTS =====================
@@ -72,9 +73,9 @@ digraph SearchDDEFlow {
         style=filled;
         fillcolor="#efebe9";
 
-        toc_model [label="TocModel\n• Vec<TocItem> {title, pageNo, level}\n• Built by EngineBase::GetToc()\n• EngineMupdf: fz_load_outline()\n• BuildPageLabelVec() / FormatPageLabelTemp()\n• IsPerPagePrefixOnlyLabels()", fillcolor="#bbdefb", style=filled);
-        toc_ui [label="TOC Sidebar (hwndTocBox)\nMainWindow.h:211\n• TreeView (VirtWnd)\n• Click → ScrollTo(pageNo)\n• Right-click → copy/link\n• TocBoxSubclassId / tocLabelWithClose", fillcolor="#c8e6c9", style=filled);
-        toc_link [label="TOC Link Handling\n• PageDestinationMupdf\n• GetName2() / GetValue2()\n• ResolveLink() / DestFromFzLinkDest()\n• Internal: page dest / named dest", fillcolor="#e3f2fd", style=filled);
+        toc_model [label="TocModel\n• Vec<TocItem> {title, pageNo, level}\n• Built by EngineBase::GetToc()\n• EngineMupdf: fz_load_outline()\n• BuildPageLabelVec() / FormatPageLabelTemp()\n• IsPerPagePrefixOnlyLabels()", fillcolor="#bbdefb", style=filled]
+        toc_ui [label="TOC Sidebar (hwndTocBox)\nMainWindow.h\n• TreeView (VirtWnd)\n• Click → ScrollTo(pageNo)\n• Right-click → copy/link\n• tocBoxSubclassId / tocLabelWithClose", fillcolor="#c8e6c9", style=filled]
+        toc_link [label="TOC Link Handling\n• PageDestinationMupdf\n• GetName2() / GetValue2()\n• ResolveLink() / DestFromFzLinkDest()\n• Internal: page dest / named dest", fillcolor="#e3f2fd", style=filled]
     }
 
     // ===================== READ ALOUD =====================
@@ -84,9 +85,9 @@ digraph SearchDDEFlow {
         style=filled;
         fillcolor="#eceff1";
 
-        tts [label="TTS Engine\n• Windows SAPI (ISpVoice)\n• ReadAloudPlaybackBar (toolbar)\n• Highlight sync: ReadAloudHighlight.cpp\n• CvtToScreen for word rects\n• ReadAloudHighlight: word rects on canvas", fillcolor="#bbdefb", style=filled);
-        tts_controls [label="Controls (ReadAloud.cpp)\n• Play/Pause/Stop\n• Voice/Speed selection\n• Skip sentence/paragraph\n• Auto-scroll follows speech\n• ReadAloudInTab / FromViewportTop / Selection / Cursor\n• ContinueInTab / StopRememberPos / PlaybackPauseOrResume\n• SpeedLabelTemp / ClosestSpeedIdx / SetSpeed\n• PlaybackCycleSpeed / PlaybackStop\n• TtsLangIdToLocaleNameTemp\n• BuildReadAloudVoiceMenuItems / RebuildReadAloudMenu\n• HandleReadAloudMenuSelection / Command", fillcolor="#c8e6c9", style=filled);
-        tts_callback [label="ControllerCallbackHandler integration\n• OnAutoScrollBottom() → stop\n• OnAutoScrollProgress() → sync\n• RequestRendering() for highlight updates\n• ZoomChanged() / PageNoChanged() → reposition", fillcolor="#e3f2fd", style=filled);
+        tts [label="TTS Engine\n• Windows SAPI (ISpVoice)\n• ReadAloudPlaybackBar (toolbar)\n• Highlight sync: ReadAloudHighlight.cpp\n• CvtToScreen for word rects\n• ReadAloudHighlight: word rects on canvas", fillcolor="#bbdefb", style=filled]
+        tts_controls [label="Controls (ReadAloud.cpp)\n• Play/Pause/Stop\n• Voice/Speed selection\n• Skip sentence/paragraph\n• Auto-scroll follows speech\n• ReadAloudInTab / FromViewportTop / Selection / Cursor\n• ContinueInTab / StopRememberPos / PlaybackPauseOrResume\n• SpeedLabelTemp / ClosestSpeedIdx / SetSpeed\n• PlaybackCycleSpeed / PlaybackStop\n• TtsLangIdToLocaleNameTemp\n• BuildReadAloudVoiceMenuItems / RebuildReadAloudMenu\n• HandleReadAloudMenuSelection / Command", fillcolor="#c8e6c9", style=filled]
+        tts_callback [label="ControllerCallbackHandler integration\n• OnAutoScrollBottom() → stop\n• OnAutoScrollProgress() → sync\n• RequestRendering() for highlight updates\n• ZoomChanged() / PageNoChanged() → reposition", fillcolor="#e3f2fd", style=filled]
     }
 
     // ===================== LINK HANDLING =====================
@@ -96,10 +97,10 @@ digraph SearchDDEFlow {
         style=filled;
         fillcolor="#e3f2fd";
 
-        links [label="LinkHandler (EngineBase.h)\n• Internal: page dest / named dest\n• External: URI / file / mailto\n• ScrollTo(pageNo, rect, zoom)\n• HandleLinkMupdf() / DestFromFzLinkDest()\n• NewPageDestinationMupdf / NewLinkDestination", fillcolor="#bbdefb", style=filled);
-        internal [label="Internal Links\n• Canvas click → HitTestLink\n• LinkHandler::ScrollTo()\n• TC2: PhysicalToVirtualForRect()\n• UpdateNavHistory()\n• DisplayModel::GetPageNoByPoint()\n• DisplayModel::GetPageNextToPoint()", fillcolor="#c8e6c9", style=filled);
-        external_links [label="External Links\n• ShellExecuteEx\n• Security: prompt for file://\n• mailto: / http: / https:\n• FzGetURL() / FzGetRectF()\n• IsExternalLink() / IsMupdfLocalFileLink()", fillcolor="#bbdefb", style=filled);
-        link_dest [label="Link Destinations\n• PageDestinationMupdf\n• GetName2() / GetValue2()\n• pdf_parse_link_action() / pdf_parse_link_dest()\n• MakePushButtonWidgetLinks()\n• fz_new_stext_page_from_whole_page", fillcolor="#e3f2fd", style=filled);
+        links [label="LinkHandler (EngineBase.h)\n• Internal: page dest / named dest\n• External: URI / file / mailto\n• ScrollTo(pageNo, rect, zoom)\n• HandleLinkMupdf() / DestFromFzLinkDest()\n• NewPageDestinationMupdf / NewLinkDestination", fillcolor="#bbdefb", style=filled]
+        internal [label="Internal Links\n• Canvas click → HitTestLink\n• LinkHandler::ScrollTo()\n• TC2: PhysicalToVirtualForRect()\n• UpdateNavHistory()\n• DisplayModel::GetPageNoByPoint()\n• DisplayModel::GetPageNextToPoint()", fillcolor="#c8e6c9", style=filled]
+        external_links [label="External Links\n• ShellExecuteEx\n• Security: prompt for file://\n• mailto: / http: / https:\n• FzGetURL() / FzGetRectF()\n• IsExternalLink() / IsMupdfLocalFileLink()", fillcolor="#bbdefb", style=filled]
+        link_dest [label="Link Destinations\n• PageDestinationMupdf\n• GetName2() / GetValue2()\n• pdf_parse_link_action() / pdf_parse_link_dest()\n• MakePushButtonWidgetLinks()\n• fz_new_stext_page_from_whole_page", fillcolor="#e3f2fd", style=filled]
     }
 
     // ===================== EDGES =====================
@@ -137,9 +138,9 @@ digraph SearchDDEFlow {
     tts -> tts_callback [style=dotted];
 
     // Cross-refs
-    search_engine ..> fz_search [style=dotted, label="fz_search_page()"];
-    internal ..> cvt_screen [style=dotted, label="CvtToScreen for rect"];
-    tts_callback ..> autoscroll [style=dotted, label="OnAutoScrollBottom/Progress"];
+    search_engine -> fz_search [style=dotted, label="fz_search_page()"];
+    internal -> cvt_screen [style=dotted, label="CvtToScreen for rect"];
+    tts_callback -> autoscroll [style=dotted, label="OnAutoScrollBottom/Progress"];
 
     // Legend
     subgraph cluster_legend {

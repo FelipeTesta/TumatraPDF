@@ -1,3 +1,4 @@
+// dot-sync: verified=2026-11-24 refs=56f3c1ca0637
 digraph HomePage {
     // NOTE (s63, 2026-11-13): this file maps the LEGACY pre-VirtWnd HOME (tiles).
     // Current paint path: see cluster_s63 near the end (OnPaintAbout → DrawHomePage).
@@ -14,10 +15,10 @@ digraph HomePage {
         style=filled;
         fillcolor="#e3f2fd";
 
-        home_wnd [label="HomePageWnd (VirtWnd)\n• hwndHomePage (child of frame)\n• Owner-drawn: background + tiles\n• Class: TUMATRA_HOMEPAGE\n• WM_PAINT: DrawHomePage()", fillcolor="#c8e6c9", style=filled);
-        tiles [label="Tile Grid\n• Recent files (max 20)\n• Pinned files (starred)\n• Each tile: thumb + title + date\n• Click → LoadDocument\n• Right-click → context menu", fillcolor="#bbdefb", style=filled);
-        toolbar_home [label="Home Toolbar Button\n• 1st button (before Open)\n•  Home icon\n• CmdOpenHome\n• Toggles showHomeOverlay", fillcolor="#e1bee7", style=filled);
-        empty_state [label="Empty State\n• No recent files\n• \"Drag PDF here\" text\n• Centered illustration\n• Handles DROPFILES", fillcolor="#fff9c4", style=filled);
+        home_wnd [label="HomePageWnd (VirtWnd)\n• hwndHomePage (child of frame)\n• Owner-drawn: background + tiles\n• Class: TUMATRA_HOMEPAGE\n• WM_PAINT: DrawHomePage()", fillcolor="#c8e6c9", style=filled]
+        tiles [label="Tile Grid\n• Recent files (max 20)\n• Pinned files (starred)\n• Each tile: thumb + title + date\n• Click → LoadDocument\n• Right-click → context menu", fillcolor="#bbdefb", style=filled]
+        toolbar_home [label="Home Toolbar Button\n• 1st button (before Open)\n•  Home icon\n• CmdOpenHome\n• Toggles showHomeOverlay", fillcolor="#e1bee7", style=filled]
+        empty_state [label="Empty State\n• No recent files\n• \"Drag PDF here\" text\n• Centered illustration\n• Handles DROPFILES", fillcolor="#fff9c4", style=filled]
     }
 
     // ===================== STATE MANAGEMENT =====================
@@ -27,10 +28,10 @@ digraph HomePage {
         style=filled;
         fillcolor="#fce4ec";
 
-        overlay_flag [label="win->showHomeOverlay\nMainWindow.h\n• true = Home visible\n• false = Document visible\n• Mutually exclusive with tabs", fillcolor="#c8e6c9", style=filled);
-        recent_files [label="Recent Files\n• gFileHistory.RecentlyOpened\n• Vec<FileState> sorted by time\n• Max 20 entries\n• Pinned files float to top", fillcolor="#bbdefb", style=filled);
-        pinned_files [label="Pinned Files\n• FileState.pinned = true\n• Persisted in FileHistory\n• Never auto-removed\n• Star icon on tile", fillcolor="#bbdefb", style=filled);
-        thumb_cache [label="Thumbnail Cache\n• %LOCALAPPDATA%\\SumatraPDF\\<hash>\\thumbs\n• 256x256 PNG per file\n• Generated on close / idle\n• Loaded async for tiles", fillcolor="#e1bee7", style=filled);
+        overlay_flag [label="win->showHomeOverlay\nMainWindow.h\n• true = Home visible\n• false = Document visible\n• Mutually exclusive with tabs", fillcolor="#c8e6c9", style=filled]
+        recent_files [label="Recent Files\n• gFileHistory.RecentlyOpened\n• Vec<FileState> sorted by time\n• Max 20 entries\n• Pinned files float to top", fillcolor="#bbdefb", style=filled]
+        pinned_files [label="Pinned Files\n• FileState.pinned = true\n• Persisted in FileHistory\n• Never auto-removed\n• Star icon on tile", fillcolor="#bbdefb", style=filled]
+        thumb_cache [label="Thumbnail Cache\n• %LOCALAPPDATA%\\SumatraPDF\\<hash>\\thumbs\n• 256x256 PNG per file\n• Generated on close / idle\n• Loaded async for tiles", fillcolor="#e1bee7", style=filled]
     }
 
     // ===================== INTERACTIONS =====================
@@ -40,12 +41,12 @@ digraph HomePage {
         style=filled;
         fillcolor="#fff3e0";
 
-        click_tile [label="Click Tile\n• StartLoadDocument(&args)\n• args.activateExisting = !Ctrl\n• args.activateExistingInWindow = true\n• HomePage.cpp:169 / 2980", fillcolor="#c8e6c9", style=filled);
-        right_click [label="Right-Click Tile\n• Context Menu:\n  – Open\n  – Open in New Window\n  – Pin / Unpin\n  – Remove from List\n  – Show in Folder\n  – Properties", fillcolor="#bbdefb", style=filled);
-        drag_drop [label="Drag & Drop onto Home\n• WM_DROPFILES\n• Canvas.cpp:5951\n• StartLoadDocuments(files, win)\n• Multiple files = multiple tabs", fillcolor="#bbdefb", style=filled);
-        pin_toggle [label="Pin Toggle\n• FileState.pinned = !pinned\n• SaveSettings()\n• Re-render tile grid\n• Pinned sort to top", fillcolor="#e1bee7", style=filled);
-        remove [label="Remove from List\n• gFileHistory.Remove(path)\n• Deletes thumbnail\n• SaveSettings()\n• Does NOT delete file", fillcolor="#fff9c4", style=filled);
-        keyboard [label="Keyboard\n• Enter = Open selected\n• Delete = Remove\n• Ctrl+Click = Multi-select\n• Arrow keys = Navigate tiles", fillcolor="#bbdefb", style=filled);
+        click_tile [label="Click Tile\n• StartLoadDocument(&args)\n• args.activateExisting = !Ctrl\n• args.activateExistingInWindow = true\n• HomePage.cpp / 2980", fillcolor="#c8e6c9", style=filled]
+        right_click [label="Right-Click Tile\n• Context Menu:\n  – Open\n  – Open in New Window\n  – Pin / Unpin\n  – Remove from List\n  – Show in Folder\n  – Properties", fillcolor="#bbdefb", style=filled]
+        drag_drop [label="Drag & Drop onto Home\n• WM_DROPFILES\n• Canvas.cpp\n• StartLoadDocuments(files, win)\n• Multiple files = multiple tabs", fillcolor="#bbdefb", style=filled]
+        pin_toggle [label="Pin Toggle\n• FileState.pinned = !pinned\n• SaveSettings()\n• Re-render tile grid\n• Pinned sort to top", fillcolor="#e1bee7", style=filled]
+        remove [label="Remove from List\n• gFileHistory.Remove(path)\n• Deletes thumbnail\n• SaveSettings()\n• Does NOT delete file", fillcolor="#fff9c4", style=filled]
+        keyboard [label="Keyboard\n• Enter = Open selected\n• Delete = Remove\n• Ctrl+Click = Multi-select\n• Arrow keys = Navigate tiles", fillcolor="#bbdefb", style=filled]
     }
 
     // ===================== RELAYOUT / VISIBILITY =====================
@@ -55,9 +56,9 @@ digraph HomePage {
         style=filled;
         fillcolor="#f3e5f5";
 
-        toggle [label="CmdOpenHome\nSumatraPDF.cpp\n• ToggleFavoritesTab pattern:\n  SaveCurrentWindowTab()\n  AddTabToWindow(homeTab)\n  LoadModelIntoTab(home)\n• win->showHomeOverlay = true\n• RelayoutFrame()", fillcolor="#c8e6c9", style=filled);
-        hide [label="Hide Home Overlay\n• User opens document\n• win->showHomeOverlay = false\n• RelayoutFrame()\n• Hide secondary toolbars\n  (hideSecondaryToolbars flag)", fillcolor="#bbdefb", style=filled);
-        relayout_home [label="RelayoutFrame Home Block\nSumatraPDF.cpp:6381\n• if (showHomeOverlay) {\n    ShowWindow(hwndHomePage, SW_SHOW)\n    SetWindowPos(hwndHomePage, rc)\n    rc.dy -= homeDy; rc.y += homeDy\n  } else SW_HIDE\n• hideSecondaryToolbars = true", fillcolor="#bbdefb", style=filled);
+        toggle [label="CmdOpenHome\nSumatraPDF.cpp\n• ToggleFavoritesTab pattern:\n  SaveCurrentWindowTab()\n  AddTabToWindow(homeTab)\n  LoadModelIntoTab(home)\n• win->showHomeOverlay = true\n• RelayoutFrame()", fillcolor="#c8e6c9", style=filled]
+        hide [label="Hide Home Overlay\n• User opens document\n• win->showHomeOverlay = false\n• RelayoutFrame()\n• Hide secondary toolbars\n  (hideSecondaryToolbars flag)", fillcolor="#bbdefb", style=filled]
+        relayout_home [label="RelayoutFrame Home Block\nSumatraPDF.cpp\n• if (showHomeOverlay) {\n    ShowWindow(hwndHomePage, SW_SHOW)\n    SetWindowPos(hwndHomePage, rc)\n    rc.dy -= homeDy; rc.y += homeDy\n  } else SW_HIDE\n• hideSecondaryToolbars = true", fillcolor="#bbdefb", style=filled]
     }
 
     // ===================== THUMBNAIL GENERATION =====================
@@ -67,8 +68,8 @@ digraph HomePage {
         style=filled;
         fillcolor="#efebe9";
 
-        gen_thumb [label="GenerateThumbnail()\nHomePage.cpp\n• Engine renders page 1\n• Scale to 256x256\n• GDI+ Save as PNG\n• Background thread", fillcolor="#c8e6c9", style=filled);
-        thumb_trigger [label="Triggers\n• On document close\n• Idle timer (5s after paint)\n• Manual: right-click → Refresh\n• Failed thumbs = placeholder", fillcolor="#bbdefb", style=filled);
+        gen_thumb [label="GenerateThumbnail()\nHomePage.cpp\n• Engine renders page 1\n• Scale to 256x256\n• GDI+ Save as PNG\n• Background thread", fillcolor="#c8e6c9", style=filled]
+        thumb_trigger [label="Triggers\n• On document close\n• Idle timer (5s after paint)\n• Manual: right-click → Refresh\n• Failed thumbs = placeholder", fillcolor="#bbdefb", style=filled]
     }
 
     // ===================== EDGES =====================
@@ -104,16 +105,16 @@ digraph HomePage {
         style=filled;
         fillcolor="#e8f5e9";
 
-        s63_flow [label="OnPaintAbout → DrawHomePage (CanvasAboutUI.cpp)\n• double-buffered DC (win->buffer)\n• always full layout (scroll-only cache removed)\n• LayoutHomePage: one origin, -homePageScrollY\n  Stats hdr+⟳Sync → stats band → books hdr+icons\n  → search HWND → thumbs/list\n• tip = fixed footer (never scrolls)", fillcolor="#c8e6c9", style=filled);
-        s63_clip [label="Clip rules (HomePage.cpp)\n• thumbs/list: GDI clip = rcThumbsArea (viewport above tip)\n• chrome/flow: clipped to tip-band top (DrawHomePageLayout)\n• tip painted on top, unclipped (PaintTree)\n• flow elements fully below tip: Visibility::Collapse (hit-test)\n• search HWND: SW_HIDE out of view", fillcolor="#bbdefb", style=filled);
-        s63_removed [label="Removed (s63)\n• ApplyHomeLayoutCache / HomeLayoutCacheMatches\n  HomeLayoutCacheFilesMatch / CollectHomePageFiles\n• SaveHomeLayoutCache kept (thumb fileSize cache only)\n• empty-history x=50 force removed (content centers)", fillcolor="#fff9c4", style=filled);
+        s63_flow [label="OnPaintAbout → DrawHomePage (CanvasAboutUI.cpp)\n• double-buffered DC (win->buffer)\n• always full layout (scroll-only cache removed)\n• LayoutHomePage: one origin, -homePageScrollY\n  Stats hdr+⟳Sync → stats band → books hdr+icons\n  → search HWND → thumbs/list\n• tip = fixed footer (never scrolls)", fillcolor="#c8e6c9", style=filled]
+        s63_clip [label="Clip rules (HomePage.cpp)\n• thumbs/list: GDI clip = rcThumbsArea (viewport above tip)\n• chrome/flow: clipped to tip-band top (DrawHomePageLayout)\n• tip painted on top, unclipped (PaintTree)\n• flow elements fully below tip: Visibility::Collapse (hit-test)\n• search HWND: SW_HIDE out of view", fillcolor="#bbdefb", style=filled]
+        s63_removed [label="Removed (s63)\n• ApplyHomeLayoutCache / HomeLayoutCacheMatches\n  HomeLayoutCacheFilesMatch / CollectHomePageFiles\n• SaveHomeLayoutCache kept (thumb fileSize cache only)\n• empty-history x=50 force removed (content centers)", fillcolor="#fff9c4", style=filled]
         s63_flow -> s63_clip;
     }
 
     // Cross-refs
-    overlay_flag ..> hide_secondary [style=dotted, label="hideSecondaryToolbars"];
-    click_tile ..> load_doc [style=dotted, label="StartLoadDocument"];
-    drag_drop ..> load_doc [style=dotted];
+    overlay_flag -> hide_secondary [style=dotted, label="hideSecondaryToolbars"];
+    click_tile -> load_doc [style=dotted, label="StartLoadDocument"];
+    drag_drop -> load_doc [style=dotted];
 
     // Legend
     subgraph cluster_legend {

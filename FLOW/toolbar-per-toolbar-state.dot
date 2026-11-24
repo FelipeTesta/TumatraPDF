@@ -1,3 +1,4 @@
+// dot-sync: verified=2026-11-24 refs=7ff2ca1935e6
 digraph ToolbarPerToolbarState {
     rankdir=TB;
     node [shape=box, style=rounded, fontname="Consolas", fontsize=10];
@@ -58,7 +59,7 @@ digraph ToolbarPerToolbarState {
         
         coord_page [label="PAGE COORDINATES (PDF page space)\n• DisplayModel::CvtToScreen/CvtFromScreen\n• Virtual page → canvas client\n• Includes scroll + zoom transform\n• Arch/Edit canvas drawing uses this", fillcolor="#e1bee7", style=filled];
         
-        coord_virtual [label="VIRTUAL WND (VirtWnd tree)\n• ev.pt after BubbleMouse = LOCAL to target\n• ctx.bounds / VirtWnd::bounds = ROOT-relative\n• Paint rects from ctx.bounds = root-space\n• Hit-test: pt + bounds.{x,y} = root-space", fillcolor="#fff9c4", style=filled);
+        coord_virtual [label="VIRTUAL WND (VirtWnd tree)\n• ev.pt after BubbleMouse = LOCAL to target\n• ctx.bounds / VirtWnd::bounds = ROOT-relative\n• Paint rects from ctx.bounds = root-space\n• Hit-test: pt + bounds.{x,y} = root-space", fillcolor="#fff9c4", style=filled]
         
         // DPI virtualization note
         dpi_note [label="⚠️ DPI VIRTUALIZATION TRAP:\nE2E posted coords may arrive DPI-virtualized (×1.25)\nNon-deterministic! Verify with page-top-border invariants.\nNEVER assume raw pixels = screen pixels.", fillcolor="#ffcdd2", style=filled, shape=note, color="#ff0000", penwidth=2.0];
@@ -81,11 +82,11 @@ digraph ToolbarPerToolbarState {
         color="#795548";
         
         ht_mouse [label="WM_LBUTTONDOWN on hwndToolbar\nlParam = client coords (toolbar client space)", fillcolor="#bbdefb", style=filled];
-        ht_hittest [label="TbHitTest(hwndToolbar, pt)\npt = {GET_X_LPARAM(lp), GET_Y_LPARAM(lp)}\n// pt in TOOLBAR CLIENT space", fillcolor="#bbdefb", style=filled);
-        ht_child [label="ChildWindowFromPoint(hwndToolbar, pt)\n// Check if over child control (page box, find box)", fillcolor="#bbdefb", style=filled);
-        ht_result [label="if (idx >= 0) → button hit\nif (idx < 0 && !childAtPoint) → empty area → window drag", fillcolor="#c8e6c9", style=filled);
-        ht_getrect [label="TB_GETITEMRECT for checked underline draw\nWndProcToolbar WM_PAINT:\nSendMessage(TB_GETITEMRECT, i, &rc)\n// rc in TOOLBAR CLIENT space", fillcolor="#fff9c4", style=filled);
-        ht_draw [label="FillRect(hdc, &rcLine, brush)\n// hdc from GetDC(hwndToolbar)\n// Draws in TOOLBAR CLIENT space", fillcolor="#e1bee7", style=filled);
+        ht_hittest [label="TbHitTest(hwndToolbar, pt)\npt = {GET_X_LPARAM(lp), GET_Y_LPARAM(lp)}\n// pt in TOOLBAR CLIENT space", fillcolor="#bbdefb", style=filled]
+        ht_child [label="ChildWindowFromPoint(hwndToolbar, pt)\n// Check if over child control (page box, find box)", fillcolor="#bbdefb", style=filled]
+        ht_result [label="if (idx >= 0) → button hit\nif (idx < 0 && !childAtPoint) → empty area → window drag", fillcolor="#c8e6c9", style=filled]
+        ht_getrect [label="TB_GETITEMRECT for checked underline draw\nWndProcToolbar WM_PAINT:\nSendMessage(TB_GETITEMRECT, i, &rc)\n// rc in TOOLBAR CLIENT space", fillcolor="#fff9c4", style=filled]
+        ht_draw [label="FillRect(hdc, &rcLine, brush)\n// hdc from GetDC(hwndToolbar)\n// Draws in TOOLBAR CLIENT space", fillcolor="#e1bee7", style=filled]
         
         ht_mouse -> ht_hittest -> ht_child -> ht_result;
         ht_result -> ht_getrect -> ht_draw;
@@ -98,17 +99,17 @@ digraph ToolbarPerToolbarState {
         label="Rebar Band Height Calculation (SetToolbarBandToRowHeight)";
         color="#9c27b0";
         
-        bc_client [label="GetClientRect(hwndToolbar, &rcToolbarClient)\nif (rcToolbarClient.right <= 0) {\n  // COLLAPSED-CHILD RECOVERY:\n  // Rebar clamped band to 0 width (stale cx)\n  // Re-assert band cx to rebar client width\n  rbBand.cx = rebarClientDx\n  SendMessage(RB_SETBANDINFO)\n  return false\n}", fillcolor="#bbdefb", style=filled);
+        bc_client [label="GetClientRect(hwndToolbar, &rcToolbarClient)\nif (rcToolbarClient.right <= 0) {\n  // COLLAPSED-CHILD RECOVERY:\n  // Rebar clamped band to 0 width (stale cx)\n  // Re-assert band cx to rebar client width\n  rbBand.cx = rebarClientDx\n  SendMessage(RB_SETBANDINFO)\n  return false\n}", fillcolor="#bbdefb", style=filled]
         
-        bc_band_info [label="for each band:\nRB_GETBANDINFO (RBBIM_CHILDSIZE)\nbandDy += rbiBand.cyChild\n// cyChild = height of toolbar child", fillcolor="#bbdefb", style=filled);
+        bc_band_info [label="for each band:\nRB_GETBANDINFO (RBBIM_CHILDSIZE)\nbandDy += rbiBand.cyChild\n// cyChild = height of toolbar child", fillcolor="#bbdefb", style=filled]
         
-        bc_measure [label="TB_GETITEMRECT(0, &rcBand)\nrows = rcBand.bottom / max(1, rcBand.top)\nbuttonHeight = rcBand.bottom - rcBand.top\nbandDy = rows * buttonHeight", fillcolor="#bbdefb", style=filled);
+        bc_measure [label="TB_GETITEMRECT(0, &rcBand)\nrows = rcBand.bottom / max(1, rcBand.top)\nbuttonHeight = rcBand.bottom - rcBand.top\nbandDy = rows * buttonHeight", fillcolor="#bbdefb", style=filled]
         
-        bc_chrome [label="Rect rcRebar = HwndWindowRect(hwndReBar)\nRect rcRebarClient = HwndClientRect(hwndReBar)\nchrome = rcRebar.dy - rcRebarClient.dy\n// Non-client area (borders, gripper)", fillcolor="#fff9c4", style=filled);
+        bc_chrome [label="Rect rcRebar = HwndWindowRect(hwndReBar)\nRect rcRebarClient = HwndClientRect(hwndReBar)\nchrome = rcRebar.dy - rcRebarClient.dy\n// Non-client area (borders, gripper)", fillcolor="#fff9c4", style=filled]
         
-        bc_set [label="rbBand.fMask = RBBIM_CHILDSIZE\nrbBand.cyChild = bandDy\nSendMessage(RB_SETBANDINFO)\n// This triggers RBN_HEIGHTCHANGE → relayout", fillcolor="#c8e6c9", style=filled);
+        bc_set [label="rbBand.fMask = RBBIM_CHILDSIZE\nrbBand.cyChild = bandDy\nSendMessage(RB_SETBANDINFO)\n// This triggers RBN_HEIGHTCHANGE → relayout", fillcolor="#c8e6c9", style=filled]
         
-        bc_return [label="return (bandDy != oldCyChild)\n// True if band height changed", fillcolor="#c8e6c9", style=filled);
+        bc_return [label="return (bandDy != oldCyChild)\n// True if band height changed", fillcolor="#c8e6c9", style=filled]
         
         bc_client -> bc_band_info -> bc_measure -> bc_chrome -> bc_set -> bc_return;
     }
@@ -120,13 +121,13 @@ digraph ToolbarPerToolbarState {
         label="ToolbarRewrapAfterSizing (Rebuild buttons at current width)";
         color="#e91e63";
         
-        rw_start [label="ToolbarRewrapAfterSizing(win, hwnd, force)\nToolbar.cpp:1570", fillcolor="#bbdefb", style=filled);
-        rw_idx [label="idx = ToolbarPackStateIndex(hwnd)\nif (idx < 0) return;", fillcolor="#bbdefb", style=filled);
-        rw_width_check [label="RECT rc; GetClientRect(hwnd, &rc)\nif (!force && sToolbarPackStates[idx].lastBuiltDx == rc.right)\n  return;  // Width unchanged, skip rebuild", fillcolor="#fff9c4", style=filled);
-        rw_delete [label="int count = TB_BUTTONCOUNT\nfor (i = count-1; i >= 0; i--)\n  TbDeleteButton(hwnd, i)\n// Delete ALL buttons", fillcolor="#ffcdd2", style=filled);
-        rw_readd [label="TbAddButtons(hwnd, count, buttons)\n// Re-add with SAME button array\n// comctl lays out at CURRENT width\n// Buttons wrap naturally if needed", fillcolor="#c8e6c9", style=filled);
-        rw_update_state [label="sToolbarPackStates[idx].lastBuiltDx = rc.right\n// Record width we built for", fillcolor="#bbdefb", style=filled);
-        rw_band_height [label="SetToolbarBandToRowHeight(hwnd)\n// Update band cyChild for new row count\nif (changed) ScheduleUiUpdate(kUiRelayout)", fillcolor="#bbdefb", style=filled);
+        rw_start [label="ToolbarRewrapAfterSizing(win, hwnd, force)\nToolbar.cpp", fillcolor="#bbdefb", style=filled]
+        rw_idx [label="idx = ToolbarPackStateIndex(hwnd)\nif (idx < 0) return;", fillcolor="#bbdefb", style=filled]
+        rw_width_check [label="RECT rc; GetClientRect(hwnd, &rc)\nif (!force && sToolbarPackStates[idx].lastBuiltDx == rc.right)\n  return;  // Width unchanged, skip rebuild", fillcolor="#fff9c4", style=filled]
+        rw_delete [label="int count = TB_BUTTONCOUNT\nfor (i = count-1; i >= 0; i--)\n  TbDeleteButton(hwnd, i)\n// Delete ALL buttons", fillcolor="#ffcdd2", style=filled]
+        rw_readd [label="TbAddButtons(hwnd, count, buttons)\n// Re-add with SAME button array\n// comctl lays out at CURRENT width\n// Buttons wrap naturally if needed", fillcolor="#c8e6c9", style=filled]
+        rw_update_state [label="sToolbarPackStates[idx].lastBuiltDx = rc.right\n// Record width we built for", fillcolor="#bbdefb", style=filled]
+        rw_band_height [label="SetToolbarBandToRowHeight(hwnd)\n// Update band cyChild for new row count\nif (changed) ScheduleUiUpdate(kUiRelayout)", fillcolor="#bbdefb", style=filled]
         
         rw_start -> rw_idx -> rw_width_check -> rw_delete -> rw_readd -> rw_update_state -> rw_band_height;
     }
@@ -134,9 +135,9 @@ digraph ToolbarPerToolbarState {
     // ============================================================
     // CROSS-REFERENCES
     // ============================================================
-    d10_usage ..> d10r_after [style=dotted, label="same index array"];
-    d10_usage ..> bc_band_info [style=dotted, label="uses pack state"];
-    d10_usage ..> rw_width_check [style=dotted, label="uses pack state"];
-    bc_measure ..> ht_getrect [style=dotted, label="same TB_GETITEMRECT"];
-    coord_client_toolbar ..> ht_hittest [style=dotted, label="same space"];
+    d10_usage -> d10r_after [style=dotted, label="same index array"];
+    d10_usage -> bc_band_info [style=dotted, label="uses pack state"];
+    d10_usage -> rw_width_check [style=dotted, label="uses pack state"];
+    bc_measure -> ht_getrect [style=dotted, label="same TB_GETITEMRECT"];
+    coord_client_toolbar -> ht_hittest [style=dotted, label="same space"];
 }

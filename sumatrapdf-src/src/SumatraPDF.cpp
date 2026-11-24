@@ -5038,11 +5038,20 @@ void CloseTab(WindowTab* tab, bool quitIfLast) {
 
     RememberRecentlyClosedDocument(tab->filePath);
 
+    // Flush pending flashcard study SAVE (only) BEFORE the save prompt.
+    // This writes the current SM-2 states without pruning, so if the user
+    // cancels the "Save changes?" dialog, the states survive (the prune flag
+    // remains set for the later full flush when the prompt succeeds).
+    FlashcardFlushBookkeepingSaveOnly(win);
+
     // TODO: maybe should have a way to over-ride this for unconditional close?
     bool canClose = MaybeSaveAnnotations(tab);
     if (!canClose) {
         return;
     }
+    // Flush the remaining deferred work (prune + sidebar) now that the save
+    // prompt succeeded. This clears all dirty flags including kFcDirtyPrune.
+    FlashcardFlushBookkeeping(win);
     // MaybeSaveAnnotations() can show a dialog that pumps messages.
     // During message pumping, the window might be destroyed
     // (e.g., WM_DESTROY from a plugin host). If so, everything
@@ -5123,6 +5132,12 @@ void CloseCurrentTab(MainWindow* win, bool quitIfLast) {
 static int CloseAllDocumentTabsForUnsync(MainWindow* win) {
     if (!win) return 0;
 
+    // Flush pending flashcard study SAVE (only) before any save prompt.
+    // This writes current SM-2 states without pruning. If user cancels a
+    // prompt, the prune flag remains set for a later full flush when prompts
+    // succeed for all tabs.
+    FlashcardFlushBookkeepingSaveOnly(win);
+
     // Collect document tabs first (can't close while iterating)
     Vec<WindowTab*> docTabs;
     for (int i = 0; i < win->TabCount(); i++) {
@@ -5167,6 +5182,12 @@ static int CloseAllDocumentTabsForUnsync(MainWindow* win) {
         if (isLastDocTab) {
             CloseDocumentInCurrentTab(win, false, false);
         }
+    }
+
+    // If ALL document tabs closed successfully, run the full flush (prune + sidebar).
+    // If user cancelled on any tab, the prune flag remains set for a later flush.
+    if (closed == len(docTabs)) {
+        FlashcardFlushBookkeeping(win);
     }
 
     return closed;
@@ -5216,6 +5237,12 @@ void CloseWindow(MainWindow* win, bool quitIfLast, bool forceClose) {
         quitIfLast = true;
     }
 
+    // Flush pending flashcard study SAVE (only) before the save prompts.
+    // This writes current SM-2 states without pruning. If user cancels any
+    // prompt, the prune flag remains set for a later full flush when all
+    // prompts succeed.
+    FlashcardFlushBookkeepingSaveOnly(win);
+
     // when used as an embedded plugin, closing should happen automatically
     // when the parent window is destroyed (cf. WM_DESTROY)
     if (gPluginMode && !gWindows.Contains(win) && !forceClose) {
@@ -5250,10 +5277,8 @@ void CloseWindow(MainWindow* win, bool quitIfLast, bool forceClose) {
         }
     }
 
-    // TODO: should be more intelligent i.e. close the tabs we can and only
-    // leave those where user cancelled closing
-    // would have to remember a list of tabs to not close above
-    // if list not empty, only close the tabs not on the list
+    // If any tab cancelled the save prompt, don't run the full flush (prune + sidebar).
+    // The prune flag remains set for a later flush when all prompts succeed.
     if (!canCloseWindow) {
         win->isBeingClosed = false;
         for (auto& tab : win->Tabs()) {
@@ -5263,6 +5288,9 @@ void CloseWindow(MainWindow* win, bool quitIfLast, bool forceClose) {
         }
         return;
     }
+
+    // All tabs saved successfully: run the full flush (prune + sidebar).
+    FlashcardFlushBookkeeping(win);
 
     // Stop eventual TTS reading
     StopReadAloudIfSourceWindow(win);
@@ -5328,6 +5356,11 @@ void CloseWindow(MainWindow* win, bool quitIfLast, bool forceClose) {
         int nWindows = len(gWindows);
         logf("Calling PostQuitMessage() in CloseWindow() because closing lastWindow, nWindows: %d\n", nWindows);
         ReportDebugIf(nWindows != 0);
+
+        // Join the flashcard study save worker (bounded timeout 3s) so pending
+        // async writes complete before process exit.
+        FlashcardSaveWorkerJoin();
+
         PostQuitMessage(0);
     }
 }
