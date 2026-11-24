@@ -437,6 +437,7 @@ enum class ControlCmd : u16 {
     TestCreateFlashcard = 86,
     TestFlushFlashcardBookkeeping = 87,
     TestFlashcardFlush = 88,
+    TestFlashcardVisibleCardIndices = 89,
 };
 
 enum class ControlArgType : u16 {
@@ -1915,6 +1916,7 @@ static void ExecuteControlRequest(ControlRequest* req) {
             // Reload cards to pick up the new one
             tab->flashcard.cards = FlashcardLoadFromDocument(AsEngineMupdf(engine));
             tab->flashcard.cardsLoaded = true;
+            FlashcardBuildPageIndex(tab->flashcard);
             // Return the card key
             u64 key = FlashcardKey(pageNo, rect);
             AppendArgInt(req->results, 1);
@@ -1979,6 +1981,18 @@ static void ExecuteControlRequest(ControlRequest* req) {
             AppendArgInt(req->results, pendingTabs);
             AppendArgInt(req->results, stateCount);
             AppendArgString(req->results, studyDocPath);
+            AppendArgEnd(req->results);
+            break;
+        }
+
+        case ControlCmd::TestFlashcardVisibleCardIndices: {
+            // Test FlashcardVisibleCardIndices helper (flashcard paint perf optimization)
+            // Request: none
+            // Response: int32 ok (1=passed, 0=failed), string message
+            int exitCode = 1;
+            TempStr result = FlashcardVisibleCardIndicesTestTemp(&exitCode);
+            AppendArgInt(req->results, exitCode == 0 ? 1 : 0);
+            AppendArgString(req->results, result);
             AppendArgEnd(req->results);
             break;
         }

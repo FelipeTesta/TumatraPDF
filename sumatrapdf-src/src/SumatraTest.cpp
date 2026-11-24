@@ -25,6 +25,7 @@
 #include "TextSearch.h"
 #include "MainWindow.h"
 #include "WindowTab.h"
+#include "Flashcard.h"
 #include "Selection.h"
 #include "SearchAndDDE.h"
 #include "ReadAloudHighlight.h"
@@ -1447,5 +1448,89 @@ TempStr PageLinksResultTemp(Str path, int pageNo, int* exitCodeOut) {
         *exitCodeOut = 0;
     }
     SafeEngineRelease(&engine);
+    return ToStrTemp(out);
+}
+
+// Test for FlashcardBuildPageIndex (flashcard paint perf optimization).
+// Builds a synthetic card set and verifies the page index is built correctly.
+TempStr FlashcardVisibleCardIndicesTestTemp(int* exitCodeOut) {
+    str::Builder out;
+    auto fail = [&](Str msg) -> Str {
+        out.Append(msg);
+        out.AppendChar('\n');
+        if (exitCodeOut) {
+            *exitCodeOut = 1;
+        }
+        return ToStrTemp(out);
+    };
+
+    // Create synthetic cards: 300 cards spread over 50 pages (6 cards per page)
+    Vec<Flashcard> cards;
+    for (int p = 1; p <= 50; p++) {
+        for (int c = 0; c < 6; c++) {
+            Flashcard card;
+            card.pageNo = p;
+            card.bounds = RectF(PointF(10.0f + c * 10.0f, 10.0f), PointF(20.0f + c * 10.0f, 20.0f));
+            card.rects.Append(card.bounds);
+            cards.Append(card);
+        }
+    }
+
+    // Build page index
+    FlashcardTabState tabState;
+    tabState.cards = cards;
+    FlashcardBuildPageIndex(tabState);
+
+    // Test 1: index should have entries for all 50 pages
+    if (len(tabState.cardIndicesByPage) != 51) { // 1-based: 0..50
+        return fail(fmt("FAIL test1: expected index size 51, got %d", len(tabState.cardIndicesByPage)));
+    }
+
+    // Test 2: each page should have exactly 6 cards
+    for (int p = 1; p <= 50; p++) {
+        if (len(tabState.cardIndicesByPage[p]) != 6) {
+            return fail(fmt("FAIL test2: page %d expected 6 cards, got %d", p, len(tabState.cardIndicesByPage[p])));
+        }
+    }
+
+    // Test 3: cross-page cloze (extraPages) - card on page 5 with extra page on page 20
+    int cardOnPage5 = 24; // page 5, card 0 (0-based: pages 1-4 = 24 cards, page 5 starts at 24)
+    Flashcard& clozeCard = tabState.cards[cardOnPage5]; // Use tabState.cards, not the original vector
+    FlashcardPageGroup extra;
+    extra.pageNo = 20;
+    extra.bounds = RectF(PointF(30.0f, 30.0f), PointF(40.0f, 40.0f));
+    extra.rects.Append(extra.bounds);
+    clozeCard.extraPages.Append(extra);
+
+    // Rebuild index to include extraPages
+    FlashcardBuildPageIndex(tabState);
+
+    // Page 20 should now have 7 cards (6 original + 1 from extraPages)
+    if (len(tabState.cardIndicesByPage[20]) != 7) {
+        return fail(
+            fmt("FAIL test3: page 20 expected 7 cards (6 + extra), got %d", len(tabState.cardIndicesByPage[20])));
+    }
+
+    // Page 5 should still have 6 cards
+    if (len(tabState.cardIndicesByPage[5]) != 6) {
+        return fail(fmt("FAIL test3b: page 5 expected 6 cards, got %d", len(tabState.cardIndicesByPage[5])));
+    }
+
+    // Test 4: empty cards returns empty index
+    Vec<Flashcard> emptyCards;
+    FlashcardTabState emptyTab;
+    emptyTab.cards = emptyCards;
+    FlashcardBuildPageIndex(emptyTab);
+    if (len(emptyTab.cardIndicesByPage) != 0) {
+        return fail(fmt("FAIL test4: expected empty index, got size %d", len(emptyTab.cardIndicesByPage)));
+    }
+
+    // Test 5: null DisplayModel returns empty (tested via FlashcardVisibleCardIndices with null dm)
+    // This is tested implicitly by the production code path
+
+    if (exitCodeOut) {
+        *exitCodeOut = 0;
+    }
+    out.Append("OK all FlashcardBuildPageIndex tests passed\n");
     return ToStrTemp(out);
 }

@@ -1686,6 +1686,8 @@ static void ImportDoImport(ImportDialog* d) {
     logf("[fc] Import window - created %d new card(s)\n", n);
     if (n > 0) {
         tab->flashcard.cards = FlashcardLoadFromDocument(AsEngineMupdf(engine));
+        tab->flashcard.cardsLoaded = true;
+        FlashcardBuildPageIndex(tab->flashcard);
         if (d->win->flashcard.activeListCardTab == tab) {
             d->win->flashcard.activeListCardIdx = -1;
             d->win->flashcard.activeListCardTab = nullptr;
@@ -1987,6 +1989,7 @@ static int ImportAnnotDoImport(ImportDialog* d) {
         // Reload cards so the new ones are visible everywhere
         tab->flashcard.cards = FlashcardLoadFromDocument(epdf);
         tab->flashcard.cardsLoaded = true;
+        FlashcardBuildPageIndex(tab->flashcard);
         if (d->win->flashcard.activeListCardTab == tab) {
             d->win->flashcard.activeListCardIdx = -1;
             d->win->flashcard.activeListCardTab = nullptr;

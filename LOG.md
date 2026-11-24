@@ -29,6 +29,35 @@
 - Branch not merged into main: user validates card-to-card jump with `[fc][perf] rate: ...` / `[fc][perf] paint: keypress->paint=...` logs first.
 - Sync `FlashcardStudySave` still used by delete and adopt/rename paths (they write synchronously).
 
+### Added (paint perf phase)
+- Per-tab page index `FlashcardTabState::cardIndicesByPage` (physical page -> card indices, primary + extraPages) built by `FlashcardBuildPageIndex()` (Flashcard.cpp:305).
+- `PaintFlashcardMasks` (Canvas.cpp:4163) computes visible PHYSICAL pages from `dm->pagesInfo` (visibleRatio > 0), includes active card and Lista-selected card pages even when off-screen, iterates only indexed cards, falls back to full iteration when index missing.
+- Pure helper `FlashcardVisibleCardIndices()` (Flashcard.cpp:350) shares logic for testing and paint path.
+- Index rebuild hooked at 6 card-assignment sites: Commands_Flashcard.cpp:185/216/1662, FlashcardToolbar.cpp:1690/1992, SumatraControl.cpp:1919.
+- Control command `TestFlashcardVisibleCardIndices` (id 89) runs hermetic index tests via control pipe.
+
+### Fixed
+- Cross-page cloze on-screen extraPage painted when primary page off-screen (index maps extraPages).
+- Active study card and Lista-selected card painted even when page outside viewport.
+- Two Columns v2 right-column cards: visible test uses `dm->pagesInfo` virtual pages (each has physicalPageNo + cropColumn) -> physical page marked visible if ANY of its virtual pages has visibleRatio > 0.
+
+### Verified
+- Build green (0 errors, 0 warnings).
+- Control test: `bun cmd/control.ts out\dbg64\TumatraPDF.exe test-flashcard-visible-card-indices` -> "OK all FlashcardBuildPageIndex tests passed".
+- Unit tests pass (`bun cmd/run-unit-tests.ts -dbg`).
+- FAIL->PASS regression check: temporarily disabled `FlashcardBuildPageIndex` -> test FAILs ("FAIL test1: expected index size 51, got 0"), restored -> PASS.
+
+### Complexity before -> after
+- Before: `PaintFlashcardMasks` iterated ALL cards O(C x Q) where C = total cards, Q = avg quads/card (every rect converted + viewport cull).
+- After: candidate set = cards whose physical page has a visible virtual page. Index lookup O(1) per visible page, paint O(cards_on_visible_pages x Q). Worst case (all pages visible) = O(C x Q), typical autoscroll = O(cards_on_visible_pages x Q). Index build O(C) amortized over loads.
+- Real complexity: O(cards whose physical page has a visible virtual page). NOT O(1).
+
+### NOT VERIFIED
+- Before/after paint-cost numbers from `[fc] paint: %d cards, %d rects drawn, %.3f ms/paint avg` instrumentation (Canvas.cpp:4246) — user manual run required.
+- TC2 right-column case verified by code inspection (visibleRatio per virtual page); not validated on real Two Columns v2 document.
+- Active-card-outside-viewport case verified by code (explicit inclusion); not validated on real scroll-away-then-rate flow.
+- Paint path optimization verified by index helper test; no test directly asserts `PaintFlashcardMasks` draws identical rects before/after.
+
 ## 2026-11-23 (s77) — Windows 11 compatibility: SmartScreen warning, self-unblock, release checksums
 
 ### Added

@@ -98,6 +98,10 @@ export enum ControlCommand {
   // Request: int32 mode (0=full flush, 1=save-only)
   // Response: int32 ok, int32 pendingTabCount, int32 stateCount, string studyDocPath
   TestFlashcardFlush = 88,
+  // Test FlashcardVisibleCardIndices helper (flashcard paint perf optimization)
+  // Request: none
+  // Response: int32 ok (1=passed, 0=failed), string message
+  TestFlashcardVisibleCardIndices = 89,
 }
 
 export type ControlArg = number | string | Uint8Array | ControlArg[];
@@ -477,10 +481,10 @@ export async function runControlCommand(
 if (import.meta.main) {
   const [exe, cmdName, ...args] = process.argv.slice(2);
   if (!exe || !cmdName) {
-    console.log("Usage: bun cmd/control.ts <SumatraPDF.exe> <ping|test-search> [args...]");
+    console.log("Usage: bun cmd/control.ts <SumatraPDF.exe> <ping|test-search|test-flashcard-visible-card-indices> [args...]");
     process.exit(1);
   }
-  const cmd = cmdName === "ping" ? ControlCommand.Ping : cmdName === "test-search" ? ControlCommand.TestSearch : 0;
+  const cmd = cmdName === "ping" ? ControlCommand.Ping : cmdName === "test-search" ? ControlCommand.TestSearch : cmdName === "test-flashcard-visible-card-indices" ? ControlCommand.TestFlashcardVisibleCardIndices : 0;
   if (!cmd) {
     throw new Error(`unknown command: ${cmdName}`);
   }

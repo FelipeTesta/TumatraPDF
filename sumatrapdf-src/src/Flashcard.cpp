@@ -18,6 +18,7 @@ extern "C" {
 #include "DocProperties.h"
 #include "TreeModel.h"
 #include "EngineBase.h"
+#include "DisplayModel.h"
 #include "EngineMupdf.h"
 #include "base/GuessFileType.h"
 #include "EngineAll.h"
@@ -294,6 +295,120 @@ Vec<Flashcard> FlashcardLoadFromDocument(EngineMupdf* engine) {
     }
 
     logf("[fc] FlashcardLoadFromDocument - found %d flashcards\n", len(result));
+    return result;
+}
+
+// Build per-page card index for fast visible-page iteration in PaintFlashcardMasks.
+// Maps physical page number (1-based) -> list of card indices that have a mask
+// on that page (primary page or any extraPages). Clears and rebuilds
+// tabState.cardIndicesByPage.
+void FlashcardBuildPageIndex(FlashcardTabState& tabState) {
+    tabState.cardIndicesByPage.Reset();
+    if (len(tabState.cards) == 0) {
+        return;
+    }
+    // Find max physical page number to size the index
+    int maxPageNo = 0;
+    for (int i = 0; i < len(tabState.cards); i++) {
+        const Flashcard& card = tabState.cards[i];
+        if (card.pageNo > maxPageNo) maxPageNo = card.pageNo;
+        for (int g = 0; g < len(card.extraPages); g++) {
+            if (card.extraPages[g].pageNo > maxPageNo) maxPageNo = card.extraPages[g].pageNo;
+        }
+    }
+    // Resize index: 1-based physical page number -> vector of card indices
+    tabState.cardIndicesByPage.AppendBlanks(maxPageNo + 1);
+    for (int i = 0; i < len(tabState.cards); i++) {
+        const Flashcard& card = tabState.cards[i];
+        // Primary page
+        if (card.pageNo >= 1 && card.pageNo <= maxPageNo) {
+            tabState.cardIndicesByPage[card.pageNo].Append(i);
+        }
+        // Extra pages (cross-page clozes)
+        for (int g = 0; g < len(card.extraPages); g++) {
+            int p = card.extraPages[g].pageNo;
+            if (p >= 1 && p <= maxPageNo) {
+                tabState.cardIndicesByPage[p].Append(i);
+            }
+        }
+    }
+}
+
+// Compute which card indices are candidates for painting based on visible pages.
+// Includes active card and Lista-selected card even if their pages are not visible.
+Vec<int> FlashcardVisibleCardIndices(const DisplayModel* dm, const Vec<Flashcard>& cards,
+                                     const Vec<Vec<int>>& pageIndex, int studyCardIdx, int listCardIdx) {
+    Vec<int> result;
+    if (!dm || len(cards) == 0) {
+        return result;
+    }
+
+    // Build set of visible physical pages from the layout
+    Vec<int> visiblePhysPages;
+    int vPageCount = dm->PageCount();
+    if (vPageCount > 0 && dm->pagesInfo) {
+        int maxPhysPage = 0;
+        for (int vPage = 1; vPage <= vPageCount; vPage++) {
+            const PageInfo* pi = dm->GetPageInfo(vPage);
+            if (pi && pi->physicalPageNo > maxPhysPage) {
+                maxPhysPage = pi->physicalPageNo;
+            }
+        }
+        if (maxPhysPage > 0) {
+            Vec<char> physPageVisible;
+            physPageVisible.AppendBlanks(maxPhysPage + 1);
+            for (int vPage = 1; vPage <= vPageCount; vPage++) {
+                const PageInfo* pi = dm->GetPageInfo(vPage);
+                if (pi && pi->visibleRatio > 0.0f && pi->physicalPageNo >= 1) {
+                    physPageVisible[pi->physicalPageNo] = 1;
+                }
+            }
+            // Always include the active card's pages
+            if (studyCardIdx >= 0 && studyCardIdx < len(cards)) {
+                int p = cards[studyCardIdx].pageNo;
+                if (p >= 1 && p <= maxPhysPage) physPageVisible[p] = 1;
+                for (int g = 0; g < len(cards[studyCardIdx].extraPages); g++) {
+                    int ep = cards[studyCardIdx].extraPages[g].pageNo;
+                    if (ep >= 1 && ep <= maxPhysPage) physPageVisible[ep] = 1;
+                }
+            }
+            // Always include the Lista-selected card's pages
+            if (listCardIdx >= 0 && listCardIdx < len(cards)) {
+                int p = cards[listCardIdx].pageNo;
+                if (p >= 1 && p <= maxPhysPage) physPageVisible[p] = 1;
+                for (int g = 0; g < len(cards[listCardIdx].extraPages); g++) {
+                    int ep = cards[listCardIdx].extraPages[g].pageNo;
+                    if (ep >= 1 && ep <= maxPhysPage) physPageVisible[ep] = 1;
+                }
+            }
+            for (int p = 1; p <= maxPhysPage; p++) {
+                if (physPageVisible[p]) {
+                    visiblePhysPages.Append(p);
+                }
+            }
+        }
+    }
+
+    // Use page index if available, otherwise return all cards (fallback)
+    if (len(pageIndex) > 0) {
+        for (int pi = 0; pi < len(visiblePhysPages); pi++) {
+            int physPage = visiblePhysPages[pi];
+            if (physPage < len(pageIndex)) {
+                const Vec<int>& cardIndices = pageIndex[physPage];
+                for (int ci = 0; ci < len(cardIndices); ci++) {
+                    int cardIdx = cardIndices[ci];
+                    if (cardIdx >= 0 && cardIdx < len(cards)) {
+                        result.Append(cardIdx);
+                    }
+                }
+            }
+        }
+    } else {
+        // Fallback: all cards
+        for (int i = 0; i < len(cards); i++) {
+            result.Append(i);
+        }
+    }
     return result;
 }
 

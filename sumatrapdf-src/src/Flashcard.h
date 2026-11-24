@@ -10,6 +10,7 @@ class EngineBase;
 struct Annotation;
 struct MainWindow;
 struct WindowTab;
+struct DisplayModel;
 
 // FlashcardPageGroup — one page's part of a cross-page cloze. A cloze that
 // spans a page break is stored as one Highlight per page (a PDF annotation
@@ -79,6 +80,11 @@ struct FlashcardTabState {
     Str filterExpr;
     bool filterEnabled = true; // ON/OFF switch (keeps the expression)
     bool cardsLoaded = false;  // lazy: true once FlashcardLoadFromDocument ran
+    // Per-page card index: physical page number (1-based) -> list of card indices
+    // that have a mask on that page (primary or extraPages). Built by
+    // FlashcardBuildPageIndex() when cards are loaded. Invalidated when
+    // tab->flashcard.cards is reassigned.
+    Vec<Vec<int>> cardIndicesByPage;
 };
 
 // FcListRow — backing data for one row of the Lista panel (the label string
@@ -94,6 +100,18 @@ struct FcListRow {
 
 // Load flashcards from PDF annotations in the current document
 Vec<Flashcard> FlashcardLoadFromDocument(EngineMupdf* engine);
+
+// Build per-page card index (physical page -> card indices) for fast visible-page
+// iteration in PaintFlashcardMasks. Must be called after tab->flashcard.cards is
+// assigned. Clears and rebuilds tab->flashcard.cardIndicesByPage.
+void FlashcardBuildPageIndex(FlashcardTabState& tabState);
+
+// Compute which card indices are candidates for painting based on visible pages.
+// Returns a Vec<int> of card indices that would be painted (includes active card
+// and Lista-selected card even if their pages are not visible). Pure helper for
+// testing and for PaintFlashcardMasks to share logic.
+Vec<int> FlashcardVisibleCardIndices(const DisplayModel* dm, const Vec<Flashcard>& cards,
+                                     const Vec<Vec<int>>& pageIndex, int studyCardIdx, int listCardIdx);
 
 // Create a flashcard Highlight annotation for the given PAGE-space rects
 // (author/color/opacity per the flashcard recipe). groupToken != 0 tags the

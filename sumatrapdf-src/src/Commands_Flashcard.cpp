@@ -182,6 +182,7 @@ bool FlashcardEnsureTabCards(WindowTab* tab) {
         }
         tab->flashcard.cards = FlashcardLoadFromDocument(engine);
         tab->flashcard.cardsLoaded = true;
+        FlashcardBuildPageIndex(tab->flashcard);
         if (tab->filePath) {
             tab->flashcard.studyDoc = FlashcardStudyLoad(tab->filePath.s);
         }
@@ -212,6 +213,7 @@ static void FlashcardRefreshAfterDelete(MainWindow* win, WindowTab* tab) {
     // Reload cards from document
     tab->flashcard.cards = FlashcardLoadFromDocument(AsEngineMupdf(engine));
     tab->flashcard.cardsLoaded = true;
+    FlashcardBuildPageIndex(tab->flashcard);
 
     // Clear active list selection if it points to this tab
     FlashcardActiveListClearIfTab(win, tab);
@@ -1657,6 +1659,7 @@ bool HandleCommandFlashcard(MainWindow* win, int cmd) {
                 // Reload cards so count/order reflect the new cloze immediately
                 tab->flashcard.cards = FlashcardLoadFromDocument(AsEngineMupdf(engine));
                 tab->flashcard.cardsLoaded = true;
+                FlashcardBuildPageIndex(tab->flashcard);
                 if (tab->filePath) {
                     tab->flashcard.studyDoc = FlashcardStudyLoad(tab->filePath.s);
                 }

@@ -4126,6 +4126,11 @@ static void PaintFlashcardMasks(MainWindow* win, DisplayModel* dm, HDC hdc) {
             studyCardIdx = e.cardIdx;
         }
     }
+    // Lista-selected card index (for highlighting), -1 if none or different tab.
+    int listCardIdx = -1;
+    if (win->flashcard.activeListCardTab == fcTab) {
+        listCardIdx = win->flashcard.activeListCardIdx;
+    }
     if (!cards || len(*cards) == 0) {
         return;
     }
@@ -4155,78 +4160,166 @@ static void PaintFlashcardMasks(MainWindow* win, DisplayModel* dm, HDC hdc) {
     Gdiplus::SolidBrush opaqueAccentBrush(GdiRgbFromCOLORREF(colActiveTb));
     Gdiplus::Pen edgePen(GdiRgbFromCOLORREF(colActiveTb), (Gdiplus::REAL)DpiScale(win->hwndCanvas, 2));
 
-    for (int i = 0; i < len(*cards); i++) {
-        const Flashcard& card = (*cards)[i];
-        // The card being studied is marked in the accent color (Peru/orange)
-        // instead of gray so it is identifiable at a glance among the other
-        // cards (user 2026-10-22: "o retângulo do flashcard ativo está pouco
-        // identificável"). Inactive cards keep the gray marker.
-        bool isActiveCard = (i == studyCardIdx);
-        // Lista-selected card (Peru outline, persistent): active when the Lista
-        // panel's selected row matches this card index AND the tab matches.
-        bool listActiveHere = (win->flashcard.activeListCardTab == fcTab && i == win->flashcard.activeListCardIdx);
-        bool opaque = (isActiveCard && !win->flashcard.revealMode);
-        // Paint each quad subrect separately so a multi-line cloze covers
-        // exactly the highlighted text (not the union bbox). Under TC2 the
-        // display uses virtual pages: map the physical rect to its column
-        // (PhysicalToVirtualForRect) so the mask lands on the text.
-        // A cross-page cloze masks EVERY page it covers (primary + extraPages).
-        auto paintPage = [&](int pageNo, const Vec<RectF>& rects) {
-            if (pageNo < 1) {
-                return;
+    // --- Perf: build set of visible PHYSICAL pages from the layout ---
+    // dm->pagesInfo is indexed by VIRTUAL page (1..VirtualPageCount()).
+    // Each PageInfo has physicalPageNo and cropColumn (TC2 v2).
+    // A physical page is a paint candidate if ANY of its virtual pages has
+    // visibleRatio > 0. We also always include the active card's page and
+    // the Lista-selected card's page (they may be off-screen, e.g. after rating).
+    Vec<int> visiblePhysPages;
+    int vPageCount = dm->PageCount(); // VirtualPageCount()
+    if (vPageCount > 0 && dm->pagesInfo) {
+        // Use a small fixed array to track seen physical pages (max ~2000 phys pages).
+        // Since physical page numbers are 1..N, we can use a bit vector or simple array.
+        // For simplicity and correctness, use a Vec<bool> sized to max physical page.
+        int maxPhysPage = 0;
+        // First pass: find max physical page number from the layout
+        for (int vPage = 1; vPage <= vPageCount; vPage++) {
+            const PageInfo* pi = dm->GetPageInfo(vPage);
+            if (pi && pi->physicalPageNo > maxPhysPage) {
+                maxPhysPage = pi->physicalPageNo;
             }
-            for (int rIdx = 0; rIdx < len(rects); rIdx++) {
-                RectF vr;
-                int vPage = dm->PhysicalToVirtualForRect(pageNo, rects[rIdx], &vr);
-                if (!dm->ValidPageNo(vPage)) {
-                    continue;
-                }
-                // Skip pages with zero/negative zoom (transient state upstream #2014):
-                // getZoomSafe in CvtToScreen reports FATAL in dbg builds when zoomReal <= 0.
+        }
+        if (maxPhysPage > 0) {
+            Vec<char> physPageVisible;
+            physPageVisible.AppendBlanks(maxPhysPage + 1);
+            // Mark all physical pages that have at least one visible virtual page
+            for (int vPage = 1; vPage <= vPageCount; vPage++) {
                 const PageInfo* pi = dm->GetPageInfo(vPage);
-                if (!pi || pi->zoomReal <= 0) {
-                    continue;
+                if (pi && pi->visibleRatio > 0.0f && pi->physicalPageNo >= 1) {
+                    physPageVisible[pi->physicalPageNo] = 1;
                 }
-                Rect rc = dm->CvtToScreen(vPage, vr);
-                // cull rects outside the visible viewport: during autoscroll
-                // almost every card is off-screen and drawing it is pure waste
-                // (Rect::Intersect returns a NEW rect - it does not mutate)
-                if (rc.Intersect(viewPortRect).IsEmpty()) {
-                    continue;
+            }
+            // Always include the active card's primary page (if valid)
+            if (studyCardIdx >= 0 && studyCardIdx < len(*cards)) {
+                int p = (*cards)[studyCardIdx].pageNo;
+                if (p >= 1 && p <= maxPhysPage) physPageVisible[p] = 1;
+                // And its extraPages
+                const Flashcard& activeCard = (*cards)[studyCardIdx];
+                for (int g = 0; g < len(activeCard.extraPages); g++) {
+                    int ep = activeCard.extraPages[g].pageNo;
+                    if (ep >= 1 && ep <= maxPhysPage) physPageVisible[ep] = 1;
                 }
-                paintedRects++;
-                if (opaque) {
-                    // Studying this card: opaque mask hides the cloze text ([_____]).
-                    // The ACTIVE card uses the Peru/orange accent so it stands out
-                    // from the inactive gray markers.
-                    gs.FillRectangle(isActiveCard ? &opaqueAccentBrush : &opaqueGrayBrush, rc.x, rc.y, rc.dx, rc.dy);
+            }
+            // Always include the Lista-selected card's primary page (if valid)
+            if (listCardIdx >= 0 && listCardIdx < len(*cards)) {
+                int p = (*cards)[listCardIdx].pageNo;
+                if (p >= 1 && p <= maxPhysPage) physPageVisible[p] = 1;
+                const Flashcard& listCard = (*cards)[listCardIdx];
+                for (int g = 0; g < len(listCard.extraPages); g++) {
+                    int ep = listCard.extraPages[g].pageNo;
+                    if (ep >= 1 && ep <= maxPhysPage) physPageVisible[ep] = 1;
+                }
+            }
+            // Collect visible physical pages
+            for (int p = 1; p <= maxPhysPage; p++) {
+                if (physPageVisible[p]) {
+                    visiblePhysPages.Append(p);
+                }
+            }
+        }
+    }
+
+    // --- Iterate only cards on visible physical pages using the per-tab index ---
+    // The index maps physical page -> list of card indices (primary + extraPages).
+    // If the index is empty (not built yet), fall back to iterating all cards.
+    auto paintPage = [&](int pageNo, const Vec<RectF>& rects, bool isActiveCard, bool listActiveHere, bool opaque) {
+        if (pageNo < 1) {
+            return;
+        }
+        for (int rIdx = 0; rIdx < len(rects); rIdx++) {
+            RectF vr;
+            int vPage = dm->PhysicalToVirtualForRect(pageNo, rects[rIdx], &vr);
+            if (!dm->ValidPageNo(vPage)) {
+                continue;
+            }
+            // Skip pages with zero/negative zoom (transient state upstream #2014):
+            // getZoomSafe in CvtToScreen reports FATAL in dbg builds when zoomReal <= 0.
+            const PageInfo* pi = dm->GetPageInfo(vPage);
+            if (!pi || pi->zoomReal <= 0) {
+                continue;
+            }
+            Rect rc = dm->CvtToScreen(vPage, vr);
+            // cull rects outside the visible viewport: during autoscroll
+            // almost every card is off-screen and drawing it is pure waste
+            // (Rect::Intersect returns a NEW rect - it does not mutate)
+            if (rc.Intersect(viewPortRect).IsEmpty()) {
+                continue;
+            }
+            paintedRects++;
+            if (opaque) {
+                // Studying this card: opaque mask hides the cloze text ([_____]).
+                // The ACTIVE card uses the Peru/orange accent so it stands out
+                // from the inactive gray markers.
+                gs.FillRectangle(isActiveCard ? &opaqueAccentBrush : &opaqueGrayBrush, rc.x, rc.y, rc.dx, rc.dy);
+            } else {
+                // Reading / reveal / non-current card: subtle translucent marker
+                // (text stays visible; on reveal the current card shows its original text)
+                // alpha 20/255 (40/255 when FlashcardHighlightBoost is on, s64-R9k) — lighter than the old 30 so
+                // the gray reads as a hint instead of a block over the text (user 2026-10-22)
+                gs.FillRectangle(&markerBrush, rc.x, rc.y, rc.dx, rc.dy);
+            }
+            if (isActiveCard) {
+                // Marks the studied card in EVERY state. While the answer is
+                // hidden the rectangle is outlined; on reveal the text is
+                // visible again, so only a bottom underline marks the card
+                // (a full outline clutters the text) — user 2026-10-22.
+                if (win->flashcard.revealMode) {
+                    Gdiplus::REAL yLine = (Gdiplus::REAL)(rc.y + rc.dy - 1);
+                    gs.DrawLine(&edgePen, (Gdiplus::REAL)rc.x, yLine, (Gdiplus::REAL)(rc.x + rc.dx), yLine);
                 } else {
-                    // Reading / reveal / non-current card: subtle translucent marker
-                    // (text stays visible; on reveal the current card shows its original text)
-                    // alpha 20/255 (40/255 when FlashcardHighlightBoost is on, s64-R9k) — lighter than the old 30 so
-                    // the gray reads as a hint instead of a block over the text (user 2026-10-22)
-                    gs.FillRectangle(&markerBrush, rc.x, rc.y, rc.dx, rc.dy);
-                }
-                if (isActiveCard) {
-                    // Marks the studied card in EVERY state. While the answer is
-                    // hidden the rectangle is outlined; on reveal the text is
-                    // visible again, so only a bottom underline marks the card
-                    // (a full outline clutters the text) — user 2026-10-22.
-                    if (win->flashcard.revealMode) {
-                        Gdiplus::REAL yLine = (Gdiplus::REAL)(rc.y + rc.dy - 1);
-                        gs.DrawLine(&edgePen, (Gdiplus::REAL)rc.x, yLine, (Gdiplus::REAL)(rc.x + rc.dx), yLine);
-                    } else {
-                        gs.DrawRectangle(&edgePen, rc.x, rc.y, rc.dx - 1, rc.dy - 1);
-                    }
-                } else if (listActiveHere) {
-                    // Lista-selected card: full Peru outline always (not underline)
                     gs.DrawRectangle(&edgePen, rc.x, rc.y, rc.dx - 1, rc.dy - 1);
                 }
+            } else if (listActiveHere) {
+                // Lista-selected card: full Peru outline always (not underline)
+                gs.DrawRectangle(&edgePen, rc.x, rc.y, rc.dx - 1, rc.dy - 1);
             }
-        };
-        paintPage(card.pageNo, card.rects);
-        for (int g = 0; g < len(card.extraPages); g++) {
-            paintPage(card.extraPages[g].pageNo, card.extraPages[g].rects);
+        }
+    };
+
+    // Fast path: use per-page index if available
+    Vec<Vec<int>>* pageIndex = fcTab ? &fcTab->flashcard.cardIndicesByPage : nullptr;
+    if (pageIndex && len(*pageIndex) > 0) {
+        // Iterate only visible physical pages
+        for (int pi = 0; pi < len(visiblePhysPages); pi++) {
+            int physPage = visiblePhysPages[pi];
+            if (physPage < len(*pageIndex)) {
+                const Vec<int>& cardIndices = (*pageIndex)[physPage];
+                for (int ci = 0; ci < len(cardIndices); ci++) {
+                    int cardIdx = cardIndices[ci];
+                    if (cardIdx < 0 || cardIdx >= len(*cards)) continue;
+                    const Flashcard& card = (*cards)[cardIdx];
+                    bool isActiveCard = (cardIdx == studyCardIdx);
+                    bool listActiveHere = (cardIdx == listCardIdx);
+                    bool opaque = (isActiveCard && !win->flashcard.revealMode);
+                    // The card may appear in multiple page buckets (primary + extraPages).
+                    // We must paint only the rects for THIS physical page.
+                    // The index was built with: primary page -> cardIdx, extraPages -> cardIdx.
+                    // So we need to check which page this cardIdx is being painted for.
+                    // Simple approach: paint primary if it matches, paint extraPages if they match.
+                    if (card.pageNo == physPage) {
+                        paintPage(card.pageNo, card.rects, isActiveCard, listActiveHere, opaque);
+                    }
+                    for (int g = 0; g < len(card.extraPages); g++) {
+                        if (card.extraPages[g].pageNo == physPage) {
+                            paintPage(card.extraPages[g].pageNo, card.extraPages[g].rects, isActiveCard, listActiveHere,
+                                      opaque);
+                        }
+                    }
+                }
+            }
+        }
+    } else {
+        // Fallback: iterate all cards (index not built yet)
+        for (int i = 0; i < len(*cards); i++) {
+            const Flashcard& card = (*cards)[i];
+            bool isActiveCard = (i == studyCardIdx);
+            bool listActiveHere = (i == listCardIdx);
+            bool opaque = (isActiveCard && !win->flashcard.revealMode);
+            paintPage(card.pageNo, card.rects, isActiveCard, listActiveHere, opaque);
+            for (int g = 0; g < len(card.extraPages); g++) {
+                paintPage(card.extraPages[g].pageNo, card.extraPages[g].rects, isActiveCard, listActiveHere, opaque);
+            }
         }
     }
 
@@ -4264,9 +4357,8 @@ static void PaintFlashcardMasks(MainWindow* win, DisplayModel* dm, HDC hdc) {
     // column cards route through the rect). The cached check uses
     // gRenderCache->Exists at the current zoom/rotation (same convention as
     // FlashcardNavigateToEntryInner).
-    if (win->flashcard.rateProbePending && win->flashcard.lastRateTick != 0 &&
-        win->flashcard.studyMode && cards && studyCardIdx >= 0 &&
-        studyCardIdx < len(*cards) && gRenderCache) {
+    if (win->flashcard.rateProbePending && win->flashcard.lastRateTick != 0 && win->flashcard.studyMode && cards &&
+        studyCardIdx >= 0 && studyCardIdx < len(*cards) && gRenderCache) {
         u64 nowMs = GetTickCount64();
         u64 deltaMs = nowMs - win->flashcard.lastRateTick;
         const Flashcard& activeCard = (*cards)[studyCardIdx];
@@ -4277,11 +4369,11 @@ static void PaintFlashcardMasks(MainWindow* win, DisplayModel* dm, HDC hdc) {
             if (zoom > 0) {
                 bool cached = gRenderCache->Exists(dm, vPage, dm->GetRotation(), zoom);
                 if (deltaMs <= 5000) {
-                    logf("[fc][perf] paint: keypress->paint=%dms card=%d page=%d cached=%d\n",
-                         (int)deltaMs, studyCardIdx, activeCard.pageNo, (int)cached);
+                    logf("[fc][perf] paint: keypress->paint=%dms card=%d page=%d cached=%d\n", (int)deltaMs,
+                         studyCardIdx, activeCard.pageNo, (int)cached);
                 } else {
-                    logf("[fc][perf] paint: keypress->paint=OUTLIER(%dms) card=%d page=%d cached=%d\n",
-                         (int)deltaMs, studyCardIdx, activeCard.pageNo, (int)cached);
+                    logf("[fc][perf] paint: keypress->paint=OUTLIER(%dms) card=%d page=%d cached=%d\n", (int)deltaMs,
+                         studyCardIdx, activeCard.pageNo, (int)cached);
                 }
             }
         }
