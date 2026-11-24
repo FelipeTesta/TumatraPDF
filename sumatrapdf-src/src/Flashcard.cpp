@@ -91,6 +91,31 @@ static u32 FlashcardAuthorToken(Str author) {
     return v ? v : 1;
 }
 
+// Binary search helper: finds the index of a StateEntry with the given key
+// in a SORTED Vec<StateEntry>. Returns the index if found, otherwise -1.
+// If not found, *outInsertIdx (if non-null) receives the index where the
+// key would be inserted to maintain sorted order.
+int FlashcardStateFindIdx(const Vec<FlashcardStudyDoc::StateEntry>& states, u64 key, int* outInsertIdx) {
+    int lo = 0;
+    int hi = len(states) - 1;
+    while (lo <= hi) {
+        int mid = (lo + hi) >> 1;
+        u64 midKey = states[mid].key;
+        if (midKey == key) {
+            return mid;
+        }
+        if (midKey < key) {
+            lo = mid + 1;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    if (outInsertIdx) {
+        *outInsertIdx = lo;
+    }
+    return -1;
+}
+
 // Iterate all annotations on all pages and extract flashcards.
 // Flashcards are Highlight annotations whose author starts with
 // "TumatraPDF-Flashcard". A cross-page cloze is stored as one Highlight per
@@ -659,30 +684,66 @@ int FlashcardStudyRecoverBackup() {
 // when its highlight annotation is deleted, but its SM-2 entry stayed in the
 // JSON forever: every save wrote it back and the Config window counted states
 // for cards that are not in the book. Returns how many entries were dropped.
+// Complexity: O(S + C log C) where S = states, C = cards (vs O(S x C) before).
+// Both doc.states (already sorted by key) and a temporary sorted copy of card
+// keys are traversed in a single merge pass.
 int FlashcardStudyPruneStates(FlashcardStudyDoc& doc, const Vec<Flashcard>& cards) {
-    int n = len(doc.states);
-    if (n == 0) {
+    int nStates = len(doc.states);
+    if (nStates == 0) {
         return 0;
     }
-    int kept = 0;
-    for (int i = 0; i < n; i++) {
-        u64 key = doc.states[i].key;
-        bool alive = false;
-        for (int j = 0; j < len(cards); j++) {
-            if (cards[j].key == key) {
-                alive = true;
-                break;
-            }
-        }
-        if (!alive) {
-            continue;
-        }
-        if (kept != i) {
-            doc.states[kept] = doc.states[i];
-        }
-        kept++;
+    int nCards = len(cards);
+    if (nCards == 0) {
+        int removed = nStates;
+        doc.states.len = 0;
+        return removed;
     }
-    int removed = n - kept;
+
+    // Build a sorted array of card keys (cards are not sorted by key in memory;
+    // they are in page order). We copy and sort keys for the merge pass.
+    Vec<u64> cardKeys;
+    VecResize(cardKeys, nCards);
+    for (int i = 0; i < nCards; i++) {
+        cardKeys[i] = cards[i].key;
+    }
+    // Sort card keys (insertion sort — fast for typical C < 500)
+    for (int i = 1; i < nCards; i++) {
+        u64 key = cardKeys[i];
+        int j = i - 1;
+        while (j >= 0 && cardKeys[j] > key) {
+            cardKeys[j + 1] = cardKeys[j];
+            j--;
+        }
+        cardKeys[j + 1] = key;
+    }
+
+    // Merge pass: both doc.states and cardKeys are sorted ascending by key.
+    // Keep only states whose key exists in cardKeys.
+    int kept = 0;
+    int iState = 0;
+    int iCard = 0;
+    while (iState < nStates && iCard < nCards) {
+        u64 stateKey = doc.states[iState].key;
+        u64 cardKey = cardKeys[iCard];
+        if (stateKey < cardKey) {
+            // State has no matching card — drop it
+            iState++;
+        } else if (stateKey > cardKey) {
+            // Card has no state (new card) — advance card pointer
+            iCard++;
+        } else {
+            // Match — keep this state
+            if (kept != iState) {
+                doc.states[kept] = doc.states[iState];
+            }
+            kept++;
+            iState++;
+            iCard++;
+        }
+    }
+    // Remaining states (if any) have keys > all card keys — drop them
+
+    int removed = nStates - kept;
     if (removed > 0) {
         doc.states.len = kept;
     }
@@ -1146,6 +1207,22 @@ void FlashcardStudyParseJsonInto(Str json, FlashcardStudyDoc& doc) {
     ParseJsonObject(json, &doc.states);
 }
 
+// Sort StateEntry vec by key (ascending). Simple insertion sort — fast for
+// small N (typical study docs have < 500 entries). Called after load and
+// after any bulk operation that might break the sorted invariant.
+static void FlashcardStudySortStates(Vec<FlashcardStudyDoc::StateEntry>& states) {
+    int n = len(states);
+    for (int i = 1; i < n; i++) {
+        FlashcardStudyDoc::StateEntry key = states[i];
+        int j = i - 1;
+        while (j >= 0 && states[j].key > key.key) {
+            states[j + 1] = states[j];
+            j--;
+        }
+        states[j + 1] = key;
+    }
+}
+
 FlashcardStudyDoc FlashcardStudyLoad(const char* filePath) {
     logf("[fc] FlashcardStudyLoad - loading from %s\n", Str(filePath));
     FlashcardStudyDoc doc;
@@ -1194,6 +1271,10 @@ FlashcardStudyDoc FlashcardStudyLoad(const char* filePath) {
     // merge into the profile ALWAYS (not only on save): two machines converge
     // on the newest state per card key as soon as they load a book
     ProfileDataMergeStudyDoc(filePath, doc);
+
+    // Ensure states are sorted by key for binary search lookups.
+    // The JSON object order is not guaranteed; we sort in-place after load.
+    FlashcardStudySortStates(doc.states);
 
     logf("[fc] FlashcardStudyLoad - loaded %d entries\n", len(doc.states));
     return doc;

@@ -5119,6 +5119,9 @@ void CloseCurrentTab(MainWindow* win, bool quitIfLast) {
 static int CloseAllDocumentTabsForUnsync(MainWindow* win) {
     if (!win) return 0;
 
+    // Flush pending flashcard study saves before any tab is torn down.
+    FlashcardFlushBookkeeping(win);
+
     // Collect document tabs first (can't close while iterating)
     Vec<WindowTab*> docTabs;
     for (int i = 0; i < win->TabCount(); i++) {

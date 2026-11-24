@@ -635,20 +635,16 @@ void FlashcardToolbarUpdateCount(MainWindow* win) {
         for (int i = 0; i < len(tab->flashcard.cards); i++) {
             const Flashcard& card = tab->flashcard.cards[i];
             total++;
-            bool found = false;
-            for (int j = 0; j < len(tab->flashcard.studyDoc.states); j++) {
-                if (tab->flashcard.studyDoc.states.els[j].key == card.key) {
-                    found = true;
-                    const FlashcardStudyState& s = tab->flashcard.studyDoc.states.els[j].state;
-                    if (s.rating == 0) {
-                        newCount++;
-                    } else if (s.nextReviewAt <= now) {
-                        dueCount++;
-                    }
-                    break;
+            // Binary search in sorted states
+            int foundIdx = FlashcardStateFindIdx(tab->flashcard.studyDoc.states, card.key, nullptr);
+            if (foundIdx >= 0) {
+                const FlashcardStudyState& s = tab->flashcard.studyDoc.states[foundIdx].state;
+                if (s.rating == 0) {
+                    newCount++;
+                } else if (s.nextReviewAt <= now) {
+                    dueCount++;
                 }
-            }
-            if (!found) {
+            } else {
                 newCount++;
             }
         }
@@ -1564,6 +1560,9 @@ void FlashcardConfigDialog(MainWindow* win) {
         gConfigEditOrigProc = (WNDPROC)GetWindowLongPtr(dlg.hwndPathEdit, GWLP_WNDPROC);
     }
     SetWindowLongPtr(dlg.hwndPathEdit, GWLP_WNDPROC, (LONG_PTR)ConfigEditProc);
+
+    // Flush pending flashcard study saves so the Config window sees the latest state.
+    FlashcardFlushBookkeeping(win);
 
     ConfigReloadList(&dlg);
     ConfigLayout(&dlg);

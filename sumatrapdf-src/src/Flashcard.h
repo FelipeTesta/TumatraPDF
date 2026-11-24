@@ -133,6 +133,10 @@ void FlashcardStudySave(const char* filePath, const FlashcardStudyDoc& doc);
 // Drop study states whose card no longer exists in the document
 int FlashcardStudyPruneStates(FlashcardStudyDoc& doc, const Vec<Flashcard>& cards);
 
+// Binary search in a SORTED Vec<StateEntry>. Returns index if found, else -1.
+// If not found and outInsertIdx is non-null, sets it to the insert position.
+int FlashcardStateFindIdx(const Vec<FlashcardStudyDoc::StateEntry>& states, u64 key, int* outInsertIdx);
+
 // Load flashcard study state from external JSON file
 FlashcardStudyDoc FlashcardStudyLoad(const char* filePath);
 

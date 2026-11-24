@@ -55,6 +55,48 @@
 - Follow-ups (not implemented): key->state index (no STL: sorted Vec + binary search), async save worker, sidebar incremental update, render-queue priority.
 - Config window study-doc read flush: lives in FlashcardToolbar.cpp (not allowed) — follow-up.
 
+## 2026-11-23 (s76 cont.) — Flashcard study perf: state index + prune merge + flush coverage
+
+### Fixed
+- Unsynced/tab-close data-integrity gap: `CloseAllDocumentTabsForUnsync` (SumatraPDF.cpp:5119) and `MaybeMigrateTab` (Tabs.cpp:244) now call `FlashcardFlushBookkeeping(win)` BEFORE any tab is torn down. Audit of all tab-removal paths:
+  - CloseTab (SumatraPDF.cpp:5041) ✓ flush
+  - CloseWindow (SumatraPDF.cpp:5216) ✓ flush
+  - CloseAllDocumentTabsForUnsync (SumatraPDF.cpp:5119) ✓ flush (ADDED)
+  - MaybeMigrateTab / tab drag-out (Tabs.cpp:266) ✓ flush (ADDED)
+  - CloseTabsToTheRight/Left (SumatraPDF.cpp:10767) → CloseTab ✓
+  - CommandPalette/CloseTab (CommandPalette.cpp:272) → CloseTab ✓
+  - Favorites/CloseTab (Favorites.cpp:1083,1498) → CloseTab ✓
+  - NavFilesInFolder/CloseTab (NavFilesInFolder.cpp:476) → CloseTab ✓
+  - Menu/CloseTab (Menu.cpp:2040) → CloseTab ✓
+  - TabGroupsManage/CloseTab (TabGroupsManage.cpp:696) → CloseTab ✓
+  - TabsCtrl/CloseTab (TabsCtrl.cpp:571,736,796) → CloseTab ✓
+  - RemoveTab (Tabs.cpp:159) called AFTER flush by callers; no direct external callers.
+
+### Added
+- Sorted `Vec<StateEntry>` by key for binary search lookups (repo-native, no STL). Invariant: states sorted after `FlashcardStudyLoad`, after every insert/update in `HandleFlashcardRate`, and after `FlashcardStudyPruneStates` (merge pass keeps order). Duplicates: never created (insert at sorted position), first wins if JSON has dupes.
+- `FlashcardStateFindIdx` helper (Flashcard.cpp:94) — binary search returns index or insert position.
+- `FlashcardStudySortStates` (Flashcard.cpp:1207) — insertion sort after JSON parse (typical < 500 entries, fast).
+- `FlashcardStudyPruneStates` rewritten as merge pass O(S + C log C): builds sorted card-keys copy, single linear pass with two pointers (states sorted, cardKeys sorted) → keeps matching states in place.
+- Config window flush: `FlashcardConfigDialog` (FlashcardToolbar.cpp:1564) calls `FlashcardFlushBookkeeping(win)` before `ConfigReloadList` so per-book counts are fresh.
+
+### Changed
+- `HandleFlashcardRate` (Commands_Flashcard.cpp:909): state lookup + write-back via binary search (was 2 linear scans O(S)). Insert at sorted position maintains invariant.
+- `FlashcardSidebarPopulate` (FlashcardSidebar.cpp:687): state lookup via binary search O(log S) per card (was O(S) linear).
+- `FlashcardToolbarUpdateCount` (FlashcardToolbar.cpp:639): state lookup via binary search O(log S) per card.
+
+### Complexity before → after
+- State lookup (rate): O(S) → O(log S)
+- State insert (rate): O(S) append → O(S) shift at sorted pos (dominated by shift, but search is O(log S))
+- Prune: O(S x C) → O(C log C + S) (merge pass)
+- Sidebar populate: O(C x S) → O(C log S)
+- Toolbar count: O(C x S) → O(C log S)
+
+### Verified
+- Build green (0 errors, 0 warnings).
+- JSON format unchanged (keys written in sorted order; object order irrelevant).
+- Per-book counts in Config window now include pending ratings.
+- All tab-removal paths audited; no path with MainWindow* available misses a flush.
+
 ## 2026-11-23 (s75) — README: app presentation video
 
 ### Added

@@ -244,6 +244,9 @@ static void CloseWindowIfNoDocuments(MainWindow* win) {
 static void MaybeMigrateTab(WindowTab* tab, MainWindow* newWin, Point releasePt) {
     MainWindow* oldWin = tab->win;
 
+    // Flush pending flashcard study saves before the tab is migrated/removed.
+    FlashcardFlushBookkeeping(oldWin);
+
     // Home / Favorites tabs stay in their window
     if (tab->IsNonDocumentTab()) {
         return;

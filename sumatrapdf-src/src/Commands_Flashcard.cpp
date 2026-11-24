@@ -904,14 +904,13 @@ static void HandleFlashcardRate(MainWindow* win, int rating) {
     }
     Flashcard& card = e.tab->flashcard.cards[e.cardIdx];
 
-    // Phase 1: scan — state lookup, SM-2 update, state write-back.
+    // Phase 1: scan — state lookup (binary search), SM-2 update, state write-back.
     t0 = GetTickCount64();
     FlashcardStudyState state = {};
-    for (int i = 0; i < len(e.tab->flashcard.studyDoc.states); i++) {
-        if (e.tab->flashcard.studyDoc.states[i].key == card.key) {
-            state = e.tab->flashcard.studyDoc.states[i].state;
-            break;
-        }
+    int insertIdx = -1;
+    int foundIdx = FlashcardStateFindIdx(e.tab->flashcard.studyDoc.states, card.key, &insertIdx);
+    if (foundIdx >= 0) {
+        state = e.tab->flashcard.studyDoc.states[foundIdx].state;
     }
     FlashcardSm2Update(state, rating);
 
@@ -922,20 +921,16 @@ static void HandleFlashcardRate(MainWindow* win, int rating) {
         FlashcardPrewarmInvalidate();
     }
 
-    // Save/update study state in the card's document
-    bool found = false;
-    for (int i = 0; i < len(e.tab->flashcard.studyDoc.states); i++) {
-        if (e.tab->flashcard.studyDoc.states[i].key == card.key) {
-            e.tab->flashcard.studyDoc.states[i].state = state;
-            found = true;
-            break;
-        }
-    }
-    if (!found) {
+    // Save/update study state in the card's document (insert at sorted position)
+    if (foundIdx >= 0) {
+        e.tab->flashcard.studyDoc.states[foundIdx].state = state;
+    } else {
         FlashcardStudyDoc::StateEntry entry;
         entry.key = card.key;
         entry.state = state;
-        e.tab->flashcard.studyDoc.states.Append(entry);
+        // Insert at the sorted position to maintain the invariant
+        e.tab->flashcard.studyDoc.states.InsertAt(insertIdx >= 0 ? insertIdx : len(e.tab->flashcard.studyDoc.states),
+                                                  entry);
     }
     t1 = GetTickCount64();
     scanMs = (int)(t1 - t0);

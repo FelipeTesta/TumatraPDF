@@ -684,13 +684,13 @@ void FlashcardSidebarPopulate(MainWindow* win) {
         row.cardIdx = i;
         row.pageNo = card.pageNo;
         row.pageNoEnd = len(card.extraPages) > 0 ? card.extraPages[len(card.extraPages) - 1].pageNo : card.pageNo;
-        for (auto& st : tab->flashcard.studyDoc.states) {
-            if (st.key == card.key) {
-                row.rating = st.state.rating;
-                row.interval = st.state.interval;
-                row.nextReviewAt = st.state.nextReviewAt;
-                break;
-            }
+        // Binary search in sorted states
+        int foundIdx = FlashcardStateFindIdx(tab->flashcard.studyDoc.states, card.key, nullptr);
+        if (foundIdx >= 0) {
+            const FlashcardStudyState& st = tab->flashcard.studyDoc.states[foundIdx].state;
+            row.rating = st.rating;
+            row.interval = st.interval;
+            row.nextReviewAt = st.nextReviewAt;
         }
         if (row.rating == 0) {
             nNew++;
