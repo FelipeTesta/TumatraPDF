@@ -99,6 +99,7 @@
 - Corrected stale claim: one file write per rating -> TWO writes (per-book JSON + ProfileDataUpdateStudyDoc deep copy + ProfileDataSaveNow).
 - Corrected stale claim: stats write per rating -> NO per-rating I/O (flush at >=20 cards / >=60 sec thresholds).
 - Corrected stale claim: study tick repaints canvas -> tick does NOT invalidate canvas (only repaints on session timer expiry at :1545).
+- Lista populate gated on panel visibility (`win->uiState.fcListVisible`) — hidden list no longer re-scans all study states, re-extracts page text, re-adds every row on each rating.
 
 ### Notes
 - Production code NOT changed in this round — analysis + maps only.

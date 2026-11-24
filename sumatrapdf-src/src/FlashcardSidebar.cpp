@@ -655,7 +655,7 @@ void FlashcardSidebarShow(MainWindow* win) {
 }
 
 void FlashcardSidebarPopulate(MainWindow* win) {
-    if (!win->flashcard.hwndListaBox || !win->flashcard.hwndListaView) {
+    if (!win->flashcard.hwndListaBox || !win->flashcard.hwndListaView || !win->uiState.fcListVisible) {
         return;
     }
     HWND hwndList = win->flashcard.hwndListaView;
