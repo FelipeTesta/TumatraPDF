@@ -981,6 +981,10 @@ struct MainWindow {
 // Flashcard bookkeeping flush (called from tab close / app exit / tab switch).
 void FlashcardFlushBookkeeping(MainWindow* win);
 
+// Flush ONLY the save part (kFcDirtySave) without pruning and without clearing kFcDirtyPrune.
+// Used before user-cancellable prompts (e.g., "Save changes?" in CloseTab).
+void FlashcardFlushBookkeepingSaveOnly(MainWindow* win);
+
 void SetWebviewsHiddenForHomeOverlay(MainWindow* win);
 
 bool HasOpenedDocuments(MainWindow*);

@@ -420,18 +420,22 @@ enum class ControlCmd : u16 {
     // Manual multi-window test instrumentation (intentional, kept).
     // Drives/focuses/reads stats per window via the control pipe.
     // No automated test uses these hooks yet.
-    TestNewWindow = 75,
-    TestWindowStats = 76,
-    TestOpenInWindow = 77,
-    TestFocusWindow = 78,
-    TestRunCommandInWindow = 79,
+    TestNewWindow = 76,
+    TestWindowStats = 77,
+    TestOpenInWindow = 78,
+    TestFocusWindow = 79,
+    TestRunCommandInWindow = 80,
     // Manual profile sync test instrumentation (intentional, kept).
     // Drives profile sync actions via the control pipe.
     // No automated test uses these hooks yet.
-    TestProfileSetFolder = 80,
-    TestProfileExport = 81,
-    TestProfileImport = 82,
-    TestProfileStatus = 83,
+    TestProfileSetFolder = 81,
+    TestProfileExport = 82,
+    TestProfileImport = 83,
+    TestProfileStatus = 84,
+    TestRateFlashcard = 85,
+    TestCreateFlashcard = 86,
+    TestFlushFlashcardBookkeeping = 87,
+    TestFlashcardFlush = 88,
 };
 
 enum class ControlArgType : u16 {
@@ -1817,6 +1821,160 @@ static void ExecuteControlRequest(ControlRequest* req) {
             }
             SendMessageW(win->hwndFrame, WM_COMMAND, (WPARAM)cmdId, 0);
             AppendArgInt(req->results, 1);
+            AppendArgEnd(req->results);
+            break;
+        }
+
+        case ControlCmd::TestRateFlashcard: {
+            // Rate a flashcard in the current study session by dispatching the
+            // appropriate CmdFlashcardRateX command (1-4).
+            // Request: int32 cardIdx (index in studyOrder), int32 rateCmdId (from cmdId lookup)
+            // Response: int32 ok (1 = rated, 0 = error)
+            i32 cardIdx = 0;
+            i32 rateCmdId = 0;
+            if (!IntArg(req, 0, cardIdx) || !IntArg(req, 1, rateCmdId)) {
+                AppendError(req, "TestRateFlashcard expects int cardIdx, int rateCmdId");
+                break;
+            }
+            if (len(gWindows) == 0) {
+                AppendError(req, "TestRateFlashcard no-window");
+                break;
+            }
+            MainWindow* win = gWindows[0];
+            if (!win || !win->flashcard.studyMode) {
+                AppendError(req, "TestRateFlashcard no-active-study-session");
+                break;
+            }
+            if (cardIdx < 0 || cardIdx >= len(win->flashcard.studyOrder)) {
+                AppendError(req, "TestRateFlashcard cardIdx out of range");
+                break;
+            }
+            // Temporarily set currentCardIdx to the requested index, rate via command, then restore
+            int oldIdx = win->flashcard.currentCardIdx;
+            win->flashcard.currentCardIdx = cardIdx;
+            if (rateCmdId && win->hwndFrame) {
+                SendMessageW(win->hwndFrame, WM_COMMAND, (WPARAM)rateCmdId, 0);
+            }
+            win->flashcard.currentCardIdx = oldIdx;
+            AppendArgInt(req->results, 1);
+            AppendArgEnd(req->results);
+            break;
+        }
+
+        case ControlCmd::TestCreateFlashcard: {
+            // Create a test flashcard at a specific page.
+            // Request: int32 pageNo
+            // Response: int32 ok (1 = created, 0 = error), int64 key (the card key)
+            i32 pageNo = 0;
+            if (!IntArg(req, 0, pageNo)) {
+                AppendError(req, "TestCreateFlashcard expects int pageNo");
+                break;
+            }
+            if (len(gWindows) == 0) {
+                AppendError(req, "TestCreateFlashcard no-window");
+                break;
+            }
+            MainWindow* win = gWindows[0];
+            if (!win || !win->ctrl) {
+                AppendError(req, "TestCreateFlashcard no-doc");
+                break;
+            }
+            WindowTab* tab = win->CurrentTab();
+            if (!tab || !tab->filePath) {
+                AppendError(req, "TestCreateFlashcard no-tab-or-file");
+                break;
+            }
+            DisplayModel* dm = tab->AsFixed();
+            if (!dm) {
+                AppendError(req, "TestCreateFlashcard not-fixed-layout");
+                break;
+            }
+            EngineBase* engine = dm->GetEngine();
+            if (!engine || !EngineSupportsAnnotations(engine)) {
+                AppendError(req, "TestCreateFlashcard engine-no-annot-support");
+                break;
+            }
+            if (pageNo < 1 || pageNo > dm->PageCount()) {
+                AppendError(req, "TestCreateFlashcard pageNo out of range");
+                break;
+            }
+            // Create a simple highlight annotation at a fixed position on the page
+            // Use a fixed rect that won't conflict with existing annotations
+            static int sTestCardOffset = 0;
+            RectF rect(100.0f + sTestCardOffset * 10.0f, 100.0f + sTestCardOffset * 10.0f, 200.0f, 50.0f);
+            sTestCardOffset++;
+            Vec<RectF> rects;
+            rects.Append(rect);
+            u64 groupToken = 0; // single-page card
+            Annotation* annot = FlashcardCreateHighlightAnnot(engine, pageNo, rects, groupToken);
+            if (!annot) {
+                AppendError(req, "TestCreateFlashcard failed to create annotation");
+                break;
+            }
+            // Reload cards to pick up the new one
+            tab->flashcard.cards = FlashcardLoadFromDocument(AsEngineMupdf(engine));
+            tab->flashcard.cardsLoaded = true;
+            // Return the card key
+            u64 key = FlashcardKey(pageNo, rect);
+            AppendArgInt(req->results, 1);
+            char keyBuf[32];
+            snprintf(keyBuf, sizeof(keyBuf), "%llu", (unsigned long long)key);
+            AppendArgString(req->results, Str(keyBuf));
+            AppendArgEnd(req->results);
+            break;
+        }
+
+        case ControlCmd::TestFlushFlashcardBookkeeping: {
+            // Flush deferred flashcard bookkeeping (prune/save/sidebar)
+            // Request: none
+            // Response: int32 ok (1 = flushed, 0 = error)
+            if (len(gWindows) == 0) {
+                AppendError(req, "TestFlushFlashcardBookkeeping no-window");
+                break;
+            }
+            MainWindow* win = gWindows[0];
+            if (!win) {
+                AppendError(req, "TestFlushFlashcardBookkeeping no-win");
+                break;
+            }
+            FlashcardFlushBookkeeping(win);
+            AppendArgInt(req->results, 1);
+            AppendArgEnd(req->results);
+            break;
+        }
+
+        case ControlCmd::TestFlashcardFlush: {
+            // Flush flashcard bookkeeping and return detailed stats
+            // Request: int32 mode (0=full flush, 1=save-only)
+            // Response: int32 ok, int32 pendingTabCount, int32 stateCount, string studyDocPath
+            i32 mode = 0;
+            IntArg(req, 0, mode);
+            if (len(gWindows) == 0) {
+                AppendError(req, "TestFlashcardFlush no-window");
+                break;
+            }
+            MainWindow* win = gWindows[0];
+            if (!win) {
+                AppendError(req, "TestFlashcardFlush no-win");
+                break;
+            }
+            int pendingTabs = len(win->flashcard.pendingSaveTabs);
+            int stateCount = 0;
+            Str studyDocPath;
+            if (pendingTabs > 0 && win->flashcard.pendingSaveTabs[0] && win->flashcard.pendingSaveTabs[0]->filePath) {
+                // Get state count from the first pending tab's study doc
+                stateCount = len(win->flashcard.pendingSaveTabs[0]->flashcard.studyDoc.states);
+                studyDocPath = win->flashcard.pendingSaveTabs[0]->filePath;
+            }
+            if (mode == 1) {
+                FlashcardFlushBookkeepingSaveOnly(win);
+            } else {
+                FlashcardFlushBookkeeping(win);
+            }
+            AppendArgInt(req->results, 1); // ok
+            AppendArgInt(req->results, pendingTabs);
+            AppendArgInt(req->results, stateCount);
+            AppendArgString(req->results, studyDocPath);
             AppendArgEnd(req->results);
             break;
         }

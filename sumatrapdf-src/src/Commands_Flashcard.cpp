@@ -931,6 +931,8 @@ static void HandleFlashcardRate(MainWindow* win, int rating) {
         e.tab->flashcard.studyDoc.states.InsertAt(insertIdx >= 0 ? insertIdx : len(e.tab->flashcard.studyDoc.states),
                                                   entry);
     }
+    // Verify the sorted invariant after insert/update (debug only)
+    FlashcardStudyVerifySorted(e.tab->flashcard.studyDoc.states, "HandleFlashcardRate:insert");
     t1 = GetTickCount64();
     scanMs = (int)(t1 - t0);
 
@@ -1116,13 +1118,66 @@ static void FlashcardRunDeferredBookkeeping(MainWindow* win) {
     win->flashcard.lastBookkeepingTick = GetTickCount64();
 }
 
-// Public flush: runs deferred work immediately and clears flags.
+// Public flush: runs deferred work immediately and clears all flags (prune + save + sidebar).
 // Idempotent: calling twice with no new ratings does nothing.
 void FlashcardFlushBookkeeping(MainWindow* win) {
     if (!win || win->flashcard.dirtyFlags == 0) {
         return;
     }
     FlashcardRunDeferredBookkeeping(win);
+}
+
+// Flush ONLY the save part (kFcDirtySave) without pruning and without clearing kFcDirtyPrune.
+// Used when we need to persist pending study states BEFORE a user-cancellable prompt
+// (e.g., the "Save changes?" dialog in CloseTab). If the user cancels, the prune
+// flag remains set so the states of potentially-deleted cards survive the cancellation.
+// The full flush (prune + save + sidebar) runs later when the prompt succeeds.
+void FlashcardFlushBookkeepingSaveOnly(MainWindow* win) {
+    if (!win || (win->flashcard.dirtyFlags & MainWindow::kFcDirtySave) == 0) {
+        return;
+    }
+    if (len(win->flashcard.pendingSaveTabs) == 0) {
+        // No pending tabs to save, just clear the save flag
+        win->flashcard.dirtyFlags &= ~MainWindow::kFcDirtySave;
+        return;
+    }
+
+    u64 tSave0 = GetTickCount64();
+    int totalSaveMs = 0;
+    int nTabs = 0;
+
+    // Save only: iterate remembered tabs, verify each is still in this window.
+    for (int i = 0; i < len(win->flashcard.pendingSaveTabs); i++) {
+        WindowTab* tab = win->flashcard.pendingSaveTabs[i];
+        if (!tab || !tab->filePath) {
+            continue;
+        }
+        // Verify the tab is still valid (exists in this window's tab list).
+        bool tabValid = false;
+        auto tabs = win->Tabs();
+        for (WindowTab* t : tabs) {
+            if (t == tab) {
+                tabValid = true;
+                break;
+            }
+        }
+        if (!tabValid) {
+            continue;
+        }
+        nTabs++;
+        u64 t0 = GetTickCount64();
+        FlashcardStudySave(tab->filePath.s, tab->flashcard.studyDoc);
+        u64 t1 = GetTickCount64();
+        totalSaveMs += (int)(t1 - t0);
+    }
+
+    // Clear ONLY the save flag; keep prune and sidebar flags intact.
+    win->flashcard.dirtyFlags &= ~MainWindow::kFcDirtySave;
+    win->flashcard.lastBookkeepingTick = GetTickCount64();
+
+    if (nTabs > 0) {
+        logf("[fc][perf] deferred-save-only: save=%dms tabs=%d\n", totalSaveMs, nTabs);
+    }
 }
 
 // Stop the active study session (queue, index, modes) — per-tab caches
