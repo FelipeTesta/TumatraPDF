@@ -132,10 +132,13 @@ int FlashcardImportDiffCount(Vec<Flashcard>& existing, const char* srcPath, int*
 void FlashcardStudySave(const char* filePath, const FlashcardStudyDoc& doc);
 
 // Save flashcard study state to external JSON file asynchronously (worker thread).
-// The caller provides a snapshot of the states (copied from studyDoc.states) and
-// the resolved file path. The profile write (ProfileDataUpdateStudyDoc) is NOT
-// included — the caller must do that separately on the UI thread.
-void FlashcardStudySaveAsync(const Vec<FlashcardStudyDoc::StateEntry>& states, const char* resolvedPath, int version);
+// The caller provides a snapshot of the states (copied from studyDoc.states), the
+// resolved file path, docName (base name of PDF), and docPath (full PDF path).
+// The profile write (ProfileDataUpdateStudyDoc) is NOT included — the caller
+// must do that separately on the UI thread.
+// The backup (FlashcardStudyMaybeBackup) is also NOT included — caller must call it.
+void FlashcardStudySaveAsync(const Vec<FlashcardStudyDoc::StateEntry>& states, const char* resolvedPath, Str docName,
+                             Str docPath, int version);
 
 // Join the save worker at app exit with a bounded timeout (3s).
 // Returns true if the worker stopped cleanly, false on timeout.
@@ -201,6 +204,11 @@ int FlashcardStudyListDocs(Vec<FlashcardStudyDocInfo>& out);
 void FlashcardStudyWriteJsonValue(FILE* f, const FlashcardStudyState& state);
 // write s as a JSON string literal (escapes backslash / quote / control chars)
 void FlashcardStudyWriteJsonStringLit(FILE* f, Str s);
+// Shared JSON writer: writes the per-book study JSON to an already-open FILE*.
+// Used by both the synchronous FlashcardStudySave and the async worker.
+// Returns true on success, false on failure (I/O error during write).
+bool FlashcardStudyWriteJsonToFile(FILE* f, int version, Str docName, Str docPath,
+                                   const Vec<FlashcardStudyDoc::StateEntry>& states);
 // parse the union of the study-state entries of a JSON blob into the doc
 // (finds the "states" section; works on any wrapper JSON holding that shape)
 void FlashcardStudyParseJsonInto(Str json, FlashcardStudyDoc& doc);

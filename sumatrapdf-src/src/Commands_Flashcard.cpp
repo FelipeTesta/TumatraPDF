@@ -18,6 +18,7 @@ extern "C" {
 }
 #include "EngineMupdf.h"
 #include "base/GuessFileType.h"
+#include "base/File.h"
 #include "EngineAll.h"
 #include "SumatraPDF.h"
 #include "MainWindow.h"
@@ -625,11 +626,17 @@ struct FcSaveJob {
     // Snapshot of study states (copied from tab->flashcard.studyDoc.states on UI thread)
     Vec<FlashcardStudyDoc::StateEntry> states;
     // Resolved study file path (computed on UI thread via FlashcardStudyPath)
-    char* path = nullptr; // owned, freed by worker after write
-    int version = 1;      // study doc version
+    Str path; // owned, freed with str::Free
+    // Document display name (base name of PDF) and full path — needed by Config
+    // window listing and sync/move detection. Resolved on UI thread.
+    Str docName;
+    Str docPath;
+    int version = 1; // study doc version
     // For error handling: if write fails, we keep the dirty flag so next flush retries.
     // The UI thread sets this when enqueueing; worker clears on success.
     // Not used directly here but documented for the invariant.
+    // Retry count for failed writes (bounded to 3 attempts).
+    int retryCount = 0;
 };
 
 static CRITICAL_SECTION gFcSaveLock;
@@ -657,21 +664,32 @@ static void FcSaveQueueInit() {
 }
 
 static void FcSaveJobFree(FcSaveJob& job) {
-    if (job.path) {
-        ::free(job.path);
-        job.path = nullptr;
+    if (!str::IsNull(job.path)) {
+        str::Free(job.path);
+        job.path = {};
+    }
+    if (!str::IsNull(job.docName)) {
+        str::Free(job.docName);
+        job.docName = {};
+    }
+    if (!str::IsNull(job.docPath)) {
+        str::Free(job.docPath);
+        job.docPath = {};
     }
     job.states.Clear();
 }
 
-static void FcSaveEnqueue(const Vec<FlashcardStudyDoc::StateEntry>& states, const char* path, int version) {
+static void FcSaveEnqueue(const Vec<FlashcardStudyDoc::StateEntry>& states, const char* path, Str docName, Str docPath,
+                          int version) {
     FcSaveQueueInit();
     FlashcardSaveEnsureWorker(); // start worker thread lazily on first enqueue
 
     // Make a copy of the states (snapshot) and the path string
     FcSaveJob job;
     job.states = states; // Vec copy constructor does deep copy of elements
-    job.path = str::Dup(path).s;
+    job.path = str::Dup(path);
+    job.docName = str::Dup(docName);
+    job.docPath = str::Dup(docPath);
     job.version = version;
 
     EnterCriticalSection(&gFcSaveLock);
@@ -679,7 +697,7 @@ static void FcSaveEnqueue(const Vec<FlashcardStudyDoc::StateEntry>& states, cons
     // Coalesce: find existing job for the same path, replace its states
     int existingIdx = -1;
     for (int i = 0; i < len(gFcSaveQueue); i++) {
-        if (gFcSaveQueue[i].path && str::Eq(Str(gFcSaveQueue[i].path), Str(path))) {
+        if (!str::IsNull(gFcSaveQueue[i].path) && str::Eq(gFcSaveQueue[i].path, Str(path))) {
             existingIdx = i;
             break;
         }
@@ -701,50 +719,35 @@ static void FcSaveEnqueue(const Vec<FlashcardStudyDoc::StateEntry>& states, cons
 
 // Write the per-book JSON to disk (the legacy sidecar write from FlashcardStudySave).
 // This runs on the worker thread. Returns true on success, false on failure.
-static bool FcSaveWriteJob(const FcSaveJob& job) {
+static bool FcSaveWriteJob(FcSaveJob& job) {
     u64 t0 = GetTickCount64();
-    TempStr tmpPath = str::JoinTemp(Str(job.path), StrL(".tmp"));
+    TempStr tmpPath = str::JoinTemp(job.path, StrL(".tmp"));
     FILE* f = fopen(tmpPath.s, "wb");
     if (!f) {
-        logf("[fc][perf] save worker ERROR: failed to open '%s' for writing (path='%s')\n", Str(tmpPath), Str(job.path));
+        logf("[fc][perf] save worker ERROR: failed to open '%s' for writing (path='%s')\n", Str(tmpPath),
+             Str(job.path));
         return false;
     }
 
-    fprintf(f, "{\n  \"version\": %d,\n  \"docName\": ", job.version);
-    // We don't have docName/docPath in the snapshot; they are not needed for the
-    // study state round-trip (only the Config window uses them for display).
-    // Write empty strings to keep JSON valid.
-    FlashcardStudyWriteJsonStringLit(f, StrL(""));
-    fprintf(f, ",\n  \"docPath\": ");
-    FlashcardStudyWriteJsonStringLit(f, StrL(""));
-    fprintf(f, ",\n  \"states\": {\n");
-
-    bool first = true;
-    for (int i = 0; i < len(job.states); i++) {
-        auto& entry = job.states[i];
-        if (!first) {
-            fprintf(f, ",\n");
-        }
-        first = false;
-        fprintf(f, "    \"%llu\": ", (unsigned long long)entry.key);
-        FlashcardStudyWriteJsonValue(f, entry.state);
-    }
-
-    fprintf(f,
-            "\n  }\n"
-            "}\n");
+    bool ok = FlashcardStudyWriteJsonToFile(f, job.version, job.docName, job.docPath, job.states);
 
     fclose(f);
 
+    if (!ok) {
+        logf("[fc][perf] save worker ERROR: write failed for '%s'\n", Str(job.path));
+        remove(tmpPath.s);
+        return false;
+    }
+
     // Atomic replace
     WCHAR* tmpW = CWStrTemp(ToWStrTemp(tmpPath));
-    WCHAR* dstW = CWStrTemp(ToWStrTemp(Str(job.path)));
-    BOOL ok = MoveFileExW(tmpW, dstW, MOVEFILE_REPLACE_EXISTING);
-    if (!ok) {
-        remove(job.path);
-        ok = rename(tmpPath.s, job.path) == 0;
+    WCHAR* dstW = CWStrTemp(ToWStrTemp(job.path));
+    BOOL replaceOk = MoveFileExW(tmpW, dstW, MOVEFILE_REPLACE_EXISTING);
+    if (!replaceOk) {
+        remove(job.path.s);
+        replaceOk = rename(tmpPath.s, job.path.s) == 0;
     }
-    if (!ok) {
+    if (!replaceOk) {
         logf("[fc][perf] save worker ERROR: failed to replace '%s' (lastError=%u)\n", Str(job.path),
              (unsigned)GetLastError());
         return false;
@@ -786,11 +789,25 @@ static DWORD WINAPI FlashcardSaveWorker(void*) {
 
         bool ok = FcSaveWriteJob(job);
         if (!ok) {
-            logf("[fc][perf] save worker: write FAILED for '%s' (will retry on next flush)\n", Str(job.path));
-            // On failure, we do NOT re-enqueue automatically — the UI thread's
-            // dirty flag (kFcDirtySave) remains set so the next flush will
-            // re-enqueue. The snapshot is lost here but the live studyDoc on the
-            // UI thread still has the states, so the next flush captures them.
+            // Retry logic: bounded attempts (max 3) with short backoff.
+            // The job struct has a retryCount field; we re-enqueue the same job
+            // if retries remain, otherwise log final failure and drop.
+            if (job.retryCount < 3) {
+                job.retryCount++;
+                logf("[fc][perf] save worker: write FAILED for '%s' (attempt %d/3, retrying in 100ms)\n", Str(job.path),
+                     job.retryCount);
+                Sleep(100); // short backoff
+                EnterCriticalSection(&gFcSaveLock);
+                // Re-enqueue at front to retry immediately
+                gFcSaveQueue.InsertAt(0, job);
+                LeaveCriticalSection(&gFcSaveLock);
+                InterlockedDecrement(&gFcSaveActive);
+                continue; // retry loop
+            } else {
+                logf("[fc][perf] save worker: write FAILED for '%s' after 3 attempts (giving up)\n", Str(job.path));
+            }
+        } else {
+            logf("[fc][perf] save worker: write succeeded for '%s'\n", Str(job.path));
         }
 
         FcSaveJobFree(job);
@@ -824,9 +841,13 @@ static bool FlashcardSaveWorkerJoinInternal() {
     if (!gFcSaveLockInit || !gFcSaveThread) {
         return true; // no worker to join
     }
-    Vec<FlashcardStudyDoc::StateEntry> emptyStates;
-    FcSaveEnqueue(emptyStates, "", 0); // wake up the worker (empty job acts as sentinel)
-    // Wait for the worker to finish current job and exit
+    // Signal the worker to stop and drain the queue
+    EnterCriticalSection(&gFcSaveLock);
+    gFcSaveStop = true;
+    LeaveCriticalSection(&gFcSaveLock);
+    SetEvent(gFcSaveSignal); // wake up worker
+
+    // Wait for the worker to finish current job, drain queue, and exit
     if (WaitForSingleObject(gFcSaveThread, 3000) == WAIT_TIMEOUT) {
         logf("[fc][perf] save worker did not stop in 3000ms - leaving it running\n");
         return false; // never close the handle of a live thread
@@ -838,12 +859,36 @@ static bool FlashcardSaveWorkerJoinInternal() {
 }
 
 // Non-static wrappers for Flashcard.cpp
-void FlashcardStudySaveAsyncWorker(const Vec<FlashcardStudyDoc::StateEntry>& states, const char* resolvedPath, int version) {
-    FcSaveEnqueue(states, resolvedPath, version);
+void FlashcardStudySaveAsyncWorker(const Vec<FlashcardStudyDoc::StateEntry>& states, const char* resolvedPath,
+                                   Str docName, Str docPath, int version) {
+    FcSaveEnqueue(states, resolvedPath, docName, docPath, version);
 }
 
 bool FlashcardSaveWorkerJoinWorker() {
     return FlashcardSaveWorkerJoinInternal();
+}
+
+// Wait for the async save worker to finish all pending writes (bounded timeout).
+// Returns true if all writes completed, false on timeout.
+bool FlashcardWaitForSaveWorker() {
+    u64 startTime = GetTickCount64();
+    const u64 timeoutMs = 5000; // 5 seconds max wait
+
+    while (true) {
+        if (GetTickCount64() - startTime > timeoutMs) {
+            return false;
+        }
+        bool queueEmpty = true;
+        if (gFcSaveLockInit) {
+            EnterCriticalSection(&gFcSaveLock);
+            queueEmpty = (len(gFcSaveQueue) == 0);
+            LeaveCriticalSection(&gFcSaveLock);
+        }
+        if (queueEmpty && gFcSaveActive == 0) {
+            return true;
+        }
+        Sleep(50);
+    }
 }
 
 static void FlashcardPrewarmEnqueue(MainWindow* win, int fromIdx) {
@@ -1333,8 +1378,12 @@ static void FlashcardRunDeferredBookkeeping(MainWindow* win) {
             if (resolvedPath) {
                 // Snapshot the states vector (deep copy)
                 Vec<FlashcardStudyDoc::StateEntry> statesSnapshot = tab->flashcard.studyDoc.states;
+                // Resolve docName (base name) and docPath (full path) for the JSON
+                Str docName = path::GetBaseNameTemp(tab->filePath);
+                Str docPath = tab->filePath;
                 // Enqueue to worker (async per-book JSON write)
-                FlashcardStudySaveAsync(statesSnapshot, resolvedPath.s, tab->flashcard.studyDoc.version);
+                FlashcardStudySaveAsync(statesSnapshot, resolvedPath.s, docName, docPath,
+                                        tab->flashcard.studyDoc.version);
             }
             // Profile write stays on UI thread (ProfileData is not thread-safe)
             ProfileDataUpdateStudyDoc(tab->filePath.s, tab->flashcard.studyDoc);
@@ -1428,8 +1477,11 @@ void FlashcardFlushBookkeepingSaveOnly(MainWindow* win) {
         if (resolvedPath) {
             // Snapshot the states vector (deep copy)
             Vec<FlashcardStudyDoc::StateEntry> statesSnapshot = tab->flashcard.studyDoc.states;
+            // Resolve docName (base name) and docPath (full path) for the JSON
+            Str docName = path::GetBaseNameTemp(tab->filePath);
+            Str docPath = tab->filePath;
             // Enqueue to worker (async per-book JSON write)
-            FlashcardStudySaveAsync(statesSnapshot, resolvedPath.s, tab->flashcard.studyDoc.version);
+            FlashcardStudySaveAsync(statesSnapshot, resolvedPath.s, docName, docPath, tab->flashcard.studyDoc.version);
         }
         // Profile write stays on UI thread (ProfileData is not thread-safe)
         ProfileDataUpdateStudyDoc(tab->filePath.s, tab->flashcard.studyDoc);

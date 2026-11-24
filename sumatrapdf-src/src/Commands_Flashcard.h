@@ -16,7 +16,10 @@ void FlashcardShowTimerDoneOverlay(MainWindow* win);
 void FlashcardCreateStudyTimerControls(MainWindow* win);
 
 // Flashcard study save worker (Phase 4): async per-book JSON write
-void FlashcardStudySaveAsyncWorker(const Vec<FlashcardStudyDoc::StateEntry>& states, const char* resolvedPath, int version);
+void FlashcardStudySaveAsyncWorker(const Vec<FlashcardStudyDoc::StateEntry>& states, const char* resolvedPath, Str docName, Str docPath, int version);
 bool FlashcardSaveWorkerJoinWorker();
+// Wait for the async save worker to finish all pending writes (bounded timeout).
+// Returns true if all writes completed, false on timeout.
+bool FlashcardWaitForSaveWorker();
 
 #endif

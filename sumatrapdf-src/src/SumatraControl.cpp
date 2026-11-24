@@ -27,6 +27,7 @@ extern "C" {
 #include "WindowTab.h"
 #include "FileHistory.h"
 #include "Favorites.h"
+#include "Commands_Flashcard.h"
 #include "SelectionTranslate.h"
 #include "ImageSaveCropResize.h"
 #include "base/GuessFileType.h"
@@ -1925,7 +1926,8 @@ static void ExecuteControlRequest(ControlRequest* req) {
         }
 
         case ControlCmd::TestFlushFlashcardBookkeeping: {
-            // Flush deferred flashcard bookkeeping (prune/save/sidebar)
+            // Flush deferred flashcard bookkeeping (prune/save/sidebar) and wait
+            // for async save worker to complete.
             // Request: none
             // Response: int32 ok (1 = flushed, 0 = error)
             if (len(gWindows) == 0) {
@@ -1938,6 +1940,8 @@ static void ExecuteControlRequest(ControlRequest* req) {
                 break;
             }
             FlashcardFlushBookkeeping(win);
+            // Wait for async worker to finish all writes
+            FlashcardWaitForSaveWorker();
             AppendArgInt(req->results, 1);
             AppendArgEnd(req->results);
             break;

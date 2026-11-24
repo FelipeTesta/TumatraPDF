@@ -575,6 +575,39 @@ void FlashcardStudyWriteJsonStringLit(FILE* f, Str s) {
     fputc('"', f);
 }
 
+// Shared JSON writer: writes the per-book study JSON to an already-open FILE*.
+// Used by both the synchronous FlashcardStudySave and the async worker.
+// Returns true on success, false on failure (I/O error during write).
+bool FlashcardStudyWriteJsonToFile(FILE* f, int version, Str docName, Str docPath,
+                                   const Vec<FlashcardStudyDoc::StateEntry>& states) {
+    fprintf(f, "{\n  \"version\": %d,\n  \"docName\": ", version);
+    FlashcardStudyWriteJsonStringLit(f, docName);
+    fprintf(f, ",\n  \"docPath\": ");
+    FlashcardStudyWriteJsonStringLit(f, docPath);
+    fprintf(f, ",\n  \"states\": {\n");
+
+    bool first = true;
+    for (int i = 0; i < len(states); i++) {
+        auto& entry = states[i];
+        if (!first) {
+            fprintf(f, ",\n");
+        }
+        first = false;
+        fprintf(f, "    \"%llu\": ", (unsigned long long)entry.key);
+        FlashcardStudyWriteJsonValue(f, entry.state);
+    }
+
+    fprintf(f,
+            "\n  }\n"
+            "}\n");
+
+    // Check for write errors
+    if (ferror(f)) {
+        return false;
+    }
+    return true;
+}
+
 // Local rolling backups of the study dir: full copies of every *.json in
 // backup\<slot>\ (1d / 3d / 7d). Refreshed after each successful save when the
 // snapshot is older than the slot's age (cheap stamp-file guard, so a normal
@@ -847,31 +880,17 @@ void FlashcardStudySave(const char* filePath, const FlashcardStudyDoc& doc) {
             return;
         }
 
-        // docName (base name of the book) lets the Config window list books by
-        // name; docPath (full path) powers the sync markers (moved/renamed
-        // detection) and is re-validated by Re-check in that window
-        fprintf(f, "{\n  \"version\": %d,\n  \"docName\": ", doc.version);
-        FlashcardStudyWriteJsonStringLit(f, path::GetBaseNameTemp(Str(filePath)));
-        fprintf(f, ",\n  \"docPath\": ");
-        FlashcardStudyWriteJsonStringLit(f, filePath);
-        fprintf(f, ",\n  \"states\": {\n");
-
-        bool first = true;
-        for (int i = 0; i < doc.states.len; i++) {
-            auto& entry = doc.states.els[i];
-            if (!first) {
-                fprintf(f, ",\n");
-            }
-            first = false;
-            fprintf(f, "    \"%llu\": ", (unsigned long long)entry.key);
-            FlashcardStudyWriteJsonValue(f, entry.state);
-        }
-
-        fprintf(f,
-                "\n  }\n"
-                "}\n");
+        Str docName = path::GetBaseNameTemp(Str(filePath));
+        Str docPath = Str(filePath);
+        bool okWrite = FlashcardStudyWriteJsonToFile(f, doc.version, docName, docPath, doc.states);
 
         fclose(f);
+
+        if (!okWrite) {
+            logf("[fc] FlashcardStudySave - ERROR: write failed for '%s'\n", Str(path));
+            remove(tmpPath.s);
+            return;
+        }
 
         // MOVEFILE_REPLACE_EXISTING makes the swap single-step; fall back to
         // remove+rename if the replace fails (e.g. antivirus holding a handle)
@@ -898,13 +917,15 @@ void FlashcardStudySave(const char* filePath, const FlashcardStudyDoc& doc) {
 }
 
 // Save flashcard study state to external JSON file asynchronously (worker thread).
-// The caller provides a snapshot of the states (copied from studyDoc.states) and
-// the resolved file path. The profile write (ProfileDataUpdateStudyDoc) is NOT
-// included — the caller must do that separately on the UI thread.
+// The caller provides a snapshot of the states (copied from studyDoc.states), the
+// resolved file path, docName (base name of PDF), and docPath (full PDF path).
+// The profile write (ProfileDataUpdateStudyDoc) is NOT included — the caller
+// must do that separately on the UI thread.
 // The backup (FlashcardStudyMaybeBackup) is also NOT included — caller must call it.
-void FlashcardStudySaveAsync(const Vec<FlashcardStudyDoc::StateEntry>& states, const char* resolvedPath, int version) {
+void FlashcardStudySaveAsync(const Vec<FlashcardStudyDoc::StateEntry>& states, const char* resolvedPath, Str docName,
+                             Str docPath, int version) {
     // Enqueue to worker thread (implemented in Commands_Flashcard.cpp)
-    FlashcardStudySaveAsyncWorker(states, resolvedPath, version);
+    FlashcardStudySaveAsyncWorker(states, resolvedPath, docName, docPath, version);
 }
 
 // Join the save worker at app exit with a bounded timeout (3s).
