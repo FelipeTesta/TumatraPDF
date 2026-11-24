@@ -286,7 +286,7 @@ bool StartInstallerAutoUpgrade(Str installerPath, bool silent) {
         // waits for parent to exit, overwrites in place, relaunches, and exits.
         logf("StartInstallerAutoUpgrade: unsigned portable update, self-replacing via direct exe\n");
         str::Builder cmd;
-        cmd.Append(fmt(R"( -sleep-ms 2000 -exit-when-done -update-self-to "%s")", GetSelfExePathTemp()));
+        cmd.Append(fmt(R"( -sleep-ms 5000 -exit-when-done -update-self-to "%s")", GetSelfExePathTemp()));
         if (silent) cmd.Append(" -silent");
         logf("StartInstallerAutoUpgrade: installer cmd: '%s'\n", ToStr(cmd));
         return CreateProcessHelper(installerPath, ToStr(cmd));
@@ -301,9 +301,9 @@ bool StartInstallerAutoUpgrade(Str installerPath, bool silent) {
         }
         if (silent) cmd.Append(" -silent");
     } else {
-        // we're asking to over-write over ourselves, so also wait 2 secs to allow
+        // we're asking to over-write over ourselves, so also wait 5 secs to allow
         // our process to exit
-        cmd.Append(fmt(R"( -sleep-ms 2000 -exit-when-done -update-self-to "%s")", GetSelfExePathTemp()));
+        cmd.Append(fmt(R"( -sleep-ms 5000 -exit-when-done -update-self-to "%s")", GetSelfExePathTemp()));
         if (silent) cmd.Append(" -silent");
     }
     logf("StartInstallerAutoUpgrade: installer cmd: '%s'\n", ToStr(cmd));
@@ -1260,10 +1260,11 @@ void UpdateSelfTo(Str dstPath) {
     ::Sleep(gCli->sleepMs);
 
     // OverwriteAtomicRetry(dst, src): copy this process (new build) onto dstPath
+    // wait window: 60 retries x 500 ms = 30 s (plus the 5 s sleep above = ~35 s total)
     TempStr srcPath = GetSelfExePathTemp();
-    bool ok = file::OverwriteAtomicRetry(dstPath, srcPath, 20, 250);
+    bool ok = file::OverwriteAtomicRetry(dstPath, srcPath, 60, 500);
     if (!ok) {
-        logf("UpdateSelfTo: failed to overwrite '%s' with '%s'\n", dstPath, srcPath);
+        logf("UpdateSelfTo: failed to overwrite '%s' with '%s' after ~35 s wait (sleep 5 s + 60x500 ms retries)\n", dstPath, srcPath);
         return;
     }
     logf("UpdateSelfTo: copied self to '%s'\n", dstPath);
