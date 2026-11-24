@@ -348,7 +348,7 @@ static bool IsCmdAvailable(MainWindow* win, int cmdId) {
     return !remove;
 }
 
-static bool IsCmdEnabled(MainWindow* win, int cmdId) {
+bool IsCmdEnabled(MainWindow* win, int cmdId) {
     auto* ctx = NewBuildMenuCtx(win->CurrentTab(), Point{0, 0});
     AutoCall delCtx(DeleteBuildMenuCtx, ctx);
 
@@ -370,9 +370,15 @@ static bool IsCmdEnabled(MainWindow* win, int cmdId) {
             }
             break;
         case CmdViewportCropToggle: // scan view
-        case CmdAutoScrollToggle:
-            // both arch tools and flashcards clash with these
+            // scan view clashes with arch tools AND flashcards (unchanged)
             if (win->archTools.on || win->flashcard.on) {
+                return false;
+            }
+            break;
+        case CmdAutoScrollToggle:
+            // autoscroll clashes with arch tools only; the flashcard toolbar
+            // being open is fine, but STUDY mode disables it
+            if (win->archTools.on || win->flashcard.studyMode) {
                 return false;
             }
             break;

@@ -432,6 +432,7 @@ enum class ControlCmd : u16 {
     TestProfileExport = 81,
     TestProfileImport = 82,
     TestProfileStatus = 83,
+    TestCommandEnabled = 84,
 };
 
 enum class ControlArgType : u16 {
@@ -1450,6 +1451,22 @@ static void ExecuteControlRequest(ControlRequest* req) {
             AppendU16(listBuilder, (u16)ControlArgType::End);
 
             AppendTestResult(req, exitCode, ToStrTemp(listBuilder));
+            break;
+        }
+
+        case ControlCmd::TestCommandEnabled: {
+            i32 cmdId = 0;
+            if (!IntArg(req, 0, cmdId)) {
+                AppendError(req, "TestCommandEnabled expects int cmdId");
+                break;
+            }
+            if (len(gWindows) == 0) {
+                AppendError(req, "TestCommandEnabled no-window");
+                break;
+            }
+            MainWindow* win = gWindows[0];
+            bool enabled = IsCmdEnabled(win, cmdId);
+            AppendTestResult(req, 0, fmt("OK cmdId=%d enabled=%d\n", cmdId, enabled ? 1 : 0));
             break;
         }
 

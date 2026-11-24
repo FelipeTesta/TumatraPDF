@@ -34,6 +34,7 @@ extern "C" {
 #include "Canvas.h"   // kFlashcardStudyTimerID
 #include "Theme.h"    // ThemeWindowBackgroundColor, DpiScale
 #include "base/Dpi.h" // DpiScale
+#include "AutoScroll.h"
 #include "Notifications.h"
 #include "Commands_Flashcard.h"
 
@@ -1150,6 +1151,12 @@ bool HandleCommandFlashcard(MainWindow* win, int cmd) {
             win->flashcard.studyTimeSec = 0;
             win->flashcard.lastStudyTick = 0;
             if (win->flashcard.studyMode) {
+                // study mode is incompatible with auto-scroll: stop it if
+                // running (calling AutoScrollToggle blindly would start a
+                // stopped autoscroll, so guard on the running state)
+                if (win->autoScroll.active) {
+                    AutoScrollToggle(win);
+                }
                 FlashcardPrewarmInvalidate(); // session (re)start: drop stale warm jobs
                 FlashcardPrewarmEnsureWorker();
                 if (gGlobalPrefs->flashcardPreloadSessionBooks) {
@@ -1174,6 +1181,9 @@ bool HandleCommandFlashcard(MainWindow* win, int cmd) {
                 FlashcardStudyTimerStop(win);
             }
             FlashcardToolbarUpdateState(win);
+            // refresh the MAIN toolbar so the autoscroll button enable state
+            // (CmdAutoScrollToggle -> win->flashcard.studyMode) takes effect
+            ToolbarUpdateStateForWindow(win, true);
             MainWindowRerender(win);
             return true;
         }

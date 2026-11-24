@@ -1,3 +1,24 @@
+## 2026-11-24 (s81) — Autoscroll stays usable with the flashcard toolbar; study mode stops it; CI action bump
+
+### Fixed
+- Toolbar.cpp IsCmdEnabled: split the shared `case CmdViewportCropToggle / CmdAutoScrollToggle` so the two commands have independent conditions. CmdViewportCropToggle keeps clashing with arch tools AND flashcards (unchanged). CmdAutoScrollToggle now clashes only with arch tools; flashcard toolbar open no longer disables the autoscroll button/command; STUDY mode (`win->flashcard.studyMode`) disables it.
+- Commands_Flashcard.cpp CmdFlashcardStudy: entering study mode stops a running autoscroll (`if (win->autoScroll.active) AutoScrollToggle(win)` — guarded so a stopped autoscroll is not started); leaving study mode makes the command/button available again.
+- Commands_Flashcard.cpp CmdFlashcardStudy: calls `ToolbarUpdateStateForWindow(win, true)` so the main toolbar autoscroll button enable state refreshes immediately on study toggle.
+- Audit: CmdFlashcardToggle does NOT stop/pause autoscroll (no AutoScrollSetHoldActive / AutoScrollPauseForFocus / direct stop) — autoscroll already usable with the flashcard toolbar open; nothing removed. HOLD interaction (`AutoScrollSetHoldActive`) untouched.
+- Exposed `IsCmdEnabled` (Toolbar.h/Toolbar.cpp) and added `TestCommandEnabled <cmdId>` control-pipe command (cmd/control.ts + src/SumatraControl.cpp, enum 84 both sides, no orphan value) to report a command's enabled state.
+
+### Changed
+- .github/workflows/{readme-sync,codeql,static-analysis,fuzz,release,tests}.yml: `actions/checkout@v4` -> `actions/checkout@v7` (node24 runtime, clears the deprecation annotation). oven-sh/setup-bun@v2 untouched. flow-sync.yml not present on main (6 files bumped).
+
+### Verified
+- `bun cmd/build.ts` green.
+- Control-pipe: flashcard toolbar ON -> autoscroll command ENABLED; study mode ON -> DISABLED + autoscroll NOT running; study mode OFF -> ENABLED again (before/after outputs in the session).
+- All workflow YAML parse cleanly.
+
+### Notes
+- CI annotation disappearance verified by the architect after the push (workflows run on GitHub, not locally).
+- HOLD behaviour untouched.
+
 ## 2026-11-23 (s79) — Ctrl+Alt rectangle accumulation + test fixture guard
 
 ### Fixed

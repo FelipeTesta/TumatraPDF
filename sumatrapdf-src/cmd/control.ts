@@ -83,6 +83,7 @@ export enum ControlCommand {
   TestProfileExport = 81,
   TestProfileImport = 82,
   TestProfileStatus = 83,
+  TestCommandEnabled = 84,
   TestWindowStats = 76,
   TestOpenInWindow = 77,
   TestFocusWindow = 78,
@@ -469,10 +470,18 @@ if (import.meta.main) {
     console.log("Usage: bun cmd/control.ts <SumatraPDF.exe> <ping|test-search> [args...]");
     process.exit(1);
   }
-  const cmd = cmdName === "ping" ? ControlCommand.Ping : cmdName === "test-search" ? ControlCommand.TestSearch : 0;
+  const cmd =
+    cmdName === "ping"
+      ? ControlCommand.Ping
+      : cmdName === "test-search"
+        ? ControlCommand.TestSearch
+        : cmdName === "test-command-enabled"
+          ? ControlCommand.TestCommandEnabled
+          : 0;
   if (!cmd) {
     throw new Error(`unknown command: ${cmdName}`);
   }
-  const res = await runControlCommand(exe, cmd, args);
+  const cmdArgs = cmdName === "test-command-enabled" && args[0] !== undefined ? [Number(args[0])] : [];
+  const res = await runControlCommand(exe, cmd, cmdArgs);
   console.log(JSON.stringify(res));
 }

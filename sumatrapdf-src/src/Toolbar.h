@@ -13,6 +13,7 @@ void ToolbarRewrapAfterSizing(MainWindow* win, HWND hwndToolbar, bool force = fa
 // calling ScheduleUiUpdate(kUiRelayout) → infinite relayout loop.
 void SetInRelayoutFrame(bool inRelayout);
 void ToolbarUpdateStateForWindow(MainWindow*, bool setButtonsVisibility);
+bool IsCmdEnabled(MainWindow* win, int cmdId);
 void UpdateToolbarButtonsToolTipsForWindow(MainWindow*);
 void UpdateToolbarFindText(MainWindow*);
 void UpdateToolbarPageText(MainWindow*, int pageCount, bool updateOnly = false);
