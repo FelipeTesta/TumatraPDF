@@ -39,6 +39,7 @@ import { testit as adHocAlignSave } from "./ad-hoc-align-save.ts";
 import { testit as adHocAlignDeskew } from "./ad-hoc-align-deskew.ts";
 import { testit as adHocTabSessionSync } from "./ad-hoc-tab-session-sync.ts";
 import { testit as adHocTabSessionSync2 } from "./ad-hoc-tab-session-sync2.ts";
+import { testit as adHocFlashcardStateInvariant } from "./ad-hoc-flashcard-state-invariant.ts";
 
 const adHocTests: [string, () => void | Promise<void>][] = [
   ["ad-hoc-exif", adHocExif],
@@ -71,6 +72,7 @@ const adHocTests: [string, () => void | Promise<void>][] = [
   ["ad-hoc-bookmark-persist", adHocBookmarkPersist],
   ["ad-hoc-align-save", adHocAlignSave],
   ["ad-hoc-align-deskew", adHocAlignDeskew],
+  ["ad-hoc-flashcard-state-invariant", adHocFlashcardStateInvariant],
 ];
 
 export async function testit(): Promise<void> {
