@@ -1,0 +1,47 @@
+digraph "UpdateDialog" {
+    rankdir=TB;
+    node [fontname="Consolas", fontsize=10];
+    edge [fontname="Consolas", fontsize=9];
+
+    // Main flow
+    StartAsyncUpdateCheck -> NotifyUserOfUpdate [label="update check complete"];
+    NotifyUserOfUpdate -> ShowUpdateAvailableDialog [label="auto-update off / unsaved / fallback"];
+
+    // Dialog creation
+    ShowUpdateAvailableDialog -> "WM_CREATE" [label="CreateWindowEx"];
+    "WM_CREATE" -> CreateButton [label="btnDontInstall (ID=100)"];
+    "WM_CREATE" -> CreateButton [label="btnInstall (ID=101)"];
+    "WM_CREATE" -> "Measure text" [label="DrawTextW @ staticW"];
+    "WM_CREATE" -> "Position statics" [label="clientW - 2*pad"];
+    "WM_CREATE" -> "Position buttons" [label="right-aligned, RTL-aware"];
+    "WM_CREATE" -> "Apply font" [label="WM_SETFONT to buttons + statics"];
+    "WM_CREATE" -> "Create bg brush" [label="ThemeWindowBackgroundColor()"];
+
+    // Button callbacks
+    CreateButton -> UpdateDialogOnInstall [label="ID=101, BN_CLICKED"];
+    CreateButton -> UpdateDialogOnDontInstall [label="ID=100, BN_CLICKED"];
+
+    // Install path
+    UpdateDialogOnInstall -> StartInstallerAutoUpgrade [label="if installer exists"];
+    StartInstallerAutoUpgrade -> "ExitProcess" [label="launch ok"];
+    StartInstallerAutoUpgrade -> "Show error in dialog" [label="launch failed"];
+    "Show error in dialog" -> SetWindowTextW [label="hwndContent error msg"];
+    "Show error in dialog" -> EnableWindow [label="disable btnInstall"];
+
+    // Don't install path
+    UpdateDialogOnDontInstall -> DestroyWindow [label="result=100"];
+
+    // Modal pump
+    ShowUpdateAvailableDialog -> "Modal GetMessage pump" [label="SW_SHOW + IsDialogMessage"];
+    "Modal GetMessage pump" -> "Return result" [label="WM_DESTROY / result set"];
+
+    // Cleanup
+    DestroyWindow -> WM_DESTROY [label="WM_DESTROY"];
+    WM_DESTROY -> "Free installerPath" [label="str::Free"];
+    WM_DESTROY -> "Delete bgBrush" [label="DeleteObject"];
+
+    // Theme handling
+    "WM_CREATE" -> ApplyDarkModeToPopupWindow [label="dark title bar"];
+    "WM_CTLCOLORSTATIC" -> UpdateDialogCtlColorBrush [label="theme brush"];
+    "WM_CTLCOLORBTN" -> UpdateDialogCtlColorBrush [label="theme brush"];
+}

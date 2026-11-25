@@ -45,6 +45,7 @@ import { testit as adHocHomeVerify } from "./ad-hoc-home-verify.ts";
 import { testit as adHocFlashcardFilterBookmarks } from "./ad-hoc-flashcard-filter-bookmarks.ts";
 import { testit as adHocFlashcardStudyFreeze } from "./ad-hoc-flashcard-study-freeze.ts";
 import { testit as adHocFlashcardNavStutter } from "./ad-hoc-flashcard-nav-stutter.ts";
+import { testit as adHocUpdateDialog } from "./ad-hoc-update-dialog.ts";
 
 const adHocTests: [string, () => void | Promise<void>][] = [
   ["ad-hoc-exif", adHocExif],
@@ -83,6 +84,7 @@ const adHocTests: [string, () => void | Promise<void>][] = [
 ["ad-hoc-flashcard-filter-bookmarks", adHocFlashcardFilterBookmarks],
   ["ad-hoc-flashcard-study-freeze", adHocFlashcardStudyFreeze],
   ["ad-hoc-flashcard-nav-stutter", adHocFlashcardNavStutter],
+  ["ad-hoc-update-dialog", adHocUpdateDialog],
 ];
 
 export async function testit(): Promise<void> {

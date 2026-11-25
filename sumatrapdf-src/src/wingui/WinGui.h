@@ -242,6 +242,8 @@ struct Button : Wnd {
         // back to a hand-drawn button: Windows' own themed push button looks
         // better than anything we can approximate, and it costs nothing.
         bool ownerDrawn = true;
+        // Control ID (HMENU) for WM_COMMAND identification
+        int ctrlId = 0;
     };
 
     Func0 onClick;
@@ -271,7 +273,7 @@ struct Button : Wnd {
     bool OnCommand(WPARAM wparam, LPARAM lparam) override;
 };
 
-Button* CreateButton(HWND parent, Str s, const Func0& onClick, bool isRtl);
+Button* CreateButton(HWND parent, Str s, const Func0& onClick, bool isRtl, int ctrlId = 0);
 Button* CreateDefaultButton(HWND parent, Str s, bool isRtl);
 
 //--- Tooltip

@@ -111,6 +111,10 @@ export enum ControlCommand {
   // Request: int width, int height
   // Response: OK newClientWidth=<w> newClientHeight=<h>
   SetWindowSize = 93,
+  // Show the update dialog for testing (modal, runs on UI thread via WM_APP+0x430)
+  // Request: int installerExists (0/1)
+  // Response: int exitCode, string result (dialog button pressed or error)
+  TestShowUpdateDialog = 94,
 }
 
 export type ControlArg = number | string | Uint8Array | ControlArg[];

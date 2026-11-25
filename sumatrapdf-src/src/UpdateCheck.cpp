@@ -361,6 +361,9 @@ static TempStr GetFileProductVersionTemp(Str path) {
 // Forward declaration
 static int ShowUpdateAvailableDialog(UpdateInfo* updateInfo);
 
+// Testing hook
+void ShowUpdateDialogForTesting(MainWindow* win, bool installerExists);
+
 // Check if any open document has unsaved annotations/outline/page geometry changes
 static bool AnyOpenDocumentHasUnsavedChanges() {
     for (MainWindow* win : gWindows) {
@@ -447,6 +450,10 @@ static void NotifyUserOfUpdate(UpdateInfo* updateInfo, UpdateCheck updateCheckTy
 
     if (!StartInstallerAutoUpgrade(installerPath, false)) {
         logf("NotifyUserOfUpdate: failed to launch installer '%s'\n", installerPath);
+        // Show error to user (theme-safe, no hardcoded RGB)
+        MessageBoxWarning(updateInfo->hwndParent,
+            _TRA("The update could not start. The downloaded file may be blocked by your antivirus - unblock it and try again."),
+            fmt(_TRA("%s Update").s, StrL(kAppName)));
         return; // do not exit: the user must not be stranded without the app
     }
     ExitAfterStartingUpdater();
@@ -497,6 +504,8 @@ static void UpdateDialogOnDontInstall(UpdateDialogData* d) {
     DestroyWindow(d->hwnd);
 }
 static void UpdateDialogOnInstall(UpdateDialogData* d) {
+    // Dialog stays pure: just return the user's choice (101 = install).
+    // The caller (NotifyUserOfUpdate) handles the actual launch.
     d->result = 101;
     DestroyWindow(d->hwnd);
 }
@@ -530,10 +539,29 @@ static LRESULT CALLBACK UpdateDialogWndProc(HWND hwnd, UINT msg, WPARAM wp, LPAR
         // Build UI
         HFONT font = GetAppFont(hwnd);
 
-        // Measure text for sizing
+        int pad = DpiScale(hwnd, 20);
+        int vgap = DpiScale(hwnd, 12);
+
+        // Create buttons first to get their ideal sizes
+        // Use explicit IDs (100 = Don't install, 101 = Install) so WM_COMMAND handler can identify them
+        d->btnDontInstall = CreateButton(hwnd, d->btnDontInstallText, MkFunc0(&UpdateDialogOnDontInstall, d), d->isRtl, 100);
+        d->btnInstall = CreateButton(hwnd, d->btnInstallText, MkFunc0(&UpdateDialogOnInstall, d), d->isRtl, 101);
+        d->btnInstall->isDefault = true;
+
+        Size szDont = d->btnDontInstall->GetIdealSize();
+        Size szInst = d->btnInstall->GetIdealSize();
+        int btnH = std::max(szDont.dy, szInst.dy);
+        int btnW = std::max(szDont.dx, szInst.dx);
+        int gap = DpiScale(hwnd, 10);
+
+        int totalClientW = std::max(DpiScale(hwnd, 400), 2 * pad + btnW * 2 + gap);
+
+        // Measure text for sizing using the actual static control width (clientW - 2*pad)
+        // This ensures text wrapping matches the actual static control layout
+        int staticW = totalClientW - 2 * pad;
         HDC hdc = GetDC(hwnd);
         HFONT oldFont = (HFONT)SelectObject(hdc, font);
-        RECT rcMeasure = {0, 0, DpiScale(hwnd, 400), 0};
+        RECT rcMeasure = {0, 0, staticW, 0};
 
         // Main instruction
         DrawTextW(hdc, CWStrTemp(d->mainInstr), -1, &rcMeasure, DT_CALCRECT | DT_WORDBREAK | DT_NOPREFIX);
@@ -547,21 +575,6 @@ static LRESULT CALLBACK UpdateDialogWndProc(HWND hwnd, UINT msg, WPARAM wp, LPAR
         SelectObject(hdc, oldFont);
         ReleaseDC(hwnd, hdc);
 
-        int pad = DpiScale(hwnd, 20);
-        int vgap = DpiScale(hwnd, 12);
-
-        // Create buttons first to get their ideal sizes
-        d->btnDontInstall = CreateButton(hwnd, d->btnDontInstallText, MkFunc0(&UpdateDialogOnDontInstall, d), d->isRtl);
-        d->btnInstall = CreateButton(hwnd, d->btnInstallText, MkFunc0(&UpdateDialogOnInstall, d), d->isRtl);
-        d->btnInstall->isDefault = true;
-
-        Size szDont = d->btnDontInstall->GetIdealSize();
-        Size szInst = d->btnInstall->GetIdealSize();
-        int btnH = std::max(szDont.dy, szInst.dy);
-        int btnW = std::max(szDont.dx, szInst.dx);
-        int gap = DpiScale(hwnd, 10);
-
-        int totalClientW = std::max(DpiScale(hwnd, 400), 2 * pad + btnW * 2 + gap);
         int totalClientH = pad + mainInstrH + vgap + contentH + vgap + btnH + pad;
 
         // Compute window rect from client size
@@ -577,10 +590,23 @@ static LRESULT CALLBACK UpdateDialogWndProc(HWND hwnd, UINT msg, WPARAM wp, LPAR
         int y = rw.top + ((rw.bottom - rw.top) - winH) / 2;
         SetWindowPos(hwnd, nullptr, x, y, winW, winH, SWP_NOZORDER | SWP_NOACTIVATE);
 
-        // Now get the real client rect and position children
+        // Now get the REAL client rect. If it's shorter than we need, grow the window and retry.
         RECT rc;
         GetClientRect(hwnd, &rc);
         int clientW = rc.right - rc.left;
+        int clientH = rc.bottom - rc.top;
+
+        // Ensure client height accommodates all content + buttons
+        int neededClientH = pad + mainInstrH + vgap + contentH + vgap + btnH + pad;
+        if (clientH < neededClientH) {
+            // Grow window by the deficit
+            int deficit = neededClientH - clientH;
+            winH += deficit;
+            SetWindowPos(hwnd, nullptr, x, y, winW, winH, SWP_NOZORDER | SWP_NOACTIVATE);
+            GetClientRect(hwnd, &rc);
+            clientW = rc.right - rc.left;
+            clientH = rc.bottom - rc.top;
+        }
 
         // Main instruction static
         HWND hwndMainInstr =
@@ -596,8 +622,8 @@ static LRESULT CALLBACK UpdateDialogWndProc(HWND hwnd, UINT msg, WPARAM wp, LPAR
         SetWindowTheme(hwndContent, L"", L"");
         SendMessageW(hwndContent, WM_SETFONT, (WPARAM)font, TRUE);
 
-        // Position buttons (right-aligned, RTL-aware)
-        int btnY = pad + mainInstrH + vgap + contentH + vgap;
+        // Position buttons BOTTOM-ALIGNED in the real client rect (right-aligned, RTL-aware)
+        int btnY = clientH - pad - btnH;
         int btnDontInstallX, btnInstallX;
         if (d->isRtl) {
             btnInstallX = pad;
@@ -610,6 +636,10 @@ static LRESULT CALLBACK UpdateDialogWndProc(HWND hwnd, UINT msg, WPARAM wp, LPAR
         Rect rInst{btnInstallX, btnY, btnW, btnH};
         d->btnDontInstall->SetPos(&rDont);
         d->btnInstall->SetPos(&rInst);
+
+        // Apply app font to buttons (same as statics)
+        SendMessageW(d->btnDontInstall->hwnd, WM_SETFONT, (WPARAM)font, TRUE);
+        SendMessageW(d->btnInstall->hwnd, WM_SETFONT, (WPARAM)font, TRUE);
 
         // Create background brush
         d->bgColor = ThemeWindowBackgroundColor();
@@ -654,6 +684,20 @@ static LRESULT CALLBACK UpdateDialogWndProc(HWND hwnd, UINT msg, WPARAM wp, LPAR
                 // Buttons use callbacks, but keep this as fallback
                 d->result = id;
                 DestroyWindow(hwnd);
+            }
+            break;
+        }
+        case WM_DRAWITEM: {
+            // Owner-drawn buttons (BS_OWNERDRAW) need the parent to paint them.
+            // Dispatch to the matching button by control ID (100 = Don't install, 101 = Install).
+            DRAWITEMSTRUCT* dis = (DRAWITEMSTRUCT*)lp;
+            if (dis->CtlID == 100 && d->btnDontInstall) {
+                d->btnDontInstall->PaintOwnerDrawn(dis);
+                return TRUE;
+            }
+            if (dis->CtlID == 101 && d->btnInstall) {
+                d->btnInstall->PaintOwnerDrawn(dis);
+                return TRUE;
             }
             break;
         }
@@ -732,6 +776,34 @@ static int ShowUpdateAvailableDialog(UpdateInfo* updateInfo) {
 
     int result = dlgData.result;
     str::Free(dlgData.content);
+    return result;
+}
+
+// Testing hook: opens the update dialog with synthetic data.
+// installerExists controls whether "Install and relaunch" or "Download update" is shown.
+void ShowUpdateDialogForTesting(MainWindow* win, bool installerExists) {
+    if (!win) {
+        return;
+    }
+    UpdateInfo* updateInfo = new UpdateInfo();
+    updateInfo->hwndParent = win->hwndFrame;
+    updateInfo->latestVer = str::Dup(StrL("9.9.9")); // fake newer version
+    updateInfo->installerPath = installerExists ? str::Dup(StrL("C:\\fake\\installer.exe")) : Str{};
+    ShowUpdateAvailableDialog(updateInfo);
+    delete updateInfo;
+}
+
+// Testing hook that returns the dialog button result (100=don't install, 101=install).
+int ShowUpdateDialogForTestingRet(MainWindow* win, bool installerExists) {
+    if (!win) {
+        return 100; // don't install on error
+    }
+    UpdateInfo* updateInfo = new UpdateInfo();
+    updateInfo->hwndParent = win->hwndFrame;
+    updateInfo->latestVer = str::Dup(StrL("9.9.9")); // fake newer version
+    updateInfo->installerPath = installerExists ? str::Dup(StrL("C:\\fake\\installer.exe")) : Str{};
+    int result = ShowUpdateAvailableDialog(updateInfo);
+    delete updateInfo;
     return result;
 }
 

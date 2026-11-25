@@ -155,6 +155,7 @@ HWND Button::Create(const CreateArgs& args) {
     cargs.font = args.font;
     cargs.isRtl = args.isRtl;
     cargs.style = WS_CHILD | WS_VISIBLE | WS_TABSTOP;
+    cargs.ctrlId = (HMENU)(INT_PTR)args.ctrlId;
     if (isDefault) {
         cargs.style |= BS_DEFPUSHBUTTON;
     } else {
@@ -194,11 +195,12 @@ Size Button::SetTextAndResize(const WCHAR* s) {
 }
 #endif
 
-Button* CreateButton(HWND parent, Str s, const Func0& onClick, bool isRtl) {
+Button* CreateButton(HWND parent, Str s, const Func0& onClick, bool isRtl, int ctrlId) {
     Button::CreateArgs args;
     args.parent = parent;
     args.text = s;
     args.isRtl = isRtl;
+    args.ctrlId = ctrlId;
 
     auto* b = new Button();
     b->onClick = onClick;

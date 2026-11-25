@@ -11,3 +11,10 @@ void DownloadAndInstallPendingUpdate(MainWindow* win);
 // returns true if the updater process was launched
 bool StartInstallerAutoUpgrade(Str installerPath, bool silent);
 void UpdateSelfTo(Str dstPath);
+
+// Testing hook: opens the update dialog with synthetic data.
+// installerExists controls whether "Install and relaunch" or "Download update" is shown.
+void ShowUpdateDialogForTesting(MainWindow* win, bool installerExists);
+
+// Testing hook that returns the dialog button result (100=don't install, 101=install).
+int ShowUpdateDialogForTestingRet(MainWindow* win, bool installerExists);

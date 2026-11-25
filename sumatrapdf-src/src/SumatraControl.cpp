@@ -47,6 +47,7 @@ extern "C" {
 #include "wingui/BrowserDocView.h"
 #include "AppSettings.h"
 #include "Tabs.h"
+#include "UpdateCheck.h"
 
 // Silent add for -dbg-control tests (no name dialog, no settings flush).
 static void AddFavoriteSilent(MainWindow* win, int pageNo) {
@@ -445,6 +446,8 @@ enum class ControlCmd : u16 {
     TestHomeGeometry = 92,
     // Resize the main window for responsiveness testing (ITEM D1)
     SetWindowSize = 93,
+    // Show the update dialog for testing (modal, runs on UI thread via WM_APP+0x430)
+    TestShowUpdateDialog = 94,
 };
 
 enum class ControlArgType : u16 {
@@ -2321,6 +2324,36 @@ static void ExecuteControlRequest(ControlRequest* req) {
                 break;
             }
             AppendTestResult(req, 0, StrL("OK\n"));
+            break;
+        }
+
+        case ControlCmd::TestShowUpdateDialog: {
+            // Show the update dialog for testing. Runs on UI thread via WM_APP+0x430
+            // because the dialog is modal and runs its own message pump.
+            // The dialog result (button pressed) is returned as exitCode.
+            i32 installerExists = 0;
+            IntArg(req, 0, installerExists);
+            UiTestCtx ctx;
+            ctx.exitCode = installerExists; // pass installerExists via exitCode to callback
+            MainWindow* win = len(gWindows) == 0 ? nullptr : gWindows[0];
+            int code = RunOnUIThread(win, [](void* p) -> int {
+                auto* c = (UiTestCtx*)p;
+                MainWindow* w = len(gWindows) == 0 ? nullptr : gWindows[0];
+                if (!w) {
+                    c->result = StrL("ERROR no-window\n");
+                    return 1;
+                }
+                // Call the testing hook that returns the dialog button result
+                int btnResult = ShowUpdateDialogForTestingRet(w, c->exitCode != 0);
+                c->result = fmt("OK button=%d\n", btnResult);
+                return btnResult; // Return the button result as exitCode
+            }, &ctx);
+            Str res = ctx.result.len ? ctx.result : StrL("ERROR no-frame\n");
+            if (code < 0) {
+                code = 1;
+                res = StrL("ERROR no-frame\n");
+            }
+            AppendTestResult(req, code, res);
             break;
         }
 
