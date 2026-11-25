@@ -1,7 +1,7 @@
 [English](README.md) · **Español**
 
 > **Última actualización:** 2026-11-23 · base: [README.md](README.md) `v1.0.20`
-<!-- readme-sync: source-blob=4e1ea2445c9fccac84ac11bbc0dbe65abfb19471 version=1.0.21 synced=2026-11-24 -->
+<!-- readme-sync: source-blob=4f5be15ad7624cb1a931543695e113c1944d83eb version=1.0.21 synced=2026-11-25 -->
 
 # TumatraPDF
 
@@ -169,9 +169,19 @@ Haz clic en "Más información" -> "Ejecutar de todos modos"; o haz clic derecho
 
 El instalador descargado lleva la marca de la Web (advierte una vez al ejecutarlo); la app que instala se extrae localmente desde el payload embebido y nunca lleva la marca, así que la app instalada no advierte. El portable es el archivo descargado — conserva la marca y hay que desbloquearlo una vez ("Más información -> Ejecutar de todos modos" / Propiedades -> Desbloquear); eliminamos el auto-desbloqueo al inicio porque es una solución ineficaz para SmartScreen en un binario sin firmar Y un detonante clásico de falsos positivos en antivirus. Windows recuerda la aprobación para ese archivo.
 
+**Algunos productos antivirus también marcan compilaciones sin firmar — ver la siguiente sección.**
+
 ### Falsos positivos de antivirus en compilaciones sin firmar
 
-Si un antivirus marca o pone en cuarentena el portable o el instalador: compara el SHA-256 del archivo con los hashes publicados en las notas de la versión. Si los hashes coinciden, el archivo es exactamente el que publicamos y la detección es un falso positivo. Agrega una exclusión para el archivo en tu antivirus (los pasos varían según el AV) en lugar de desactivar la protección. Si la detección persiste, abre un issue con el nombre del producto AV y el ID de la detección.
+**Los binarios de las versiones no están firmados con código.** SumatraPDF upstream tampoco está firmado — su documentación indica que los falsos positivos de antivirus son comunes en binarios de Windows sin firmar. Por eso, Windows SmartScreen puede avisar, y los productos antivirus que dependen de heurísticas (motores de "comportamiento" / "control de amenazas avanzado") pueden marcar un binario recién publicado y sin firmar como sospechoso. Una detección en una compilación sin firmar es, en la mayoría de los casos, un falso positivo, no una infección.
+
+**Qué cambió para que la compilación actual pase limpio:** la app ya no borra su propia marca de la Web (Mark of the Web) al iniciar, y la auto-actualización ya no lanza un `.bat` auxiliar a través de `cmd.exe` — ambos comportamientos son exactamente lo que los motores heurísticos penalizan. Las compilaciones actuales pasan limpias en la máquina que reportó el problema (0 cuarentenas, 0 reportes de fallo).
+
+**Cómo verificar que el archivo es nuestro:** cada versión publica el SHA-256 de ambos archivos (el portable y el instalador) en las notas de la versión. Si el hash de tu archivo coincide, el archivo es byte a byte lo que publicamos y cualquier detección es un falso positivo.
+
+**Qué hacer:** agrega una exclusión para el archivo (o su carpeta) en tu antivirus — **no** desactives la protección. Si sigue marcando, abre un issue con el nombre del producto antivirus y el ID de la detección para que podamos actuar.
+
+**Caso concreto:** en noviembre de 2026 un antivirus (el "Advanced Threat Control" de Bitdefender) puso en cuarentena una versión publicada — detección `ATC.Malicious`, id `SuspiciousBehavior.54B279F15D24AA5B` — por los dos comportamientos descritos arriba; tras la corrección, los nuevos binarios ya no lo disparan. Ver `SECURITY.md` para el informe completo del incidente.
 
 ## Arquitectura
 

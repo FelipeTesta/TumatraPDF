@@ -174,9 +174,19 @@ Click **"More info" -> "Run anyway"**; or right-click the file -> Properties -> 
 
 The downloaded installer carries the Mark of the Web (warns once when you launch it); the app it installs is extracted locally from the embedded payload and never carries the mark, so the installed app does not warn. The portable is the downloaded file itself — it keeps the mark and must be unblocked once ("More info -> Run anyway" / Properties -> Unblock); we removed the startup self-unblock because it is an ineffective SmartScreen workaround for an unsigned binary AND a classic AV false-positive trigger. Windows remembers the approval for that file.
 
+**Some antivirus products flag unsigned builds as well — see the next section.**
+
 ### Antivirus false positives on unsigned builds
 
-If an antivirus flags or quarantines the portable or installer: compare the file's SHA-256 with the hashes published in the release notes. If the hashes match, the file is exactly what we published and the detection is a false positive. Add an exclusion for the file in your AV (per-AV steps vary) rather than disabling protection. If the detection persists, open an issue with the AV product name and the detection ID.
+**The release binaries are not code-signed.** Upstream SumatraPDF is also unsigned — its documentation notes that antivirus false positives are common for unsigned Windows binaries. Because of this, Windows SmartScreen may warn, and antivirus products that rely on heuristics ("behaviour" / "advanced threat control" engines) may flag a newly published, unsigned binary as suspicious. A detection on an unsigned build is most often a false positive, not an infection.
+
+**What changed so the current build runs clean:** the app no longer deletes its own Mark of the Web at startup, and the self-update no longer spawns a helper `.bat` through `cmd.exe` — both behaviours are exactly what heuristic engines dislike. The current builds run clean on the machine that reported the problem (0 quarantines, 0 crash reports).
+
+**How to verify the file is ours:** every release publishes the SHA-256 of both assets (the portable and the installer) in the release notes. If the hash of your file matches, the file is byte-for-byte what we published and any detection is a false positive.
+
+**What to do:** add an exclusion for the file (or its folder) in your antivirus — do **not** disable protection. If it still flags, open an issue with the antivirus product name and the detection ID so we can act.
+
+**Concrete case:** in November 2026 one antivirus (Bitdefender's "Advanced Threat Control") quarantined a published build — detection `ATC.Malicious`, id `SuspiciousBehavior.54B279F15D24AA5B` — because of the two behaviours described above; after the fix, the new binaries no longer trigger it. See `SECURITY.md` for the full incident report.
 
 ## Architecture
 
