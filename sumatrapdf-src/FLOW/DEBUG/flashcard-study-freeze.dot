@@ -1,0 +1,56 @@
+digraph FlashcardStudyFreeze {
+  rankdir=TB;
+  node [shape=box, fontname="Consolas", fontsize=10];
+  edge [fontname="Consolas", fontsize=9];
+
+  // Root cause
+  RootCause [label="O(N²) PopAt(0) in RenderCache::Paint\nsrc/RenderCache.cpp:1383", style=filled, fillcolor=red, fontcolor=white];
+
+  // Study freeze path
+  HandleFlashcardRate [label="HandleFlashcardRate\nsrc/Commands_Flashcard.cpp:1172"];
+  FlashcardNavigateToEntry [label="FlashcardNavigateToEntry\nsrc/Commands_Flashcard.cpp:1152"];
+  FlashcardNavigateToEntryInner [label="FlashcardNavigateToEntryInner\nsrc/Commands_Flashcard.cpp:1104"];
+  MainWindowRerender [label="MainWindowRerender\nsrc/MainWindow.cpp"];
+  PaintFlashcardMasks [label="PaintFlashcardMasks\nsrc/Canvas.cpp:4109"];
+  RenderCachePaint [label="RenderCache::Paint\nsrc/RenderCache.cpp:1350"];
+  PopAtZero [label="Vec<TilePosition>::PopAt(0)\nO(N²) memmove per tile", style=filled, fillcolor=orange];
+
+  // Navigation stutter path
+  CmdGoToNextPage [label="CmdGoToNextPage / CmdGoToPrevPage"];
+  PageChange [label="Page navigation"];
+  RenderQueue [label="RenderCache request queue\nMAX_PAGE_REQUESTS=8"];
+  SpeculativeRequests [label="Flashcard prewarm\nRequestRenderingSpeculative"];
+  PaintFlashcardMasks2 [label="PaintFlashcardMasks\nper-page flashcard masks"];
+
+  // Stack evidence from cdb
+  StackEvidence [label="cdb stack (UI thread):\nTumatraPDF!Vec<TilePosition>::RemoveAt+0x90\nTumatraPDF!Vec<TilePosition>::PopAt+0x125\nTumatraPDF!RenderCache::Paint+0x678\nTumatraPDF!DrawDocument+0x1761\nTumatraPDF!OnPaintDocument+0x19d\nTumatraPDF!WndProcCanvasFixedPageUI+0x377\nTumatraPDF!WndProcCanvas+0xb26\nUSER32!UserCallWinProcCheckWow+0x50c\n...\nTumatraPDF!HandleFlashcardRate+0x8aa", shape=note, fillcolor=lightyellow, style=filled];
+
+  // Fix
+  Fix [label="Fix: Read index instead of PopAt(0)\nsrc/RenderCache.cpp:1382-1417\n+ VecSort overload for sub-range\nsrc/base/Vec.h:273-281", style=filled, fillcolor=green, fontcolor=white];
+
+  // Hypothesis
+  Hypothesis [label="Hypothesis: O(N²) tile queue processing\nin RenderCache::Paint blocks UI thread\non each page paint during study session.\nEach rating → repaint → PaintFlashcardMasks →\nRenderCache::Paint → PopAt(0) × N tiles.\nWith many cards/tiles, this becomes\nquadratic and stalls the message loop.", shape=ellipse, fillcolor=lightblue, style=filled];
+
+  // Before/After metrics
+  Metrics [label="Before fix (study): Rate card 3 timeout 2000ms\nAfter fix (study): 10 cards rated 15-38ms each\nBefore fix (nav): Max 709ms on card pages\nAfter fix (nav): Max 376ms, avg 27.4ms", shape=note, fillcolor=lightgreen, style=filled];
+
+  // Edges
+  HandleFlashcardRate -> FlashcardNavigateToEntry;
+  FlashcardNavigateToEntry -> FlashcardNavigateToEntryInner;
+  FlashcardNavigateToEntryInner -> MainWindowRerender;
+  MainWindowRerender -> PaintFlashcardMasks;
+  PaintFlashcardMasks -> RenderCachePaint;
+  RenderCachePaint -> PopAtZero;
+  PopAtZero -> RootCause;
+
+  CmdGoToNextPage -> PageChange;
+  PageChange -> RenderQueue;
+  SpeculativeRequests -> RenderQueue;
+  PageChange -> PaintFlashcardMasks2;
+  PaintFlashcardMasks2 -> RenderCachePaint;
+
+  RootCause -> Hypothesis;
+  StackEvidence -> RootCause;
+  RootCause -> Fix;
+  Fix -> Metrics;
+}
