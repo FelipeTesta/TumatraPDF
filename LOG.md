@@ -1,3 +1,39 @@
+## 2026-11-25 (s82) — Flashcard study freeze fixed; Home responsive + heatmap readable; Filter bookmarks first open; Auto-update install button fixed; Windows/AV compatibility; Ctrl+Alt separate rects
+
+### Fixed
+- Flashcard study freeze: render cache queue used `PopAt(0)` (memmove on every tile) -> O(N^2) repaint cost on every rating. Paint now reads with index + sorts unprocessed part only (same order). Rating 13-46 ms instead of UI thread freeze.
+- Page navigation stutter with many cards: flashcard masks now paint only visible pages; speculative pre-render capped at 2 concurrent requests (no longer delays visible page). Avg nav ~32 ms (was ~65 ms).
+- Home "last read" card: now shows ACTIVE TAB book (was book with most accumulated time when two books read in same second).
+- Flashcards > Filter: bookmark (chapter) list populated on FIRST open (no Bookmarks panel prerequisite); each bookmark listed once (old code walked tree twice -> per-sibling dupes, exploded on deep outlines; also broke study+filter together).
+- Auto-update "Install" button disappearance: silent install failure (unsaved changes, installer not downloaded, launch fail) now falls back to confirmation dialog instead of no-op; silent install relaunches app; self-update no longer needs helper .bat (unsigned portable replaces itself directly).
+- Windows/AV compatibility: app no longer deletes own Mark-of-the-Web at startup; no longer spawns cmd.exe for self-update (triggered Bitdefender ATC.Malicious, SuspiciousBehavior.54B279F15D24AA5B). README (EN+ES) + SECURITY.md document false-positive, SHA-256 check, signing options.
+- Ctrl+Alt accumulation: drawing several rectangles now paints as separate rects (were merged into one union).
+
+### Added
+- Home responsive layout: wide window -> study history beside heatmap; below half-screen -> stacks (study history -> heatmap -> recent books); study history never collapses/disappears.
+- Home heatmap readable: months alternate peru/silver in FILL (was border only); week spanning two months no longer mis-colors 36 days (border follows real month per day); cells square with more spacing; TODAY always white; narrow window shows most RECENT weeks (not 53 cols squeezed to 5px).
+- Home hover highlight fades 0.5 s after mouse leaves (was permanent); no flicker while moving inside field.
+- Flashcard study perf branch: per-book study file written on worker thread; bookkeeping deferred out of rating path; study-state index binary-searched; paint touches only visible pages; Lista panel updates incrementally.
+
+### Changed
+- Autoscroll: button stays usable while flashcard toolbar open (was greyed); study mode stops autoscroll + disables button until study exit.
+- Build/CI: clean Release build script (`cmd/build-release.ts`); guard against tests polluting tracked repo files; GitHub Actions checkout bump to v7; flashcard/perf FLOW map updates; subagent handoff contract (R1..R7).
+
+### Verified
+- Clean Release build x64 (the release binary): 0 errors; `out/rel64/TumatraPDF.exe` -> 11,276,288 bytes, sha256 `43B9FC13C42F3AAD50E9EDCB9C38D86E0D0AEBC2BE7D049D5A0B3DAFA6C9E4A8`, ProductVersion 1.0.22.
+- The 1.0.22 binary starts, runs 12 s, Bitdefender quarantine delta 0, Windows Error Reporting crash events delta 0, no Zone.Identifier stream.
+- The sha256 above is the LOCAL build; the published hashes are in the release notes (CI builds its own binary).
+- Probe `ad-hoc-flashcard-study-freeze`: 3/3 runs pass (agent ran 5/5), 10 cards rated, 13-46 ms/rating, ping 5-22 ms.
+- Probe `ad-hoc-flashcard-nav-stutter`: avg 32.5 ms and 31.6 ms over 400 navigations.
+- Probe `ad-hoc-home-geometry`: 8 widths pass; `ad-hoc-home-verify`: pass; `ad-hoc-flashcard-filter-bookmarks`: 5 bookmarks, 0 dupes, 3 open/close cycles stable, study+filter alive.
+- `bun scripts/flow-sync.ts` passes; graphviz renders flashcard maps.
+- User validated visual result on portable build.
+
+### Notes
+- Code signing documented in SECURITY.md and DEFERRED (SignPath Community = free path but needs application).
+- Release build MUST use `bun cmd/build-release.ts` (stale incremental build can crash at startup).
+- Debug build can carry stale MSVC PCH after header change (delete `out/<cfg>/obj/**/*.pch`).
+
 ## 2026-11-24 (s81) — Autoscroll stays usable with the flashcard toolbar; study mode stops it; CI action bump
 
 ### Fixed

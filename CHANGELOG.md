@@ -4,6 +4,21 @@ Per-version changelog for TumatraPDF — new functions + bug fixes, newest first
 Feature details live in [README.md](README.md); full per-session development
 history in [LOG.md](LOG.md).
 
+## v1.0.22 (2026-11-25)
+
+- **Flashcard study no longer freezes:** the render cache used a quadratic algorithm on every repaint; now each rating takes 13-46 ms instead of locking the UI thread.
+- **Page navigation is fast and smooth with many cards:** flashcard masks paint only for visible pages, and background pre-rendering is capped so it never delays the page you're viewing. Average navigation ~32 ms (was ~65 ms).
+- **Flashcard study is faster overall:** study files write on a background thread, bookkeeping defers out of the rating path, state lookup uses binary search, painting touches only visible pages, and the List panel updates incrementally.
+- **Home "last read" shows the active tab's book:** it used to pick the book with the most reading time when two books were read in the same second.
+- **Home responsive layout:** on wide windows the study history sits beside the heatmap; below half-screen height everything stacks (study history → heatmap → recent books) and the study history never collapses or disappears.
+- **Home heatmap is readable again:** months alternate orange and gray in the fill (not just the border), a week spanning two months no longer mis-colors 36 days, cells are square with more spacing, today is always white, and narrow windows show the most recent weeks instead of squeezing 53 columns into unreadable cells.
+- **Home hover highlight fades out** 0.5 s after the mouse leaves instead of staying forever, and no longer flickers while moving inside the field.
+- **Flashcards > Filter bookmarks populate on first open** (no need to visit the Bookmarks panel first) and each chapter appears exactly once (the old code duplicated entries on deep outlines and broke study + filter together).
+- **Auto-update "Install" button no longer disappears:** when silent install cannot start, the app falls back to the confirmation dialog instead of doing nothing; silent install relaunches the app; the portable self-update no longer needs a helper .bat.
+- **Windows / antivirus compatibility:** the app no longer deletes its own Mark-of-the-Web at startup and no longer spawns cmd.exe for self-update — that behavior triggered Bitdefender's Advanced Threat Control false positive. The README (EN + ES) and SECURITY.md now document the false-positive possibility, how to verify the SHA-256, and signing options.
+- **Autoscroll button stays usable** while the flashcard toolbar is open (it used to grey out); entering study mode stops auto-scroll and disables the button until you leave study.
+- **Ctrl+Alt drawing** now paints several rectangles as separate rectangles (they used to be merged into one).
+
 ## v1.0.21 (2026-11-23)
 
 - **No more ghost highlight:** the highlight of a new flashcard — and of a normal text highlight — no longer shows up outside the text you selected. The appearance saved into the PDF was written in the wrong coordinate space, so the marker drifted away from the selection (on multi-line selections it looked inverted). It now lands exactly on the selected text, with the same sharp corners on screen and in the file.
