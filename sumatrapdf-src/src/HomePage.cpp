@@ -1279,27 +1279,33 @@ struct HomeStatsWnd : VirtWnd {
     // This is the single source of truth for heatmap geometry (fixes flicker D1/D4).
     Rect rcPrev;
     Rect rcNext;
-    Rect rcGrid;         // heatmap cells origin (after the weekday label column)
-    int cellDx = 10;     // cell width (== cellDy, square cells)
-    int cellDy = 10;     // cell height
-    int cellGap = 4;     // gap between cells (was 2, increased per C5)
-    int rowGap = 4;      // gap between rows (was 2, increased per C5)
-    int labelDx = 12;    // weekday label gutter width (DIP, scaled)
-    int firstCol = 0;    // weekday row of Jan 1 (Monday-first)
-    int hoverDay = -1;   // day-of-year under the mouse, -1 = none
+    Rect rcGrid;       // heatmap cells origin (after the weekday label column)
+    int cellDx = 10;   // cell width (== cellDy, square cells)
+    int cellDy = 10;   // cell height
+    int cellGap = 4;   // gap between cells (was 2, increased per C5)
+    int rowGap = 4;    // gap between rows (was 2, increased per C5)
+    int labelDx = 12;  // weekday label gutter width (DIP, scaled)
+    int firstCol = 0;  // weekday row of Jan 1 (Monday-first)
+    int hoverDay = -1; // day-of-year under the mouse, -1 = none
     // hover fade state (ITEM 3): fade out over 500ms after mouse leaves
-    int hoverFadeAlpha = 255;      // 255 = fully visible, 0 = faded out
-    UINT_PTR hoverFadeTimer = 0;   // timer ID (nIDEvent = (UINT_PTR)this), NOT SetTimer return value
-    int hoverFadeTargetDay = -1;   // the day that was hovered when fade started
-    DWORD hoverFadeStartTime = 0;  // GetTickCount() when fade started
+    int hoverFadeAlpha = 255;     // 255 = fully visible, 0 = faded out
+    UINT_PTR hoverFadeTimer = 0;  // timer ID (nIDEvent = (UINT_PTR)this), NOT SetTimer return value
+    int hoverFadeTargetDay = -1;  // the day that was hovered when fade started
+    DWORD hoverFadeStartTime = 0; // GetTickCount() when fade started
     // D7: calendar mode — grid (heatmap) or line graph (day x hours)
     bool graphMode = false;
     Rect rcMode; // the Grid/Graph toggle (window coords)
     // uniform grid geometry (computed once in LayoutHomePage, stored here):
     // monthStartCol[m] = first week column of month m (index 1..12)
-    // monthBorderAlt[m] = true for silver border, false for gray (alternating per month; Jan=false=gray, Feb=true=silver)
+    // monthBorderAlt[m] = true for silver border, false for gray (alternating per month; Jan=false=gray,
+    // Feb=true=silver)
     int monthStartCol[13] = {};
     bool monthBorderAlt[13] = {};
+    // Narrow-window visible range (F2): when 53 cols don't fit at >=6px, show last N weeks
+    int firstVisibleCol = 0;  // first visible week column (0-based)
+    int visibleCols = 53;     // number of visible week columns (<= 53)
+    int firstVisibleDoy = 1;  // first visible day-of-year
+    int lastVisibleDoy = 366; // last visible day-of-year
 
     int ColX(int col) const;
     void Paint(VirtWndPaintCtx&) override;
@@ -1448,8 +1454,9 @@ void HomeStatsWnd::Paint(VirtWndPaintCtx& ctx) {
     // --- heatmap grid (Monday-first rows, GitHub/Anki style) ---
     // Geometry is PRE-COMPUTED in LayoutHomePage() and stored in this object.
     // Paint() only READS: rcGrid, cellDx, cellDy, cellGap, rowGap, labelDx,
-    // firstCol, monthStartCol[], monthBorderAlt[].
-    // This single-source-of-truth fixes the hover flicker (D1/D4).
+    // firstCol, monthStartCol[], monthBorderAlt[],
+    // firstVisibleCol, visibleCols, firstVisibleDoy, lastVisibleDoy (F2).
+    // This single-source-of-truth fixes hover flicker (D1/D4).
     if (rcGrid.IsEmpty() || cellDx <= 0 || cellDy <= 0) {
         return; // geometry not computed yet
     }
@@ -1469,12 +1476,23 @@ void HomeStatsWnd::Paint(VirtWndPaintCtx& ctx) {
     }
     // month names below each block, centered over the columns it spans.
     // Stagger on two rows if labels would overlap.
-    struct MonthLabel { int m; int x0; int x1; int width; int row; };
+    // F2: only draw labels for months that intersect the visible range.
+    struct MonthLabel {
+        int m;
+        int x0;
+        int x1;
+        int width;
+        int row;
+    };
     MonthLabel labels[12];
     int labelCount = 0;
     for (int m = 1; m <= 12; m++) {
         int c0 = monthStartCol[m];
         int c1 = (m < 12) ? monthStartCol[m + 1] : 53;
+        // Skip months entirely outside visible column range
+        if (c1 <= firstVisibleCol || c0 >= firstVisibleCol + visibleCols) {
+            continue;
+        }
         int x0 = ColX(c0);
         int x1 = ColX(c1) - cellGap;
         Gdiplus::RectF nameRc;
@@ -1500,8 +1518,7 @@ void HomeStatsWnd::Paint(VirtWndPaintCtx& ctx) {
         const auto& L = labels[i];
         float cx = (float)(L.x0 + L.x1) / 2.0f - (float)L.width / 2.0f;
         float cy = (float)(rcGrid.y + rcGrid.dy + dpi(2) + L.row * dpi(14));
-        g->DrawString(kStatsMonthNames[L.m - 1], 3, &fontLabel,
-                      Gdiplus::PointF(cx, cy), &txtBrush);
+        g->DrawString(kStatsMonthNames[L.m - 1], 3, &fontLabel, Gdiplus::PointF(cx, cy), &txtBrush);
     }
 
     // --- cells: fill by reading time with month-tinted families (C6) ---
@@ -1531,47 +1548,34 @@ void HomeStatsWnd::Paint(VirtWndPaintCtx& ctx) {
     Gdiplus::Pen todayPen(GpCol(ac.today), 1.6f); // orange: TODAY
 
     // Month border pens — slightly thicker (1.6) per C5
-    Gdiplus::Pen grayBorderPen(GpCol(ac.cellOutline), 1.6f);    // gray (dark) / light gray (light)
-    Gdiplus::Pen silverBorderPen(GpCol(ac.silverHi), 1.6f);     // silver accent
+    Gdiplus::Pen grayBorderPen(GpCol(ac.cellOutline), 1.6f); // gray (dark) / light gray (light)
+    Gdiplus::Pen silverBorderPen(GpCol(ac.silverHi), 1.6f);  // silver accent
 
-    // Fill families (C6): two families × 4 grades
-    // Family 0 (gray-border months): peru/orange tones
-    // Family 1 (silver-border months): silver/gray tones
-    // Theme-sensitive: defined per-theme in DsAccentsGet()
+    // Fill families (C6): two families × 4 grades — read from theme tokens (F1)
+    // Family 0 (gray-border months): peru/orange tones → ac.cellGradePeru[grade]
+    // Family 1 (silver-border months): silver/gray tones → ac.cellGrade[grade]
     Gdiplus::ARGB peruGrade[4];
     Gdiplus::ARGB silverGrade[4];
-    if (DsIsDarkTheme()) {
-        // Dark theme: peru family (warm, readable on dark)
-        peruGrade[0] = GpCol(RGB(80, 50, 30)).GetValue();    // dark peru
-        peruGrade[1] = GpCol(RGB(120, 75, 40)).GetValue();   // medium peru
-        peruGrade[2] = GpCol(RGB(170, 110, 55)).GetValue();  // light peru
-        peruGrade[3] = GpCol(RGB(210, 145, 75)).GetValue();  // bright peru
-        // Silver family (cool grays)
-        silverGrade[0] = GpCol(RGB(60, 65, 70)).GetValue();
-        silverGrade[1] = GpCol(RGB(90, 95, 105)).GetValue();
-        silverGrade[2] = GpCol(RGB(130, 135, 145)).GetValue();
-        silverGrade[3] = GpCol(RGB(170, 175, 185)).GetValue();
-    } else {
-        // Light theme: peru family (deeper for white bg)
-        peruGrade[0] = GpCol(RGB(200, 160, 120)).GetValue();  // pale peru
-        peruGrade[1] = GpCol(RGB(180, 130, 85)).GetValue();   // light peru
-        peruGrade[2] = GpCol(RGB(160, 105, 55)).GetValue();   // medium peru
-        peruGrade[3] = GpCol(RGB(140, 85, 35)).GetValue();    // deep peru
-        // Silver family (warm grays)
-        silverGrade[0] = GpCol(RGB(215, 215, 220)).GetValue();
-        silverGrade[1] = GpCol(RGB(190, 190, 200)).GetValue();
-        silverGrade[2] = GpCol(RGB(160, 160, 175)).GetValue();
-        silverGrade[3] = GpCol(RGB(130, 130, 150)).GetValue();
+    for (int i = 0; i < 4; i++) {
+        peruGrade[i] = GpCol(ac.cellGradePeru[i]).GetValue();
+        silverGrade[i] = GpCol(ac.cellGrade[i]).GetValue();
     }
 
     int daysInYear = HomeStatsDaysInYear(year);
-    for (int doy = 1; doy <= daysInYear; doy++) {
+    // F2: only paint days in the visible range
+    int startDoy = firstVisibleDoy;
+    int endDoy = lastVisibleDoy;
+    for (int doy = startDoy; doy <= endDoy; doy++) {
         int mm = 0, dd = 0;
         HomeStatsDateFromDayOfYear(year, doy, &mm, &dd, nullptr);
         int sec = ProfileDataReadingDaySec(year * 10000 + mm * 100 + dd);
         int idx = firstCol + doy - 1;
         int row = idx % 7;
         int col = idx / 7;
+        // Skip columns outside visible range
+        if (col < firstVisibleCol || col >= firstVisibleCol + visibleCols) {
+            continue;
+        }
         int cx = ColX(col);
         int cy = rcGrid.y + row * (cellDy + rowGap);
 
@@ -1592,7 +1596,8 @@ void HomeStatsWnd::Paint(VirtWndPaintCtx& ctx) {
             } else {
                 Gdiplus::Color hoverColor = GpCol(ac.silverHi);
                 BYTE a = (BYTE)hoverFadeAlpha;
-                Gdiplus::SolidBrush fadeBrush(Gdiplus::Color(a, hoverColor.GetR(), hoverColor.GetG(), hoverColor.GetB()));
+                Gdiplus::SolidBrush fadeBrush(
+                    Gdiplus::Color(a, hoverColor.GetR(), hoverColor.GetG(), hoverColor.GetB()));
                 g->FillRectangle(&fadeBrush, cx, cy, cellDx, cellDy);
             }
             g->DrawRectangle(borderPen, cx, cy, cellDx, cellDy);
@@ -1603,7 +1608,7 @@ void HomeStatsWnd::Paint(VirtWndPaintCtx& ctx) {
             g->FillRectangle(&cellBrush, cx, cy, cellDx, cellDy);
             g->DrawRectangle(borderPen, cx, cy, cellDx, cellDy);
         }
-        // TODAY cell: ALWAYS white fill + orange outline (C6)
+        // TODAY cell: ALWAYS white fill + orange outline (C6) — explicit owner requirement
         if (doy == todayDoy) {
             Gdiplus::SolidBrush whiteBrush(Gdiplus::Color(255, 255, 255, 255));
             g->FillRectangle(&whiteBrush, cx, cy, cellDx, cellDy);
@@ -1801,18 +1806,19 @@ bool HomeStatsWnd::OnMouseMove(VirtWndMouseEvent& e) {
     Point pt{e.pt.x + bounds.x, e.pt.y + bounds.y};
     int newHover = -1;
     // Cell hover only exists in grid mode. Hit-test uses PRE-COMPUTED geometry
-    // (rcGrid, cellDx, cellDy, cellGap, rowGap) — single source of truth (C3).
+    // (rcGrid, cellDx, cellDy, cellGap, rowGap, firstVisibleCol, visibleCols) — single source of truth (C3, F2).
     // y bound = painted grid height (7*cellDy + 6*rowGap), row clamped to 0..6.
-    // x bound = cell width WITHOUT trailing gap on last column (D4).
+    // x bound = visible columns only (no trailing gap on last visible column).
     // Weekday label gutter (labelDx) must not hit a cell.
-    if (!graphMode && !rcGrid.IsEmpty() &&
-        pt.x >= rcGrid.x && pt.x < rcGrid.x + 53 * (cellDx + cellGap) - cellGap &&
-        pt.y >= rcGrid.y && pt.y < rcGrid.y + 7 * cellDy + 6 * rowGap) {
+    // F2: hover cannot highlight a day outside the visible range.
+    int gridRight = rcGrid.x + visibleCols * (cellDx + cellGap) - cellGap;
+    if (!graphMode && !rcGrid.IsEmpty() && pt.x >= rcGrid.x && pt.x < gridRight && pt.y >= rcGrid.y &&
+        pt.y < rcGrid.y + 7 * cellDy + 6 * rowGap) {
         int col = (pt.x - rcGrid.x) / (cellDx + cellGap);
         int row = (pt.y - rcGrid.y) / (cellDy + rowGap);
-        if (col >= 0 && col < 53 && row >= 0 && row < 7) {
+        if (col >= firstVisibleCol && col < firstVisibleCol + visibleCols && row >= 0 && row < 7) {
             int idx = col * 7 + row - firstCol + 1;
-            if (idx >= 1 && idx <= HomeStatsDaysInYear(year)) {
+            if (idx >= firstVisibleDoy && idx <= lastVisibleDoy) {
                 newHover = idx;
             }
         }
@@ -1877,6 +1883,64 @@ void HomeStatsWnd::OnMouseLeave() {
     }
 }
 
+// F3: Timer safety — static registry to prevent use-after-free if WM_TIMER
+// arrives after ~HomeStatsWnd(). The registry maps nIDEvent (=(UINT_PTR)this)
+// to the live object. Destructor unregisters; callback checks registry.
+// Using Windows CRITICAL_SECTION + simple array (avoids STL in PCH context).
+static HomeStatsWnd* gHoverFadeRegistry[32]; // max 32 concurrent timers (plenty)
+static int gHoverFadeRegistryCount = 0;
+static CRITICAL_SECTION gHoverFadeRegistryLock;
+static bool gHoverFadeRegistryInited = false;
+
+static void InitHoverFadeRegistry() {
+    if (!gHoverFadeRegistryInited) {
+        InitializeCriticalSection(&gHoverFadeRegistryLock);
+        gHoverFadeRegistryInited = true;
+    }
+}
+
+static void RegisterHoverFade(UINT_PTR id, HomeStatsWnd* wnd) {
+    InitHoverFadeRegistry();
+    EnterCriticalSection(&gHoverFadeRegistryLock);
+    for (int i = 0; i < gHoverFadeRegistryCount; i++) {
+        if (gHoverFadeRegistry[i] == nullptr) {
+            gHoverFadeRegistry[i] = wnd;
+            LeaveCriticalSection(&gHoverFadeRegistryLock);
+            return;
+        }
+    }
+    if (gHoverFadeRegistryCount < 32) {
+        gHoverFadeRegistry[gHoverFadeRegistryCount++] = wnd;
+    }
+    LeaveCriticalSection(&gHoverFadeRegistryLock);
+}
+
+static void UnregisterHoverFade(UINT_PTR id) {
+    InitHoverFadeRegistry();
+    EnterCriticalSection(&gHoverFadeRegistryLock);
+    for (int i = 0; i < gHoverFadeRegistryCount; i++) {
+        if (gHoverFadeRegistry[i] != nullptr && (UINT_PTR)gHoverFadeRegistry[i] == id) {
+            gHoverFadeRegistry[i] = nullptr;
+            break;
+        }
+    }
+    LeaveCriticalSection(&gHoverFadeRegistryLock);
+}
+
+static HomeStatsWnd* FindHoverFade(UINT_PTR id) {
+    InitHoverFadeRegistry();
+    EnterCriticalSection(&gHoverFadeRegistryLock);
+    for (int i = 0; i < gHoverFadeRegistryCount; i++) {
+        if (gHoverFadeRegistry[i] != nullptr && (UINT_PTR)gHoverFadeRegistry[i] == id) {
+            HomeStatsWnd* wnd = gHoverFadeRegistry[i];
+            LeaveCriticalSection(&gHoverFadeRegistryLock);
+            return wnd;
+        }
+    }
+    LeaveCriticalSection(&gHoverFadeRegistryLock);
+    return nullptr;
+}
+
 void HomeStatsWnd::StartHoverFade() {
     if (hoverFadeTimer != 0) {
         return; // already fading
@@ -1888,7 +1952,9 @@ void HomeStatsWnd::StartHoverFade() {
     if (hwnd) {
         // nIDEvent = (UINT_PTR)this (NOT the SetTimer return value) — fixes D3
         SetTimer(hwnd, (UINT_PTR)this, 16, nullptr); // ~60fps
-        hoverFadeTimer = (UINT_PTR)this; // store nIDEvent for StopHoverFade
+        hoverFadeTimer = (UINT_PTR)this;             // store nIDEvent for StopHoverFade
+        // Register in safety map
+        RegisterHoverFade(hoverFadeTimer, this);
     }
 }
 
@@ -1899,6 +1965,8 @@ void HomeStatsWnd::StopHoverFade() {
             // Kill with nIDEvent = (UINT_PTR)this, not the SetTimer return value (D3)
             KillTimer(hwnd, (UINT_PTR)this);
         }
+        // Unregister from safety map
+        UnregisterHoverFade(hoverFadeTimer);
         hoverFadeTimer = 0;
         hoverFadeTargetDay = -1;
         hoverFadeAlpha = 255;
@@ -1906,14 +1974,15 @@ void HomeStatsWnd::StopHoverFade() {
 }
 
 HomeStatsWnd::~HomeStatsWnd() {
-    // Destructor stops fade timer to prevent use-after-free (D3)
+    // Destructor stops fade timer and unregisters to prevent use-after-free (F3)
     StopHoverFade();
 }
 
 void CALLBACK HomeStatsWnd::HoverFadeTimerProc(HWND hwnd, UINT, UINT_PTR id, DWORD) {
-    auto* self = (HomeStatsWnd*)id;
+    // F3: Check registry first — if not registered, object was destroyed.
+    HomeStatsWnd* self = FindHoverFade(id);
     if (!self || self->hoverFadeTimer == 0) {
-        return;
+        return; // not registered or already stopped -> safe to ignore
     }
     DWORD now = GetTickCount();
     DWORD elapsed = now - self->hoverFadeStartTime;
@@ -1946,8 +2015,10 @@ void HomeStudyHistoryWnd::Paint(VirtWndPaintCtx& ctx) {
     g->SetTextRenderingHint(Gdiplus::TextRenderingHintClearTypeGridFit);
     auto dpi = [this](int v) { return DpiScale(win->hwndFrame, v); };
     DsAccents ac = DsAccentsGet();
-    Gdiplus::Font fontLabel(DsFontFamily(), DsFontSizePx(win->hwndFrame, DsFontSizeLabel()), Gdiplus::FontStyleRegular, Gdiplus::UnitPixel);
-    Gdiplus::Font fontTitle(DsFontFamily(), DsFontSizePx(win->hwndFrame, DsFontSizeTitle()), Gdiplus::FontStyleBold, Gdiplus::UnitPixel);
+    Gdiplus::Font fontLabel(DsFontFamily(), DsFontSizePx(win->hwndFrame, DsFontSizeLabel()), Gdiplus::FontStyleRegular,
+                            Gdiplus::UnitPixel);
+    Gdiplus::Font fontTitle(DsFontFamily(), DsFontSizePx(win->hwndFrame, DsFontSizeTitle()), Gdiplus::FontStyleBold,
+                            Gdiplus::UnitPixel);
     Gdiplus::SolidBrush txtBrush(GpCol(ac.text));
     Gdiplus::SolidBrush valBrush(GpCol(ac.textStrong));
     Gdiplus::SolidBrush hotBrush(GpCol(ac.textHot));
@@ -2017,20 +2088,26 @@ void HomeStudyHistoryWnd::Paint(VirtWndPaintCtx& ctx) {
     pickBrushes(0, chipFill, chipText);
     g->FillRectangle(chipFill, rcReadTab.x, rcReadTab.y, rcReadTab.dx, rcReadTab.dy);
     g->DrawRectangle(&tabBorderPen, rcReadTab.x, rcReadTab.y, rcReadTab.dx, rcReadTab.dy);
-    g->DrawString(ToWStrTemp(Str(readLabel)).s, -1, &fontLabel,
-                  Gdiplus::PointF((float)(rcReadTab.x + tabPad), (float)(rcReadTab.y + (rcReadTab.dy - (int)rRead.Height) / 2)), chipText);
+    g->DrawString(
+        ToWStrTemp(Str(readLabel)).s, -1, &fontLabel,
+        Gdiplus::PointF((float)(rcReadTab.x + tabPad), (float)(rcReadTab.y + (rcReadTab.dy - (int)rRead.Height) / 2)),
+        chipText);
     // Draw Flashcards chip
     pickBrushes(1, chipFill, chipText);
     g->FillRectangle(chipFill, rcFlashcardTab.x, rcFlashcardTab.y, rcFlashcardTab.dx, rcFlashcardTab.dy);
     g->DrawRectangle(&tabBorderPen, rcFlashcardTab.x, rcFlashcardTab.y, rcFlashcardTab.dx, rcFlashcardTab.dy);
     g->DrawString(ToWStrTemp(Str(fcLabel)).s, -1, &fontLabel,
-                  Gdiplus::PointF((float)(rcFlashcardTab.x + tabPad), (float)(rcFlashcardTab.y + (rcFlashcardTab.dy - (int)rFc.Height) / 2)), chipText);
+                  Gdiplus::PointF((float)(rcFlashcardTab.x + tabPad),
+                                  (float)(rcFlashcardTab.y + (rcFlashcardTab.dy - (int)rFc.Height) / 2)),
+                  chipText);
     // Draw Sessions chip
     pickBrushes(2, chipFill, chipText);
     g->FillRectangle(chipFill, rcSessionsTab.x, rcSessionsTab.y, rcSessionsTab.dx, rcSessionsTab.dy);
     g->DrawRectangle(&tabBorderPen, rcSessionsTab.x, rcSessionsTab.y, rcSessionsTab.dx, rcSessionsTab.dy);
     g->DrawString(ToWStrTemp(Str(sessionsLabel)).s, -1, &fontLabel,
-                  Gdiplus::PointF((float)(rcSessionsTab.x + tabPad), (float)(rcSessionsTab.y + (rcSessionsTab.dy - (int)rSessions.Height) / 2)), chipText);
+                  Gdiplus::PointF((float)(rcSessionsTab.x + tabPad),
+                                  (float)(rcSessionsTab.y + (rcSessionsTab.dy - (int)rSessions.Height) / 2)),
+                  chipText);
 
     // Build ranked list (same logic as HomeStatsWnd)
     Vec<FileState*> all;
@@ -2076,7 +2153,10 @@ void HomeStudyHistoryWnd::Paint(VirtWndPaintCtx& ctx) {
             int bestIdx = -1, bestTs = 0;
             for (int i = 0; i < len(ranked); i++) {
                 int ts = ranked[i]->lastActivityTs;
-                if (ts > bestTs) { bestTs = ts; bestIdx = i; }
+                if (ts > bestTs) {
+                    bestTs = ts;
+                    bestIdx = i;
+                }
             }
             if (bestIdx >= 0) {
                 pinnedFs = ranked[bestIdx];
@@ -2085,7 +2165,11 @@ void HomeStudyHistoryWnd::Paint(VirtWndPaintCtx& ctx) {
             } else {
                 for (int i = 0; i < len(all); i++) {
                     int at = -1;
-                    for (int j = 0; j < len(ranked); j++) if (ranked[j] == all[i]) { at = j; break; }
+                    for (int j = 0; j < len(ranked); j++)
+                        if (ranked[j] == all[i]) {
+                            at = j;
+                            break;
+                        }
                     if (at >= 0) {
                         pinnedFs = ranked[at];
                         for (int j = at; j > 0; j--) ranked[j] = ranked[j - 1];
@@ -2106,8 +2190,10 @@ void HomeStudyHistoryWnd::Paint(VirtWndPaintCtx& ctx) {
                 bool groupExists = false;
                 if (gGlobalPrefs && gGlobalPrefs->tabGroups) {
                     for (int j = 0; j < len(*gGlobalPrefs->tabGroups); j++) {
-                        if ((*gGlobalPrefs->tabGroups)[j] && str::EqI(sessionEntries[i].name, (*gGlobalPrefs->tabGroups)[j]->name)) {
-                            groupExists = true; break;
+                        if ((*gGlobalPrefs->tabGroups)[j] &&
+                            str::EqI(sessionEntries[i].name, (*gGlobalPrefs->tabGroups)[j]->name)) {
+                            groupExists = true;
+                            break;
                         }
                     }
                 }
@@ -2120,13 +2206,18 @@ void HomeStudyHistoryWnd::Paint(VirtWndPaintCtx& ctx) {
             while (j >= 0) {
                 int curSec = filtered[j].readSec + filtered[j].fcSec;
                 if (curSec >= e.readSec + e.fcSec) break;
-                filtered[j + 1] = filtered[j]; j--;
+                filtered[j + 1] = filtered[j];
+                j--;
             }
             filtered[j + 1] = e;
         }
-        int pinnedSessIdx = -1; u32 pinnedSessTs = 0;
+        int pinnedSessIdx = -1;
+        u32 pinnedSessTs = 0;
         for (int i = 0; i < len(filtered); i++) {
-            if (filtered[i].lastUsedTs > pinnedSessTs) { pinnedSessTs = filtered[i].lastUsedTs; pinnedSessIdx = i; }
+            if (filtered[i].lastUsedTs > pinnedSessTs) {
+                pinnedSessTs = filtered[i].lastUsedTs;
+                pinnedSessIdx = i;
+            }
         }
         if (pinnedSessIdx > 0) {
             SessionStatEntry pinned = filtered[pinnedSessIdx];
@@ -2141,7 +2232,8 @@ void HomeStudyHistoryWnd::Paint(VirtWndPaintCtx& ctx) {
 
     int y = b.y + pad + dpi(28); // below chips
     int rowDy = dpi(17);
-    SYSTEMTIME st{}; GetLocalTime(&st);
+    SYSTEMTIME st{};
+    GetLocalTime(&st);
     int todayKey = (int)st.wYear * 10000 + (int)st.wMonth * 100 + (int)st.wDay;
     int readTodaySec = ProfileDataReadingDaySec(todayKey);
     int readTotalSec = ProfileDataReadingTotalSec();
@@ -2149,8 +2241,11 @@ void HomeStudyHistoryWnd::Paint(VirtWndPaintCtx& ctx) {
     int fcTotalSec = ProfileDataStudyTotalSec();
     int fcTodayCards = ProfileDataStudyDayCards(todayKey);
     int fcTotalCards = ProfileDataStudyTotalCards();
-    TempStr totalsRead = fmt("Read: Today %s | Total: %s", Str(HomeStatsFormatMinTemp(readTodaySec)), Str(HomeStatsFormatMinTemp(readTotalSec)));
-    TempStr totalsFc = fmt("Flashcards: Today %d cards / %s | Total: %d cards / %s", fcTodayCards, Str(HomeStatsFormatMinTemp(fcTodaySec)), fcTotalCards, Str(HomeStatsFormatMinTemp(fcTotalSec)));
+    TempStr totalsRead = fmt("Read: Today %s | Total: %s", Str(HomeStatsFormatMinTemp(readTodaySec)),
+                             Str(HomeStatsFormatMinTemp(readTotalSec)));
+    TempStr totalsFc =
+        fmt("Flashcards: Today %d cards / %s | Total: %d cards / %s", fcTodayCards,
+            Str(HomeStatsFormatMinTemp(fcTodaySec)), fcTotalCards, Str(HomeStatsFormatMinTemp(fcTotalSec)));
     int totalsAvailW = b.dx - 2 * pad;
     Gdiplus::RectF totalsMeasure;
     g->MeasureString(ToWStrTemp(Str(totalsRead)).s, -1, &fontLabel, Gdiplus::PointF(0, 0), &totalsMeasure);
@@ -2192,8 +2287,11 @@ void HomeStudyHistoryWnd::Paint(VirtWndPaintCtx& ctx) {
         int readSec = 0, fcSec = 0, fcCards = 0, total = 0, sec = 0;
         if (isSessions) {
             baseName = Str(entry->name.s, entry->name.len);
-            readSec = entry->readSec; fcSec = entry->fcSec; fcCards = entry->fcCards;
-            total = readSec + fcSec; sec = total;
+            readSec = entry->readSec;
+            fcSec = entry->fcSec;
+            fcCards = entry->fcCards;
+            total = readSec + fcSec;
+            sec = total;
         } else {
             baseName = path::GetBaseNameTemp(fs->filePath);
             sec = (statsTab == 1) ? fs->flashcardStudyTimeSec : fs->readingTimeSec;
@@ -2201,7 +2299,8 @@ void HomeStudyHistoryWnd::Paint(VirtWndPaintCtx& ctx) {
         TempStr timeTxt, sessReadTxt, sessFcTxt, sessTotalTxt;
         if (isSessions) {
             sessReadTxt = HomeStatsFormatMinTemp(readSec);
-            sessFcTxt = fcCards > 0 ? fmt("%s (%d)", Str(HomeStatsFormatMinTemp(fcSec)), fcCards) : HomeStatsFormatMinTemp(fcSec);
+            sessFcTxt = fcCards > 0 ? fmt("%s (%d)", Str(HomeStatsFormatMinTemp(fcSec)), fcCards)
+                                    : HomeStatsFormatMinTemp(fcSec);
             sessTotalTxt = HomeStatsFormatMinTemp(total);
         } else if (statsTab == 1 && fs->flashcardCardsDone > 0) {
             timeTxt = fmt("%d cards / %s", fs->flashcardCardsDone, Str(HomeStatsFormatMinTemp(sec)));
@@ -2236,50 +2335,83 @@ void HomeStudyHistoryWnd::Paint(VirtWndPaintCtx& ctx) {
             if (sessColW < dpi(12)) sessColW = dpi(12);
             const TempStr* sessTxts[3] = {&sessReadTxt, &sessFcTxt, &sessTotalTxt};
             for (int c = 0; c < 3; c++) {
-                Gdiplus::RectF cRc((float)(colTimeL + c * (sessColW + sessGap)), (float)rowY, (float)sessColW, (float)rowDy);
+                Gdiplus::RectF cRc((float)(colTimeL + c * (sessColW + sessGap)), (float)rowY, (float)sessColW,
+                                   (float)rowDy);
                 g->DrawString(ToWStrTemp(Str(*sessTxts[c])).s, -1, &fontLabel, cRc, &sfCell, &valBrush);
             }
         } else {
             Gdiplus::RectF timeRc((float)colTimeL, (float)rowY, (float)(colTimeR - colTimeL), (float)rowDy);
             g->DrawString(ToWStrTemp(Str(timeTxt)).s, -1, &fontLabel, timeRc, &sfCell, &valBrush);
         }
-        int barW = isSessions ? (int)(((float)total / (float)maxSecRanked) * (float)barMaxW) : (int)(((float)sec / (float)maxSecRanked) * (float)barMaxW);
+        int barW = isSessions ? (int)(((float)total / (float)maxSecRanked) * (float)barMaxW)
+                              : (int)(((float)sec / (float)maxSecRanked) * (float)barMaxW);
         if (barW > barMaxW) barW = barMaxW;
         if (sec > 0 && barW < 2) barW = 2;
         g->FillRectangle(&barBrush, barStartX, rowY + dpi(4), barW, rowDy - dpi(9));
     }
     if (rankCount == 0) {
-        if (statsTab == 1) g->DrawString(L"Study flashcards to collect stats", -1, &fontLabel, Gdiplus::PointF((float)(b.x + pad), (float)y), &txtBrush);
-        else if (statsTab == 2) g->DrawString(L"Study with a tab group active to collect session stats", -1, &fontLabel, Gdiplus::PointF((float)(b.x + pad), (float)y), &txtBrush);
-        else g->DrawString(L"Read with auto-scroll to collect stats", -1, &fontLabel, Gdiplus::PointF((float)(b.x + pad), (float)y), &txtBrush);
+        if (statsTab == 1)
+            g->DrawString(L"Study flashcards to collect stats", -1, &fontLabel,
+                          Gdiplus::PointF((float)(b.x + pad), (float)y), &txtBrush);
+        else if (statsTab == 2)
+            g->DrawString(L"Study with a tab group active to collect session stats", -1, &fontLabel,
+                          Gdiplus::PointF((float)(b.x + pad), (float)y), &txtBrush);
+        else
+            g->DrawString(L"Read with auto-scroll to collect stats", -1, &fontLabel,
+                          Gdiplus::PointF((float)(b.x + pad), (float)y), &txtBrush);
     } else if (rankCount > rankRows) {
         if (statsTab == 2) {
             TempStr more = fmt("%d groups - scroll", rankCount);
-            g->DrawString(ToWStrTemp(Str(more)).s, -1, &fontLabel, Gdiplus::PointF((float)(b.x + pad), (float)(listBottom + dpi(1))), &txtBrush);
+            g->DrawString(ToWStrTemp(Str(more)).s, -1, &fontLabel,
+                          Gdiplus::PointF((float)(b.x + pad), (float)(listBottom + dpi(1))), &txtBrush);
         } else {
             TempStr more = fmt("%d books - scroll", rankCount);
-            g->DrawString(ToWStrTemp(Str(more)).s, -1, &fontLabel, Gdiplus::PointF((float)(b.x + pad), (float)(listBottom + dpi(1))), &txtBrush);
+            g->DrawString(ToWStrTemp(Str(more)).s, -1, &fontLabel,
+                          Gdiplus::PointF((float)(b.x + pad), (float)(listBottom + dpi(1))), &txtBrush);
         }
     }
     if (totalsTwoLines) {
-        g->DrawString(ToWStrTemp(Str(totalsRead)).s, -1, &fontLabel, Gdiplus::PointF((float)(b.x + pad), (float)(b.y + b.dy - pad - dpi(26))), &valBrush);
-        g->DrawString(ToWStrTemp(Str(totalsFc)).s, -1, &fontLabel, Gdiplus::PointF((float)(b.x + pad), (float)(b.y + b.dy - pad - dpi(13))), &valBrush);
+        g->DrawString(ToWStrTemp(Str(totalsRead)).s, -1, &fontLabel,
+                      Gdiplus::PointF((float)(b.x + pad), (float)(b.y + b.dy - pad - dpi(26))), &valBrush);
+        g->DrawString(ToWStrTemp(Str(totalsFc)).s, -1, &fontLabel,
+                      Gdiplus::PointF((float)(b.x + pad), (float)(b.y + b.dy - pad - dpi(13))), &valBrush);
     } else {
         TempStr totalsAll = fmt("%s    %s", Str(totalsRead), Str(totalsFc));
-        g->DrawString(ToWStrTemp(Str(totalsAll)).s, -1, &fontLabel, Gdiplus::PointF((float)(b.x + pad), (float)(b.y + b.dy - pad - dpi(13))), &valBrush);
+        g->DrawString(ToWStrTemp(Str(totalsAll)).s, -1, &fontLabel,
+                      Gdiplus::PointF((float)(b.x + pad), (float)(b.y + b.dy - pad - dpi(13))), &valBrush);
     }
     // Separator at bottom
     Gdiplus::Pen sepPen(GpCol(ac.separator));
     g->DrawLine(&sepPen, (float)b.x, (float)(b.y + b.dy - 1), (float)(b.x + b.dx), (float)(b.y + b.dy - 1));
 }
 
-bool HomeStudyHistoryWnd::OnMouseDown(VirtWndMouseEvent& e) { return !bounds.IsEmpty(); }
+bool HomeStudyHistoryWnd::OnMouseDown(VirtWndMouseEvent& e) {
+    return !bounds.IsEmpty();
+}
 
 bool HomeStudyHistoryWnd::OnMouseUp(VirtWndMouseEvent& e) {
     Point pt{e.pt.x + bounds.x, e.pt.y + bounds.y};
-    if (rcReadTab.Contains(pt)) { if (statsTab != 0) { statsTab = 0; HwndInvalidate(win->hwndCanvas); } return true; }
-    if (rcFlashcardTab.Contains(pt)) { if (statsTab != 1) { statsTab = 1; HwndInvalidate(win->hwndCanvas); } return true; }
-    if (rcSessionsTab.Contains(pt)) { if (statsTab != 2) { statsTab = 2; HwndInvalidate(win->hwndCanvas); } return true; }
+    if (rcReadTab.Contains(pt)) {
+        if (statsTab != 0) {
+            statsTab = 0;
+            HwndInvalidate(win->hwndCanvas);
+        }
+        return true;
+    }
+    if (rcFlashcardTab.Contains(pt)) {
+        if (statsTab != 1) {
+            statsTab = 1;
+            HwndInvalidate(win->hwndCanvas);
+        }
+        return true;
+    }
+    if (rcSessionsTab.Contains(pt)) {
+        if (statsTab != 2) {
+            statsTab = 2;
+            HwndInvalidate(win->hwndCanvas);
+        }
+        return true;
+    }
     return true;
 }
 
@@ -2296,7 +2428,10 @@ bool HomeStudyHistoryWnd::OnMouseWheel(VirtWndMouseEvent& e) {
     int newScroll = rankScroll + step * 3;
     if (newScroll > rankCount - rankRows) newScroll = rankCount - rankRows;
     if (newScroll < 0) newScroll = 0;
-    if (newScroll != rankScroll) { rankScroll = newScroll; HwndInvalidate(win->hwndCanvas); }
+    if (newScroll != rankScroll) {
+        rankScroll = newScroll;
+        HwndInvalidate(win->hwndCanvas);
+    }
     return true;
 }
 
@@ -2304,7 +2439,9 @@ bool HomeStudyHistoryWnd::OnSetCursor(Point pt) {
     Point ptAbs{pt.x + bounds.x, pt.y + bounds.y};
     if (rcReadTab.Contains(ptAbs) || rcFlashcardTab.Contains(ptAbs) || rcSessionsTab.Contains(ptAbs)) {
         SetCursorCached(IDC_HAND);
-    } else { SetCursorCached(IDC_ARROW); }
+    } else {
+        SetCursorCached(IDC_ARROW);
+    }
     return true;
 }
 
@@ -2332,8 +2469,8 @@ struct HomePageLayoutCache {
     Rect rcSearchBorder;
     Rect rcSearchClear;
     Rect rcStudyHistory; // study history band (ranking column)
-    Rect rcStats;    // heatmap/graph band (empty = hidden)
-    Rect rcBooksHdr; // books-section title rect (D1)
+    Rect rcStats;        // heatmap/graph band (empty = hidden)
+    Rect rcBooksHdr;     // books-section title rect (D1)
     Rect rcIconOpen;
     Rect rcIconListView;
     Rect rcIconThumbnailView;
@@ -2686,9 +2823,8 @@ static void LayoutHomePage(HomePageLayout& l) {
     if (twoColumnMode) {
         fixedTop = hdrY0 + statsHdrSize.dy + statsGapY + topBandDy + booksSepGapY + booksHdrSize.dy + searchAreaDyPre;
     } else {
-        fixedTop = hdrY0 + statsHdrSize.dy + statsGapY
-                 + studyHistoryBandDy + statsGapBetweenBands
-                 + heatmapBandDy + booksSepGapY + booksHdrSize.dy + searchAreaDyPre;
+        fixedTop = hdrY0 + statsHdrSize.dy + statsGapY + studyHistoryBandDy + statsGapBetweenBands + heatmapBandDy +
+                   booksSepGapY + booksHdrSize.dy + searchAreaDyPre;
     }
     int totalContentDy = fixedTop + thumbsContentDy;
     int maxScrollY = std::max(0, totalContentDy - contentBottomY);
@@ -2984,6 +3120,7 @@ static void LayoutHomePage(HomePageLayout& l) {
     // This is the single source of truth for rcGrid, cellDx, cellDy, cellGap,
     // rowGap, labelDx, firstCol, monthStartCol[], monthBorderAlt[].
     // Paint() only READS these fields — fixes hover flicker (D1/D4).
+    // F2: Narrow windows show only the last N weeks (N <= 53) with cell >= 6px.
     if (chrome->stats && !l.rcStats.IsEmpty()) {
         Rect b = l.rcStats;
         auto dpi = [&](int v) { return DpiScale(win->hwndFrame, v); };
@@ -3003,17 +3140,8 @@ static void LayoutHomePage(HomePageLayout& l) {
         // cellHeightPitch: max square size that fits 7 rows + 6 gaps
         int cellHeightPitch = (availGridDy - 6 * rowGap) / 7;
         if (cellHeightPitch < 2) cellHeightPitch = 2;
-        // cellWidthPitch: max square size that fits 53 cols + 52 gaps
-        int cellWidthPitch = (gridW - 52 * cellGap) / 53;
-        if (cellWidthPitch < 2) cellWidthPitch = 2;
-        // ALWAYS square: pick the smaller pitch
-        int cellSize = (cellWidthPitch < cellHeightPitch) ? cellWidthPitch : cellHeightPitch;
 
-        int gridDy = 7 * (cellSize + rowGap) - rowGap;
-        int gridDx = 53 * (cellSize + cellGap) - cellGap;
-        Rect rcGrid = {heatX0 + labelDx, topUsable, gridDx, gridDy};
-
-        // Compute month mapping for the browsed year
+        // Compute month mapping for the browsed year (needed for visible range)
         int year = chrome->stats->year;
         if (year == 0) {
             SYSTEMTIME st{};
@@ -3029,6 +3157,56 @@ static void LayoutHomePage(HomePageLayout& l) {
             monthStartCol[m] = (firstCol + HomeStatsDoyOfMonthFirst(year, m) - 1) / 7;
             monthBorderAlt[m] = (m % 2 == 0); // Jan=gray, Feb=silver, ...
         }
+        int daysInYear = HomeStatsDaysInYear(year);
+
+        // F2: Determine visible week columns (N) so cell >= 6px.
+        // Start with 53 cols; if cellWidthPitch < 6, reduce N until >= 6 or floor (13).
+        // Show the LAST N weeks (most recent) -> firstVisibleCol = 53 - N.
+        const int fullCols = 53;
+        const int minCellPx = 6;
+        const int minCols = 13; // floor: don't go below 13 weeks
+        int visibleCols = fullCols;
+        int cellWidthPitch = (gridW - (visibleCols - 1) * cellGap) / visibleCols;
+        if (cellWidthPitch < minCellPx) {
+            // Reduce visibleCols until cellWidthPitch >= minCellPx or hit minCols
+            for (int n = fullCols - 1; n >= minCols; n--) {
+                int pitch = (gridW - (n - 1) * cellGap) / n;
+                if (pitch >= minCellPx) {
+                    visibleCols = n;
+                    cellWidthPitch = pitch;
+                    break;
+                }
+            }
+            // If even minCols doesn't reach 6px, clamp to minCols and accept smaller cell
+            if (visibleCols == fullCols) { // loop didn't find a fit
+                visibleCols = minCols;
+                cellWidthPitch = (gridW - (visibleCols - 1) * cellGap) / visibleCols;
+                if (cellWidthPitch < 2) cellWidthPitch = 2;
+            }
+        }
+        // If 53 cols fit at >=6px, cellWidthPitch is already correct
+        // ALWAYS square: pick the smaller pitch
+        int cellSize = (cellWidthPitch < cellHeightPitch) ? cellWidthPitch : cellHeightPitch;
+
+        // Visible range: last N week columns
+        int firstVisibleCol = fullCols - visibleCols;
+        // Compute first/last visible day-of-year for the visible columns
+        int firstVisibleDoy = 1;
+        int lastVisibleDoy = daysInYear;
+        if (visibleCols < fullCols) {
+            // First visible day = first day of firstVisibleCol
+            int firstDoyOfCol = firstVisibleCol * 7 - firstCol + 1;
+            if (firstDoyOfCol < 1) firstDoyOfCol = 1;
+            firstVisibleDoy = firstDoyOfCol;
+            // Last visible day = last day of last visible column (col 52)
+            int lastDoyOfCol = fullCols * 7 - firstCol;
+            if (lastDoyOfCol > daysInYear) lastDoyOfCol = daysInYear;
+            lastVisibleDoy = lastDoyOfCol;
+        }
+
+        int gridDy = 7 * (cellSize + rowGap) - rowGap;
+        int gridDx = visibleCols * (cellSize + cellGap) - cellGap;
+        Rect rcGrid = {heatX0 + labelDx, topUsable, gridDx, gridDy};
 
         // Store in HomeStatsWnd (single source of truth)
         chrome->stats->rcGrid = rcGrid;
@@ -3042,6 +3220,11 @@ static void LayoutHomePage(HomePageLayout& l) {
             chrome->stats->monthStartCol[m] = monthStartCol[m];
             chrome->stats->monthBorderAlt[m] = monthBorderAlt[m];
         }
+        // F2: visible range
+        chrome->stats->firstVisibleCol = firstVisibleCol;
+        chrome->stats->visibleCols = visibleCols;
+        chrome->stats->firstVisibleDoy = firstVisibleDoy;
+        chrome->stats->lastVisibleDoy = lastVisibleDoy;
     }
 }
 
@@ -3258,37 +3441,44 @@ TempStr HomeGeometryResultTemp(int* exitCodeOut) {
     // Debug: always dump cache state even if invalid
     str::Builder outDbg;
     outDbg.Append(fmt("OK cacheValid=%d\n", c.valid ? 1 : 0));
-    outDbg.Append(fmt("rcStudyHistory=%d,%d,%d,%d\n", c.rcStudyHistory.x, c.rcStudyHistory.y, c.rcStudyHistory.dx, c.rcStudyHistory.dy));
+    outDbg.Append(fmt("rcStudyHistory=%d,%d,%d,%d\n", c.rcStudyHistory.x, c.rcStudyHistory.y, c.rcStudyHistory.dx,
+                      c.rcStudyHistory.dy));
     outDbg.Append(fmt("rcStats=%d,%d,%d,%d\n", c.rcStats.x, c.rcStats.y, c.rcStats.dx, c.rcStats.dy));
     outDbg.Append(fmt("rcBooksHdr=%d,%d,%d,%d\n", c.rcBooksHdr.x, c.rcBooksHdr.y, c.rcBooksHdr.dx, c.rcBooksHdr.dy));
-    outDbg.Append(fmt("rcThumbsArea=%d,%d,%d,%d\n", c.rcThumbsArea.x, c.rcThumbsArea.y, c.rcThumbsArea.dx, c.rcThumbsArea.dy));
-    outDbg.Append(fmt("totalContentDy=%d thumbsVisibleDy=%d scrollY=%d\n", c.totalContentDy, c.thumbsVisibleDy, c.scrollY));
+    outDbg.Append(
+        fmt("rcThumbsArea=%d,%d,%d,%d\n", c.rcThumbsArea.x, c.rcThumbsArea.y, c.rcThumbsArea.dx, c.rcThumbsArea.dy));
+    outDbg.Append(
+        fmt("totalContentDy=%d thumbsVisibleDy=%d scrollY=%d\n", c.totalContentDy, c.thumbsVisibleDy, c.scrollY));
     outDbg.Append(fmt("canvasRc=%d,%d,%d,%d\n", c.canvasRc.x, c.canvasRc.y, c.canvasRc.dx, c.canvasRc.dy));
-    
+
     if (!c.valid) {
         if (exitCodeOut) *exitCodeOut = 2;
         return ToStrTemp(outDbg);
     }
     str::Builder out;
     out.Append(fmt("OK\n"));
-    out.Append(fmt("rcStudyHistory=%d,%d,%d,%d\n", c.rcStudyHistory.x, c.rcStudyHistory.y, c.rcStudyHistory.dx, c.rcStudyHistory.dy));
+    out.Append(fmt("rcStudyHistory=%d,%d,%d,%d\n", c.rcStudyHistory.x, c.rcStudyHistory.y, c.rcStudyHistory.dx,
+                   c.rcStudyHistory.dy));
     out.Append(fmt("rcStats=%d,%d,%d,%d\n", c.rcStats.x, c.rcStats.y, c.rcStats.dx, c.rcStats.dy));
     out.Append(fmt("rcBooksHdr=%d,%d,%d,%d\n", c.rcBooksHdr.x, c.rcBooksHdr.y, c.rcBooksHdr.dx, c.rcBooksHdr.dy));
-    out.Append(fmt("rcThumbsArea=%d,%d,%d,%d\n", c.rcThumbsArea.x, c.rcThumbsArea.y, c.rcThumbsArea.dx, c.rcThumbsArea.dy));
-    out.Append(fmt("totalContentDy=%d thumbsVisibleDy=%d scrollY=%d\n", c.totalContentDy, c.thumbsVisibleDy, c.scrollY));
-    
+    out.Append(
+        fmt("rcThumbsArea=%d,%d,%d,%d\n", c.rcThumbsArea.x, c.rcThumbsArea.y, c.rcThumbsArea.dx, c.rcThumbsArea.dy));
+    out.Append(
+        fmt("totalContentDy=%d thumbsVisibleDy=%d scrollY=%d\n", c.totalContentDy, c.thumbsVisibleDy, c.scrollY));
+
     // Heatmap cell info
     if (chrome->stats) {
-        out.Append(fmt("cellDx=%d cellDy=%d rcGrid=%d,%d,%d,%d\n", 
-            chrome->stats->cellDx, chrome->stats->cellDy,
-            chrome->stats->rcGrid.x, chrome->stats->rcGrid.y, chrome->stats->rcGrid.dx, chrome->stats->rcGrid.dy));
+        out.Append(fmt("cellDx=%d cellDy=%d rcGrid=%d,%d,%d,%d\n", chrome->stats->cellDx, chrome->stats->cellDy,
+                       chrome->stats->rcGrid.x, chrome->stats->rcGrid.y, chrome->stats->rcGrid.dx,
+                       chrome->stats->rcGrid.dy));
         // Month mapping
         for (int m = 1; m <= 12; m++) {
             int c0 = chrome->stats->monthStartCol[m];
-            int c1 = (m < 12) ? chrome->stats->monthStartCol[m+1] : 53;
-            out.Append(fmt("month%d: col=%d-%d border=%s\n", m, c0, c1-1, Str(chrome->stats->monthBorderAlt[m] ? "silver" : "gray")));
+            int c1 = (m < 12) ? chrome->stats->monthStartCol[m + 1] : 53;
+            out.Append(fmt("month%d: col=%d-%d border=%s\n", m, c0, c1 - 1,
+                           Str(chrome->stats->monthBorderAlt[m] ? "silver" : "gray")));
         }
-        
+
         // Border parity mismatch check: compare actual day month vs column-based month
         int daysInYear = HomeStatsDaysInYear(chrome->stats->year);
         int mismatches = 0;
@@ -3311,7 +3501,7 @@ TempStr HomeGeometryResultTemp(int* exitCodeOut) {
             }
         }
         out.Append(fmt("borderMismatches=%d\n", mismatches));
-        
+
         // Report week columns that span two months
         out.Append("splitWeeks=");
         bool first = true;
@@ -3332,13 +3522,57 @@ TempStr HomeGeometryResultTemp(int* exitCodeOut) {
         }
         out.Append("\n");
     }
-    
+
     // Hover state
     if (chrome->stats) {
-        out.Append(fmt("hoverFadeAlpha=%d hoverDay=%d hoverFadeTimerActive=%d\n",
-            chrome->stats->hoverFadeAlpha, chrome->stats->hoverDay, chrome->stats->hoverFadeTimer != 0 ? 1 : 0));
+        out.Append(fmt("hoverFadeAlpha=%d hoverDay=%d hoverFadeTimerActive=%d\n", chrome->stats->hoverFadeAlpha,
+                       chrome->stats->hoverDay, chrome->stats->hoverFadeTimer != 0 ? 1 : 0));
     }
-    
+
+    // F4: Extended probe data
+    if (chrome->stats) {
+        // Visible range (F2)
+        out.Append(fmt("firstVisibleCol=%d visibleCols=%d firstVisibleDoy=%d lastVisibleDoy=%d\n",
+                       chrome->stats->firstVisibleCol, chrome->stats->visibleCols, chrome->stats->firstVisibleDoy,
+                       chrome->stats->lastVisibleDoy));
+        // Fill family verification: report which family each visible month uses
+        // (gray-border months -> peru, silver-border months -> silver)
+        out.Append("monthFillFamily=");
+        bool firstFam = true;
+        for (int m = 1; m <= 12; m++) {
+            // Only report for months that intersect visible range
+            int c0 = chrome->stats->monthStartCol[m];
+            int c1 = (m < 12) ? chrome->stats->monthStartCol[m + 1] : 53;
+            if (c1 <= chrome->stats->firstVisibleCol ||
+                c0 >= chrome->stats->firstVisibleCol + chrome->stats->visibleCols) {
+                continue;
+            }
+            if (!firstFam) out.Append(",");
+            out.Append(fmt("%d:%s", m, Str(chrome->stats->monthBorderAlt[m] ? "silver" : "peru")));
+            firstFam = false;
+        }
+        out.Append("\n");
+        // TODAY cell verification
+        int todayDoyProbe = 0;
+        if (chrome->stats->year != 0) {
+            SYSTEMTIME st{};
+            GetLocalTime(&st);
+            if ((int)st.wYear == chrome->stats->year) {
+                struct tm t{};
+                t.tm_year = st.wYear - 1900;
+                t.tm_mon = st.wMonth - 1;
+                t.tm_mday = st.wDay;
+                t.tm_isdst = -1;
+                time_t tt = mktime(&t);
+                struct tm lt{};
+                if (tt != (time_t)-1 && localtime_s(&lt, &tt) == 0) {
+                    todayDoyProbe = lt.tm_yday + 1;
+                }
+            }
+        }
+        out.Append(fmt("todayDoy=%d\n", todayDoyProbe));
+    }
+
     if (exitCodeOut) *exitCodeOut = 0;
     return ToStrTemp(out);
 }
