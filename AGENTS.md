@@ -52,6 +52,7 @@ TumatraPDF is a fork of SumatraPDF (upstream baseline ~912ecf2, Aug 2026) — Wi
 | `CHANGELOG.md` (root)                                | per-version public changelog (v1.0.x releases, Keep a Changelog style, release checklist)                                                                                                                                              | agents/users |
 | `LICENSE` / `SECURITY.md` / `CONTRIBUTING.md` (root) | GitHub community-health files: GPL-3.0 (verbatim text), vuln reporting, contributor ground rules                                                                                                                                       | users        |
 | `update.txt` (root)                                  | update metadata served to running apps (`Latest:` + download URLs) — bumped by the release workflow, do NOT hand-edit except the URL keys                                                                                              | agents       |
+| `FLASHCARD_ALGORITHM.md` (root)                      | the official SuperMemo/SM-2 spec + our scheduler map + the completion plan                                                                                                                                                       | agents       |
 | `Design_Guidelines.md` (root)                        | conventions + known traps distilled from sessions. **§6 / §6.2 = UI rules for Win32 dialogs, panels, toolbar, overlays — read before ANY visible UI change; §6.2 ends with the mandatory screenshot verification loop (dark + light)** | agents       |
 | `DEBUG.md` (root)                                    | Win32 toolbar/UI debugging toolchain — win-automation + control pipe pattern for secondary toolbars (Arch Tools, Edit, Flashcard)                                                                                                      | agents       |
 | `FLOW/*.dot`                                         | process maps only (never code architecture — §0b)                                                                                                                                                                                      | agents       |
@@ -296,7 +297,7 @@ _Living document — append patterns/gotchas discovered during development._
 
 # 13. Informativos: English + Caveman (MANDATORY)
 
-All project informativos (`README.md`, `LOG.md`, `TODO.md`, `BUILD.md`, `MERGE.md`, `FLOW/*.dot`) are written in **English, caveman-compressed — always**. No Portuguese in new content; translate PT on sight.
+All project informativos (`README.md`, `LOG.md`, `TODO.md`, `BUILD.md`, `MERGE.md`, `FLOW/*.dot`, `FLASHCARD_ALGORITHM.md`) are written in **English, caveman-compressed — always**. No Portuguese in new content; translate PT on sight.
 
 - Caveman: drop articles/filler/hedging, fragments OK. Preserve EXACTLY: code blocks, inline code, paths, commands, IDs, numbers, table layout, headings.
 - TODO unfinished sections (`[ ]`, pending, awaiting-validation, future plans): translate only, NEVER compress. Done sections (`[x]`/`✅`/COMPLETE/resolved): translate + compress.
