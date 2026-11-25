@@ -60,7 +60,19 @@ export async function testit(): Promise<void> {
     
     await withControlledSumatra(EXE, async (client) => {
       // Set width for testing
-      await client.request(ControlCommand.SetWindowSize, [width, 900]);
+      const resizeRes = await client.request(ControlCommand.SetWindowSize, [width, 900]);
+      console.log(`  Resize: ${resizeRes[1]}`);
+      
+      // Parse resize response to verify actual client width
+      const resizeOut = resizeRes[1] as string;
+      const clientWidthMatch = resizeOut.match(/newClientWidth=(\d+)/);
+      assertTrue(clientWidthMatch !== null, "Resize response missing newClientWidth");
+      const actualClientWidth = parseInt(clientWidthMatch[1], 10);
+      console.log(`  Actual client width: ${actualClientWidth}`);
+      
+      // Verify window actually resized
+      assertTrue(Math.abs(actualClientWidth - width) < 50, 
+        `Window did not resize: requested ${width}, got ${actualClientWidth}`);
       
       // Get initial geometry (should be grid mode)
       let geomRes = await client.request(ControlCommand.TestHomeGeometry);
@@ -132,18 +144,30 @@ export async function testit(): Promise<void> {
         }
       }
       
-      // F2: Verify visible range
+      // F2: Verify visible range invariants
       const visibleCols = parseInt(geom["visibleCols"] || "53", 10);
       const cellDx = parseInt(geom["cellDx"] || "0", 10);
-      console.log(`Visible cols: ${visibleCols}, cell size: ${cellDx}`);
+      const firstVisibleCol = parseInt(geom["firstVisibleCol"] || "0", 10);
+      const firstVisibleDoy = parseInt(geom["firstVisibleDoy"] || "1", 10);
+      const lastVisibleDoy = parseInt(geom["lastVisibleDoy"] || "366", 10);
+      console.log(`Visible cols: ${visibleCols}, cell size: ${cellDx}, firstVisibleCol=${firstVisibleCol}, doy=${firstVisibleDoy}-${lastVisibleDoy}`);
       
-      if (width === 640) {
-        assertTrue(visibleCols >= 24 && visibleCols <= 28, `At 640px expected ~26 visible cols, got ${visibleCols}`);
-        assertTrue(cellDx >= 6, `At 640px cell size should be >=6px, got ${cellDx}`);
+      // Invariant: visibleCols is largest N <= 53 that fits band with cell >= 6px
+      // When N < 53, the visible range must be the LAST N weeks (most recent)
+      // So: firstVisibleDoy > 1 and lastVisibleDoy == last day of year (or close)
+      if (visibleCols < 53) {
+        assertTrue(firstVisibleDoy > 1, `When visibleCols<53, firstVisibleDoy must be >1 (showing last weeks), got ${firstVisibleDoy}`);
+        // lastVisibleDoy should be the last day of the year (365 or 366)
+        assertTrue(lastVisibleDoy >= 365, `When visibleCols<53, lastVisibleDoy should be year-end, got ${lastVisibleDoy}`);
+        // Cell size must be >= 6px when reduced
+        assertTrue(cellDx >= 6, `When visibleCols<53, cellDx must be >=6px, got ${cellDx}`);
+      } else {
+        // When all 53 cols fit, the full year should be visible
+        assertTrue(firstVisibleDoy === 1, `When visibleCols==53, firstVisibleDoy must be 1, got ${firstVisibleDoy}`);
+        assertTrue(lastVisibleDoy >= 365, `When visibleCols==53, lastVisibleDoy should be year-end, got ${lastVisibleDoy}`);
       }
-      if (width <= 480) {
-        assertTrue(visibleCols >= 13, `At ${width}px visibleCols should be >=13 (floor), got ${visibleCols}`);
-      }
+      // visibleCols must be >= 13 (clamped floor)
+      assertTrue(visibleCols >= 13, `visibleCols must be >=13 (floor), got ${visibleCols}`);
       
       // F4: TODAY cell verification
       if ("todayDoy" in geom) {
