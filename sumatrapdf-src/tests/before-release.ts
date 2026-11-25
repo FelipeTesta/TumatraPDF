@@ -42,6 +42,7 @@ import { testit as adHocTabSessionSync2 } from "./ad-hoc-tab-session-sync2.ts";
 import { testit as adHocFcInvariantHermetic } from "./ad-hoc-fc-invariant-hermetic.ts";
 import { testit as adHocHomeGeometry } from "./ad-hoc-home-geometry.ts";
 import { testit as adHocHomeVerify } from "./ad-hoc-home-verify.ts";
+import { testit as adHocFlashcardFilterBookmarks } from "./ad-hoc-flashcard-filter-bookmarks.ts";
 
 const adHocTests: [string, () => void | Promise<void>][] = [
   ["ad-hoc-exif", adHocExif],
@@ -77,6 +78,7 @@ const adHocTests: [string, () => void | Promise<void>][] = [
   ["ad-hoc-fc-invariant-hermetic", adHocFcInvariantHermetic],
   ["ad-hoc-home-geometry", adHocHomeGeometry],
   ["ad-hoc-home-verify", adHocHomeVerify],
+  ["ad-hoc-flashcard-filter-bookmarks", adHocFlashcardFilterBookmarks],
 ];
 
 export async function testit(): Promise<void> {

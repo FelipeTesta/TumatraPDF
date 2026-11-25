@@ -1,0 +1,40 @@
+digraph flashcard_filter_bookmarks {
+  rankdir=TB;
+  node [shape=box, fontname="Consolas", fontsize=10];
+  edge [fontname="Consolas", fontsize=9];
+
+  // Root cause hypothesis
+  hypothesis [label="HYPOTHESIS:\n1. FilterFlattenTocItem recurses into both child AND next\n2. FilterBuildBookmarkItems ALSO walks siblings via for-loop\n=> exponential duplication (N * 2^depth)\n3. FilterBuildBookmarkItems reads tab->currToc (lazy, only set when Bookmarks panel loads)\n=> empty list on first open", shape=note, fillcolor=lightyellow, style=filled];
+
+  // Symbols
+  FilterOptionsDialog [label="FlashcardFilterOptionsDialog\n(opens dialog, calls FilterBuildBookmarkItems)"];
+  FilterBuildBookmarkItems [label="FilterBuildBookmarkItems\n(d->tab->ctrl->GetToc() ← FIX)\nfor each child: FilterFlattenTocItem"];
+  FilterFlattenTocItem [label="FilterFlattenTocItem\n(RECURSIVE)\nitem->child (depth+1)\nitem->next (depth) ← BUG: double walk"];
+  FilterToggleBookmark [label="FilterToggleBookmark\ninjects page-range token\ncalls FilterApplyText"];
+  FilterApplyText [label="FilterApplyText\nsaves filterExpr\nFlashcardApplyStudyOrder\nFlashcardToolbarUpdateState"];
+  FilterOptionsPaint [label="FilterOptionsPaint\npaints dialog UI"];
+  FilterDrawListItem [label="FilterDrawListItem\nowner-draw listbox row\nreads bmItems[idx]"];
+  LoadTocTree [label="LoadTocTree (TableOfContents.cpp)\ntab->ctrl->GetToc()\nSetTocTreeOwner\n→ tab->currToc (BORROWED)"];
+  GetToc [label="EngineBase::GetToc()\nEngineMupdf::GetToc()\ncreates/caches TocTree\nOWNED by engine"];
+  CommandPaletteCollect [label="CommandPaletteCollect.cpp:306\nTocTree* tree = mainWin->ctrl->GetToc()\nCollectTocRec walks child only\nwhile-loop for siblings ← CORRECT"];
+
+  // Relationships
+  FilterOptionsDialog -> FilterBuildBookmarkItems;
+  FilterBuildBookmarkItems -> FilterFlattenTocItem [label="calls for each sibling"];
+  FilterFlattenTocItem -> FilterFlattenTocItem [label="recurse child (depth+1)"];
+  FilterFlattenTocItem -> FilterFlattenTocItem [label="recurse next (depth) BUG", color=red];
+  FilterBuildBookmarkItems -> GetToc [label="FIX: use ctrl->GetToc()"];
+  LoadTocTree -> GetToc [label="panel path"];
+  LoadTocTree -> "tab->currToc" [label="stores BORROWED ref"];
+  FilterBuildBookmarkItems -> "tab->currToc" [label="OLD: reads lazy ref", color=red];
+  CommandPaletteCollect -> GetToc [label="correct pattern"];
+  FilterToggleBookmark -> FilterApplyText;
+  FilterApplyText -> "FlashcardApplyStudyOrder" [label="rebuilds study queue"];
+  FilterOptionsPaint -> FilterDrawListItem [label="WM_DRAWITEM"];
+  FilterDrawListItem -> "d->bmItems[idx]" [label="bounds check at :3131"];
+
+  // Fix plan
+  fix [label="FIX PLAN:\nF1: FilterFlattenTocItem → only recurse child, use while-loop for next\nF2: FilterBuildBookmarkItems → use tab->ctrl->GetToc() (engine-owned)\nF3: add depth cap (64) + item cap (2000), log and stop cleanly\nF4: investigate study+filter breakage (re-entrancy in FilterApplyText?)\nF5: verify checkbox inject/remove, Clear (2s), ON/OFF, cross-doc toggle", shape=note, fillcolor=lightgreen, style=filled];
+
+  hypothesis -> fix;
+}
