@@ -41,7 +41,7 @@ Items ONLY the user can verify live (real book / real build). Flat list; details
 - [ ] BUG-4 contrast one-shot (s36-az): first trim-config open after launch — does the contrast overlay still vanish? (Fix v2 deployed 2026-09-22; note: 2026-10-25 report was a separate save-reload wipe, FIXED.)
 - [ ] TOC-first / torn sync s45/s46 (session-tabs): closed books not correctly removed from session — awaiting user validation (s45 pre-sync + s46 7 latent sync bugs).
 - [ ] TC2 save-corruption revalidation (s36-bz, Bug7): save corrupts PDF under TC2 — fix deployed (VirtualToPhysical pageNo + corrupt-annot guard); revalidate on a real book.
-- [ ] Flashcards — user live tests (queue): Filter window + global session (cross-tab jumping, per-book saves); List panel visual on real books; Settings window (folder picker + Drive backup, clear-selected, dark theme); bookmark-mirror on real TOC books (test PDF has none — automated test skipped the mirror).
+- [ ] Flashcards — user live tests (queue): Filter window + global session (cross-tab jumping, per-book saves); List panel visual on real books; Settings window (folder picker + Drive backup, clear-selected, dark theme); bookmark-mirror on real TOC books (automated probe exists: 5 bookmarks, 0 dupes, 3 open/close cycles, study+filter alive — see `tests/ad-hoc-flashcard-filter-bookmarks.ts`; USER: verify on real book with real TOC).
 - [ ] Flashcards — user live tests (s36-az batch): study-time + cards totals format on a real book; session-timer trio (checkbox/minutes edit/progress line/expiry beep+overlay) visual on light+dark; flashcard toolbar single centered labels + checked=bold+underline (no white face); home hides fc/arch toolbars and restores them.
 - [ ] Stats: USER visual review — `tests/tmp/s36-f1-grid.png` + `s36-f1-graph.png` (dark); LIGHT theme pair added but UNVERIFIED (user: dark first, light later).
 - [ ] Ctrl+click flashcard highlight opens List (s34-b): ctrl+click detects `TumatraPDF-Flashcard` author → sidebar; needs a book with flashcard highlights.
@@ -112,9 +112,9 @@ Source: external agent's perf map (archived TEMP/performance-code-arch.dot), cla
 
 ### Tests
 
-- [ ] **FC-M1** tests: SM-2 (intervals/ease cap/relearn), study-JSON roundtrip, due filter — after Image Occlusion lands. See also: planned doc `FLASHCARD_ALGORITHM.md` for the official SuperMemo/SM-2 algorithm spec and phased implementation plan; cross-reference the existing FC-M1 tests item (kept, pointed at this doc).
+- [ ] **FC-M1** tests: SM-2 (intervals/ease cap/relearn), study-JSON roundtrip, due filter — after Image Occlusion lands. See `FLASHCARD_ALGORITHM.md` (official SM-2 spec + the P0-P6 plan).
 
-- [ ] **SM-2 completion**: document the official SuperMemo/SM-2 algorithm in `FLASHCARD_ALGORITHM.md` (being written in parallel); produce a phased plan to complete the hand-rolled 'lite' SM-2 implementation (4 ratings; no repetitions counter, no learning steps, no graduating/easy interval settings, no max interval, no fuzz, no burying) from that spec. Phases: (1) add repetitions counter, (2) add learning steps/easy interval, (3) add max interval + fuzz, (4) add burying logic.
+- [ ] **SM-2 completion**: the doc `FLASHCARD_ALGORITHM.md` exists at repo root: the official SuperMemo/SM-2 spec (with sources) + our scheduler map (file:line) + the completion plan. The plan is a PROPOSAL — nothing implemented yet. Real phases, in order: P0 test harness + deterministic clock seam + pure scheduler function (NOW BLOCKED: no deterministic clock seam today, `time(nullptr)` called directly, so reproducible scheduler test is impossible until P0 lands); P1 state schema v2 + v1→v2 migration; P2 faithful SM-2 core behind opt-in setting; P3 modern refinements as optional advanced settings; P4 session/queue integration; P5 UI feedback; P6 rollout. First real blocker: no deterministic clock seam (time called directly).
 - [ ] **FC-M5** rate keys 1-4 have no visual hint (no rate buttons/tooltips on toolbar).
 
 ### Study preload
