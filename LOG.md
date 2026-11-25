@@ -1,3 +1,43 @@
+## 2026-11-25 (s84) — Update dialog: paint + layout + probe FAIL->PASS (true root causes)
+
+### Fixed
+- Update dialog ("New version available") showed the question but NO BUTTONS (user could not answer).
+  - TRUE ROOT CAUSE 1 (paint): raw `TUMATRA_UPDATE_DIALOG` never handled `WM_DRAWITEM`. Owner-drawn buttons (BS_OWNERDRAW) require parent to paint them via `WM_DRAWITEM` -> `Button::PaintOwnerDrawn`. Missing case in `UpdateDialogWndProc` (UpdateCheck.cpp:690) -> buttons never painted -> user sees question with no buttons.
+  - TRUE ROOT CAUSE 2 (layout): buttons laid out against computed `totalClientH` but `AdjustWindowRectEx` + DWM frame made real client area shorter -> buttons clipped at bottom. Fix: after `SetWindowPos`, re-read REAL client rect (`GetClientRect`), if shorter than needed, grow window (`SetWindowPos` again), then place buttons BOTTOM-ALIGNED in real client rect (`btnY = clientH - pad - btnH`).
+  - TRUE ROOT CAUSE 3 (click IDs): `CreateButton` calls lacked `ctrlId` (100/101) -> `WM_COMMAND` ignored clicks (fell through to IDCANCEL=100 "Don't install").
+  - Double-launch regression avoided: dialog stays PURE (returns 100/101 only); caller (`NotifyUserOfUpdate`) launches ONCE; on launch fail shows theme-safe `MessageBoxWarning` with error and returns without exiting.
+  - Install failure feedback: caller shows `MessageBoxWarning` ("The update could not start. The downloaded file may be blocked by your antivirus - unblock it and try again.") instead of silent fail.
+
+### Added
+- `WM_DRAWITEM` case in `UpdateDialogWndProc` (UpdateCheck.cpp:690) dispatching to `btnDontInstall->PaintOwnerDrawn` / `btnInstall->PaintOwnerDrawn` by `CtlID` (100/101).
+- Layout fix: after `SetWindowPos`, re-read client rect, grow if needed, place buttons bottom-aligned (`btnY = clientH - pad - btnH`).
+- `CreateButton` signature + calls: `ctrlId` param (100 = Don't install, 101 = Install).
+- Layout reorder: create buttons first -> compute `totalClientW` -> measure text with real static width (`totalClientW - 2*pad`).
+- `WM_SETFONT` to buttons with `GetAppFont()`.
+- Caller-side launch failure UI: `MessageBoxWarning` with error msg (theme-safe, no hardcoded RGB).
+- Probe `ad-hoc-update-dialog.ts`: layout verification (buttons fully inside client rect in CLIENT coords), BM_CLICK on Install, asserts exit 101. Pixel paint check removed (PrintWindow doesn't capture owner-drawn reliably); layout check catches clip bug.
+- Probe runs BOTH variants: installerExists=0 ("Download update") + installerExists=1 ("Install and relaunch").
+- Probe timeouts: bounded `Promise.race` on control pipe (15s) and quit (5s) -> no 21-min hangs.
+
+### Changed
+- `CreateButton` signature in `wingui/WinGui.h:276` + `wingui/Button.cpp:198` -> `ctrlId` param (default 0).
+- `UpdateCheck.cpp`: WM_CREATE reorder, text measurement with real static width, bottom-aligned button layout, WM_DRAWITEM dispatch, WM_SETFONT to buttons.
+- `NotifyUserOfUpdate`: on `StartInstallerAutoUpgrade` fail -> `MessageBoxWarning` + return (no exit).
+
+### Verified
+- Probe `ad-hoc-update-dialog.ts`: 3/3 runs PASS (was FAIL on original code - buttons unpainted + clipped). Per run ~4.2s (was 21-min hang).
+- Layout assertions: buttons fully inside client rect in CLIENT coords (`clientRect.bottom <= clientH`, `clientRect.top >= 0`).
+- PNG captures: `tests/tmp/update-dialog-probe-0.png` (Download update) + `update-dialog-probe-1.png` (Install and relaunch) show both buttons COMPLETE, not clipped.
+- Build: clean (0 errors) debug x64; `out/dbg64/TumatraPDF.exe`.
+- `bun scripts/flow-sync.ts` passes (35 checked, 21 with known debt).
+- Graphviz renders `FLOW/DEBUG/update-dialog.dot` (exit 0).
+- WM_DRAWITEM sweep: checked all raw WndProcs hosting repo Buttons -> only UpdateCheck.cpp was missing the case (others: FlashcardToolbar, FlashcardSidebar, SumatraDialogs, SumatraPDF, Wnd framework).
+
+### Notes
+- Only allowed files touched: UpdateCheck.cpp/h, WinGui.h, Button.cpp, ad-hoc-update-dialog.ts, before-release.ts, LOG.md, FLOW/DEBUG/update-dialog.dot.
+- No CHANGELOG/README/update.txt/FLASHCARD_ALGORITHM.md changes.
+- Commit 1: fix + probe + map. Commit 2: LOG.md.
+
 ## 2026-11-25 (s83) — SM-2 spec doc added; scheduler gap map; FLOW maps re-verified + re-stamped; flashcard maps now state SM-2 is lite variant
 
 ### Added
