@@ -40,6 +40,8 @@ import { testit as adHocAlignDeskew } from "./ad-hoc-align-deskew.ts";
 import { testit as adHocTabSessionSync } from "./ad-hoc-tab-session-sync.ts";
 import { testit as adHocTabSessionSync2 } from "./ad-hoc-tab-session-sync2.ts";
 import { testit as adHocFcInvariantHermetic } from "./ad-hoc-fc-invariant-hermetic.ts";
+import { testit as adHocHomeGeometry } from "./ad-hoc-home-geometry.ts";
+import { testit as adHocHomeVerify } from "./ad-hoc-home-verify.ts";
 
 const adHocTests: [string, () => void | Promise<void>][] = [
   ["ad-hoc-exif", adHocExif],
@@ -73,6 +75,8 @@ const adHocTests: [string, () => void | Promise<void>][] = [
   ["ad-hoc-align-save", adHocAlignSave],
   ["ad-hoc-align-deskew", adHocAlignDeskew],
   ["ad-hoc-fc-invariant-hermetic", adHocFcInvariantHermetic],
+  ["ad-hoc-home-geometry", adHocHomeGeometry],
+  ["ad-hoc-home-verify", adHocHomeVerify],
 ];
 
 export async function testit(): Promise<void> {
