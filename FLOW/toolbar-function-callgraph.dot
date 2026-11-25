@@ -1,4 +1,4 @@
-// dot-sync: verified=2026-11-25 refs=dce2bd42af2d
+// dot-sync: verified=2026-11-25 refs=8fd640f0df33
 digraph ToolbarFunctionCallGraph {
     rankdir=LR;
     node [shape=box, style=rounded, fontname="Consolas", fontsize=9];

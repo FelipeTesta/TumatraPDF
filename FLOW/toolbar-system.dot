@@ -1,4 +1,4 @@
-// dot-sync: verified=2026-11-25 refs=cc70ccb6467b
+// dot-sync: verified=2026-11-25 refs=41a6e103ea89
 digraph ToolbarSystem {
     rankdir=TB;
     fontname="Consolas";

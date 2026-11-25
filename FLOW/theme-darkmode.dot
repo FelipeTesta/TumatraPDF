@@ -1,4 +1,4 @@
-// dot-sync: verified=2026-11-25 refs=f39562180554
+// dot-sync: verified=2026-11-25 refs=dcabbe8484c9
 digraph ThemeDarkMode {
     rankdir=TB;
     node [shape=box, style=rounded, fontname="Consolas", fontsize=9];

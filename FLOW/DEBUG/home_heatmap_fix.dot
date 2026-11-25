@@ -8,11 +8,11 @@ digraph HomeHeatmapFix {
         style=dashed;
         color=blue;
         
-        h1 [label="ColX() - monthGapPx removal\nHomePage.cpp:1329-1337", shape=box, color=red];
-        h2 [label="Paint() - cellDx/cellDy formula\nHomePage.cpp:1909-1940", shape=box, color=red];
-        h3 [label="Paint() - month border colors\nHomePage.cpp:1982-2035", shape=box, color=red];
-        h4 [label="Paint() - month labels no overlap\nHomePage.cpp:1969-1981", shape=box, color=red];
-        h5 [label="monthStartCol[] computation\nHomePage.cpp:1952-1954", shape=box, color=green];
+        h1 [label="ColX() - monthGapPx removal\nHomePage.cpp", shape=box, color=red];
+        h2 [label="Paint() - cellDx/cellDy formula\nHomePage.cpp", shape=box, color=red];
+        h3 [label="Paint() - month border colors\nHomePage.cpp", shape=box, color=red];
+        h4 [label="Paint() - month labels no overlap\nHomePage.cpp", shape=box, color=red];
+        h5 [label="monthStartCol[] computation\nHomePage.cpp", shape=box, color=green];
         
         h1 -> h2 [label="geometry"];
         h2 -> h3 [label="cell drawing"];
@@ -24,11 +24,11 @@ digraph HomeHeatmapFix {
         style=dashed;
         color=green;
         
-        v1 [label="LayoutHomePage() - statsGapY, booksSepGapY\nHomePage.cpp:2530-2587", shape=box, color=red];
-        v2 [label="rcStats rect computation\nHomePage.cpp:2647-2651", shape=box, color=red];
-        v3 [label="booksHdrY positioning\nHomePage.cpp:2654-2670", shape=box, color=red];
-        v4 [label="fixedTop / totalContentDy\nHomePage.cpp:2607-2608", shape=box, color=red];
-        v5 [label="minStatsBandDy / maxStatsBandDy\nHomePage.cpp:2571-2572", shape=box, color=red];
+        v1 [label="LayoutHomePage() - statsGapY, booksSepGapY\nHomePage.cpp", shape=box, color=red];
+        v2 [label="rcStats rect computation\nHomePage.cpp", shape=box, color=red];
+        v3 [label="booksHdrY positioning\nHomePage.cpp", shape=box, color=red];
+        v4 [label="fixedTop / totalContentDy\nHomePage.cpp", shape=box, color=red];
+        v5 [label="minStatsBandDy / maxStatsBandDy\nHomePage.cpp", shape=box, color=red];
         
         v1 -> v2 [label="band height"];
         v2 -> v3 [label="stack order"];
@@ -40,8 +40,8 @@ digraph HomeHeatmapFix {
         style=dashed;
         color=orange;
         
-        f1 [label="HomeStatsWnd::hoverDay state\nHomePage.cpp:1281", shape=box, color=red];
-        f2 [label="OnMouseMove - hover detection\nHomePage.cpp:2244-2271", shape=box, color=red];
+        f1 [label="HomeStatsWnd::hoverDay state\nHomePage.cpp", shape=box, color=red];
+        f2 [label="OnMouseMove - hover detection\nHomePage.cpp", shape=box, color=red];
         f3 [label="OnMouseLeave / WM_MOUSELEAVE\nHomePage.cpp:~3589, ~3717", shape=box, color=red];
         f4 [label="ClearHover() ~4293", shape=box, color=red];
         f5 [label="VirtWnd hover state (vwfHovered)", shape=box, color=green];

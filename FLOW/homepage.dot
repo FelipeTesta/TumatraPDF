@@ -1,4 +1,4 @@
-// dot-sync: verified=2026-11-25 refs=77b6e983c8a9
+// dot-sync: verified=2026-11-25 refs=0ff34de932c5
 digraph HomePage {
     // NOTE: Current paint path and layout logic (2026-11-24, sXX)
     // Two-column responsive layout with heatmap visual improvements

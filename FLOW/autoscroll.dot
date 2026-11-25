@@ -1,4 +1,4 @@
-// dot-sync: verified=2026-11-25 refs=dae70a835ee3
+// dot-sync: verified=2026-11-25 refs=0a20954d78ff
 digraph AutoScroll {
     rankdir=TB;
     node [shape=box, style=rounded];

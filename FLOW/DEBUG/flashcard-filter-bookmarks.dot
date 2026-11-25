@@ -16,7 +16,7 @@ digraph flashcard_filter_bookmarks {
   FilterDrawListItem [label="FilterDrawListItem\nowner-draw listbox row\nreads bmItems[idx]"];
   LoadTocTree [label="LoadTocTree (TableOfContents.cpp)\ntab->ctrl->GetToc()\nSetTocTreeOwner\n→ tab->currToc (BORROWED)"];
   GetToc [label="EngineBase::GetToc()\nEngineMupdf::GetToc()\ncreates/caches TocTree\nOWNED by engine"];
-  CommandPaletteCollect [label="CommandPaletteCollect.cpp:306\nTocTree* tree = mainWin->ctrl->GetToc()\nCollectTocRec walks child only\nwhile-loop for siblings ← CORRECT"];
+  CommandPaletteCollect [label="CommandPaletteCollect.cpp\nTocTree* tree = mainWin->ctrl->GetToc()\nCollectTocRec walks child only\nwhile-loop for siblings ← CORRECT"];
 
   // Relationships
   FilterOptionsDialog -> FilterBuildBookmarkItems;
