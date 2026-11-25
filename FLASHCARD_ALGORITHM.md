@@ -305,7 +305,7 @@ No injection point → deterministic scheduler regression test IMPOSSIBLE today.
 
 | Requirement (official, citation) | Ours (file:line) | Gap | User impact | Effort |
 |----------------------------------|------------------|-----|-------------|--------|
-| EF formula: `EF' = EF + 0.1 - (5-q)*(0.08+(5-q)*0.02)` [S1] | `Flashcard.cpp:1736-1772` uses hardcoded deltas (-0.20, -0.15, +0.15) | Formula not implemented; deltas approximate only q=1,2,4; q=3 no EF change correct | Wrong EF evolution for all grades; q=5 not representable | M |
+| EF formula: `EF' = EF + 0.1 - (5-q)*(0.08+(5-q)*0.02)` [S1] | `Flashcard.cpp:1736-1772` uses hardcoded deltas (-0.20, -0.15, +0.15) | Our deltas vs derived: Good 0.00→q=4 0.00 EXACT; Hard -0.15→q=3 -0.14 off by 0.01; Easy +0.15→q=5 +0.10 overshoots 0.05; Again -0.20→q=1 -0.54 far off (milder penalty); q=0 -0.80 collapsed into Again | q=5 representable (Easy); EF evolution off for other grades (Again especially); q=0 vs q=2 distinction lost (Again collapses both) | M |
 | EF floor 1.3 [S1] | `Flashcard.cpp:1768` clamp to [1.3, 2.5] | Floor correct | — | — |
 | Initial EF = 2.5 [S1] | `Flashcard.cpp:1360-1369` parse default; new card gets EF=2.5 via `FlashcardStudyState{}` zero-init then first rating sets | Implicit via first rating path; no explicit initial EF field | New card first interval uses EF=2.5 de facto | S |
 | I(1)=1, I(2)=6, I(n)=I(n-1)*EF [S1] | `Flashcard.cpp:1736-1772` uses `interval*EF` for Good, `interval*EF*1.3` for Easy, `interval*1.2` for Hard | No I(1)=1 / I(2)=6 distinction; no repetition counter `n`; Easy/Hard multipliers are Anki not SM-2 | Intervals diverge from SM-2 from 3rd repetition | M |
