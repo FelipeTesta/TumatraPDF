@@ -48,6 +48,11 @@ DsAccents DsAccentsGet() {
         a.cellGrade[1] = RGB(150, 150, 150);
         a.cellGrade[2] = RGB(190, 190, 190);
         a.cellGrade[3] = RGB(225, 225, 225);
+        // peru/orange family (warm tones for gray-border months)
+        a.cellGradePeru[0] = RGB(80, 50, 30);
+        a.cellGradePeru[1] = RGB(120, 75, 40);
+        a.cellGradePeru[2] = RGB(170, 110, 55);
+        a.cellGradePeru[3] = RGB(210, 145, 75);
 
         // Theme-paired tokens (dark branch)
         a.bgSelToolbar = RGB(27, 29, 33);
@@ -68,6 +73,11 @@ DsAccents DsAccentsGet() {
         a.cellGrade[1] = RGB(175, 175, 175);
         a.cellGrade[2] = RGB(150, 150, 150);
         a.cellGrade[3] = RGB(120, 120, 120);
+        // peru/orange family (deeper tones for white background)
+        a.cellGradePeru[0] = RGB(200, 160, 120);
+        a.cellGradePeru[1] = RGB(180, 130, 85);
+        a.cellGradePeru[2] = RGB(160, 105, 55);
+        a.cellGradePeru[3] = RGB(140, 85, 35);
 
         // Theme-paired tokens (light branch)
         a.bgSelToolbar = RGB(92, 96, 104);
