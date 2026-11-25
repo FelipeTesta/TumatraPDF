@@ -1376,11 +1376,12 @@ int RenderCache::Paint(HDC hdc, Rect bounds, DisplayModel* dm, int pageNo, PageI
 
     Vec<TilePosition> queue;
     queue.Append(TilePosition(0, 0, 0));
+    int queueReadIdx = 0; // read index instead of PopAt(0) to avoid O(N²) memmove
     int renderDelayMin = RENDER_DELAY_UNDEFINED;
     bool neededScaling = false;
 
-    while (len(queue) > 0) {
-        TilePosition tile = queue.PopAt(0);
+    while (queueReadIdx < len(queue)) {
+        TilePosition tile = queue[queueReadIdx++];
         Rect tileOnScreen = GetTileOnScreen(dm, pageNo, rotation, zoom, tile, pi->pageOnScreen, dm->marginTrimEnabled);
         if (tileOnScreen.IsEmpty()) {
             // display an error message when only empty tiles should be drawn (i.e. on page loading errors)
@@ -1411,8 +1412,14 @@ int RenderCache::Paint(HDC hdc, Rect bounds, DisplayModel* dm, int pageNo, PageI
             renderDelayMin = std::min(renderDelay, renderDelayMin);
         }
         // paint tiles from left to right from top to bottom
-        if (tile.res > 0 && len(queue) > 0 && tile.res < queue[0].res) {
-            VecSort(queue, cmpTilePosition);
+        // sort only the unprocessed portion of the queue
+        if (tile.res > 0 && queueReadIdx < len(queue) && tile.res < queue[queueReadIdx].res) {
+            // sort queue[queueReadIdx .. len(queue)-1]
+            int unprocessedLen = len(queue) - queueReadIdx;
+            if (unprocessedLen > 1) {
+                qsort(queue.els + queueReadIdx, unprocessedLen, sizeof(TilePosition),
+                      (int (*)(const void*, const void*))cmpTilePosition);
+            }
         }
     }
 
