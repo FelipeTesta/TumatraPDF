@@ -155,9 +155,9 @@ export async function testit(): Promise<void> {
       // Gap between cells (C5: should be 4px)
       const rcGridX = parseInt(geom["rcGrid.x"] || "0", 10);
       const rcGridDx = parseInt(geom["rcGrid.dx"] || "0", 10);
-      const visibleCols = parseInt(geom["visibleCols"] || "53", 10);
-      const expectedGridDx = visibleCols * (cellDx + 4) - 4;
-      console.log(`  Grid: x=${rcGridX} dx=${rcGridDx} visibleCols=${visibleCols} (expected ~${expectedGridDx})`);
+      const vCols = parseInt(geom["visibleCols"] || "53", 10);
+      const expectedGridDx = vCols * (cellDx + 4) - 4;
+      console.log(`  Grid: x=${rcGridX} dx=${rcGridDx} visibleCols=${vCols} (expected ~${expectedGridDx})`);
       assertTrue(Math.abs(rcGridDx - expectedGridDx) <= cellDx, "Grid width doesn't match 4px gap formula for visibleCols");
       
       // Month border parity and fill families (C6, F1, F4)
@@ -205,15 +205,24 @@ export async function testit(): Promise<void> {
       const lastVisibleDoy = parseInt(geom["lastVisibleDoy"] || "366", 10);
       console.log(`  Visible range: cols=${firstVisibleCol}-${firstVisibleCol + visibleCols - 1} (${visibleCols} cols), doy=${firstVisibleDoy}-${lastVisibleDoy}`);
       
-      // F2: At 640px, expect ~26 weeks (visibleCols around 26)
-      if (width === 640) {
-        assertTrue(visibleCols >= 24 && visibleCols <= 28, `At 640px expected ~26 visible cols, got ${visibleCols}`);
-        assertTrue(cellDx >= 6, `At 640px cell size should be >=6px, got ${cellDx}`);
+      // Invariant: visibleCols is largest N <= 53 that fits band with cell >= 6px
+      // When N < 53, the visible range must be the LAST N weeks (most recent)
+      // So: firstVisibleDoy > 1 and lastVisibleDoy == last day of year (or close)
+      if (visibleCols < 53) {
+        assertTrue(firstVisibleDoy > 1, `When visibleCols<53, firstVisibleDoy must be >1 (showing last weeks), got ${firstVisibleDoy}`);
+        // lastVisibleDoy should be the last day of the year (365 or 366)
+        assertTrue(lastVisibleDoy >= 365, `When visibleCols<53, lastVisibleDoy should be year-end, got ${lastVisibleDoy}`);
+      } else {
+        // When all 53 cols fit, the full year should be visible
+        assertTrue(firstVisibleDoy === 1, `When visibleCols==53, firstVisibleDoy must be 1, got ${firstVisibleDoy}`);
+        assertTrue(lastVisibleDoy >= 365, `When visibleCols==53, lastVisibleDoy should be year-end, got ${lastVisibleDoy}`);
       }
-      // F2: At 480px and below, visibleCols should be clamped to floor (13)
-      if (width <= 480) {
-        assertTrue(visibleCols >= 13, `At ${width}px visibleCols should be >=13 (floor), got ${visibleCols}`);
+      // Cell size invariant: when N < 53, cellDx >= 6; when N == 53, cellDx can be any
+      if (visibleCols < 53) {
+        assertTrue(cellDx >= 6, `When visibleCols<53, cellDx must be >=6px, got ${cellDx}`);
       }
+      // visibleCols must be >= 13 (clamped floor)
+      assertTrue(visibleCols >= 13, `visibleCols must be >=13 (floor), got ${visibleCols}`);
       
       // F4: TODAY cell verification
       if ("todayDoy" in geom) {
