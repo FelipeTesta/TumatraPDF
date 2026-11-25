@@ -2891,16 +2891,30 @@ static WNDPROC gFilterEditOrigProc = nullptr;
 // Flatten the TOC depth-first in document order: an item, then its whole
 // subtree, then its next sibling. Items with no valid page are skipped but
 // still traversed (their children may point to pages).
+// Safety caps: max depth 64, max items 2000 (prevents cycles / malformed outlines).
 static void FilterFlattenTocItem(TocItem* item, int depth, Vec<TocItem*>& flat, Vec<int>& depths) {
-    if (!item) {
+    constexpr int kMaxDepth = 64;
+    constexpr int kMaxItems = 2000;
+    if (!item || depth > kMaxDepth || len(flat) >= kMaxItems) {
+        if (depth > kMaxDepth) {
+            logf("[fc] Filter - depth cap %d reached, stopping traversal\n", kMaxDepth);
+        }
+        if (len(flat) >= kMaxItems) {
+            logf("[fc] Filter - item cap %d reached, stopping traversal\n", kMaxItems);
+        }
         return;
     }
-    if (item->pageNo >= 1) {
-        flat.Append(item);
-        depths.Append(depth);
+    // Iterative sibling walk (while-loop), recurse only into children.
+    // This matches the correct pattern in CommandPaletteCollect.cpp:CollectTocRec.
+    for (TocItem* cur = item; cur && len(flat) < kMaxItems; cur = cur->next) {
+        if (cur->pageNo >= 1) {
+            flat.Append(cur);
+            depths.Append(depth);
+        }
+        if (cur->child) {
+            FilterFlattenTocItem(cur->child, depth + 1, flat, depths);
+        }
     }
-    FilterFlattenTocItem(item->child, depth + 1, flat, depths);
-    FilterFlattenTocItem(item->next, depth, flat, depths);
 }
 
 // Build the bookmark mirror. A bookmark's range runs from its own page to the
@@ -2915,15 +2929,21 @@ static void FilterBuildBookmarkItems(FilterOptionsDialog* d) {
         return;
     }
     int pageCount = dm->PageCount();
-    TocTree* toc = d->tab->currToc;
+    // FIX: obtain TOC from the controller (engine-owned), not from tab->currToc.
+    // tab->currToc is only set when the Bookmarks panel loads (LoadTocTree),
+    // so the filter dialog was empty on first open.
+    // The engine caches the TocTree and owns it; we only borrow the pointer.
+    TocTree* toc = d->tab->ctrl->GetToc();
     if (!toc || !toc->root) {
         logf("[fc] Filter - no TOC, bookmark mirror empty\n");
         return;
     }
     Vec<TocItem*> flat;
     Vec<int> depths;
-    for (TocItem* child = toc->root->child; child; child = child->next) {
-        FilterFlattenTocItem(child, 0, flat, depths);
+    // Walk the root's children (top-level bookmarks). FilterFlattenTocItem
+    // handles the sibling iteration internally via while-loop.
+    if (toc->root->child) {
+        FilterFlattenTocItem(toc->root->child, 0, flat, depths);
     }
     for (int i = 0; i < len(flat); i++) {
         FilterBookmarkItem item;
