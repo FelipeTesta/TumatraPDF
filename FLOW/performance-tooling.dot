@@ -1,4 +1,4 @@
-// dot-sync: verified=2026-11-24 refs=9195ee2db8d1
+// dot-sync: verified=2026-11-25 refs=058ab8f78da2
 digraph PerformanceTooling {
     rankdir=TB;
     node [shape=box, style=rounded, fontname="Consolas", fontsize=9];

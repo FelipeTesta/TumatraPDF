@@ -1,4 +1,4 @@
-// dot-sync: verified=2026-11-24 refs=c6627fb63e16
+// dot-sync: verified=2026-11-25 refs=dc1adc5ffc26
 digraph ToolbarCriticalOrdering {
     rankdir=TB;
     node [shape=box, style=rounded, fontname="Consolas", fontsize=10];

@@ -1,4 +1,4 @@
-// dot-sync: verified=2026-11-24 refs=f1d708336c74
+// dot-sync: verified=2026-11-25 refs=f1d708336c74
 digraph ResourceManagement {
     rankdir=TB;
     node [shape=box, style=rounded, fontname="Consolas", fontsize=9];

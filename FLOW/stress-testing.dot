@@ -1,4 +1,4 @@
-// dot-sync: verified=2026-11-24 refs=f808236201eb
+// dot-sync: verified=2026-11-25 refs=61c56378ed8b
 digraph StressTesting {
     rankdir=TB;
     node [shape=box, style=rounded, fontname="Consolas", fontsize=9];

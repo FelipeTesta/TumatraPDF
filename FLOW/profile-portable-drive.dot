@@ -1,4 +1,4 @@
-// dot-sync: verified=2026-11-24 refs=ffed2df6c06e
+// dot-sync: verified=2026-11-25 refs=ffed2df6c06e
 digraph ProfilePortableDrive {
     rankdir=TB;
     node [shape=box, style=rounded, fontname="Consolas", fontsize=9];

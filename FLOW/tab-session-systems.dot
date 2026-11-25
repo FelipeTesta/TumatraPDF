@@ -1,4 +1,4 @@
-// dot-sync: verified=2026-11-24 refs=97587d8acd5b
+// dot-sync: verified=2026-11-25 refs=476f24008354
 // ===================== TAB SESSION SYSTEM =====================
 // Snapshot 2026-11-21 per-window active group s67/s68. Red dashed = sync gaps found by audit;
 // s46 fix applied : RemoveTab now syncs (pre-sync covers programmatic close),

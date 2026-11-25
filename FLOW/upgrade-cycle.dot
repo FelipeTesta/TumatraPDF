@@ -1,4 +1,4 @@
-// dot-sync: verified=2026-11-24 refs=d20324342ea4
+// dot-sync: verified=2026-11-25 refs=d20324342ea4
 digraph UpgradeCycle {
     rankdir=TB;
     node [shape=box, style=rounded];

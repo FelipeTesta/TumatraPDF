@@ -1,4 +1,4 @@
-// dot-sync: verified=2026-11-24 refs=2afd7f4c18e1
+// dot-sync: verified=2026-11-25 refs=7a96494de82c
 digraph SearchDDEFlow {
     rankdir=TB;
     node [shape=box, style=rounded, fontname="Consolas", fontsize=9];

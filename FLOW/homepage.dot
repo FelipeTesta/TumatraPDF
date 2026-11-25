@@ -1,8 +1,7 @@
-// dot-sync: verified=2026-11-24 refs=56f3c1ca0637
+// dot-sync: verified=2026-11-25 refs=77b6e983c8a9
 digraph HomePage {
-    // NOTE (s63, 2026-11-13): this file maps the LEGACY pre-VirtWnd HOME (tiles).
-    // Current paint path: see cluster_s63 near the end (OnPaintAbout → DrawHomePage).
-    // Full rewrite pending — cluster_s63 wins conflicts on paint details.
+    // NOTE: Current paint path and layout logic (2026-11-24, sXX)
+    // Two-column responsive layout with heatmap visual improvements
     rankdir=TB;
     node [shape=box, style=rounded, fontname="Consolas", fontsize=9];
     edge [fontname="Consolas", fontsize=8];
@@ -15,115 +14,123 @@ digraph HomePage {
         style=filled;
         fillcolor="#e3f2fd";
 
-        home_wnd [label="HomePageWnd (VirtWnd)\n• hwndHomePage (child of frame)\n• Owner-drawn: background + tiles\n• Class: TUMATRA_HOMEPAGE\n• WM_PAINT: DrawHomePage()", fillcolor="#c8e6c9", style=filled]
-        tiles [label="Tile Grid\n• Recent files (max 20)\n• Pinned files (starred)\n• Each tile: thumb + title + date\n• Click → LoadDocument\n• Right-click → context menu", fillcolor="#bbdefb", style=filled]
-        toolbar_home [label="Home Toolbar Button\n• 1st button (before Open)\n•  Home icon\n• CmdOpenHome\n• Toggles showHomeOverlay", fillcolor="#e1bee7", style=filled]
-        empty_state [label="Empty State\n• No recent files\n• \"Drag PDF here\" text\n• Centered illustration\n• Handles DROPFILES", fillcolor="#fff9c4", style=filled]
+        canvas [label="Canvas (hwndCanvas)\n• WM_PAINT → DrawHomePage()\n• Double-buffered via win->buffer", fillcolor="#c8e6c9", style=filled]
+        chrome [label="HomeChromeWnd (VirtWnd tree)\n• Persistent hover/pressed state\n• Children: studyHistory, stats, entries, tip, buttons", fillcolor="#bbdefb", style=filled]
+        study_history [label="HomeStudyHistoryWnd\n• Ranking column (Read/FC/Sessions)\n• Fixed height, NEVER collapses (D2)\n• Internal scroll", fillcolor="#c8e6c9", style=filled]
+        stats_band [label="HomeStatsWnd\n• Heatmap / Graph toggle (D7)\n• Single-source geometry (C3)\n• Square cells, 4px gap (C5)\n• Month-tinted fills (C6)\n• TODAY = white (C6)\n• Steady hover fade (C4)", fillcolor="#bbdefb", style=filled]
+        entries [label="HomeEntriesWnd\n• Thumbnail/List entries\n• Hit-test, hover, keyboard nav", fillcolor="#e1bee7", style=filled]
+        tip_band [label="HomeTipWnd (fixed footer)\n• Markup + links\n• Never scrolls", fillcolor="#fff9c4", style=filled]
     }
 
-    // ===================== STATE MANAGEMENT =====================
-    subgraph cluster_state {
-        label="State Management";
+    // ===================== LAYOUT ENGINE =====================
+    subgraph cluster_layout {
+        label="LayoutHomePage() — Single Pass (scroll bakes dyLayout)";
         color="#e91e63";
         style=filled;
         fillcolor="#fce4ec";
 
-        overlay_flag [label="win->showHomeOverlay\nMainWindow.h\n• true = Home visible\n• false = Document visible\n• Mutually exclusive with tabs", fillcolor="#c8e6c9", style=filled]
-        recent_files [label="Recent Files\n• gFileHistory.RecentlyOpened\n• Vec<FileState> sorted by time\n• Max 20 entries\n• Pinned files float to top", fillcolor="#bbdefb", style=filled]
-        pinned_files [label="Pinned Files\n• FileState.pinned = true\n• Persisted in FileHistory\n• Never auto-removed\n• Star icon on tile", fillcolor="#bbdefb", style=filled]
-        thumb_cache [label="Thumbnail Cache\n• %LOCALAPPDATA%\\SumatraPDF\\<hash>\\thumbs\n• 256x256 PNG per file\n• Generated on close / idle\n• Loaded async for tiles", fillcolor="#e1bee7", style=filled]
+        layout_start [label="LayoutHomePage(HomePageLayout& l)\n• Input: canvas client rect (rc.dx, rc.dy)\n• Output: all band rects in l.*", fillcolor="#c8e6c9", style=filled]
+        two_col_decision [label="Two-Column Decision (C1)\n• screenCx = GetSystemMetrics(SM_CXSCREEN)\n• threshold = max(screenCx/2, 900)\n• twoColumnMode = (rc.dx >= threshold)\n• Recomputed EVERY layout", fillcolor="#bbdefb", style=filled]
+        geom_compute [label="Heatmap Geometry (C3)\n• Compute ONCE per layout\n• rcGrid, cellDx=cellDy, cellGap=4, rowGap=4\n• monthStartCol[13], monthBorderAlt[13]\n• firstCol (Jan 1 weekday)\n• Store in HomeStatsWnd fields\n• Paint() only READS", fillcolor="#c8e6c9", style=filled]
+        band_rects [label="Band Rectangles (C2)\n• 2-col: StudyHistory LEFT (40%, clamp 280-460)\n•        Heatmap RIGHT (remainder, floor 520)\n•        Books FULL WIDTH below\n• 1-col: Vertical stack (StudyHist → Heatmap → Books)\n• StudyHistory NEVER collapses (D2/C7)", fillcolor="#bbdefb", style=filled]
+        scroll_clamp [label="Scroll Clamp\n• totalContentDy = fixedTop + thumbsContentDy\n• maxScrollY = max(0, totalContentDy - contentBottomY)\n• scrollY clamped, dyLayout = -scrollY\n• Recompute Y with dyLayout applied", fillcolor="#e1bee7", style=filled]
     }
 
-    // ===================== INTERACTIONS =====================
-    subgraph cluster_interactions {
-        label="User Interactions";
+    // ===================== PAINT PIPELINE =====================
+    subgraph cluster_paint {
+        label="Paint Pipeline (DrawHomePage → DrawHomePageLayout)";
         color="#ff9800";
         style=filled;
         fillcolor="#fff3e0";
 
-        click_tile [label="Click Tile\n• StartLoadDocument(&args)\n• args.activateExisting = !Ctrl\n• args.activateExistingInWindow = true\n• HomePage.cpp / 2980", fillcolor="#c8e6c9", style=filled]
-        right_click [label="Right-Click Tile\n• Context Menu:\n  – Open\n  – Open in New Window\n  – Pin / Unpin\n  – Remove from List\n  – Show in Folder\n  – Properties", fillcolor="#bbdefb", style=filled]
-        drag_drop [label="Drag & Drop onto Home\n• WM_DROPFILES\n• Canvas.cpp\n• StartLoadDocuments(files, win)\n• Multiple files = multiple tabs", fillcolor="#bbdefb", style=filled]
-        pin_toggle [label="Pin Toggle\n• FileState.pinned = !pinned\n• SaveSettings()\n• Re-render tile grid\n• Pinned sort to top", fillcolor="#e1bee7", style=filled]
-        remove [label="Remove from List\n• gFileHistory.Remove(path)\n• Deletes thumbnail\n• SaveSettings()\n• Does NOT delete file", fillcolor="#fff9c4", style=filled]
-        keyboard [label="Keyboard\n• Enter = Open selected\n• Delete = Remove\n• Ctrl+Click = Multi-select\n• Arrow keys = Navigate tiles", fillcolor="#bbdefb", style=filled]
+        draw_home [label="DrawHomePage()\n• LayoutHomePage(l)\n• SaveHomeLayoutCache(l)\n• HomePageSyncChrome(l)\n• DrawHomePageLayout(l)\n• SyncHomeLayoutCacheFileSizes(l)", fillcolor="#c8e6c9", style=filled]
+        sync_chrome [label="HomePageSyncChrome()\n• Feed l.* rects to chrome tree\n• studyHistory.visibility = Visible (D2 fix)\n• stats.visibility = flowVis(rcStats)\n• flowVis collapses ONLY below tip band", fillcolor="#bbdefb", style=filled]
+        draw_layout [label="DrawHomePageLayout()\n• Background + search box border\n• Thumbnails/List (clipped to rcThumbsArea)\n• Chrome tree (clipped to tipTop)\n• Tip band (unclipped, on top)", fillcolor="#c8e6c9", style=filled]
+        stats_paint [label="HomeStatsWnd::Paint()\n• READS pre-computed geometry (C3)\n• Square cells: cellDx == cellDy\n• Gap = 4px (C5)\n• Month fills: peru (gray-border) / silver (silver-border) (C6)\n• TODAY = white fill + orange outline (C6)\n• Border pens 1.6px (C5)\n• Hover: silverHi with fade alpha (C4)", fillcolor="#c8e6c9", style=filled]
     }
 
-    // ===================== RELAYOUT / VISIBILITY =====================
-    subgraph cluster_relayout {
-        label="Visibility & Relayout";
+    // ===================== HOVER STATE MACHINE =====================
+    subgraph cluster_hover {
+        label="Hover State Machine (C4, D3 fix)";
         color="#9c27b0";
         style=filled;
         fillcolor="#f3e5f5";
 
-        toggle [label="CmdOpenHome\nSumatraPDF.cpp\n• ToggleFavoritesTab pattern:\n  SaveCurrentWindowTab()\n  AddTabToWindow(homeTab)\n  LoadModelIntoTab(home)\n• win->showHomeOverlay = true\n• RelayoutFrame()", fillcolor="#c8e6c9", style=filled]
-        hide [label="Hide Home Overlay\n• User opens document\n• win->showHomeOverlay = false\n• RelayoutFrame()\n• Hide secondary toolbars\n  (hideSecondaryToolbars flag)", fillcolor="#bbdefb", style=filled]
-        relayout_home [label="RelayoutFrame Home Block\nSumatraPDF.cpp\n• if (showHomeOverlay) {\n    ShowWindow(hwndHomePage, SW_SHOW)\n    SetWindowPos(hwndHomePage, rc)\n    rc.dy -= homeDy; rc.y += homeDy\n  } else SW_HIDE\n• hideSecondaryToolbars = true", fillcolor="#bbdefb", style=filled]
+        on_mouse_move [label="OnMouseMove()\n• Hit-test uses PRE-COMPUTED geometry\n• y bound = 7*cellDy + 6*rowGap (D1)\n• x bound = cellDx (no trailing gap, D4)\n• Row clamped 0..6, Col 0..52\n• If hoverDay changes:\n  - hoverDay = new, alpha=255\n  - StopHoverFade() with nIDEvent=(UINT_PTR)this (D3)\n  - Invalidate() only heatmap band", fillcolor="#c8e6c9", style=filled]
+        on_mouse_leave [label="OnMouseLeave()\n• If hoverDay>=1 && alpha>0:\n  StartHoverFade()", fillcolor="#bbdefb", style=filled]
+        start_fade [label="StartHoverFade()\n• timerId = SetTimer(hwnd, (UINT_PTR)this, 16, nullptr)\n• hoverFadeTimer = (UINT_PTR)this (nIDEvent, D3)\n• hoverFadeTargetDay = hoverDay\n• hoverFadeStartTime = GetTickCount()", fillcolor="#c8e6c9", style=filled]
+        fade_proc [label="HoverFadeTimerProc()\n• Linear 255→0 over 500ms\n• At 500ms: alpha=0, hoverDay=-1, StopHoverFade()\n• Invalidate()", fillcolor="#e1bee7", style=filled]
+        stop_fade [label="StopHoverFade()\n• KillTimer(hwnd, (UINT_PTR)this) — nIDEvent!\n• hoverFadeTimer=0, targetDay=-1, alpha=255", fillcolor="#c8e6c9", style=filled]
+        destructor [label="~HomeStatsWnd()\n• StopHoverFade() — prevents use-after-free (D3)", fillcolor="#e1bee7", style=filled]
     }
 
-    // ===================== THUMBNAIL GENERATION =====================
-    subgraph cluster_thumbs {
-        label="Thumbnail Generation";
+    // ===================== HEATMAP VISUALS =====================
+    subgraph cluster_visuals {
+        label="Heatmap Visuals (C5, C6)";
         color="#795548";
         style=filled;
         fillcolor="#efebe9";
 
-        gen_thumb [label="GenerateThumbnail()\nHomePage.cpp\n• Engine renders page 1\n• Scale to 256x256\n• GDI+ Save as PNG\n• Background thread", fillcolor="#c8e6c9", style=filled]
-        thumb_trigger [label="Triggers\n• On document close\n• Idle timer (5s after paint)\n• Manual: right-click → Refresh\n• Failed thumbs = placeholder", fillcolor="#bbdefb", style=filled]
+        square_cells [label="Square Cells\n• cellDx == cellDy always\n• Size = min(widthPitch, heightPitch)\n• Floored at 2px", fillcolor="#c8e6c9", style=filled]
+        gaps [label="4px Gaps (C5)\n• cellGap = 4, rowGap = 4\n• Uniform grid: no month gaps\n• ColX(col) = rcGrid.x + col*(cellDx+cellGap)", fillcolor="#bbdefb", style=filled]
+        month_fills [label="Month-Tinted Fills (C6)\n• Gray-border months → peru/orange (4 grades)\n• Silver-border months → silver/gray (4 grades)\n• Theme-sensitive (dark/light)\n• TODAY = ALWAYS white fill + orange outline", fillcolor="#c8e6c9", style=filled]
+        borders [label="Thicker Borders (C5)\n• 1.6px (match TODAY pen)\n• Gray-border: cellOutline\n• Silver-border: silverHi", fillcolor="#bbdefb", style=filled]
+    }
+
+    // ===================== DEFECT FIXES =====================
+    subgraph cluster_fixes {
+        label="Defect Fixes (D1–D4)";
+        color="#f44336";
+        style=filled;
+        fillcolor="#ffebee";
+
+        d1 [label="D1: Hit-test y-boundary\n• WAS: pt.y < rcGrid.y + 7*(cellDy+2)\n• NOW: pt.y < rcGrid.y + 7*cellDy + 6*rowGap\n• Matches painted grid height", fillcolor="#ffcdd2", style=filled]
+        d2 [label="D2: StudyHistory never collapses\n• flowVis() skipped for studyHistory\n• visibility = Visible if !IsEmpty()", fillcolor="#ffcdd2", style=filled]
+        d3 [label="D3: Timer ID fix + destructor\n• SetTimer nIDEvent = (UINT_PTR)this\n• KillTimer with nIDEvent, not return value\n• ~HomeStatsWnd() calls StopHoverFade()", fillcolor="#ffcdd2", style=filled]
+        d4 [label="D4: Hit-test x-boundary\n• WAS: pt.x < ColX(col) + cellDx + 2\n• NOW: pt.x < rcGrid.x + 53*(cellDx+cellGap) - cellGap\n• No trailing gap on last column", fillcolor="#ffcdd2", style=filled]
     }
 
     // ===================== EDGES =====================
-    home_wnd -> tiles;
-    home_wnd -> toolbar_home [style=dotted];
-    home_wnd -> empty_state [style=dashed];
+    layout_start -> two_col_decision;
+    two_col_decision -> geom_compute;
+    two_col_decision -> band_rects;
+    band_rects -> scroll_clamp;
+    scroll_clamp -> draw_home;
 
-    overlay_flag -> home_wnd [style=dotted];
-    recent_files -> tiles;
-    pinned_files -> tiles [style=dotted, label="sort top"];
-    thumb_cache -> tiles [style=dotted, label="async load"];
+    draw_home -> sync_chrome;
+    draw_home -> draw_layout;
+    sync_chrome -> study_history;
+    sync_chrome -> stats_band;
+    sync_chrome -> entries;
+    draw_layout -> draw_home;
+    draw_layout -> stats_paint;
 
-    click_tile -> overlay_flag [style=dashed, label="hide home"];
-    right_click -> pin_toggle;
-    right_click -> remove;
-    drag_drop -> overlay_flag [style=dashed];
-    pin_toggle -> pinned_files;
-    remove -> recent_files;
-    keyboard -> click_tile [style=dashed];
+    on_mouse_move -> start_fade [style=dashed, label="hoverDay change"];
+    on_mouse_leave -> start_fade;
+    start_fade -> fade_proc;
+    fade_proc -> stop_fade [label="500ms"];
+    stop_fade -> destructor;
 
-    toggle -> overlay_flag;
-    hide -> overlay_flag;
-    overlay_flag -> relayout_home;
-    relayout_home -> toolbar_home [style=dotted];
+    geom_compute -> square_cells;
+    geom_compute -> gaps;
+    square_cells -> month_fills;
+    gaps -> borders;
 
-    gen_thumb -> thumb_cache;
-    thumb_trigger -> gen_thumb;
+    d1 -> on_mouse_move;
+    d2 -> sync_chrome;
+    d3 -> start_fade;
+    d3 -> destructor;
+    d4 -> on_mouse_move;
 
-    // ===================== s63 UPDATE: CURRENT PAINT PATH =====================
-    subgraph cluster_s63 {
-        label="Current paint path (s63, supersedes UI/relayout above)";
-        color="#2e7d32";
-        style=filled;
-        fillcolor="#e8f5e9";
-
-        s63_flow [label="OnPaintAbout → DrawHomePage (CanvasAboutUI.cpp)\n• double-buffered DC (win->buffer)\n• always full layout (scroll-only cache removed)\n• LayoutHomePage: one origin, -homePageScrollY\n  Stats hdr+⟳Sync → stats band → books hdr+icons\n  → search HWND → thumbs/list\n• tip = fixed footer (never scrolls)", fillcolor="#c8e6c9", style=filled]
-        s63_clip [label="Clip rules (HomePage.cpp)\n• thumbs/list: GDI clip = rcThumbsArea (viewport above tip)\n• chrome/flow: clipped to tip-band top (DrawHomePageLayout)\n• tip painted on top, unclipped (PaintTree)\n• flow elements fully below tip: Visibility::Collapse (hit-test)\n• search HWND: SW_HIDE out of view", fillcolor="#bbdefb", style=filled]
-        s63_removed [label="Removed (s63)\n• ApplyHomeLayoutCache / HomeLayoutCacheMatches\n  HomeLayoutCacheFilesMatch / CollectHomePageFiles\n• SaveHomeLayoutCache kept (thumb fileSize cache only)\n• empty-history x=50 force removed (content centers)", fillcolor="#fff9c4", style=filled]
-        s63_flow -> s63_clip;
-    }
-
-    // Cross-refs
-    overlay_flag -> hide_secondary [style=dotted, label="hideSecondaryToolbars"];
-    click_tile -> load_doc [style=dotted, label="StartLoadDocument"];
-    drag_drop -> load_doc [style=dotted];
-
-    // Legend
+    // ===================== LEGEND =====================
     subgraph cluster_legend {
         label="Legend";
         color="#ccc";
-        ui_n [label="UI", fillcolor="#e3f2fd", style=filled];
-        state [label="State", fillcolor="#fce4ec", style=filled];
-        interact [label="Interactions", fillcolor="#fff3e0", style=filled];
-        relayout [label="Relayout", fillcolor="#f3e5f5", style=filled];
-        thumbs [label="Thumbnails", fillcolor="#efebe9", style=filled];
+        ui_n [label="UI Components", fillcolor="#e3f2fd", style=filled];
+        layout [label="Layout Engine", fillcolor="#fce4ec", style=filled];
+        paint [label="Paint Pipeline", fillcolor="#fff3e0", style=filled];
+        hover [label="Hover State Machine", fillcolor="#f3e5f5", style=filled];
+        visuals [label="Heatmap Visuals", fillcolor="#efebe9", style=filled];
+        fixes [label="Defect Fixes", fillcolor="#ffebee", style=filled];
     }
 }

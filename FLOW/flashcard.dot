@@ -1,4 +1,4 @@
-// dot-sync: verified=2026-11-24 refs=199d365ee0b6
+// dot-sync: verified=2026-11-25 refs=c52307992c98
 digraph Flashcard {
     rankdir=TB;
     node [shape=box, style=rounded];

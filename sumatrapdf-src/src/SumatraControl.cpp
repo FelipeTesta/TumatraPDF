@@ -443,6 +443,8 @@ enum class ControlCmd : u16 {
     TestFlashcardVisibleCardIndices = 91,
     // Home page geometry probe (ITEM 1-3): returns layout rects, cell sizes, month mapping, hover state
     TestHomeGeometry = 92,
+    // Resize the main window for responsiveness testing (ITEM D1)
+    SetWindowSize = 93,
 };
 
 enum class ControlArgType : u16 {
@@ -1070,6 +1072,30 @@ static void ExecuteControlRequest(ControlRequest* req) {
             int exitCode = 0;
             Str res = HomeGeometryResultTemp(&exitCode);
             AppendTestResult(req, exitCode, res);
+            break;
+        }
+
+        case ControlCmd::SetWindowSize: {
+            i32 width = 0, height = 0;
+            if (!IntArg(req, 0, width) || !IntArg(req, 1, height)) {
+                AppendError(req, "SetWindowSize expects int width, int height");
+                break;
+            }
+            if (len(gWindows) == 0) {
+                AppendError(req, "SetWindowSize no-window");
+                break;
+            }
+            MainWindow* win = gWindows[0];
+            HWND hwndFrame = win->hwndFrame;
+            RECT rc;
+            GetWindowRect(hwndFrame, &rc);
+            // Adjust for window frame to get client size
+            SetWindowPos(hwndFrame, nullptr, 0, 0, width, height, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+            // Report actual client size after resize
+            GetClientRect(hwndFrame, &rc);
+            int clientW = rc.right - rc.left;
+            int clientH = rc.bottom - rc.top;
+            AppendTestResult(req, 0, fmt("OK newClientWidth=%d newClientHeight=%d\n", clientW, clientH));
             break;
         }
 

@@ -1,4 +1,4 @@
-// dot-sync: verified=2026-11-24 refs=b6b364d9d77a
+// dot-sync: verified=2026-11-25 refs=2cbbbdf8cc36
 digraph AnnotationEditFlow {
     rankdir=TB;
     node [shape=box, style=rounded, fontname="Consolas", fontsize=9];

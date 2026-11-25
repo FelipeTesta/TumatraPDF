@@ -107,6 +107,10 @@ export enum ControlCommand {
   TestFlashcardVisibleCardIndices = 91,
   // Home page geometry probe (ITEM 1-3): returns layout rects, cell sizes, month mapping, hover state
   TestHomeGeometry = 92,
+  // Resize the main window for responsiveness testing (ITEM D1)
+  // Request: int width, int height
+  // Response: OK newClientWidth=<w> newClientHeight=<h>
+  SetWindowSize = 93,
 }
 
 export type ControlArg = number | string | Uint8Array | ControlArg[];
@@ -486,7 +490,7 @@ export async function runControlCommand(
 if (import.meta.main) {
   const [exe, cmdName, ...args] = process.argv.slice(2);
   if (!exe || !cmdName) {
-    console.log("Usage: bun cmd/control.ts <SumatraPDF.exe> <ping|test-search|test-command-enabled|test-home-pinned-book|test-flashcard-visible-card-indices|test-flashcard-flush|test-rate-flashcard|test-create-flashcard|test-flush-flashcard-bookkeeping|test-home-geometry> [args...]");
+    console.log("Usage: bun cmd/control.ts <SumatraPDF.exe> <ping|test-search|test-command-enabled|test-home-pinned-book|test-flashcard-visible-card-indices|test-flashcard-flush|test-rate-flashcard|test-create-flashcard|test-flush-flashcard-bookkeeping|test-home-geometry|set-window-size> [args...]");
     process.exit(1);
   }
   let cmd = 0;
@@ -510,11 +514,13 @@ if (import.meta.main) {
     cmd = ControlCommand.TestFlushFlashcardBookkeeping;
   } else if (cmdName === "test-home-geometry") {
     cmd = ControlCommand.TestHomeGeometry;
+  } else if (cmdName === "set-window-size") {
+    cmd = ControlCommand.SetWindowSize;
   }
   if (!cmd) {
     throw new Error(`unknown command: ${cmdName}`);
   }
-  const cmdArgs = (cmdName === "test-command-enabled" || cmdName === "test-rate-flashcard" || cmdName === "test-create-flashcard" || cmdName === "test-flashcard-flush") && args[0] !== undefined ? [Number(args[0])] : (cmdName === "test-create-flashcard" && args[1] !== undefined ? [Number(args[0]), Number(args[1])] : []);
+  const cmdArgs = (cmdName === "test-command-enabled" || cmdName === "test-rate-flashcard" || cmdName === "test-create-flashcard" || cmdName === "test-flashcard-flush") && args[0] !== undefined ? [Number(args[0])] : (cmdName === "test-create-flashcard" && args[1] !== undefined ? [Number(args[0]), Number(args[1])] : (cmdName === "set-window-size" && args[0] !== undefined && args[1] !== undefined ? [Number(args[0]), Number(args[1])] : []));
   const res = await runControlCommand(exe, cmd, cmdArgs);
   console.log(JSON.stringify(res));
 }

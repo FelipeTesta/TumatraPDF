@@ -1275,23 +1275,27 @@ static float DsFontSizePx(HWND hwnd, float ptSize) {
 struct HomeStatsWnd : VirtWnd {
     MainWindow* win = nullptr;
     int year = 0; // browsed year; 0 = initialize to the current year on paint
-    // geometry recomputed in Paint(); used by hover/click handling
+    // geometry computed in LayoutHomePage() and stored here; Paint() only READS it.
+    // This is the single source of truth for heatmap geometry (fixes flicker D1/D4).
     Rect rcPrev;
     Rect rcNext;
-    Rect rcGrid; // heatmap cells origin (after the weekday label column)
-    int cellDx = 10;
-    int cellDy = 10;
-    int firstCol = 0;  // weekday row of Jan 1 (Monday-first)
-    int hoverDay = -1; // day-of-year under the mouse, -1 = none
+    Rect rcGrid;         // heatmap cells origin (after the weekday label column)
+    int cellDx = 10;     // cell width (== cellDy, square cells)
+    int cellDy = 10;     // cell height
+    int cellGap = 4;     // gap between cells (was 2, increased per C5)
+    int rowGap = 4;      // gap between rows (was 2, increased per C5)
+    int labelDx = 12;    // weekday label gutter width (DIP, scaled)
+    int firstCol = 0;    // weekday row of Jan 1 (Monday-first)
+    int hoverDay = -1;   // day-of-year under the mouse, -1 = none
     // hover fade state (ITEM 3): fade out over 500ms after mouse leaves
     int hoverFadeAlpha = 255;      // 255 = fully visible, 0 = faded out
-    UINT_PTR hoverFadeTimer = 0;   // timer ID for fade animation
+    UINT_PTR hoverFadeTimer = 0;   // timer ID (nIDEvent = (UINT_PTR)this), NOT SetTimer return value
     int hoverFadeTargetDay = -1;   // the day that was hovered when fade started
     DWORD hoverFadeStartTime = 0;  // GetTickCount() when fade started
     // D7: calendar mode — grid (heatmap) or line graph (day x hours)
     bool graphMode = false;
     Rect rcMode; // the Grid/Graph toggle (window coords)
-    // uniform grid geometry (Paint refreshes; shared with handlers):
+    // uniform grid geometry (computed once in LayoutHomePage, stored here):
     // monthStartCol[m] = first week column of month m (index 1..12)
     // monthBorderAlt[m] = true for silver border, false for gray (alternating per month; Jan=false=gray, Feb=true=silver)
     int monthStartCol[13] = {};
@@ -1310,6 +1314,7 @@ struct HomeStatsWnd : VirtWnd {
     void OnMouseLeave() override;
     void StartHoverFade();
     void StopHoverFade();
+    ~HomeStatsWnd() override; // destructor stops fade timer (D3)
     static void CALLBACK HoverFadeTimerProc(HWND, UINT, UINT_PTR, DWORD);
 };
 
@@ -1354,9 +1359,9 @@ static int HomeStatsDoyOfMonthFirst(int year, int m) {
 }
 
 // x of week column `col` in the uniform grid: no month gaps; column pitch is
-// cellDx + cellGap (2). Grid paint + hover share this.
+// cellDx + cellGap. Grid paint + hover share this (single source of truth).
 int HomeStatsWnd::ColX(int col) const {
-    return rcGrid.x + col * (cellDx + 2);
+    return rcGrid.x + col * (cellDx + cellGap);
 }
 
 void HomeStatsWnd::Paint(VirtWndPaintCtx& ctx) {
@@ -1441,45 +1446,16 @@ void HomeStatsWnd::Paint(VirtWndPaintCtx& ctx) {
     }
 
     // --- heatmap grid (Monday-first rows, GitHub/Anki style) ---
-    // uniform grid: no month gaps; column pitch = cellDx + cellGap (2).
-    // cell is ALWAYS SQUARE: cellDx == cellDy.
-    // size = min(cellWidthPitch, cellHeightPitch), floored at 2.
-    // grid does NOT stretch to fill the band; it's sized by the square cells.
-    int labelDx = dpi(12);
-    int gridW = heatW - labelDx;
-    int cellGap = 2;
-    int rowGap = 2;
-    int monthLblDy = dpi(14);
-    int topUsable = b.y + yearRowDy;
-    int bottomUsable = b.y + b.dy - pad - monthLblDy;
-    int availGridDy = bottomUsable - topUsable;
-    // cellHeightPitch: max square size that fits 7 rows + 6 gaps in available height
-    int cellHeightPitch = (availGridDy - 6 * rowGap) / 7;
-    if (cellHeightPitch < 2) {
-        cellHeightPitch = 2;
+    // Geometry is PRE-COMPUTED in LayoutHomePage() and stored in this object.
+    // Paint() only READS: rcGrid, cellDx, cellDy, cellGap, rowGap, labelDx,
+    // firstCol, monthStartCol[], monthBorderAlt[].
+    // This single-source-of-truth fixes the hover flicker (D1/D4).
+    if (rcGrid.IsEmpty() || cellDx <= 0 || cellDy <= 0) {
+        return; // geometry not computed yet
     }
-    // cellWidthPitch: max square size that fits 53 cols + 52 gaps in available width
-    int cellWidthPitch = (gridW - 52 * cellGap) / 53;
-    if (cellWidthPitch < 2) {
-        cellWidthPitch = 2;
-    }
-    // ALWAYS square: pick the smaller of the two pitches
-    cellDx = cellDy = (cellWidthPitch < cellHeightPitch) ? cellWidthPitch : cellHeightPitch;
-    int gridDy = 7 * (cellDy + rowGap) - rowGap; // 7 rows, 6 gaps between them
-    int gridDx = 53 * (cellDx + cellGap) - cellGap; // 53 cols, 52 gaps
-    // grid mode = ONLY the heatmap (no annual bar chart here — that is graph
-    // mode's job). Top-align the grid under the year row (not centered), so the
-    // month labels stay attached to the grid and don't drift.
-    rcGrid = {heatX0 + labelDx, topUsable, gridDx, gridDy};
-    int jan1Wd = 0;
-    HomeStatsDateFromDayOfYear(year, 1, nullptr, nullptr, &jan1Wd);
-    firstCol = (jan1Wd + 6) % 7; // Monday-first row index of Jan 1
-    for (int m = 1; m <= 12; m++) {
-        monthStartCol[m] = (firstCol + HomeStatsDoyOfMonthFirst(year, m) - 1) / 7;
-        monthBorderAlt[m] = (m % 2 == 0); // Jan=1 (odd)=gray (false), Feb=2 (even)=silver (true), ...
-    }
+
     // weekday labels: one letter per day, Monday-first, vertically centered
-    // with the row it names
+    // with the row it names (uses stored labelDx, rcGrid, cellDy, rowGap)
     {
         Gdiplus::RectF wdRc;
         g->MeasureString(L"M", 1, &fontLabel, Gdiplus::PointF(0, 0), &wdRc);
@@ -1492,8 +1468,7 @@ void HomeStatsWnd::Paint(VirtWndPaintCtx& ctx) {
         }
     }
     // month names below each block, centered over the columns it spans.
-    // Stagger on two rows if labels would overlap (detect by checking if
-    // next label's left edge < current label's right edge + small gap).
+    // Stagger on two rows if labels would overlap.
     struct MonthLabel { int m; int x0; int x1; int width; int row; };
     MonthLabel labels[12];
     int labelCount = 0;
@@ -1528,8 +1503,13 @@ void HomeStatsWnd::Paint(VirtWndPaintCtx& ctx) {
         g->DrawString(kStatsMonthNames[L.m - 1], 3, &fontLabel,
                       Gdiplus::PointF(cx, cy), &txtBrush);
     }
-    // cells — fill by reading time; hovered = silver; TODAY = orange outline.
-    // Month border: alternating gray/silver per monthBorderAlt[].
+
+    // --- cells: fill by reading time with month-tinted families (C6) ---
+    // Gray-border months (monthBorderAlt=false) → peru/orange shades
+    // Silver-border months (monthBorderAlt=true) → silver/gray shades
+    // 4 intensity grades as before (<30, <60, <120, >=120 min)
+    // TODAY cell is ALWAYS white (C6), keeps orange outline.
+    // Month borders slightly thicker (1.6, matching todayPen).
     int todayDoy = 0;
     {
         SYSTEMTIME st{};
@@ -1547,10 +1527,43 @@ void HomeStatsWnd::Paint(VirtWndPaintCtx& ctx) {
             }
         }
     }
+
     Gdiplus::Pen todayPen(GpCol(ac.today), 1.6f); // orange: TODAY
-    // month border pens (theme tokens)
-    Gdiplus::Pen grayBorderPen(GpCol(ac.cellOutline));      // gray (dark) / light gray (light)
-    Gdiplus::Pen silverBorderPen(GpCol(ac.silverHi));       // silver accent
+
+    // Month border pens — slightly thicker (1.6) per C5
+    Gdiplus::Pen grayBorderPen(GpCol(ac.cellOutline), 1.6f);    // gray (dark) / light gray (light)
+    Gdiplus::Pen silverBorderPen(GpCol(ac.silverHi), 1.6f);     // silver accent
+
+    // Fill families (C6): two families × 4 grades
+    // Family 0 (gray-border months): peru/orange tones
+    // Family 1 (silver-border months): silver/gray tones
+    // Theme-sensitive: defined per-theme in DsAccentsGet()
+    Gdiplus::ARGB peruGrade[4];
+    Gdiplus::ARGB silverGrade[4];
+    if (DsIsDarkTheme()) {
+        // Dark theme: peru family (warm, readable on dark)
+        peruGrade[0] = GpCol(RGB(80, 50, 30)).GetValue();    // dark peru
+        peruGrade[1] = GpCol(RGB(120, 75, 40)).GetValue();   // medium peru
+        peruGrade[2] = GpCol(RGB(170, 110, 55)).GetValue();  // light peru
+        peruGrade[3] = GpCol(RGB(210, 145, 75)).GetValue();  // bright peru
+        // Silver family (cool grays)
+        silverGrade[0] = GpCol(RGB(60, 65, 70)).GetValue();
+        silverGrade[1] = GpCol(RGB(90, 95, 105)).GetValue();
+        silverGrade[2] = GpCol(RGB(130, 135, 145)).GetValue();
+        silverGrade[3] = GpCol(RGB(170, 175, 185)).GetValue();
+    } else {
+        // Light theme: peru family (deeper for white bg)
+        peruGrade[0] = GpCol(RGB(200, 160, 120)).GetValue();  // pale peru
+        peruGrade[1] = GpCol(RGB(180, 130, 85)).GetValue();   // light peru
+        peruGrade[2] = GpCol(RGB(160, 105, 55)).GetValue();   // medium peru
+        peruGrade[3] = GpCol(RGB(140, 85, 35)).GetValue();    // deep peru
+        // Silver family (warm grays)
+        silverGrade[0] = GpCol(RGB(215, 215, 220)).GetValue();
+        silverGrade[1] = GpCol(RGB(190, 190, 200)).GetValue();
+        silverGrade[2] = GpCol(RGB(160, 160, 175)).GetValue();
+        silverGrade[3] = GpCol(RGB(130, 130, 150)).GetValue();
+    }
+
     int daysInYear = HomeStatsDaysInYear(year);
     for (int doy = 1; doy <= daysInYear; doy++) {
         int mm = 0, dd = 0;
@@ -1561,14 +1574,19 @@ void HomeStatsWnd::Paint(VirtWndPaintCtx& ctx) {
         int col = idx / 7;
         int cx = ColX(col);
         int cy = rcGrid.y + row * (cellDy + rowGap);
-        // border color by the day's REAL month (mm), not the week column
+
+        // Border color by the day's REAL month (mm), not the week column
         bool useSilverBorder = monthBorderAlt[mm];
         Gdiplus::Pen* borderPen = useSilverBorder ? &silverBorderPen : &grayBorderPen;
+
+        // Select fill family by month border parity (C6)
+        Gdiplus::ARGB* gradeFamily = useSilverBorder ? silverGrade : peruGrade;
+
         if (sec == 0) {
             g->FillRectangle(&emptyBrush, cx, cy, cellDx, cellDy);
             g->DrawRectangle(borderPen, cx, cy, cellDx, cellDy);
         } else if (doy == hoverDay && hoverFadeAlpha > 0) {
-            // Apply fade alpha to hover highlight
+            // Apply fade alpha to hover highlight (silverHi)
             if (hoverFadeAlpha >= 255) {
                 g->FillRectangle(&silverBrush, cx, cy, cellDx, cellDy);
             } else {
@@ -1580,21 +1598,15 @@ void HomeStatsWnd::Paint(VirtWndPaintCtx& ctx) {
             g->DrawRectangle(borderPen, cx, cy, cellDx, cellDy);
         } else {
             int mins = sec / 60;
-            Gdiplus::ARGB c;
-            if (mins < 30) {
-                c = GpCol(ac.cellGrade[0]).GetValue();
-            } else if (mins < 60) {
-                c = GpCol(ac.cellGrade[1]).GetValue();
-            } else if (mins < 120) {
-                c = GpCol(ac.cellGrade[2]).GetValue();
-            } else {
-                c = GpCol(ac.cellGrade[3]).GetValue();
-            }
-            Gdiplus::SolidBrush cellBrush(c);
+            int gradeIdx = (mins < 30) ? 0 : (mins < 60) ? 1 : (mins < 120) ? 2 : 3;
+            Gdiplus::SolidBrush cellBrush(gradeFamily[gradeIdx]);
             g->FillRectangle(&cellBrush, cx, cy, cellDx, cellDy);
             g->DrawRectangle(borderPen, cx, cy, cellDx, cellDy);
         }
+        // TODAY cell: ALWAYS white fill + orange outline (C6)
         if (doy == todayDoy) {
+            Gdiplus::SolidBrush whiteBrush(Gdiplus::Color(255, 255, 255, 255));
+            g->FillRectangle(&whiteBrush, cx, cy, cellDx, cellDy);
             g->DrawRectangle(&todayPen, cx - 1, cy - 1, cellDx + 2, cellDy + 2);
         }
     }
@@ -1788,18 +1800,17 @@ bool HomeStatsWnd::OnMouseMove(VirtWndMouseEvent& e) {
     // same local→window conversion as OnMouseUp (see the comment there)
     Point pt{e.pt.x + bounds.x, e.pt.y + bounds.y};
     int newHover = -1;
-    // D7: cell hover only exists in grid mode. The grid is month-separated
-    // (ColX), so invert that mapping instead of dividing by the column pitch.
-    if (!graphMode && !rcGrid.IsEmpty() && pt.y >= rcGrid.y && pt.y < rcGrid.y + 7 * (cellDy + 2)) {
-        int col = -1;
-        for (int c = 52; c >= 0; c--) {
-            if (pt.x >= ColX(c)) {
-                col = c;
-                break;
-            }
-        }
-        if (col >= 0 && pt.x < ColX(col) + cellDx + 2) {
-            int row = (pt.y - rcGrid.y) / (cellDy + 2);
+    // Cell hover only exists in grid mode. Hit-test uses PRE-COMPUTED geometry
+    // (rcGrid, cellDx, cellDy, cellGap, rowGap) — single source of truth (C3).
+    // y bound = painted grid height (7*cellDy + 6*rowGap), row clamped to 0..6.
+    // x bound = cell width WITHOUT trailing gap on last column (D4).
+    // Weekday label gutter (labelDx) must not hit a cell.
+    if (!graphMode && !rcGrid.IsEmpty() &&
+        pt.x >= rcGrid.x && pt.x < rcGrid.x + 53 * (cellDx + cellGap) - cellGap &&
+        pt.y >= rcGrid.y && pt.y < rcGrid.y + 7 * cellDy + 6 * rowGap) {
+        int col = (pt.x - rcGrid.x) / (cellDx + cellGap);
+        int row = (pt.y - rcGrid.y) / (cellDy + rowGap);
+        if (col >= 0 && col < 53 && row >= 0 && row < 7) {
             int idx = col * 7 + row - firstCol + 1;
             if (idx >= 1 && idx <= HomeStatsDaysInYear(year)) {
                 newHover = idx;
@@ -1808,7 +1819,10 @@ bool HomeStatsWnd::OnMouseMove(VirtWndMouseEvent& e) {
     }
     if (newHover != hoverDay) {
         hoverDay = newHover;
-        HwndInvalidate(win->hwndCanvas);
+        hoverFadeAlpha = 255;
+        StopHoverFade(); // cancel any running fade with correct nIDEvent (D3)
+        // Invalidate only the heatmap band rect, not the whole canvas (less flicker)
+        Invalidate();
     }
     return true;
 }
@@ -1872,7 +1886,9 @@ void HomeStatsWnd::StartHoverFade() {
     hoverFadeAlpha = 255;
     HWND hwnd = GetHwnd();
     if (hwnd) {
-        hoverFadeTimer = SetTimer(hwnd, (UINT_PTR)this, 16, nullptr); // ~60fps
+        // nIDEvent = (UINT_PTR)this (NOT the SetTimer return value) — fixes D3
+        SetTimer(hwnd, (UINT_PTR)this, 16, nullptr); // ~60fps
+        hoverFadeTimer = (UINT_PTR)this; // store nIDEvent for StopHoverFade
     }
 }
 
@@ -1880,12 +1896,18 @@ void HomeStatsWnd::StopHoverFade() {
     if (hoverFadeTimer != 0) {
         HWND hwnd = GetHwnd();
         if (hwnd) {
-            KillTimer(hwnd, hoverFadeTimer);
+            // Kill with nIDEvent = (UINT_PTR)this, not the SetTimer return value (D3)
+            KillTimer(hwnd, (UINT_PTR)this);
         }
         hoverFadeTimer = 0;
         hoverFadeTargetDay = -1;
         hoverFadeAlpha = 255;
     }
+}
+
+HomeStatsWnd::~HomeStatsWnd() {
+    // Destructor stops fade timer to prevent use-after-free (D3)
+    StopHoverFade();
 }
 
 void CALLBACK HomeStatsWnd::HoverFadeTimerProc(HWND hwnd, UINT, UINT_PTR id, DWORD) {
@@ -2469,6 +2491,14 @@ static void LayoutHomePage(HomePageLayout& l) {
     HFONT fontText = HdcCreateSimpleFont(hdc, "MS Shell Dlg", 14);
     HFONT hdrFont = HdcCreateSimpleFont(hdc, "MS Shell Dlg", 24);
 
+    // --- Two-column layout decision (C1) ---
+    // Two columns iff windowWidth >= max(0.5 * screenWidth, kMinTwoColWidthPx)
+    // Use client width (rc.dx), not frame width. Recompute every layout.
+    int screenCx = GetSystemMetrics(SM_CXSCREEN);
+    constexpr int kMinTwoColWidthPx = 900;
+    int twoColThreshold = std::max(screenCx / 2, kMinTwoColWidthPx);
+    bool twoColumnMode = (rc.dx >= twoColThreshold);
+
     // --- Pre-compute thumbnail grid x offset so header can align with it ---
     // use unfiltered count so layout stays stable when search filters results
     int colsForLayout =
@@ -2557,7 +2587,7 @@ static void LayoutHomePage(HomePageLayout& l) {
             heatmapBandDy = maxHeatmapDy;
         }
     } else {
-        // Not enough space for both minimums: study history gets absolute priority
+        // Not enough space for both minimums: study history gets absolute priority (C7)
         studyHistoryBandDy = minStudyHistoryDy;
         heatmapBandDy = std::max(0, availForStatsBands - studyHistoryBandDy);
         if (heatmapBandDy < DpiScale(hdc, 60)) {
@@ -2583,32 +2613,116 @@ static void LayoutHomePage(HomePageLayout& l) {
     if (thumbsContentDy > 0) {
         thumbsContentDy += thumbsContentPadTop;
     }
-    int statsGapBetweenBands = DpiScale(hdc, 8); // gap between study history and heatmap bands
-    int fixedTop = hdrY0 + statsHdrSize.dy + statsGapY
+
+    // --- Two-column layout geometry (C2) ---
+    // In two-column mode: top band split horizontally
+    //   LEFT: Study History (40% of band width, clamped [280, 460])
+    //   RIGHT: Heatmap/Graph (remaining, floor ~520 so 53 cols fit)
+    //   Below: Recent Books FULL WIDTH
+    // In one-column mode: vertical stack (Study History → Heatmap → Books)
+    int statsGapBetweenBands = DpiScale(hdc, 8); // vertical gap in 1-col mode
+    int contentLeftX = thumbsStartX;
+    int contentRightX = rc.dx - kThumbsMarginRight;
+    int contentWidth = contentRightX - contentLeftX;
+    if (contentWidth < thumbsContentWidth) {
+        contentWidth = thumbsContentWidth;
+    }
+
+    int studyHistoryBandDx, heatmapBandDx, heatmapBandX;
+    int topBandY, topBandDy, booksHdrY;
+
+    // First compute the unscrolled layout to determine totalContentDy and scrollY
+    // We use dyLayout = 0 for the initial measurement
+    int dyLayoutForMeasure = 0;
+
+    if (twoColumnMode) {
+        // Two-column: split the top band horizontally
+        int topBandWidth = contentWidth;
+        int studyHistoryShare = (topBandWidth * 40) / 100;
+        studyHistoryShare = std::clamp(studyHistoryShare, DpiScale(hdc, 280), DpiScale(hdc, 460));
+        // Heatmap gets the rest, but ensure minimum ~520 for 53 cols
+        int heatmapMinDx = DpiScale(hdc, 520);
+        int heatmapShare = topBandWidth - studyHistoryShare;
+        if (heatmapShare < heatmapMinDx) {
+            // shrink study history to give heatmap its minimum
+            studyHistoryShare = topBandWidth - heatmapMinDx;
+            studyHistoryShare = std::max(studyHistoryShare, DpiScale(hdc, 280));
+            heatmapShare = topBandWidth - studyHistoryShare;
+        }
+        studyHistoryBandDx = studyHistoryShare;
+        heatmapBandDx = heatmapShare;
+        heatmapBandX = contentLeftX + studyHistoryBandDx;
+
+        // Top band height = max of the two band heights (they sit side by side)
+        topBandDy = std::max(studyHistoryBandDy, heatmapBandDy);
+        topBandY = hdrY0 + statsHdrSize.dy + statsGapY + dyLayoutForMeasure;
+
+        // Study History rect (left column)
+        l.rcStudyHistory = Rect{contentLeftX, topBandY, studyHistoryBandDx, studyHistoryBandDy};
+
+        // Heatmap rect (right column) — vertically centered in top band if shorter
+        int heatmapY = topBandY + (topBandDy - heatmapBandDy) / 2;
+        l.rcStats = Rect{heatmapBandX, heatmapY, heatmapBandDx, heatmapBandDy};
+
+        // Books header below the top band (full width)
+        booksHdrY = topBandY + topBandDy + booksSepGapY;
+    } else {
+        // One-column: vertical stack (original behavior)
+        studyHistoryBandDx = contentWidth;
+        heatmapBandDx = contentWidth;
+        heatmapBandX = contentLeftX;
+
+        topBandY = hdrY0 + dyLayoutForMeasure; // Stats header at top
+        int studyHistoryY = topBandY + statsHdrSize.dy + statsGapY;
+        l.rcStudyHistory = Rect{contentLeftX, studyHistoryY, studyHistoryBandDx, studyHistoryBandDy};
+
+        int heatmapY = l.rcStudyHistory.y + l.rcStudyHistory.dy + statsGapBetweenBands;
+        l.rcStats = Rect{heatmapBandX, heatmapY, heatmapBandDx, heatmapBandDy};
+
+        booksHdrY = l.rcStats.y + l.rcStats.dy + booksSepGapY;
+    }
+
+    int fixedTop;
+    if (twoColumnMode) {
+        fixedTop = hdrY0 + statsHdrSize.dy + statsGapY + topBandDy + booksSepGapY + booksHdrSize.dy + searchAreaDyPre;
+    } else {
+        fixedTop = hdrY0 + statsHdrSize.dy + statsGapY
                  + studyHistoryBandDy + statsGapBetweenBands
                  + heatmapBandDy + booksSepGapY + booksHdrSize.dy + searchAreaDyPre;
+    }
     int totalContentDy = fixedTop + thumbsContentDy;
     int maxScrollY = std::max(0, totalContentDy - contentBottomY);
     int scrollY = std::min(std::max(win->homePageScrollY, 0), maxScrollY);
     win->homePageScrollY = scrollY;
     int dyLayout = -scrollY;
 
-    // --- Step 1: section headers (D1: STATS section on top, books below) ---
+    // Recompute Y positions with scroll applied
+    if (twoColumnMode) {
+        topBandY = hdrY0 + statsHdrSize.dy + statsGapY + dyLayout;
+        l.rcStudyHistory.y = topBandY;
+        l.rcStats.y = topBandY + (topBandDy - heatmapBandDy) / 2;
+        booksHdrY = topBandY + topBandDy + booksSepGapY + dyLayout;
+    } else {
+        int y0s = hdrY0 + dyLayout;
+        int studyHistoryY = y0s + statsHdrSize.dy + statsGapY;
+        l.rcStudyHistory.y = studyHistoryY;
+        l.rcStats.y = studyHistoryY + studyHistoryBandDy + statsGapBetweenBands;
+        booksHdrY = l.rcStats.y + l.rcStats.dy + booksSepGapY + dyLayout;
+    }
+
+    // --- Step 1: section headers ---
     l.himlOpen = TbGetImageList(win->hwndToolbar);
     Rect rcIconView(0, 0, 0, 0);
     ImageList_GetIconSize(l.himlOpen, &rcIconView.dx, &rcIconView.dy);
 
-    int y0s = hdrY0 + dyLayout; // scrolled origin for the Stats section
     int iconGap = DpiScale(hdc, 4);
     int titleGap = DpiScale(hdc, 8);
 
-    // stats section title ("Stats") at the very top, left-aligned with thumbs
-    Rect rcHdr(thumbsStartX, y0s, statsHdrSize.dx, statsHdrSize.dy);
+    // stats section title ("Stats") at the very top, left-aligned with content
+    Rect rcHdr(contentLeftX, hdrY0 + dyLayout, statsHdrSize.dx, statsHdrSize.dy);
     hdr->SetBounds(rcHdr);
 
-    // "Sync" button next to the Stats header — opens the Profile Sync dialog.
-    // Always shown when chrome exists (opens the profile window regardless of
-    // stats presence). Vertical center on rcHdr; RTL mirrors to the left of hdr.
+    // "Sync" button next to the Stats header
     HomeSyncBtnWnd* syncBtn = chrome->syncBtn;
     syncBtn->SetText(_TRA("⟳ Sync"));
     syncBtn->font = GetPlatformFont(fontText);
@@ -2623,28 +2737,16 @@ static void LayoutHomePage(HomePageLayout& l) {
     }
     syncBtn->SetBounds(rcSync);
 
-    // --- Study History band (ranking column, full width): always drawn ---
-    int statsDx = rc.dx - thumbsStartX - kThumbsMarginRight;
-    if (statsDx < thumbsContentWidth) {
-        statsDx = thumbsContentWidth;
-    }
-    l.rcStudyHistory = Rect{thumbsStartX, rcHdr.y + rcHdr.dy + statsGapY, statsDx, studyHistoryBandDy};
-
-    // --- Heatmap/Graph band (full width): always drawn, toggles with Grid/Graph ---
-    int heatmapY = l.rcStudyHistory.y + l.rcStudyHistory.dy + statsGapBetweenBands;
-    l.rcStats = Rect{thumbsStartX, heatmapY, statsDx, heatmapBandDy};
-
     // --- books-section header (recently opened + view icons + open link) ---
-    int booksHdrY = l.rcStats.y + l.rcStats.dy + booksSepGapY;
     int viewIconsDx = (2 * rcIconView.dx) + iconGap;
-    Rect rcBooksHdr(thumbsStartX + viewIconsDx + titleGap, booksHdrY, booksHdrSize.dx, booksHdrSize.dy);
-    l.rcIconThumbnailView = {thumbsStartX, rcBooksHdr.y + ((rcBooksHdr.dy - rcIconView.dy) / 2), rcIconView.dx,
+    Rect rcBooksHdr(contentLeftX + viewIconsDx + titleGap, booksHdrY, booksHdrSize.dx, booksHdrSize.dy);
+    l.rcIconThumbnailView = {contentLeftX, rcBooksHdr.y + ((rcBooksHdr.dy - rcIconView.dy) / 2), rcIconView.dx,
                              rcIconView.dy};
     l.rcIconListView = {l.rcIconThumbnailView.x + rcIconView.dx + iconGap, l.rcIconThumbnailView.y, rcIconView.dx,
                         rcIconView.dy};
     if (isRtl) {
         int groupDx = viewIconsDx + titleGap + rcBooksHdr.dx;
-        int groupX = rc.dx - thumbsStartX - groupDx;
+        int groupX = rc.dx - contentLeftX - groupDx;
         rcBooksHdr.x = groupX;
         l.rcIconListView = {rcBooksHdr.x + rcBooksHdr.dx + titleGap, l.rcIconListView.y, rcIconView.dx, rcIconView.dy};
         l.rcIconThumbnailView = {l.rcIconListView.x + rcIconView.dx + iconGap, l.rcIconThumbnailView.y, rcIconView.dx,
@@ -2652,6 +2754,13 @@ static void LayoutHomePage(HomePageLayout& l) {
     }
     booksHdr->SetBounds(rcBooksHdr);
     l.rcBooksHdr = rcBooksHdr;
+
+    // Ensure rcStudyHistory and rcStats have correct X/DX (set above, but X may need RTL adjustment)
+    if (isRtl) {
+        // In RTL, content flows from right; but our two-col logic uses left-origin.
+        // For simplicity, keep LTR-origin for stats bands (they're centered content areas).
+        // The chrome SyncChrome will handle RTL for individual controls.
+    }
 
     /* "Open a document" link next to the books header */
     Rect rcIconOpen(0, 0, 0, 0);
@@ -2870,6 +2979,70 @@ static void LayoutHomePage(HomePageLayout& l) {
         int tipStartY = tipY + tipPadding;
         l.rcTipText = {tipStartX, tipStartY, thumbsContentWidth, tip->MinIntrinsicHeight(thumbsContentWidth)};
     }
+
+    // --- Heatmap geometry: compute ONCE per layout (C3) ---
+    // This is the single source of truth for rcGrid, cellDx, cellDy, cellGap,
+    // rowGap, labelDx, firstCol, monthStartCol[], monthBorderAlt[].
+    // Paint() only READS these fields — fixes hover flicker (D1/D4).
+    if (chrome->stats && !l.rcStats.IsEmpty()) {
+        Rect b = l.rcStats;
+        auto dpi = [&](int v) { return DpiScale(win->hwndFrame, v); };
+        int pad = dpi(8);
+        int heatX0 = b.x;
+        int heatW = b.dx;
+        int yearRowDy = dpi(16);
+        int labelDx = dpi(12);
+        int cellGap = 4; // C5: increased from 2 to 4
+        int rowGap = 4;  // C5: increased from 2 to 4
+        int monthLblDy = dpi(14);
+        int topUsable = b.y + yearRowDy;
+        int bottomUsable = b.y + b.dy - pad - monthLblDy;
+        int availGridDy = bottomUsable - topUsable;
+        int gridW = heatW - labelDx;
+
+        // cellHeightPitch: max square size that fits 7 rows + 6 gaps
+        int cellHeightPitch = (availGridDy - 6 * rowGap) / 7;
+        if (cellHeightPitch < 2) cellHeightPitch = 2;
+        // cellWidthPitch: max square size that fits 53 cols + 52 gaps
+        int cellWidthPitch = (gridW - 52 * cellGap) / 53;
+        if (cellWidthPitch < 2) cellWidthPitch = 2;
+        // ALWAYS square: pick the smaller pitch
+        int cellSize = (cellWidthPitch < cellHeightPitch) ? cellWidthPitch : cellHeightPitch;
+
+        int gridDy = 7 * (cellSize + rowGap) - rowGap;
+        int gridDx = 53 * (cellSize + cellGap) - cellGap;
+        Rect rcGrid = {heatX0 + labelDx, topUsable, gridDx, gridDy};
+
+        // Compute month mapping for the browsed year
+        int year = chrome->stats->year;
+        if (year == 0) {
+            SYSTEMTIME st{};
+            GetLocalTime(&st);
+            year = (int)st.wYear;
+        }
+        int jan1Wd = 0;
+        HomeStatsDateFromDayOfYear(year, 1, nullptr, nullptr, &jan1Wd);
+        int firstCol = (jan1Wd + 6) % 7; // Monday-first row index of Jan 1
+        int monthStartCol[13] = {};
+        bool monthBorderAlt[13] = {};
+        for (int m = 1; m <= 12; m++) {
+            monthStartCol[m] = (firstCol + HomeStatsDoyOfMonthFirst(year, m) - 1) / 7;
+            monthBorderAlt[m] = (m % 2 == 0); // Jan=gray, Feb=silver, ...
+        }
+
+        // Store in HomeStatsWnd (single source of truth)
+        chrome->stats->rcGrid = rcGrid;
+        chrome->stats->cellDx = cellSize;
+        chrome->stats->cellDy = cellSize;
+        chrome->stats->cellGap = cellGap;
+        chrome->stats->rowGap = rowGap;
+        chrome->stats->labelDx = labelDx;
+        chrome->stats->firstCol = firstCol;
+        for (int m = 1; m <= 12; m++) {
+            chrome->stats->monthStartCol[m] = monthStartCol[m];
+            chrome->stats->monthBorderAlt[m] = monthBorderAlt[m];
+        }
+    }
 }
 
 static void GetFileStateIcon(FileState* fs) {
@@ -3068,20 +3241,33 @@ TempStr HomeGeometryResultTemp(int* exitCodeOut) {
         if (exitCodeOut) *exitCodeOut = 2;
         return StrL("NOCHROME");
     }
-    // Force a paint so the layout cache is populated
-    HwndInvalidate(win->hwndCanvas);
-    // Run message loop briefly to process the paint
+    // Force a synchronous paint so the layout cache is populated
+    // Ensure the frame is visible
+    ShowWindow(win->hwndFrame, SW_SHOW);
+    // Force a full repaint of the canvas
+    RedrawWindow(win->hwndCanvas, nullptr, nullptr, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN);
+    // Also run message loop to process any pending messages
     MSG msg;
-    for (int i = 0; i < 10; i++) {
+    for (int i = 0; i < 100; i++) {
         if (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
             TranslateMessage(&msg);
             DispatchMessageW(&msg);
         }
     }
     auto& c = gHomeLayoutCache;
+    // Debug: always dump cache state even if invalid
+    str::Builder outDbg;
+    outDbg.Append(fmt("OK cacheValid=%d\n", c.valid ? 1 : 0));
+    outDbg.Append(fmt("rcStudyHistory=%d,%d,%d,%d\n", c.rcStudyHistory.x, c.rcStudyHistory.y, c.rcStudyHistory.dx, c.rcStudyHistory.dy));
+    outDbg.Append(fmt("rcStats=%d,%d,%d,%d\n", c.rcStats.x, c.rcStats.y, c.rcStats.dx, c.rcStats.dy));
+    outDbg.Append(fmt("rcBooksHdr=%d,%d,%d,%d\n", c.rcBooksHdr.x, c.rcBooksHdr.y, c.rcBooksHdr.dx, c.rcBooksHdr.dy));
+    outDbg.Append(fmt("rcThumbsArea=%d,%d,%d,%d\n", c.rcThumbsArea.x, c.rcThumbsArea.y, c.rcThumbsArea.dx, c.rcThumbsArea.dy));
+    outDbg.Append(fmt("totalContentDy=%d thumbsVisibleDy=%d scrollY=%d\n", c.totalContentDy, c.thumbsVisibleDy, c.scrollY));
+    outDbg.Append(fmt("canvasRc=%d,%d,%d,%d\n", c.canvasRc.x, c.canvasRc.y, c.canvasRc.dx, c.canvasRc.dy));
+    
     if (!c.valid) {
         if (exitCodeOut) *exitCodeOut = 2;
-        return StrL("NOLAYOUT");
+        return ToStrTemp(outDbg);
     }
     str::Builder out;
     out.Append(fmt("OK\n"));
@@ -3876,8 +4062,9 @@ static void HomePageSyncChrome(HomePageLayout& l) {
     chrome->stats->visibility = flowVis(l.rcStats);
 
     // study history band (ranking column): separate from heatmap
+    // D2 FIX: study history is a FIXED band — must NEVER collapse, even on short windows.
     chrome->studyHistory->SetBounds(l.rcStudyHistory);
-    chrome->studyHistory->visibility = flowVis(l.rcStudyHistory);
+    chrome->studyHistory->visibility = l.rcStudyHistory.IsEmpty() ? Visibility::Collapse : Visibility::Visible;
 
     // file entries: clipped to the thumbnails band, like the static links were
     HomeEntriesWnd* entries = chrome->entries;

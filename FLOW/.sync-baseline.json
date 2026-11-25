@@ -42,15 +42,6 @@
         "UpdateFileStateForTab"
       ]
     },
-    "homepage.dot": {
-      "files": [],
-      "symbols": [
-        "CollectHomePageFiles",
-        "HomeLayoutCacheFilesMatch",
-        "HomeLayoutCacheMatches",
-        "HomePageWnd"
-      ]
-    },
     "print-export.dot": {
       "files": [
         "PrintDialog.cpp"
