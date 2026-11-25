@@ -51,6 +51,8 @@ Items ONLY the user can verify live (real book / real build). Flat list; details
 - [ ] Crop Align s64-R8 + s64-R9: Page Crop box cut == drawn region + nomacs overlay visual; GUI rotate-drag draws diagonal box + rotated handles (vision check).
 
 - [ ] Loading fix (s64): on real launch confirm instant window with heavy books + logo-dots pulsing + white progress bar; evidence tests/tmp/s64/loading-heavy-*.png (dbg64; users get it via v1.0.19).
+- [ ] Focus-refocus freeze observation (NOT reproduced): with study:on, switching to another app window and coming back froze the window ONCE; it could not be reproduced afterwards (the user is watching for a recurrence). The v1.0.22 fixes (the O(N^2) render-cache paint, the prewarm cap) already landed. Observe for recurrence on real build.
+- [ ] Auto-update end-to-end proof: the installed 1.0.21 must show the "Install and relaunch" button (Help > Check for updates) and install/restart 1.0.22; the automatic daily path must install silently. The code fix shipped in v1.0.22; the end-to-end proof is still open.
 
 ## Vertical tab list
 
@@ -69,12 +71,13 @@ Goal: make reading long file names easier. Clicking a tab in the list focuses th
 - [ ] Add a settings option to disable the toolbar `scan mode` button; other buttons must adapt to the freed space.
 - [ ] R2 latent rotated-90 bug triage (LOG s64-R2 — Edit/ notes archived 2026-11-15).
 - [ ] Decision needed: branch protection "main must not contain merge commits" was BYPASSED on v1.0.17 push (b0fda73) — repo admin decision pending.
+- [ ] **Code signing** (deferred by the owner): the signing roadmap is documented in SECURITY.md (SignPath Community = the free path for OSS, needs an application + approval wait; the other options cost money or are not Authenticode). The open work: apply to SignPath Community in parallel; do NOT block a release on it; never make the updater REQUIRE a signature while v1.0.21/1.0.22 are unsigned.
 
 ## Performance optimizations (verified 2026-11-04, evidence LOG s38)
 
 Source: external agent's perf map (archived TEMP/performance-code-arch.dot), claims verified against code (LOG s38). Safest first:
 
-- [ ] **OPT-7** coordinate-space guards (START): `#if isDebug` asserts in `DisplayModel::CvtToScreen/CvtFromScreen` + TC2 colX consistency check (debug-only, no behavior change; prerequisite for OPT-3). STATUS: in progress s38-o1.
+- [ ] **OPT-7** coordinate-space guards (START): `#if isDebug` asserts in `DisplayModel::CvtToScreen/CvtFromScreen` + TC2 colX consistency check (debug-only, no behavior change; prerequisite for OPT-3).
 - [ ] **OPT-6** perf regression tests: cache hit rate, RelayoutFrame frequency, trim/crop toggle latency; ad-hoc tests, fail on >5% regression. STATUS: baseline tests shipped (startup/cache-behavior/toggle-latency); CI fail-gate metrics (cache hit rate, relayout frequency) need new C++ control cmds — residual open.
 - [ ] (DEFER) OPT-1 adaptive cache cap — after OPT-7; needs memory accounting + tests.
 - [ ] (DEFER) OPT-3 partial trim-cache invalidate — real gain (Full FreeForDisplayModel storm, RenderCache.cpp:426) but stale-tile risk on rect.y shift; needs stamping/versioning.
@@ -109,7 +112,9 @@ Source: external agent's perf map (archived TEMP/performance-code-arch.dot), cla
 
 ### Tests
 
-- [ ] **FC-M1** tests: SM-2 (intervals/ease cap/relearn), study-JSON roundtrip, due filter — after Image Occlusion lands.
+- [ ] **FC-M1** tests: SM-2 (intervals/ease cap/relearn), study-JSON roundtrip, due filter — after Image Occlusion lands. See also: planned doc `FLASHCARD_ALGORITHM.md` for the official SuperMemo/SM-2 algorithm spec and phased implementation plan; cross-reference the existing FC-M1 tests item (kept, pointed at this doc).
+
+- [ ] **SM-2 completion**: document the official SuperMemo/SM-2 algorithm in `FLASHCARD_ALGORITHM.md` (being written in parallel); produce a phased plan to complete the hand-rolled 'lite' SM-2 implementation (4 ratings; no repetitions counter, no learning steps, no graduating/easy interval settings, no max interval, no fuzz, no burying) from that spec. Phases: (1) add repetitions counter, (2) add learning steps/easy interval, (3) add max interval + fuzz, (4) add burying logic.
 - [ ] **FC-M5** rate keys 1-4 have no visual hint (no rate buttons/tooltips on toolbar).
 
 ### Study preload
@@ -259,3 +264,6 @@ Items involving .exe file names, internal window classes, registry/CLSID, instal
 ## Default light colors — investigate later (2026-11-18, user directive)
 
 - [ ] **Win32 default fallbacks render light on the app's dark theme** — first spotted on the flashcard Lista panel (2026-11-18): the panel's top `LabelWithCloseWnd` strip was white and its `Splitter` was light-gray on dark theme, because the panel was never added to `UpdateControlsColors` and `Splitter::Create` falls back to `GetSysColor(COLOR_BTNFACE)` when `backgroundColor` is unset. Investigate repo-wide whether every wingui control that can silently fall back to `GetSysColor(COLOR_BTNFACE/COLOR_WINDOW/COLOR_ACTIVEBORDER)` or a null `BackgroundBrush()` (`kColorUnset`) renders light when the parent wasn't themed, and decide: (a) make fork defaults theme-aware (dark by default) vs (b) enforce explicit theme colors at every call site + audit checklist in Design_Guidelines §6.3. Include: `wingui/Splitter` background fallback, `wingui/Static`/WC_STATIC box backgrounds, `BackgroundBrush()` when `bgColor == kColorUnset`, `COLOR_BTNFACE` hits, any fork UI painting with stock brushes. **Do not use this note as permission for silent fixes — document deviations, ask first.**
+
+- [ ] **Branch cleanup**: `feature/flashcard-study-perf` was merged into main and shipped in v1.0.22; the branch can be deleted after the release (the user's call).
+- [ ] **Unmerged user edits in other checkout**: the root checkout `D:\…\TumatraPDF` (branch `feature/flashcard-study-perf`) has uncommitted README.md/README.es.md/LOG.md edits (a YouTube-thumbnail change) that are NOT on main and did NOT ship in v1.0.22 — the user must decide whether to port them.
