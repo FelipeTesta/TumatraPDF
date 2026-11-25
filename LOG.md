@@ -1,3 +1,21 @@
+## 2026-11-25 (s83) — SM-2 spec doc added; scheduler gap map; FLOW maps re-verified + re-stamped; flashcard maps now state SM-2 is lite variant
+
+### Added
+- Root doc `FLASHCARD_ALGORITHM.md` = official SuperMemo/SM-2 spec (sources: canonical official article, official blogs, twenty rules) + our scheduler map (file:line) + completion plan P0-P6 (PROPOSAL, nothing implemented) + 8 owner decisions; registered in AGENTS.md hierarchy + caveman list.
+- Code audit of our scheduler (12 state writers, all preserving sorted-by-key invariant; settings surface = 3 fields and NOT ONE scheduler knob; missing deterministic clock seam -> reproducible scheduler test impossible until P0).
+- Key spec findings vs ours (EF formula: `EF' = EF + 0.1 - (5-q)*(0.08+(5-q)*0.02)`, I(1)=1 / I(2)=6 / I(n)=I(n-1)*EF rounded up, failure reset MUST NOT change EF, same-day re-repeat until q>=4, rating mapping: Again->q=1/0, Hard->q=3, Good->q=4, Easy->q=5).
+
+### Changed
+- `TODO.md` re-synced after v1.0.22 (open-work list only; SM-2 item now points at doc + real phases; flashcard bookmark-mirror covered by `ad-hoc-flashcard-filter-bookmarks.ts` probe).
+- FLOW maps re-verified + re-stamped (14 stale stamps) + flashcard maps now state SM-2 is lite variant with reference to `FLASHCARD_ALGORITHM.md`.
+
+### Verified
+- `bun scripts/flow-sync.ts` passes (35 checked, 21 with known debt) + Graphviz exit 0 on all 15 touched maps; baseline 21 maps / 75 refs.
+- Doc corrections verified (7): citation traceability, rating mapping, repetition off-by-one, deterministic migration rule, EF formula delta table, failure reset EF change, round-up interval.
+
+### Notes
+- SM-2 work NOT started (stays in TODO.md); first blocker is clock seam (P0); 8 owner decisions listed in doc section 9; user does visual validation.
+
 ## 2026-11-25 (s82) — Flashcard study freeze fixed; Home responsive + heatmap readable; Filter bookmarks first open; Auto-update install button fixed; Windows/AV compatibility; Ctrl+Alt separate rects
 
 ### Fixed
