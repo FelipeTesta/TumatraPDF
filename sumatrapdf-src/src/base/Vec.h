@@ -272,9 +272,9 @@ void VecSort(Vec<T>& v, typename VecSortCmp<T>::Fn cmpFunc) {
 
 // Overload for sorting a sub-range of a raw array (used by RenderCache::Paint
 // to avoid O(N²) PopAt(0) by using a read index)
-// Cmp is a template parameter to allow deduction from the function pointer type
-template <typename T, typename Cmp>
-void VecSort(T* els, int len, Cmp cmpFunc) {
+// Uses the same comparator signature as VecSort(Vec&) for consistency
+template <typename T>
+void VecSort(T* els, int len, typename VecSortCmp<T>::Fn cmpFunc) {
     if (len > 1) {
         auto cmp = (int (*)(const void* a, const void* b))cmpFunc;
         qsort(els, len, sizeof(T), cmp);

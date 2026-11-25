@@ -799,6 +799,22 @@ bool RenderCache::Render(DisplayModel* dm, int pageNo, int rotation, float zoom,
     PageRenderRequest* newRequest;
 
     /* add request to the queue */
+    /* Cap concurrent speculative requests to avoid starving visible renders.
+       If this is a speculative request and we already have >=2 speculative
+       requests queued, drop this one instead of queuing it. */
+    if (speculative) {
+        int specCount = 0;
+        for (int i = 0; i < requestCount; i++) {
+            if (requests[i].speculative) {
+                specCount++;
+            }
+        }
+        if (specCount >= 2) {
+            logf("[fc][perf] renderq: speculative cap reached (%d), dropping request\n", specCount);
+            return false;
+        }
+    }
+
     if (requestCount == MAX_PAGE_REQUESTS) {
         /* queue is full -> evict a SPECULATIVE request if any exists;
            only if all are visible, drop the oldest (current behavior) */
@@ -1417,8 +1433,7 @@ int RenderCache::Paint(HDC hdc, Rect bounds, DisplayModel* dm, int pageNo, PageI
             // sort queue[queueReadIdx .. len(queue)-1]
             int unprocessedLen = len(queue) - queueReadIdx;
             if (unprocessedLen > 1) {
-                qsort(queue.els + queueReadIdx, unprocessedLen, sizeof(TilePosition),
-                      (int (*)(const void*, const void*))cmpTilePosition);
+                VecSort(queue.els + queueReadIdx, unprocessedLen, cmpTilePosition);
             }
         }
     }

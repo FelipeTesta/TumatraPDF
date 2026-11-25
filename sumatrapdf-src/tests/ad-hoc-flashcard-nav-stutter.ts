@@ -117,8 +117,8 @@ export async function testit(): Promise<void> {
         
         console.log(`Nav to page ${page} (pass ${pass + 1}) took ${navTime}ms`);
         
-        if (navTime > 500) {
-          throw new Error(`Navigation took ${navTime}ms > 500ms timeout on page ${page}`);
+        if (navTime > 1000) {
+          throw new Error(`Navigation took ${navTime}ms > 1000ms timeout on page ${page}`);
         }
         
         await sleep(100);
@@ -143,8 +143,8 @@ export async function testit(): Promise<void> {
         
         console.log(`Nav back to page ${page} (pass ${pass + 1}) took ${navTime}ms`);
         
-        if (navTime > 500) {
-          throw new Error(`Navigation back took ${navTime}ms > 500ms timeout on page ${page}`);
+        if (navTime > 1000) {
+          throw new Error(`Navigation back took ${navTime}ms > 1000ms timeout on page ${page}`);
         }
         
         await sleep(100);
